@@ -17,8 +17,8 @@ export default function Contact() {
         </div>
 
         <div className="mt-12 grid gap-6 lg:grid-cols-[1.1fr,0.9fr]">
-          <div className="rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-lg shadow-black/20 backdrop-blur">
-            <form className="grid gap-5">
+          {/* <div className="rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-lg shadow-black/20 backdrop-blur">
+            {/* <form className="grid gap-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block text-sm font-medium text-slate-200">Name</label>
@@ -58,8 +58,8 @@ export default function Contact() {
                 Send project brief
               </button>
               <p className="text-xs text-slate-400">We&apos;ll follow up with a discovery call invite and a written proposal.</p>
-            </form>
-          </div>
+            </form> */}
+          {/* </div> */}
           <div className="flex flex-col justify-between gap-8 rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-lg shadow-black/20 backdrop-blur">
             <div>
               <h3 className="text-xl font-semibold text-white">Prefer a quick chat?</h3>

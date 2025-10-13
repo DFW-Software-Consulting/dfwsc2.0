@@ -45,7 +45,7 @@ export default function Footer() {
             {/* Left: Logo + Branding */}
             <div className="flex-1 space-y-6">
               <Link to="/" className="inline-flex items-center gap-3">
-                <img src="/dfwsc-logo.svg" alt="DFW Software Consulting" className="h-9 w-auto" />
+                <img src="/dfwsc-logo.png" alt="DFW Software Consulting" className="h-9 w-auto rounded-full" />
                 <span className="text-base font-semibold tracking-wide text-white">DFW Software Consulting</span>
               </Link>
               <p className="text-base text-slate-400 max-w-xl">

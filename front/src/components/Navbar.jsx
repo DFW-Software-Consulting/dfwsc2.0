@@ -4,7 +4,7 @@ const navItems = [
   { type: 'scroll', id: 'services', label: 'Solutions' },
   { type: 'scroll', id: 'values', label: 'Values' },
   { type: 'link', href: '/pricing', label: 'Pricing' },
-  { type: 'route', href: '/team', label: 'Meet our team' },
+  // { type: 'route', href: '/team', label: 'Meet our team' },
 ]
 
 export default function Navbar() {
@@ -28,7 +28,7 @@ export default function Navbar() {
       <div className="mx-auto flex h-20 w-full max-w-6xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
         <Link to="/" className="group relative inline-flex items-center gap-3">
           <span className="absolute -left-4 hidden h-12 w-12 rounded-2xl bg-brand-500/20 blur-xl transition group-hover:opacity-90 sm:block" />
-          <img src="/dfwsc-logo.svg" alt="DFW Software Consulting" className="h-9 w-auto" />
+          <img src="/dfwsc-logo.png" alt="DFW Software Consulting" className="h-9 w-auto rounded-full" />
           <span className="text-base font-semibold tracking-wide text-slate-100">DFW Software Consulting</span>
         </Link>
         <nav className="hidden items-center gap-6 text-sm font-medium sm:flex">
