@@ -9,11 +9,11 @@ const stats = [
 export default function Hero() {
   return (
     <section className="relative overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 grid-bg" />
-      <div className="container-px section-y">
+      <div className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:48px_48px] [mask-image:radial-gradient(circle_at_center,rgba(0,0,0,0.7),transparent_70%)]" />
+      <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
         <div className="mx-auto grid max-w-6xl items-center gap-12 lg:grid-cols-[1.2fr,1fr]">
           <div className="text-center lg:text-left">
-            <span className="badge mb-6 inline-flex items-center gap-2">
+            <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-100/80">
               <span className="h-2 w-2 rounded-full bg-brand-400" />
               Dallas–Fort Worth • Remote friendly
             </span>
@@ -25,16 +25,16 @@ export default function Hero() {
               with code you own.
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-4 lg:justify-start">
-              <Link to="/pricing" className="btn-primary">
+              <Link to="/pricing" className="inline-flex items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_20px_40px_-18px_rgba(11,114,133,0.6)] transition duration-200 hover:-translate-y-0.5 hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400">
                 View hosting plans
               </Link>
-              <a href="#contact" className="btn-ghost">
+              <a href="#contact" className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 px-5 py-2.5 text-sm font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:text-white">
                 Book a discovery call
               </a>
             </div>
             <div className="mt-12 grid grid-cols-1 gap-4 text-left sm:grid-cols-3">
               {stats.map((item) => (
-                <div key={item.value} className="card p-6">
+                <div key={item.value} className="rounded-3xl border border-white/10 bg-slate-900/50 p-6 shadow-lg shadow-black/20 backdrop-blur">
                   <p className="text-base font-semibold text-brand-200">{item.value}</p>
                   <p className="mt-2 text-sm text-slate-300">{item.detail}</p>
                 </div>
@@ -46,7 +46,7 @@ export default function Hero() {
             <img
               src="https://images.unsplash.com/photo-1558494949-ef010cbdcc31?q=80&w=1600&auto=format&fit=crop"
               alt="Screens showing dashboards and analytics"
-              className="relative w-full rounded-3xl border border-white/10 shadow-2xl shadow-brand-500/10"
+              className="relative w-full rounded-3xl border border-white/10 shadow-2xl shadow-[0_30px_60px_-45px_rgba(11,114,133,0.12)]"
               loading="lazy"
             />
           </div>

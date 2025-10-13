@@ -33,9 +33,9 @@ const services = [
 
 export default function Services() {
   return (
-    <section id="services" className="container-px section-y">
+    <section id="services" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
       <div className="mx-auto max-w-3xl text-center">
-        <span className="badge mb-6">What we do</span>
+        <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-100/80">What we do</span>
         <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Full-stack product delivery without the hand-holding</h2>
         <p className="mt-4 text-base text-slate-300">
           From prototypes to production-critical systems, we bring the right tools for your budget, team, and customers.
@@ -44,7 +44,7 @@ export default function Services() {
 
       <div className="mt-12 grid gap-6 lg:grid-cols-2">
         {services.map((service) => (
-          <article key={service.name} className="card h-full p-8 text-left">
+          <article key={service.name} className="h-full rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur">
             <div className="flex items-start justify-between gap-4">
               <h3 className="text-xl font-semibold text-white">{service.name}</h3>
               <span className="rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-200">

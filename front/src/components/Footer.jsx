@@ -5,7 +5,7 @@ export default function Footer() {
 
   return (
     <footer className="border-t border-white/10 bg-slate-950">
-      <div className="container-px py-10 text-sm text-slate-300">
+      <div className="mx-auto w-full max-w-6xl px-4 py-10 text-sm text-slate-300 sm:px-6 lg:px-8">
         <div className="grid gap-8 sm:grid-cols-[1.5fr,1fr]">
           <div className="space-y-3">
             <h3 className="text-lg font-semibold text-white">DFW Software Consulting</h3>

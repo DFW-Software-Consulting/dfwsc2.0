@@ -8,7 +8,7 @@ import Pricing from './pages/Pricing.jsx'
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen gradient-hero">
+      <div className="min-h-screen [background:radial-gradient(circle_at_20%_20%,rgba(44,161,180,0.15),transparent_55%),radial-gradient(circle_at_80%_0%,rgba(11,114,133,0.18),transparent_50%),linear-gradient(180deg,#020617_0%,#020617_55%,#040b18_100%)]">
         <Navbar />
         <main>
           <Routes>
