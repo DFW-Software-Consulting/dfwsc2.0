@@ -1,26 +1,23 @@
 import React from 'react'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Navbar from './components/Navbar.jsx'
-import Hero from './components/Hero.jsx'
-import ValueProps from './components/ValueProps.jsx'
-import Services from './components/Services.jsx'
-import CaseStudies from './components/CaseStudies.jsx'
-import TechStrip from './components/TechStrip.jsx'
-import Contact from './components/Contact.jsx'
 import Footer from './components/Footer.jsx'
+import Home from './pages/Home.jsx'
+import Pricing from './pages/Pricing.jsx'
 
 export default function App() {
   return (
-    <div className="min-h-screen gradient-hero">
-      <Navbar />
-      <main>
-        <Hero />
-        <ValueProps />
-        <Services />
-        <CaseStudies />
-        <TechStrip />
-        <Contact />
-      </main>
-      <Footer />
-    </div>
+    <BrowserRouter>
+      <div className="min-h-screen gradient-hero">
+        <Navbar />
+        <main>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/pricing" element={<Pricing />} />
+          </Routes>
+        </main>
+        <Footer />
+      </div>
+    </BrowserRouter>
   )
 }

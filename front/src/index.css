@@ -1,1 +1,136 @@
 @import "tailwindcss";
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --brand-50: #e6f5f7;
+    --brand-100: #c9e9ef;
+    --brand-200: #98d4df;
+    --brand-300: #63bdcc;
+    --brand-400: #2ca1b4;
+    --brand-500: #0b7285;
+  }
+
+  body {
+    @apply bg-slate-950 text-slate-100 antialiased;
+  }
+}
+
+@layer components {
+  .gradient-hero {
+    background: radial-gradient(circle at 20% 20%, rgba(44, 161, 180, 0.15), transparent 55%),
+      radial-gradient(circle at 80% 0%, rgba(11, 114, 133, 0.18), transparent 50%),
+      linear-gradient(180deg, #020617 0%, #020617 55%, #040b18 100%);
+  }
+
+  .grid-bg {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(circle at center, rgba(0, 0, 0, 0.7), transparent 70%);
+  }
+
+  .container-px {
+    @apply mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .section-y {
+    @apply py-16 sm:py-20;
+  }
+
+  .card {
+    @apply rounded-3xl border border-white/10 bg-slate-900/50 shadow-lg shadow-black/20 backdrop-blur;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-100/80;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold text-white shadow-[0_20px_40px_-18px_rgba(11,114,133,0.6)] transition duration-200 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2;
+    background-color: var(--brand-500);
+  }
+
+  .btn-primary:hover {
+    background-color: var(--brand-400);
+  }
+
+  .btn-primary:focus-visible {
+    outline-color: var(--brand-400);
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-white/10 px-5 py-2.5 text-sm font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:text-white;
+  }
+}
+
+@layer utilities {
+  .bg-brand-500 {
+    background-color: var(--brand-500);
+  }
+
+  .bg-brand-400 {
+    background-color: var(--brand-400);
+  }
+
+  .bg-brand-500\/10 {
+    background-color: color-mix(in srgb, var(--brand-500) 10%, transparent);
+  }
+
+  .bg-brand-500\/20 {
+    background-color: color-mix(in srgb, var(--brand-500) 20%, transparent);
+  }
+
+  .text-brand-200 {
+    color: var(--brand-200);
+  }
+
+  .text-brand-300 {
+    color: var(--brand-300);
+  }
+
+  .border-brand-500 {
+    border-color: var(--brand-500);
+  }
+
+  .border-brand-500\/30 {
+    border-color: color-mix(in srgb, var(--brand-500) 30%, transparent);
+  }
+
+  .hover\:border-brand-500\/40:hover {
+    border-color: color-mix(in srgb, var(--brand-500) 40%, transparent);
+  }
+
+  .hover\:bg-brand-400:hover {
+    background-color: var(--brand-400);
+  }
+
+  .text-brand-200:hover {
+    color: var(--brand-200);
+  }
+
+  .hover\:text-brand-200:hover {
+    color: var(--brand-200);
+  }
+
+  .shadow-brand-500\/30 {
+    box-shadow: 0 24px 45px -20px color-mix(in srgb, var(--brand-500) 30%, transparent);
+  }
+
+  .shadow-brand-500\/10 {
+    box-shadow: 0 30px 60px -45px color-mix(in srgb, var(--brand-500) 12%, transparent);
+  }
+
+  .focus\:border-brand-400:focus {
+    border-color: var(--brand-400);
+  }
+
+  .focus\:ring-brand-500\/40:focus {
+    --tw-ring-color: color-mix(in srgb, var(--brand-500) 40%, transparent);
+  }
+
+  .focus-visible\:outline-brand-400:focus-visible {
+    outline-color: var(--brand-400);
+  }
+}

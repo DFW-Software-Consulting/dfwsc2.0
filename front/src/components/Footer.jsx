@@ -1,14 +1,46 @@
+import { Link } from 'react-router-dom'
+
 export default function Footer() {
   const year = new Date().getFullYear()
+
   return (
     <footer className="border-t border-white/10 bg-slate-950">
-      <div className="container-px py-8 text-sm text-slate-300">
-        <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
-          <p>© {year} DFW Software Consulting — All rights reserved.</p>
-          <div className="flex items-center gap-4">
-            <a href="#services" className="hover:text-white">Services</a>
-            <a href="#work" className="hover:text-white">Work</a>
-            <a href="#contact" className="hover:text-white">Contact</a>
+      <div className="container-px py-10 text-sm text-slate-300">
+        <div className="grid gap-8 sm:grid-cols-[1.5fr,1fr]">
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold text-white">DFW Software Consulting</h3>
+            <p className="text-sm text-slate-400">
+              Managed custom development &amp; hosting — Dallas-Fort Worth, TX. Modern web apps, APIs, and automation built with
+              clarity and ownership.
+            </p>
+            <p className="text-xs text-slate-500">© {year} DFW Software Consulting. All rights reserved.</p>
+          </div>
+          <div className="grid gap-4 text-sm sm:justify-self-end">
+            <div className="flex flex-wrap gap-4">
+              <Link to="/" state={{ scrollTo: 'services' }} className="hover:text-white">
+                Solutions
+              </Link>
+              <Link to="/" state={{ scrollTo: 'process' }} className="hover:text-white">
+                Process
+              </Link>
+              <Link to="/pricing" className="hover:text-white">
+                Pricing
+              </Link>
+              <Link to="/" state={{ scrollTo: 'contact' }} className="hover:text-white">
+                Contact
+              </Link>
+            </div>
+            <div className="flex flex-col gap-2 text-xs text-slate-400">
+              <a href="mailto:dfwsoftwareconsulting@gmail.com" className="hover:text-white">
+                dfwsoftwareconsulting@gmail.com
+              </a>
+              <a href="https://dfwsc.netlify.app/" className="hover:text-white">
+                dfwsc.netlify.app
+              </a>
+              <a href="https://www.linkedin.com/company/dfw-software-consulting" className="hover:text-white">
+                LinkedIn
+              </a>
+            </div>
           </div>
         </div>
       </div>
