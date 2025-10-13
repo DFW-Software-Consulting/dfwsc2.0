@@ -1,0 +1,27 @@
+
+.banner {
+    background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+    color: white;
+    text-align: center;
+    padding: 1rem;
+    overflow: hidden;
+    position: relative;
+    height: 60px;
+}
+
+.banner-text {
+    position: absolute;
+    white-space: nowrap;
+    font-weight: 800;
+    font-size: 1.2rem;
+    animation: slide 15s linear infinite;
+}
+
+@keyframes slide {
+    from {
+        transform: translateX(100vw);
+    }
+    to {
+        transform: translateX(-100%);
+    }
+}
