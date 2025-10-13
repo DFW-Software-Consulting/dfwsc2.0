@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { scrollToSection } from '../utils/scrollToSection.js'
 import Hero from '../components/Hero.jsx'
 import ValueProps from '../components/ValueProps.jsx'
 import Services from '../components/Services.jsx'
@@ -16,12 +17,9 @@ export default function Home() {
     if (location.state?.scrollTo) {
       const id = location.state.scrollTo
       requestAnimationFrame(() => {
-        const el = document.getElementById(id)
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        }
+        scrollToSection(id)
       })
-      navigate(location.pathname, { replace: true })
+      navigate(location.pathname, { replace: true, state: {} })
     }
   }, [location, navigate])
 
