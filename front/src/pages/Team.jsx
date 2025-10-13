@@ -1,25 +1,28 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import Banner from '../components/Banner.jsx'
+import JcImage from '../assets/jc.jpg'
+import DiegoImage from '../assets/diego.jpg'
+import SpencerImage from '../assets/spencer.jpg'
 
 const teamMembers = [
   {
     name: 'Jeremy Ashley',
     role: 'Founder & CTO',
     bio: 'Drives technical strategy and architecture across the organization. Oversees full-stack product delivery, DevOps automation, and scalable cloud infrastructure design.',
-    image: 'src/assets/jc.jpg',
+    image: JcImage,
   },
   {
     name: 'Diego Espino',
     role: 'Full Stack & DevOps Engineer',
     bio: 'Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.',
-    image: 'src/assets/diego.jpg',
+    image: DiegoImage,
   },
   {
     name: 'Spencer Lillian',
     role: 'Full Stack Engineer',
     bio: 'Collaborates with clients to translate business needs into robust solutions. Supports backend systems, cloud deployments, and continuous delivery workflows.',
-    image: 'src/assets/spencer.jpg',
+    image: SpencerImage,
   },
 ]
 
