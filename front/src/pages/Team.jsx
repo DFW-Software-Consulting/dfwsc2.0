@@ -4,19 +4,22 @@ import Banner from '../components/Banner.jsx'
 
 const teamMembers = [
   {
-    name: 'Ava Martinez',
-    role: 'Principal Consultant & Solutions Architect',
-    bio: 'Leads end-to-end platform delivery with a focus on resilient cloud infrastructure, API design, and measurable outcomes.',
+    name: 'Jeremy Ashley',
+    role: 'Founder & CTO',
+    bio: 'Drives technical strategy and architecture across the organization. Oversees full-stack product delivery, DevOps automation, and scalable cloud infrastructure design.',
+    image: 'https://media.licdn.com/dms/image/v2/D5635AQHwU24z-uEeUw/profile-framedphoto-shrink_200_200/profile-framedphoto-shrink_200_200/0/1701043840409?e=1760979600&v=beta&t=dqAlmlq5wL5HYVLsPrsR1h0jva9kSugrwd8tE3XuEqE',
   },
   {
-    name: 'Noah Patterson',
-    role: 'Staff Software Engineer',
-    bio: 'Specializes in full-stack TypeScript development, modernization of legacy systems, and performance-focused web applications.',
+    name: 'Diego Espino',
+    role: 'Full Stack & DevOps Engineer',
+    bio: 'Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.',
+    image: 'https://media.licdn.com/dms/image/v2/D5635AQEH7-tkmh8rgw/profile-framedphoto-shrink_200_200/B56ZYiPX.lHoAY-/0/1744331178327?e=1760979600&v=beta&t=TOyLCStpys3QSYs0bLXgTImvnypBs0Y-BBm8XA0kEJY',
   },
   {
-    name: 'Maya Chen',
-    role: 'Product & Delivery Lead',
-    bio: 'Partners with stakeholders to define roadmaps, align project delivery, and keep teams shipping customer-loved experiences.',
+    name: 'Spencer Lillian',
+    role: 'Full Stack Engineer',
+    bio: 'Collaborates with clients to translate business needs into robust solutions. Supports backend systems, cloud deployments, and continuous delivery workflows.',
+    image: 'https://media.licdn.com/dms/image/v2/D5603AQFNFyNT5qUlfA/profile-displayphoto-shrink_200_200/profile-displayphoto-shrink_200_200/0/1694171512892?e=1762992000&v=beta&t=YYgXAbbRK65W2Sfd6Gxu25XzMfrOCdO2RqwbGQ06isw',
   },
 ]
 
@@ -27,13 +30,16 @@ export default function Team() {
 
   return (
     <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+      {/* Header */}
+      <div className="mb-12 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-300/80">Meet our team</p>
-          <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Experts building reliable software outcomes</h1>
+          <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
+            Experts building reliable software outcomes
+          </h1>
           <p className="mt-4 max-w-2xl text-base text-slate-400">
-            Every engagement is led by seasoned practitioners who have shipped critical systems for finance, logistics, and high-growth
-            startups. We stay close to business goals, turning strategy into running software.
+            Every engagement is led by seasoned practitioners who have shipped critical systems for finance, logistics,
+            and high-growth startups. We stay close to business goals, turning strategy into running software.
           </p>
         </div>
         <Link
@@ -45,24 +51,38 @@ export default function Team() {
         </Link>
       </div>
 
-      <div className="mt-12 grid gap-6 md:grid-cols-3">
-        {teamMembers.map((member) => (
-          <article
+      {/* Team Members */}
+      <div className="space-y-16">
+        {teamMembers.map((member, idx) => (
+          <div
             key={member.name}
-            className="group relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_40px_80px_-50px_rgba(11,114,133,0.8)] transition hover:-translate-y-1 hover:bg-white/10"
+            className={`flex flex-col items-center gap-8 rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_40px_80px_-50px_rgba(11,114,133,0.8)] transition hover:bg-white/10 md:flex-row ${
+              idx % 2 === 1 ? 'md:flex-row-reverse' : ''
+            }`}
           >
-            <div className="absolute inset-x-4 top-4 h-28 rounded-3xl bg-gradient-to-br from-brand-500/20 via-brand-400/10 to-transparent blur-2xl transition duration-500 group-hover:opacity-100" />
-            <div className="relative">
-              <h2 className="text-xl font-semibold text-white">{member.name}</h2>
-              <p className="mt-1 text-sm font-medium uppercase tracking-[0.18em] text-brand-200/80">{member.role}</p>
-              <p className="mt-4 text-sm leading-relaxed text-slate-300">{member.bio}</p>
+            {/* Image */}
+            <div className="w-full md:w-1/3 flex-shrink-0">
+              <img
+                src={member.image}
+                alt={member.name}
+                className="mx-auto h-56 w-56 rounded-full border border-white/10 object-cover shadow-lg md:h-64 md:w-64"
+              />
             </div>
-          </article>
+
+            {/* Info */}
+            <div className="w-full md:w-2/3 text-center md:text-left">
+              <h2 className="text-2xl font-semibold text-white">{member.name}</h2>
+              <p className="mt-1 text-sm font-medium uppercase tracking-[0.18em] text-brand-200/80">
+                {member.role}
+              </p>
+              <p className="mt-4 text-base leading-relaxed text-slate-300">{member.bio}</p>
+            </div>
+          </div>
         ))}
       </div>
 
       <Banner
-        className="mt-16"
+        className="mt-20"
         message="🤝 Embedded software engineers and web developers partner with you from whiteboard to launch."
       />
     </section>
