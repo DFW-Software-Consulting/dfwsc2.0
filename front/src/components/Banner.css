@@ -17,21 +17,25 @@
     box-shadow: 0 18px 40px -24px rgba(11, 114, 133, 0.65);
 }
 
+.banner-track {
+    display: flex;
+    width: max-content;
+    animation: slide 30s linear infinite;
+}
+
 .banner-text {
-    position: absolute;
     white-space: nowrap;
     font-weight: 800;
     font-size: 1.2rem;
     letter-spacing: .2em;
-    animation: slide 20s linear infinite;
-    animation-direction: alternate;
+    padding-right: 4rem;
 }
 
 @keyframes slide {
     from {
-        transform: translateX(100vw);
+        transform: translateX(0);
     }
     to {
-        transform: translateX(-100%);
+        transform: translateX(-33.333%);
     }
 }
