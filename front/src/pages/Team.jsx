@@ -63,7 +63,7 @@ export default function Team() {
 
       <Banner
         className="mt-16"
-        message="🤝 Embedded product leaders, solution architects, and engineers partner with you from whiteboard to launch."
+        message="🤝 Embedded software engineers and web developers partner with you from whiteboard to launch."
       />
     </section>
   )

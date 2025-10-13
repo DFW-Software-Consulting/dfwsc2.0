@@ -12,7 +12,7 @@ const socialLinks = [
   },
   {
     name: 'GitHub',
-    href: 'https://github.com/dfwsoftwareconsulting',
+    href: 'https://github.com/DFW-Software-Consulting',
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-current">
         <path
@@ -87,7 +87,7 @@ export default function Footer() {
                 ))}
               </div>
               <a
-                href="https://www.linkedin.com/in/jeremyashley/"
+                href="linkedin.byjc.dev"
                 target="_blank"
                 rel="noreferrer"
                 className="block text-sm font-semibold text-slate-200 transition hover:text-white"

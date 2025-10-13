@@ -33,7 +33,7 @@ export default function Home() {
       <Services />
       <Banner
         className="mt-16"
-        message="🔧 Need specialized skills mid-project? Tap into our on-demand engineers, architects, and analysts to keep your roadmap moving."
+        message="🔧 Need specialized skills mid-project? Tap into our on-demand engineers to keep your roadmap moving."
       />
       <CaseStudies />
       <Values />
