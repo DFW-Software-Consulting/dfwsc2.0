@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import Banner from '../components/Banner.jsx'
 
 const plans = [
   {
@@ -55,6 +56,11 @@ export default function Pricing() {
           Backend features, integrations, and new development are scoped separately and billed hourly ($100–$150/hr).
         </p>
       </section>
+
+      <Banner
+        className="mt-10"
+        message="🌐 From cloud migrations to compliance-ready hosting, our bench of engineers has your infrastructure on lock."
+      />
 
       <section className="overflow-hidden rounded-3xl border border-white/10 bg-slate-900/50 shadow-xl shadow-cyan-500/10">
         <div className="grid divide-y divide-white/5 text-left sm:grid-cols-2 sm:divide-x sm:divide-y-0">

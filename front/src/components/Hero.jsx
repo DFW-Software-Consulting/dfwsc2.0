@@ -44,8 +44,8 @@ export default function Hero() {
           <div className="relative">
             <div className="absolute -inset-10 hidden rounded-full bg-brand-500/20 blur-3xl lg:block" aria-hidden="true" />
             <img
-              src="https://images.unsplash.com/photo-1558494949-ef010cbdcc31?q=80&w=1600&auto=format&fit=crop"
-              alt="Screens showing dashboards and analytics"
+              src="https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1600&auto=format&fit=crop"
+              alt="Developer configuring cloud infrastructure across multiple monitors"
               className="relative w-full rounded-3xl border border-white/10 shadow-2xl shadow-[0_30px_60px_-45px_rgba(11,114,133,0.12)]"
               loading="lazy"
             />

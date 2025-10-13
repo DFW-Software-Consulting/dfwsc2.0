@@ -1,12 +1,20 @@
 
+
 .banner {
-    background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+    background: linear-gradient(90deg, #0b7285, #2ca1b4);
     color: white;
     text-align: center;
-    padding: 1rem;
+    padding: 1rem 2rem;
     overflow: hidden;
     position: relative;
-    height: 60px;
+    min-height: 64px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: min(100%, 72rem);
+    margin-inline: auto;
+    box-shadow: 0 18px 40px -24px rgba(11, 114, 133, 0.65);
 }
 
 .banner-text {
@@ -14,7 +22,8 @@
     white-space: nowrap;
     font-weight: 800;
     font-size: 1.2rem;
-    animation: slide 15s linear infinite;
+    letter-spacing: 0.02em;
+    animation: slide 30s linear infinite;
 }
 
 @keyframes slide {

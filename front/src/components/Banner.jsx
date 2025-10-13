@@ -1,12 +1,15 @@
-import React from 'react';
-import './Banner.css';
+import React from 'react'
+import './Banner.css'
 
-const Banner = () => {
+const defaultMessage =
+  '💼 DFW Software Consulting has a network of THOUSANDS of technology professionals... No tech too obscure 🤖, no project too big 🏗️. We’ve got you covered! 🚀🔥'
+
+const Banner = ({ message = defaultMessage, className = '' }) => {
   return (
-    <div className="banner">
-      <p className="banner-text">💼 DFW Software Consulting has a network of THOUSANDS of technology professionals... No tech too obscure 🤖, no project too big 🏗️. We’ve got you covered! 🚀🔥</p>
+    <div className={`banner ${className}`.trim()} role="status" aria-live="polite">
+      <p className="banner-text">{message}</p>
     </div>
-  );
-};
+  )
+}
 
-export default Banner;
+export default Banner
