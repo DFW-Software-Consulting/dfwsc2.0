@@ -7,19 +7,19 @@ const teamMembers = [
     name: 'Jeremy Ashley',
     role: 'Founder & CTO',
     bio: 'Drives technical strategy and architecture across the organization. Oversees full-stack product delivery, DevOps automation, and scalable cloud infrastructure design.',
-    image: '/jc.jpeg',
+    image: 'src/assets/jc.jpg',
   },
   {
     name: 'Diego Espino',
     role: 'Full Stack & DevOps Engineer',
     bio: 'Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.',
-    image: '/diego.jpeg',
+    image: 'src/assets/diego.jpg',
   },
   {
     name: 'Spencer Lillian',
     role: 'Full Stack Engineer',
     bio: 'Collaborates with clients to translate business needs into robust solutions. Supports backend systems, cloud deployments, and continuous delivery workflows.',
-    image: '/spencer.jpeg',
+    image: 'src/assets/spencer.jpg',
   },
 ]
 
