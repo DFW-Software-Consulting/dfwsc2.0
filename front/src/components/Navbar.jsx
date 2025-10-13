@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { scrollToSection } from '../utils/scrollToSection.js'
 
 const navItems = [
   { type: 'scroll', id: 'services', label: 'Solutions' },
@@ -13,6 +14,16 @@ export default function Navbar() {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
 
+  const desktopItemClasses =
+    'group relative inline-flex items-center justify-center overflow-hidden rounded-full px-4 py-2 text-sm font-medium text-slate-300 transition duration-200 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400'
+  const desktopGlow =
+    'pointer-events-none absolute inset-0 rounded-full bg-white/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-white/10'
+
+  const mobileItemClasses =
+    'group relative overflow-hidden rounded-full px-4 py-2 text-left text-slate-200 transition duration-200 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400'
+  const mobileGlow =
+    'pointer-events-none absolute inset-0 rounded-full bg-white/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-white/10'
+
   useEffect(() => {
     setMenuOpen(false)
   }, [location.pathname])
@@ -23,11 +34,7 @@ export default function Navbar() {
       return
     }
 
-    const el = document.getElementById(id)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }
-
+    scrollToSection(id)
     setMenuOpen(false)
   }
 
@@ -47,17 +54,19 @@ export default function Navbar() {
                   key={item.id}
                   type="button"
                   onClick={() => handleScroll(item.id)}
-                  className="text-slate-300 transition hover:text-white"
+                  className={desktopItemClasses}
                 >
-                  {item.label}
+                  <span aria-hidden="true" className={desktopGlow} />
+                  <span className="relative z-10">{item.label}</span>
                 </button>
               )
             }
 
             if (item.type === 'link') {
               return (
-                <Link key={item.label} to={item.href} className="text-slate-300 transition hover:text-white">
-                  {item.label}
+                <Link key={item.label} to={item.href} className={desktopItemClasses}>
+                  <span aria-hidden="true" className={desktopGlow} />
+                  <span className="relative z-10">{item.label}</span>
                 </Link>
               )
             }
@@ -66,9 +75,10 @@ export default function Navbar() {
               <Link
                 key={item.label}
                 to={item.href}
-                className="rounded-full border border-transparent px-4 py-1.5 text-slate-200 transition hover:border-brand-400 hover:text-white"
+                className={`${desktopItemClasses} border border-white/10 text-slate-200 transition hover:border-white/20`}
               >
-                {item.label}
+                <span aria-hidden="true" className={desktopGlow} />
+                <span className="relative z-10">{item.label}</span>
               </Link>
             )
           })}
@@ -112,9 +122,10 @@ export default function Navbar() {
                     key={item.id}
                     type="button"
                     onClick={() => handleScroll(item.id)}
-                    className="rounded-full px-4 py-2 text-left text-slate-200 transition hover:bg-white/10"
+                    className={mobileItemClasses}
                   >
-                    {item.label}
+                    <span aria-hidden="true" className={mobileGlow} />
+                    <span className="relative z-10">{item.label}</span>
                   </button>
                 )
               }
@@ -125,9 +136,10 @@ export default function Navbar() {
                     key={item.label}
                     to={item.href}
                     onClick={() => setMenuOpen(false)}
-                    className="rounded-full px-4 py-2 text-slate-200 transition hover:bg-white/10"
+                    className={mobileItemClasses}
                   >
-                    {item.label}
+                    <span aria-hidden="true" className={mobileGlow} />
+                    <span className="relative z-10">{item.label}</span>
                   </Link>
                 )
               }
@@ -137,9 +149,10 @@ export default function Navbar() {
                   key={item.label}
                   to={item.href}
                   onClick={() => setMenuOpen(false)}
-                  className="rounded-full border border-white/10 px-4 py-2 text-center text-slate-100 transition hover:border-brand-400 hover:bg-white/5"
+                  className={`${mobileItemClasses} border border-white/10 text-center transition hover:border-white/20`}
                 >
-                  {item.label}
+                  <span aria-hidden="true" className={mobileGlow} />
+                  <span className="relative z-10">{item.label}</span>
                 </Link>
               )
             })}
