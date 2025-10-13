@@ -42,9 +42,9 @@ const plans = [
 
 export default function Pricing() {
   return (
-    <div className="container-px section-y space-y-16">
+    <div className="mx-auto w-full max-w-6xl space-y-16 px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
       <section className="mx-auto max-w-4xl text-center">
-        <span className="badge mb-6">Hosting & Maintenance</span>
+        <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-100/80">Hosting & Maintenance</span>
         <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
           Predictable pricing for platforms you can depend on
         </h1>
@@ -77,7 +77,7 @@ export default function Pricing() {
       </section>
 
       <section className="grid gap-6 lg:grid-cols-2">
-        <div className="card p-8">
+        <div className="rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-lg shadow-black/20 backdrop-blur">
           <h2 className="text-2xl font-semibold text-white">Project Kickoffs</h2>
           <p className="mt-3 text-sm text-slate-300">
             Need a new build or major feature? We start with a short discovery workshop to define scope, handoff plan, and
@@ -98,7 +98,7 @@ export default function Pricing() {
             </li>
           </ul>
         </div>
-        <div className="card flex flex-col justify-between p-8">
+        <div className="flex flex-col justify-between rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-lg shadow-black/20 backdrop-blur">
           <div>
             <h2 className="text-2xl font-semibold text-white">Let&apos;s pick the right plan</h2>
             <p className="mt-3 text-sm text-slate-300">
@@ -106,7 +106,11 @@ export default function Pricing() {
               migration path if you&apos;re moving from an existing host.
             </p>
           </div>
-          <Link to="/" state={{ scrollTo: 'contact' }} className="btn-primary mt-8 w-fit">
+          <Link
+            to="/"
+            state={{ scrollTo: 'contact' }}
+            className="mt-8 inline-flex w-fit items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_20px_40px_-18px_rgba(11,114,133,0.6)] transition duration-200 hover:-translate-y-0.5 hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+          >
             Start the conversation
           </Link>
         </div>

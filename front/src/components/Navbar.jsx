@@ -24,7 +24,7 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/70 backdrop-blur">
-      <div className="container-px flex h-16 items-center justify-between gap-6">
+      <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
         <Link to="/" className="flex items-center gap-3">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 font-extrabold text-slate-950">
             DFW
@@ -46,7 +46,11 @@ export default function Navbar() {
             Pricing
           </Link>
         </nav>
-        <Link to="/" state={{ scrollTo: 'contact' }} className="btn-primary hidden text-sm sm:inline-flex">
+        <Link
+          to="/"
+          state={{ scrollTo: 'contact' }}
+          className="hidden items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_20px_40px_-18px_rgba(11,114,133,0.6)] transition duration-200 hover:-translate-y-0.5 hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 sm:inline-flex"
+        >
           Start a project
         </Link>
       </div>
