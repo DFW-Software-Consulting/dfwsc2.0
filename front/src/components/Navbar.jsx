@@ -1,9 +1,10 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
-const sections = [
-  { id: 'services', label: 'Solutions' },
-  { id: 'process', label: 'Process' },
-  { id: 'values', label: 'Values' },
+const navItems = [
+  { type: 'scroll', id: 'services', label: 'Solutions' },
+  { type: 'scroll', id: 'values', label: 'Values' },
+  { type: 'link', href: '/pricing', label: 'Pricing' },
+  { type: 'route', href: '/team', label: 'Meet our team' },
 ]
 
 export default function Navbar() {
@@ -23,28 +24,46 @@ export default function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/70 backdrop-blur">
-      <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
-        <Link to="/" className="flex items-center gap-3">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 font-extrabold text-slate-950">
-            DFW
-          </span>
-          <span className="text-sm font-semibold tracking-wide text-slate-200">DFW Software Consulting</span>
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
+      <div className="mx-auto flex h-20 w-full max-w-6xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
+        <Link to="/" className="group relative inline-flex items-center gap-3">
+          <span className="absolute -left-4 hidden h-12 w-12 rounded-2xl bg-brand-500/20 blur-xl transition group-hover:opacity-90 sm:block" />
+          <img src="/dfwsc-logo.svg" alt="DFW Software Consulting" className="h-9 w-auto" />
+          <span className="text-base font-semibold tracking-wide text-slate-100">DFW Software Consulting</span>
         </Link>
-        <nav className="hidden items-center gap-6 text-sm sm:flex">
-          {sections.map((section) => (
-            <button
-              key={section.id}
-              type="button"
-              onClick={() => handleScroll(section.id)}
-              className="text-slate-300 transition hover:text-white"
-            >
-              {section.label}
-            </button>
-          ))}
-          <Link to="/pricing" className="text-slate-300 transition hover:text-white">
-            Pricing
-          </Link>
+        <nav className="hidden items-center gap-6 text-sm font-medium sm:flex">
+          {navItems.map((item) => {
+            if (item.type === 'scroll') {
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleScroll(item.id)}
+                  className="text-slate-300 transition hover:text-white"
+                >
+                  {item.label}
+                </button>
+              )
+            }
+
+            if (item.type === 'link') {
+              return (
+                <Link key={item.label} to={item.href} className="text-slate-300 transition hover:text-white">
+                  {item.label}
+                </Link>
+              )
+            }
+
+            return (
+              <Link
+                key={item.label}
+                to={item.href}
+                className="rounded-full border border-transparent px-4 py-1.5 text-slate-200 transition hover:border-brand-400 hover:text-white"
+              >
+                {item.label}
+              </Link>
+            )
+          })}
         </nav>
         <Link
           to="/"
