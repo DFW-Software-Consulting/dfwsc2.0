@@ -30,7 +30,7 @@ export default function ValueProps() {
 
       <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {promises.map((promise) => (
-          <article key={promise.title} className="rounded-3xl border border-white/10 bg-slate-900/50 p-6 text-left shadow-lg shadow-black/20 backdrop-blur">
+          <article key={promise.title} className="rounded-3xl border border-white/10 bg-slate-900/50 p-6 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:scale-105 hover:border-brand-500/40 hover:shadow-sky-400/20 hover:bg-brand-500">
             <h3 className="text-lg font-semibold text-white">{promise.title}</h3>
             <p className="mt-3 text-sm text-slate-300">{promise.description}</p>
           </article>

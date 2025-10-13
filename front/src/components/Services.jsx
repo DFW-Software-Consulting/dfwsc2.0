@@ -44,7 +44,7 @@ export default function Services() {
 
       <div className="mt-12 grid gap-6 lg:grid-cols-2">
         {services.map((service) => (
-          <article key={service.name} className="h-full rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur">
+          <article key={service.name} className="h-full rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:border-brand-500/40 hover:shadow-sky-400/20">
             <div className="flex items-start justify-between gap-4">
               <h3 className="text-xl font-semibold text-white">{service.name}</h3>
               <span className="rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-200">

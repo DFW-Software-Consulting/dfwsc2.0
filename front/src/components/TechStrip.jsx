@@ -20,7 +20,7 @@ export default function TechStrip() {
         </div>
         <div className="mt-10 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {stacks.map((stack) => (
-            <article key={stack.title} className="h-full rounded-3xl border border-white/10 bg-slate-900/50 p-6 text-left shadow-lg shadow-black/20 backdrop-blur">
+            <article key={stack.title} className="h-full rounded-3xl border border-white/10 bg-slate-900/50 p-6 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:border-brand-500/40 hover:shadow-sky-400/20">
               <h3 className="text-lg font-semibold text-white">{stack.title}</h3>
               <ul className="mt-4 space-y-2 text-sm text-slate-300">
                 {stack.tools.map((tool) => (

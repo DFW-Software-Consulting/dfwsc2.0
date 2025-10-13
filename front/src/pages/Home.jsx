@@ -31,8 +31,6 @@ export default function Home() {
       <Hero />
       <ValueProps />
       <Services />
-      <Process />
-      <TechStrip />
       <CaseStudies />
       <Values />
       <Contact />

@@ -31,7 +31,7 @@ export default function CaseStudies() {
         {projects.map((project) => (
           <article
             key={project.name}
-            className="h-full rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:border-brand-500/40"
+            className="h-full rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:border-brand-500/40 hover:shadow-sky-400/20"
           >
             <h3 className="text-lg font-semibold text-white">{project.name}</h3>
             <p className="mt-3 text-sm text-slate-300">{project.result}</p>

@@ -23,7 +23,7 @@ export default function Contact() {
                 <div>
                   <label className="block text-sm font-medium text-slate-200">Name</label>
                   <input
-                    className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-[rgba(11,114,133,0.4)]"
+                    className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
                     placeholder="Your name"
                   />
                 </div>
@@ -31,34 +31,23 @@ export default function Contact() {
                   <label className="block text-sm font-medium text-slate-200">Email</label>
                   <input
                     type="email"
-                    className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-[rgba(11,114,133,0.4)]"
+                    className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
                     placeholder="you@company.com"
                   />
                 </div>
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className="block text-sm font-medium text-slate-200">Company or project name</label>
-                  <input
-                    className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-[rgba(11,114,133,0.4)]"
-                    placeholder="Acme Inc."
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-200">Estimated budget</label>
-                  <select className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-[rgba(11,114,133,0.4)]">
-                    <option>Under $5k</option>
-                    <option>$5k–$15k</option>
-                    <option>$15k–$40k</option>
-                    <option>$40k+</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-200">Company or project name</label>
+                <input
+                  className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
+                  placeholder="Acme Inc."
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-200">What are you building?</label>
                 <textarea
                   rows="4"
-                  className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-[rgba(11,114,133,0.4)]"
+                  className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder-slate-400 focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
                   placeholder="Share the problem, timeline, and any integrations you need"
                 />
               </div>

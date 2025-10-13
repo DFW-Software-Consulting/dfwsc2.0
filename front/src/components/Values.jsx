@@ -23,7 +23,7 @@ export default function Values() {
 
       <div className="mt-12 grid gap-6 md:grid-cols-3">
         {values.map((value) => (
-          <article key={value.title} className="rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur">
+          <article key={value.title} className="rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:scale-105 hover:border-brand-500/40 hover:shadow-sky-400/20 hover:bg-brand-500">
             <h3 className="text-xl font-semibold text-white">{value.title}</h3>
             <p className="mt-4 text-sm text-slate-300">{value.description}</p>
           </article>

@@ -17,27 +17,27 @@ export default function Footer() {
           </div>
           <div className="grid gap-4 text-sm sm:justify-self-end">
             <div className="flex flex-wrap gap-4">
-              <Link to="/" state={{ scrollTo: 'services' }} className="hover:text-white">
+              <Link to="/" state={{ scrollTo: 'services' }} className="transition-colors hover:text-white">
                 Solutions
               </Link>
-              <Link to="/" state={{ scrollTo: 'process' }} className="hover:text-white">
+              <Link to="/" state={{ scrollTo: 'process' }} className="transition-colors hover:text-white">
                 Process
               </Link>
-              <Link to="/pricing" className="hover:text-white">
+              <Link to="/pricing" className="transition-colors hover:text-white">
                 Pricing
               </Link>
-              <Link to="/" state={{ scrollTo: 'contact' }} className="hover:text-white">
+              <Link to="/" state={{ scrollTo: 'contact' }} className="transition-colors hover:text-white">
                 Contact
               </Link>
             </div>
             <div className="flex flex-col gap-2 text-xs text-slate-400">
-              <a href="mailto:dfwsoftwareconsulting@gmail.com" className="hover:text-white">
+              <a href="mailto:dfwsoftwareconsulting@gmail.com" className="transition-colors hover:text-white">
                 dfwsoftwareconsulting@gmail.com
               </a>
-              <a href="https://dfwsc.netlify.app/" className="hover:text-white">
+              <a href="https://dfwsc.netlify.app/" className="transition-colors hover:text-white">
                 dfwsc.netlify.app
               </a>
-              <a href="https://www.linkedin.com/company/dfw-software-consulting" className="hover:text-white">
+              <a href="https://www.linkedin.com/company/dfw-software-consulting" className="transition-colors hover:text-white">
                 LinkedIn
               </a>
             </div>
