@@ -60,7 +60,15 @@ export default function Contact() {
               <p className="text-xs text-slate-400">We&apos;ll follow up with a discovery call invite and a written proposal.</p>
             </form>
           </div>
-          <div className="flex flex-col justify-between gap-8 rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-lg shadow-black/20 backdrop-blur">
+          <div className="flex flex-col gap-8 rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-lg shadow-black/20 backdrop-blur">
+            <figure className="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/40">
+              <img
+                src="https://images.unsplash.com/photo-1521737694912-31c83cd3e302?q=80&w=900&auto=format&fit=crop"
+                alt="Team shaking hands with clients in a modern workspace"
+                className="h-44 w-full object-cover"
+                loading="lazy"
+              />
+            </figure>
             <div>
               <h3 className="text-xl font-semibold text-white">Prefer a quick chat?</h3>
               <p className="mt-3 text-sm text-slate-300">
@@ -78,8 +86,7 @@ export default function Contact() {
               ))}
             </ul>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-slate-300">
-              Hosting retainers include uptime monitoring, SSL, and maintenance. Feature work is billed hourly at $100–$150/hr
-              with clear estimates before kickoff.
+              Hosting retainers include uptime monitoring, SSL, and maintenance. Feature work is billed hourly at $100–$150/hr with clear estimates before kickoff.
             </div>
           </div>
         </div>

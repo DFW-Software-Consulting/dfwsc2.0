@@ -42,26 +42,57 @@ export default function Services() {
         </p>
       </div>
 
-      <div className="mt-12 grid gap-6 lg:grid-cols-2">
-        {services.map((service) => (
-          <article key={service.name} className="h-full rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:border-brand-500/40 hover:shadow-sky-400/20">
-            <div className="flex items-start justify-between gap-4">
-              <h3 className="text-xl font-semibold text-white">{service.name}</h3>
-              <span className="rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-200">
-                {service.details.length} highlights
-              </span>
-            </div>
-            <p className="mt-3 text-sm text-slate-300">{service.description}</p>
-            <ul className="mt-6 space-y-3 text-sm text-slate-200">
-              {service.details.map((detail) => (
-                <li key={detail} className="flex items-start gap-3">
-                  <span className="mt-1 h-2 w-2 flex-none rounded-full bg-brand-400" />
-                  <span>{detail}</span>
-                </li>
-              ))}
-            </ul>
-          </article>
-        ))}
+      <div className="mt-12 grid gap-10 lg:grid-cols-[1.2fr,0.8fr] lg:items-start">
+        <div className="grid gap-6 sm:grid-cols-2">
+          {services.map((service) => (
+            <article key={service.name} className="h-full rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:border-brand-500/40 hover:shadow-sky-400/20">
+              <div className="flex items-start justify-between gap-4">
+                <h3 className="text-xl font-semibold text-white">{service.name}</h3>
+                <span className="rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-200">
+                  {service.details.length} highlights
+                </span>
+              </div>
+              <p className="mt-3 text-sm text-slate-300">{service.description}</p>
+              <ul className="mt-6 space-y-3 text-sm text-slate-200">
+                {service.details.map((detail) => (
+                  <li key={detail} className="flex items-start gap-3">
+                    <span className="mt-1 h-2 w-2 flex-none rounded-full bg-brand-400" />
+                    <span>{detail}</span>
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+
+        <div className="grid gap-4">
+          <figure className="overflow-hidden rounded-3xl border border-white/10 bg-slate-900/40 shadow-2xl shadow-black/40">
+            <img
+              src="https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1200&auto=format&fit=crop"
+              alt="Developer writing code for a cloud application"
+              className="h-full w-full object-cover"
+              loading="lazy"
+            />
+          </figure>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <figure className="overflow-hidden rounded-3xl border border-white/10 bg-slate-900/40">
+              <img
+                src="https://images.unsplash.com/photo-1483478550801-ceba5fe50e8e?q=80&w=900&auto=format&fit=crop"
+                alt="Cloud infrastructure diagram on a screen"
+                className="h-40 w-full object-cover"
+                loading="lazy"
+              />
+            </figure>
+            <figure className="overflow-hidden rounded-3xl border border-white/10 bg-slate-900/40">
+              <img
+                src="https://images.unsplash.com/photo-1517430816045-df4b7de11d1d?q=80&w=900&auto=format&fit=crop"
+                alt="Team monitoring deployment dashboards"
+                className="h-40 w-full object-cover"
+                loading="lazy"
+              />
+            </figure>
+          </div>
+        </div>
       </div>
     </section>
   )
