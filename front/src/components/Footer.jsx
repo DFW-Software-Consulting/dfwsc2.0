@@ -26,7 +26,7 @@ export default function Footer() {
             </div>
           </div>
 
-          <div className="grid gap-8 text-sm md:justify-items-end">
+          <div className="grid gap-8 text-sm md:items-start md:text-left">
             <div className="flex flex-wrap gap-5 text-slate-300">
               <Link to="/" state={{ scrollTo: 'services' }} className="transition-colors hover:text-white">
                 Solutions
