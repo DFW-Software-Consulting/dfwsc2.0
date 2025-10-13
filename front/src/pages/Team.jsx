@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import Banner from '../components/Banner.jsx'
 
 const teamMembers = [
   {
@@ -59,6 +60,11 @@ export default function Team() {
           </article>
         ))}
       </div>
+
+      <Banner
+        className="mt-16"
+        message="🤝 Embedded product leaders, solution architects, and engineers partner with you from whiteboard to launch."
+      />
     </section>
   )
 }

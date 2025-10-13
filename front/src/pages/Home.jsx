@@ -28,11 +28,19 @@ export default function Home() {
   return (
     <>
       <Hero />
+      <Banner className="mt-10" />
       <ValueProps />
       <Services />
+      <Banner
+        className="mt-16"
+        message="🔧 Need specialized skills mid-project? Tap into our on-demand engineers, architects, and analysts to keep your roadmap moving."
+      />
       <CaseStudies />
-      <Banner />
       <Values />
+      <Banner
+        className="mt-16 mb-16"
+        message="📞 Ready for a reliable partner? We help founders, IT teams, and enterprises stabilize, ship, and scale with confidence."
+      />
       <Contact />
     </>
   )
