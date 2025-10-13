@@ -7,19 +7,19 @@ const teamMembers = [
     name: 'Jeremy Ashley',
     role: 'Founder & CTO',
     bio: 'Drives technical strategy and architecture across the organization. Oversees full-stack product delivery, DevOps automation, and scalable cloud infrastructure design.',
-    image: 'https://media.licdn.com/dms/image/v2/D5635AQHwU24z-uEeUw/profile-framedphoto-shrink_200_200/profile-framedphoto-shrink_200_200/0/1701043840409?e=1760979600&v=beta&t=dqAlmlq5wL5HYVLsPrsR1h0jva9kSugrwd8tE3XuEqE',
+    image: '/jc.jpeg',
   },
   {
     name: 'Diego Espino',
     role: 'Full Stack & DevOps Engineer',
     bio: 'Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.',
-    image: 'https://media.licdn.com/dms/image/v2/D5635AQEH7-tkmh8rgw/profile-framedphoto-shrink_200_200/B56ZYiPX.lHoAY-/0/1744331178327?e=1760979600&v=beta&t=TOyLCStpys3QSYs0bLXgTImvnypBs0Y-BBm8XA0kEJY',
+    image: '/diego.jpeg',
   },
   {
     name: 'Spencer Lillian',
     role: 'Full Stack Engineer',
     bio: 'Collaborates with clients to translate business needs into robust solutions. Supports backend systems, cloud deployments, and continuous delivery workflows.',
-    image: 'https://media.licdn.com/dms/image/v2/D5603AQFNFyNT5qUlfA/profile-displayphoto-shrink_200_200/profile-displayphoto-shrink_200_200/0/1694171512892?e=1762992000&v=beta&t=YYgXAbbRK65W2Sfd6Gxu25XzMfrOCdO2RqwbGQ06isw',
+    image: '/spencer.jpeg',
   },
 ]
 
