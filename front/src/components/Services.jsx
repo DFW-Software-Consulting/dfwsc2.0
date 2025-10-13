@@ -1,42 +1,65 @@
+const services = [
+  {
+    name: 'Custom Web Apps',
+    description: 'Dashboards, portals, and internal tools with UX that keeps ops moving fast.',
+    details: ['Design systems in React/Next.js', 'Role-based access, audit trails', 'Performance budgets & accessibility'],
+  },
+  {
+    name: 'E-commerce & Payments',
+    description: 'Subscriptions, checkout flows, and secure payment integrations that just work.',
+    details: ['Stripe, LemonSqueezy, ACH', 'Inventory, tax, and fulfillment workflows', 'Multi-step onboarding & verifications'],
+  },
+  {
+    name: 'APIs & Integrations',
+    description: 'REST & GraphQL services, webhooks, and data sync built for reliability.',
+    details: ['Postgres, Redis, Prisma/Drizzle', 'Third-party integrations & webhooks', 'Monitoring, logging, and alerting'],
+  },
+  {
+    name: 'Video & File Delivery',
+    description: 'Streaming, secure downloads, and presigned links with analytics included.',
+    details: ['Cloudflare Stream & R2', 'Bunny.net, AWS S3', 'Access control & DRM-friendly setups'],
+  },
+  {
+    name: 'AI-assisted Workflows',
+    description: 'Practical automation for data extraction, QA, and internal enablement.',
+    details: ['LLM integrations & prompt libraries', 'Ollama for secure on-prem inference', 'Agentic scripts for docs & testing'],
+  },
+  {
+    name: 'Cloud Infrastructure',
+    description: 'Deployments, monitoring, and cost-aware scaling across modern platforms.',
+    details: ['Cloudflare Workers, AWS, Render', 'IaC, CI/CD, and observability', 'On-call and incident response playbooks'],
+  },
+]
+
 export default function Services() {
-  const services = [
-    {
-      name: "API & Data",
-      bullets: ["REST/GraphQL", "Auth & RBAC", "Postgres/SQLite", "Stripe integrations"],
-      img: "https://images.unsplash.com/photo-1556157382-97eda2d62296?q=80&w=1200&auto=format&fit=crop"
-    },
-    {
-      name: "Web Apps",
-      bullets: ["Next.js/React", "Vite + Tailwind", "Design systems", "SEO & performance"],
-      img: "https://images.unsplash.com/photo-1487014679447-9f8336841d58?q=80&w=1200&auto=format&fit=crop"
-    },
-    {
-      name: "Cloud & DevOps",
-      bullets: ["Docker/Compose", "Vercel/Render", "Nginx/Cloudflare", "CI/CD & monitoring"],
-      img: "https://images.unsplash.com/photo-1515378791036-0648a3ef77b2?q=80&w=1200&auto=format&fit=crop"
-    },
-    {
-      name: "AI Tooling",
-      bullets: ["Local models (Ollama)", "Agentic testing", "Docs generators", "Prompt libraries"],
-      img: "https://images.unsplash.com/photo-1518779578993-ec3579fee39f?q=80&w=1200&auto=format&fit=crop"
-    }
-  ]
   return (
     <section id="services" className="container-px section-y">
-      <div className="mx-auto mb-10 max-w-3xl text-center">
-        <h2 className="text-3xl font-bold sm:text-4xl">What we do</h2>
-        <p className="mt-3 text-slate-300">From idea to prod — we cover the stack and ship iteratively.</p>
+      <div className="mx-auto max-w-3xl text-center">
+        <span className="badge mb-6">What we do</span>
+        <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Full-stack product delivery without the hand-holding</h2>
+        <p className="mt-4 text-base text-slate-300">
+          From prototypes to production-critical systems, we bring the right tools for your budget, team, and customers.
+        </p>
       </div>
-      <div className="grid gap-6 lg:grid-cols-2">
-        {services.map((s)=> (
-          <article key={s.name} className="card overflow-hidden">
-            <img src={s.img} alt={s.name} className="h-56 w-full object-cover" loading="lazy" />
-            <div className="p-6">
-              <h3 className="text-xl font-semibold">{s.name}</h3>
-              <ul className="mt-3 grid list-disc gap-1 pl-5 text-sm text-slate-300 sm:grid-cols-2">
-                {s.bullets.map((b)=> <li key={b}>{b}</li>)}
-              </ul>
+
+      <div className="mt-12 grid gap-6 lg:grid-cols-2">
+        {services.map((service) => (
+          <article key={service.name} className="card h-full p-8 text-left">
+            <div className="flex items-start justify-between gap-4">
+              <h3 className="text-xl font-semibold text-white">{service.name}</h3>
+              <span className="rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-200">
+                {service.details.length} highlights
+              </span>
             </div>
+            <p className="mt-3 text-sm text-slate-300">{service.description}</p>
+            <ul className="mt-6 space-y-3 text-sm text-slate-200">
+              {service.details.map((detail) => (
+                <li key={detail} className="flex items-start gap-3">
+                  <span className="mt-1 h-2 w-2 flex-none rounded-full bg-brand-400" />
+                  <span>{detail}</span>
+                </li>
+              ))}
+            </ul>
           </article>
         ))}
       </div>
