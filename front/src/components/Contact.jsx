@@ -1,6 +1,6 @@
 const contactMethods = [
-  { label: 'Email', value: 'dfwsoftwareconsulting@gmail.com', href: 'mailto:dfwsoftwareconsulting@gmail.com' },
-  { label: 'Website', value: 'dfwsc.netlify.app', href: 'https://dfwsc.netlify.app/' },
+  { label: 'Email', value: 'mail@dfwsc.com', href: 'mailto:mail@dfwsc.com' },
+  { label: 'Website', value: 'www.dfwsc.com', href: 'www.dfwsc.com' },
   { label: 'LinkedIn', value: 'DFW Software Consulting', href: 'https://www.linkedin.com/company/dfw-software-consulting' },
 ]
 
