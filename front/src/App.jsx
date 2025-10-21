@@ -5,6 +5,9 @@ import Footer from './components/Footer.jsx'
 import Home from './pages/Home.jsx'
 import Pricing from './pages/Pricing.jsx'
 import Team from './pages/Team.jsx'
+import OnboardClient from "./pages/OnboardClient";
+
+
 
 export default function App() {
   return (
@@ -16,6 +19,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/team" element={<Team />} />
+            <Route path="/onboard" element={<OnboardClient />} />
           </Routes>
         </main>
         <Footer />
