@@ -20,10 +20,22 @@ export default function OnboardClient() {
     setLoading(true);
     setMessage("Verifying token and redirecting...");
 
+
+
+
     try {
+      // const res = await fetch(
+      //   `${import.meta.env.VITE_API_URL}/v1/onboard-client?token=${encodeURIComponent(token)}`,
+      //   { headers: { Accept: "application/json" } }
+      // );
       const res = await fetch(
         `${import.meta.env.VITE_API_URL}/v1/onboard-client?token=${encodeURIComponent(token)}`,
-        { headers: { Accept: "application/json" } }
+        {
+          headers: {
+            Accept: "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
+        }
       );
 
       const contentType = res.headers.get("content-type") || "";
@@ -114,9 +126,8 @@ export default function OnboardClient() {
 
           {message && (
             <p
-              className={`mt-4 text-center text-sm ${
-                isError ? "text-red-400" : "text-blue-400"
-              }`}
+              className={`mt-4 text-center text-sm ${isError ? "text-red-400" : "text-blue-400"
+                }`}
             >
               {message}
             </p>
