@@ -1,0 +1,11 @@
+
+[[redirects]]
+  from = "https://linkedin.dfwsc.com/*"
+  to = "https://www.linkedin.com/company/dfwsc"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
