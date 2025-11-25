@@ -4,6 +4,7 @@ import Banner from '../components/Banner.jsx'
 import JcImage from '../assets/jc.jpg'
 import DiegoImage from '../assets/diego.jpg'
 import SpencerImage from '../assets/spencer.jpg'
+import HectorImage from '../assets/hector.webp'
 
 const teamMembers = [
   {
@@ -24,6 +25,13 @@ const teamMembers = [
     bio: 'Collaborates with clients to translate business needs into robust solutions. Supports backend systems, cloud deployments, and continuous delivery workflows.',
     image: SpencerImage,
   },
+  {
+  name: 'Hector Oropesa',
+  role: 'Full Stack Developer • DevOps & Network Engineer',
+  bio: 'Combines full-stack development with deep IT and network engineering experience. Bridges software, systems, and networking by managing cloud environments, hardening systems, and supporting scalable, reliable deployments across DevOps workflows.',
+  image: HectorImage,
+},
+
 ]
 
 export default function Team() {
