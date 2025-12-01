@@ -6,6 +6,7 @@ import Home from './pages/Home.jsx'
 import Pricing from './pages/Pricing.jsx'
 import Team from './pages/Team.jsx'
 import OnboardClient from "./pages/OnboardClient";
+import PaymentSuccess from "./pages/PaymentSuccess";
 
 
 
@@ -20,6 +21,7 @@ export default function App() {
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/team" element={<Team />} />
             <Route path="/onboard" element={<OnboardClient />} />
+            <Route path="/payment-success" element={<PaymentSuccess />} />
           </Routes>
         </main>
         <Footer />
