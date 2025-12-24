@@ -77,8 +77,7 @@ export default function Pricing() {
           ))}
         </div>
         <div className="border-t border-white/5 bg-slate-900/60 p-6 text-sm text-slate-300 sm:text-base">
-          All hosting plans are non-taxable professional services in Texas and include DFWSC-managed uptime, SSL, monitoring,
-          and incident response.
+          All hosting plans include DFWSC-managed uptime, SSL, monitoring, and incident response, but labor for devops work is billed separately.
         </div>
       </section>
 

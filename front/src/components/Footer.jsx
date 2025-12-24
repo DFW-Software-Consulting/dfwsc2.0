@@ -44,9 +44,8 @@ export default function Footer() {
           <div className="flex flex-col gap-12 md:flex-row md:justify-between md:items-start">
             {/* Left: Logo + Branding */}
             <div className="flex-1 space-y-6">
-              <Link to="/" className="inline-flex items-center gap-3">
-                <img src="/dfwsc-logo.png" alt="DFW Software Consulting" className="h-9 w-auto rounded-full" />
-                <span className="text-base font-semibold tracking-wide text-white">DFW Software Consulting</span>
+              <Link to="/" className="inline-flex items-center gap-3 bg-sky-200 p-1 rounded-md hover:scale-105 transition-transform duration-200">
+<img src="/DFWSC-Logo-HorizWordmarkPNG.png" alt="DFW Software Consulting" className="h-9 w-auto" />
               </Link>
               <p className="text-base text-slate-400 max-w-xl">
                 Dallas-Fort Worth based engineers delivering end-to-end product strategy, resilient cloud infrastructure,
