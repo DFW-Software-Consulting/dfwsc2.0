@@ -39,3 +39,52 @@ export function signJwt(payload: { role: string }): string {
   const expiresIn = process.env.JWT_EXPIRY || '1h';
   return jwt.sign(payload, secret, { expiresIn });
 }
+
+/**
+ * Middleware to require and verify JWT authentication for admin routes
+ * Expects Authorization header in format: "Bearer <token>"
+ * Validates token signature, expiry, and admin role claim
+ */
+export async function requireAdminJwt(request: FastifyRequest, reply: FastifyReply) {
+  const authHeader = request.headers.authorization;
+
+  // Check for Authorization header
+  if (!authHeader) {
+    return reply.code(401).send({ error: 'Authorization header required' });
+  }
+
+  // Validate Bearer token format
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return reply.code(401).send({ error: 'Invalid authorization header format. Expected: Bearer <token>' });
+  }
+
+  const token = parts[1];
+
+  // Verify JWT
+  try {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      throw new Error('JWT_SECRET is not configured');
+    }
+
+    const decoded = jwt.verify(token, secret) as jwt.JwtPayload & { role: string };
+
+    // Verify role claim
+    if (decoded.role !== 'admin') {
+      return reply.code(403).send({ error: 'Forbidden: Admin role required' });
+    }
+
+    // Optionally attach decoded payload to request for use in route handlers
+    // (request as any).user = decoded;
+  } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) {
+      return reply.code(401).send({ error: 'Token expired' });
+    }
+    if (error instanceof jwt.JsonWebTokenError) {
+      return reply.code(401).send({ error: 'Invalid token' });
+    }
+    // Unknown error
+    return reply.code(401).send({ error: 'Authentication failed' });
+  }
+}
