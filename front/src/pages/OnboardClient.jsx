@@ -141,6 +141,65 @@ export default function OnboardClient() {
     }
   };
 
+  const updateClientStatus = async (clientId, currentStatus) => {
+    const token = sessionStorage.getItem('adminToken');
+    if (!token) {
+      setIsLoggedIn(false);
+      return;
+    }
+
+    // Optimistic update: immediately update the UI
+    const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+    setClients(prevClients =>
+      prevClients.map(client =>
+        client.id === clientId ? { ...client, status: newStatus } : client
+      )
+    );
+
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/v1/clients/${clientId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          status: newStatus,
+        }),
+      });
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          // Unauthorized - clear token and log out
+          sessionStorage.removeItem('adminToken');
+          setIsLoggedIn(false);
+          throw new Error('Session expired. Please log in again.');
+        } else if (res.status === 404) {
+          throw new Error('Client not found');
+        }
+
+        const errorData = await res.json().catch(() => ({ error: 'Failed to update client status' }));
+        throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
+      }
+
+      // Success - status is already updated optimistically
+    } catch (err) {
+      console.error('Error updating client status:', err);
+
+      // Rollback: revert the optimistic update
+      setClients(prevClients =>
+        prevClients.map(client =>
+          client.id === clientId ? { ...client, status: currentStatus } : client
+        )
+      );
+
+      // Show error to user
+      setClientsError(err.message);
+      // Clear error after 5 seconds
+      setTimeout(() => setClientsError(""), 5000);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!token) {
       setMessage("Please enter your onboarding token.");
@@ -517,6 +576,7 @@ export default function OnboardClient() {
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
                             <th className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Stripe Account</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-800">
@@ -535,6 +595,18 @@ export default function OnboardClient() {
                               </td>
                               <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-200">
                                 {client.stripeAccountId || 'N/A'}
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap text-sm">
+                                <button
+                                  onClick={() => updateClientStatus(client.id, client.status)}
+                                  className={`px-3 py-1 rounded text-xs font-medium ${
+                                    client.status === 'active'
+                                      ? 'bg-red-600 hover:bg-red-700 text-white'
+                                      : 'bg-green-600 hover:bg-green-700 text-white'
+                                  }`}
+                                >
+                                  {client.status === 'active' ? 'Deactivate' : 'Activate'}
+                                </button>
                               </td>
                             </tr>
                           ))}
