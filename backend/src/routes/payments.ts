@@ -4,7 +4,7 @@ import { stripe } from '../lib/stripe';
 import { db } from '../db/client';
 import { clients } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { requireRole } from '../lib/auth';
+import { requireRole, requireAdminJwt } from '../lib/auth';
 import { rateLimit } from '../lib/rate-limit';
 
 const useCheckout = (process.env.USE_CHECKOUT ?? 'false').toLowerCase() === 'true';
@@ -137,7 +137,7 @@ const feeAmount = Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
 
   fastify.get(
     '/reports/payments',
-    { preHandler: requireRole(['admin']) },
+    { preHandler: requireAdminJwt },
     async (request, reply) => {
       const { clientId, limit, starting_after, ending_before } = request.query as {
         clientId?: string;
