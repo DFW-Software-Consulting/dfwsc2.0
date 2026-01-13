@@ -3,7 +3,7 @@ import { stripe } from '../lib/stripe';
 import { db } from '../db/client';
 import { clients, onboardingTokens } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { requireRole } from '../lib/auth';
+import { requireRole, requireAdminJwt } from '../lib/auth';
 import { rateLimit } from '../lib/rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
@@ -29,7 +29,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     '/accounts',
     {
 
-      preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireRole(['admin'])],
+      preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
     },
     async (request, reply) => {
       request.log.info({ body: request.body, headers: request.headers }, 'Received request in /accounts handler');
@@ -62,7 +62,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     '/onboard-client/initiate',
     {
 
-      preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireRole(['admin'])],
+      preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
     },
     async (request, reply) => {
       const { name, email } = request.body as { name: string; email: string };
