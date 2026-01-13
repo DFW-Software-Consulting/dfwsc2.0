@@ -37,7 +37,7 @@ export function signJwt(payload: { role: string }): string {
   }
 
   const expiresIn = process.env.JWT_EXPIRY || '1h';
-  return jwt.sign(payload, secret, { expiresIn });
+  return jwt.sign(payload, secret, { expiresIn } as jwt.SignOptions);
 }
 
 /**
