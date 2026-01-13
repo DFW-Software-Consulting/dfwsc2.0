@@ -12,6 +12,11 @@ export default function OnboardClient() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [adminLoading, setAdminLoading] = useState(false);
 
+  // Client list state
+  const [clients, setClients] = useState([]);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  const [clientsError, setClientsError] = useState("");
+
   useEffect(() => {
     document.title = "Client Stripe Onboarding";
     const urlParams = new URLSearchParams(window.location.search);
@@ -24,6 +29,52 @@ export default function OnboardClient() {
       setIsLoggedIn(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      fetchClients();
+    }
+  }, [isLoggedIn]);
+
+  const fetchClients = async () => {
+    const token = sessionStorage.getItem('adminToken');
+    if (!token) {
+      setIsLoggedIn(false);
+      return;
+    }
+
+    setClientsLoading(true);
+    setClientsError("");
+
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/v1/clients`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          // Unauthorized - clear token and log out
+          sessionStorage.removeItem('adminToken');
+          setIsLoggedIn(false);
+          throw new Error('Session expired. Please log in again.');
+        }
+
+        const errorData = await res.json().catch(() => ({ error: 'Failed to fetch clients' }));
+        throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      setClients(data);
+    } catch (err) {
+      console.error('Error fetching clients:', err);
+      setClientsError(err.message);
+    } finally {
+      setClientsLoading(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!token) {
@@ -264,8 +315,62 @@ export default function OnboardClient() {
                   </button>
                 </div>
 
-                <div className="text-center text-gray-300">
-                  <p>Admin dashboard content will appear here</p>
+                <div className="mb-6">
+                  <h4 className="text-md font-semibold text-white mb-3">Client List</h4>
+
+                  {clientsLoading ? (
+                    <div className="text-center py-4">
+                      <div className="inline-block animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-500"></div>
+                      <p className="mt-2 text-gray-300">Loading clients...</p>
+                    </div>
+                  ) : clientsError ? (
+                    <div className="text-center py-4">
+                      <p className="text-red-400">{clientsError}</p>
+                      <button
+                        onClick={fetchClients}
+                        className="mt-2 text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded-md transition-colors"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : clients.length === 0 ? (
+                    <div className="text-center py-4">
+                      <p className="text-gray-300">No clients yet</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-700">
+                        <thead>
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Name</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
+                            <th className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Stripe Account</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-800">
+                          {clients.map((client) => (
+                            <tr key={client.id} className="hover:bg-gray-700/50">
+                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-200">{client.name}</td>
+                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-200">{client.email}</td>
+                              <td className="px-3 py-2 whitespace-nowrap text-sm">
+                                <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                                  client.status === 'active'
+                                    ? 'bg-green-800 text-green-200'
+                                    : 'bg-red-800 text-red-200'
+                                }`}>
+                                  {client.status.charAt(0).toUpperCase() + client.status.slice(1)}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-200">
+                                {client.stripeAccountId || 'N/A'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
