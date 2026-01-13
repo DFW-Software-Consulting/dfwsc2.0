@@ -10,6 +10,7 @@ import webhooksRoute from './routes/webhooks';
 import configRoutes from './routes/config';
 import healthRoutes from './routes/health';
 import authRoutes from './routes/auth';
+import clientRoutes from './routes/clients';
 import { sendMail } from './lib/mailer';
 import { validateEnv, logMaskedEnvSummary } from './lib/env';
 
@@ -117,6 +118,7 @@ export async function buildServer() {
   server.register(connectRoutes, { prefix: '/api/v1' });
   server.register(paymentsRoutes, { prefix: '/api/v1' });
   server.register(webhooksRoute, { prefix: '/api/v1' });
+  server.register(clientRoutes, { prefix: '/api/v1' });
 
   // SPA fallback: serve index.html for non-API routes (React Router support)
   server.setNotFoundHandler((request, reply) => {
