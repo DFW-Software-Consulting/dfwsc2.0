@@ -13,8 +13,8 @@ interface ClientParams {
 }
 
 const clientRoutes: FastifyPluginAsync = async (app) => {
-  // GET /api/v1/clients - List all clients (admin only)
-  app.get('/api/v1/clients', { preHandler: requireAdminJwt }, async (req, res) => {
+  // GET /clients - List all clients (admin only) - NOTE: Will be prefixed with /api/v1 by app.ts
+  app.get('/clients', { preHandler: requireAdminJwt }, async (req, res) => {
     try {
       // Query all clients from the database
       const clientList = await db
@@ -41,11 +41,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  // PATCH /api/v1/clients/:id - Update client status (admin only)
+  // PATCH /clients/:id - Update client status (admin only) - NOTE: Will be prefixed with /api/v1 by app.ts
   app.patch<{
     Params: ClientParams;
     Body: ClientPatchBody;
-  }>('/api/v1/clients/:id', { preHandler: requireAdminJwt }, async (req, res) => {
+  }>('/clients/:id', { preHandler: requireAdminJwt }, async (req, res) => {
     try {
       const { id } = req.params;
       const { status } = req.body;
