@@ -9,6 +9,7 @@ import paymentsRoutes from './routes/payments';
 import webhooksRoute from './routes/webhooks';
 import configRoutes from './routes/config';
 import healthRoutes from './routes/health';
+import authRoutes from './routes/auth';
 import { sendMail } from './lib/mailer';
 import { validateEnv, logMaskedEnvSummary } from './lib/env';
 
@@ -112,6 +113,7 @@ export async function buildServer() {
 
   server.register(configRoutes);
   server.register(healthRoutes, { prefix: '/api/v1' });
+  server.register(authRoutes, { prefix: '/api/v1' });
   server.register(connectRoutes, { prefix: '/api/v1' });
   server.register(paymentsRoutes, { prefix: '/api/v1' });
   server.register(webhooksRoute, { prefix: '/api/v1' });
