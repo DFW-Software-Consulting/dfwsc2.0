@@ -20,14 +20,7 @@ export default function OnboardClient() {
     setLoading(true);
     setMessage("Verifying token and redirecting...");
 
-
-
-
     try {
-      // const res = await fetch(
-      //   `${import.meta.env.VITE_API_URL}/v1/onboard-client?token=${encodeURIComponent(token)}`,
-      //   { headers: { Accept: "application/json" } }
-      // );
       const res = await fetch(
         `${import.meta.env.VITE_API_URL}/v1/onboard-client?token=${encodeURIComponent(token)}`,
         {
@@ -76,62 +69,80 @@ export default function OnboardClient() {
 
   return (
     <section
-      className="min-h-[90vh] flex items-center justify-center 
-                 bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 
-                 text-gray-100"
+      className="min-h-[90vh] flex items-center justify-center
+                 bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900
+                 text-gray-100 p-4"
     >
-      <div className="mx-auto w-full max-w-md px-6 sm:px-8">
-        <div className="bg-gray-800/60 backdrop-blur-md p-8 rounded-2xl shadow-xl border border-gray-700">
-          <h1 className="text-3xl font-bold text-center mb-4 text-white">
-            Stripe Account Setup
-          </h1>
+      <div className="w-full max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Client Token Entry Section */}
+          <div className="bg-gray-800/60 backdrop-blur-md p-8 rounded-2xl shadow-xl border border-gray-700">
+            <h1 className="text-3xl font-bold text-center mb-4 text-white">
+              Stripe Account Setup
+            </h1>
 
-          <p className="text-center text-gray-300 mb-8">
-            Please enter the onboarding token provided by{" "}
-            <span className="text-blue-400 font-semibold">
-              DFW Software Consulting
-            </span>{" "}
-            to set up your Stripe account.
-          </p>
+            <p className="text-center text-gray-300 mb-8">
+              Please enter the onboarding token provided by{" "}
+              <span className="text-blue-400 font-semibold">
+                DFW Software Consulting
+              </span>{" "}
+              to set up your Stripe account.
+            </p>
 
-          <div className="mb-6">
-            <label
-              htmlFor="onboardingToken"
-              className="block text-sm font-semibold text-gray-200 mb-2"
+            <div className="mb-6">
+              <label
+                htmlFor="onboardingToken"
+                className="block text-sm font-semibold text-gray-200 mb-2"
+              >
+                Onboarding Token
+              </label>
+              <input
+                id="onboardingToken"
+                type="text"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Enter your token"
+                className="block w-full rounded-md border border-gray-600 bg-gray-900/50
+                           px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
+                           focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <button
+              onClick={handleSubmit}
+              disabled={loading}
+              className="mt-6 w-full rounded-md bg-blue-600 hover:bg-blue-700
+                         text-white font-semibold py-2 px-4 shadow-lg
+                         transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400
+                         disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Onboarding Token
-            </label>
-            <input
-              id="onboardingToken"
-              type="text"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Enter your token"
-              className="block w-full rounded-md border border-gray-600 bg-gray-900/50 
-                         px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm 
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
+              {loading ? "Processing..." : "Continue to Stripe Setup"}
+            </button>
+
+            {message && (
+              <p
+                className={`mt-4 text-center text-sm ${isError ? "text-red-400" : "text-blue-400"
+                  }`}
+              >
+                {message}
+              </p>
+            )}
           </div>
 
-          <button
-            onClick={handleSubmit}
-            disabled={loading}
-            className="mt-6 w-full rounded-md bg-blue-600 hover:bg-blue-700 
-                       text-white font-semibold py-2 px-4 shadow-lg 
-                       transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400
-                       disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? "Processing..." : "Continue to Stripe Setup"}
-          </button>
-
-          {message && (
-            <p
-              className={`mt-4 text-center text-sm ${isError ? "text-red-400" : "text-blue-400"
-                }`}
-            >
-              {message}
+          {/* Admin Section */}
+          <div className="bg-gray-800/60 backdrop-blur-md p-8 rounded-2xl shadow-xl border border-gray-700">
+            <h2 className="text-2xl font-bold text-center mb-4 text-white">
+              Admin Dashboard
+            </h2>
+            <p className="text-center text-gray-300 mb-6">
+              Log in to manage client accounts and onboarding tokens.
             </p>
-          )}
+
+            {/* Admin login form will go here */}
+            <div className="text-center text-gray-400 italic">
+              Admin functionality will appear here after login
+            </div>
+          </div>
         </div>
       </div>
     </section>
