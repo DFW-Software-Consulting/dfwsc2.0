@@ -120,6 +120,9 @@ All API routes are prefixed with `/api/v1`:
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | GET | `/api/v1/health` | Health check | Public |
+| POST | `/api/v1/auth/login` | Admin login (returns JWT token) | Public |
+| GET | `/api/v1/clients` | List all clients | Admin (JWT) |
+| PATCH | `/api/v1/clients/:id` | Update client status | Admin (JWT) |
 | POST | `/api/v1/accounts` | Create client account | Admin |
 | POST | `/api/v1/onboard-client/initiate` | Send onboarding email | Admin |
 | GET | `/api/v1/onboard-client` | Get Stripe onboarding link | Public |
@@ -160,10 +163,18 @@ SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
 SMTP_PASS=your-app-password
 
+# Admin Authentication (JWT)
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=changeme_secure_password
+JWT_SECRET=your_jwt_secret_minimum_32_characters_long
+JWT_EXPIRY=1h
+
 # Payment Config
 USE_CHECKOUT=true
 DEFAULT_PROCESS_FEE_CENTS=100
 ```
+
+**Admin Authentication:** The backend uses JWT tokens for admin endpoints (client list, status management). Configure `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `JWT_SECRET` (minimum 32 characters). `JWT_EXPIRY` is optional (defaults to `1h`). See `backend/.env.example` for detailed documentation.
 
 ### Frontend (.env)
 
