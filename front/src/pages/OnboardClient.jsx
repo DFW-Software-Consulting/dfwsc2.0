@@ -17,6 +17,14 @@ export default function OnboardClient() {
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState("");
 
+  // Create client state
+  const [newClientName, setNewClientName] = useState("");
+  const [newClientEmail, setNewClientEmail] = useState("");
+  const [createClientLoading, setCreateClientLoading] = useState(false);
+  const [createClientError, setCreateClientError] = useState("");
+  const [createdClientInfo, setCreatedClientInfo] = useState(null);
+  const [copySuccess, setCopySuccess] = useState("");
+
   useEffect(() => {
     document.title = "Client Stripe Onboarding";
     const urlParams = new URLSearchParams(window.location.search);
@@ -73,6 +81,63 @@ export default function OnboardClient() {
       setClientsError(err.message);
     } finally {
       setClientsLoading(false);
+    }
+  };
+
+  const handleCreateClient = async (e) => {
+    e.preventDefault();
+    if (!newClientName.trim() || !newClientEmail.trim()) {
+      setCreateClientError("Name and email are required");
+      return;
+    }
+
+    setCreateClientLoading(true);
+    setCreateClientError("");
+    setCreatedClientInfo(null);
+
+    try {
+      const token = sessionStorage.getItem('adminToken');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/v1/accounts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: newClientName.trim(),
+          email: newClientEmail.trim(),
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: 'Failed to create client' }));
+        throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      setCreatedClientInfo(data);
+      setNewClientName("");
+      setNewClientEmail("");
+
+      // Refresh the client list
+      await fetchClients();
+    } catch (err) {
+      console.error('Error creating client:', err);
+      setCreateClientError(err.message);
+    } finally {
+      setCreateClientLoading(false);
+    }
+  };
+
+  const copyToClipboard = async (text, type) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopySuccess(`${type} copied to clipboard!`);
+      setTimeout(() => setCopySuccess(""), 2000); // Clear message after 2 seconds
+    } catch (err) {
+      console.error(`Failed to copy ${type}:`, err);
+      setCopySuccess(`Failed to copy ${type}`);
+      setTimeout(() => setCopySuccess(""), 2000);
     }
   };
 
@@ -315,6 +380,112 @@ export default function OnboardClient() {
                   </button>
                 </div>
 
+                {/* Create Client Form */}
+                <div className="mb-6 p-4 bg-gray-700/50 rounded-lg">
+                  <h4 className="text-md font-semibold text-white mb-3">Create New Client</h4>
+
+                  <form onSubmit={handleCreateClient}>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                      <div>
+                        <label
+                          htmlFor="newClientName"
+                          className="block text-sm font-medium text-gray-300 mb-1"
+                        >
+                          Client Name
+                        </label>
+                        <input
+                          id="newClientName"
+                          type="text"
+                          value={newClientName}
+                          onChange={(e) => setNewClientName(e.target.value)}
+                          placeholder="Enter client name"
+                          className="w-full rounded-md border border-gray-600 bg-gray-900/50
+                                     px-3 py-2 text-gray-100 placeholder-gray-500
+                                     focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          disabled={createClientLoading}
+                        />
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="newClientEmail"
+                          className="block text-sm font-medium text-gray-300 mb-1"
+                        >
+                          Client Email
+                        </label>
+                        <input
+                          id="newClientEmail"
+                          type="email"
+                          value={newClientEmail}
+                          onChange={(e) => setNewClientEmail(e.target.value)}
+                          placeholder="Enter client email"
+                          className="w-full rounded-md border border-gray-600 bg-gray-900/50
+                                     px-3 py-2 text-gray-100 placeholder-gray-500
+                                     focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          disabled={createClientLoading}
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={createClientLoading || !newClientName.trim() || !newClientEmail.trim()}
+                      className="w-full md:w-auto rounded-md bg-blue-600 hover:bg-blue-700
+                                 text-white font-semibold py-2 px-4 shadow-lg
+                                 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400
+                                 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {createClientLoading ? "Creating..." : "Create Client"}
+                    </button>
+
+                    {createClientError && (
+                      <p className="mt-2 text-sm text-red-400">{createClientError}</p>
+                    )}
+                  </form>
+
+                  {/* Display created client info */}
+                  {createdClientInfo && (
+                    <div className="mt-4 p-4 bg-gray-800/50 rounded-lg border border-gray-600">
+                      <h5 className="font-semibold text-green-400 mb-2">Client Created Successfully!</h5>
+
+                      <div className="mb-3">
+                        <p className="text-sm text-gray-300 mb-1"><strong>Onboarding Token:</strong></p>
+                        <div className="flex items-center">
+                          <code className="flex-1 bg-gray-900/50 text-green-300 p-2 rounded break-all mr-2">
+                            {createdClientInfo.onboardingToken}
+                          </code>
+                          <button
+                            onClick={() => copyToClipboard(createdClientInfo.onboardingToken, 'Token')}
+                            className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded transition-colors"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="text-sm text-gray-300 mb-1"><strong>Onboarding URL:</strong></p>
+                        <div className="flex items-center">
+                          <code className="flex-1 bg-gray-900/50 text-blue-300 p-2 rounded break-all mr-2">
+                            {createdClientInfo.onboardingUrlHint}
+                          </code>
+                          <button
+                            onClick={() => copyToClipboard(createdClientInfo.onboardingUrlHint, 'URL')}
+                            className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded transition-colors"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {copySuccess && (
+                    <div className="mt-2 text-sm text-green-400">{copySuccess}</div>
+                  )}
+                </div>
+
+                {/* Client List */}
                 <div className="mb-6">
                   <h4 className="text-md font-semibold text-white mb-3">Client List</h4>
 
