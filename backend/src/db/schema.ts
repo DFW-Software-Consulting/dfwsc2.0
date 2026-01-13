@@ -5,6 +5,9 @@ export const clients = pgTable("clients", {
   name: text("name").notNull(),
   email: text("email").notNull(),
   stripeAccountId: text("stripe_account_id"),
+  status: text("status", { enum: ["active", "inactive"] })
+    .default("active")
+    .notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
