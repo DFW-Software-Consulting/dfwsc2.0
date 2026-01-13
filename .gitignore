@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+*/node_modules/
+**/node_modules/
+
+# Build output
+/front/dist
+/backend/dist
+/backend/public
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*/.env
+backend/.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+*.log
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Database
+/backend/drizzle
+
+# Misc
+.cache/

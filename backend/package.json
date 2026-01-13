@@ -1,0 +1,58 @@
+{
+  "name": "dfsc_stripe_payment_portal",
+  "version": "1.0.0",
+  "description": "This will act as the payment portal for all dfwsc clients",
+  "homepage": "https://github.com/DFW-Software-Consulting/dfsc_stripe_payment_portal#readme",
+  "bugs": {
+    "url": "https://github.com/DFW-Software-Consulting/dfsc_stripe_payment_portal/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DFW-Software-Consulting/dfsc_stripe_payment_portal.git"
+  },
+  "license": "ISC",
+  "author": "Jeremy Ashley",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon --exec ts-node src/server.ts",
+    "dev:client": "cd client && npm run dev",
+    "start": "node dist/server.js",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "cd client && npm install && npm run build",
+    "build:server": "tsc -p tsconfig.build.json",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "stripe:listen": "stripe listen --forward-to localhost:4242/api/v1/webhooks/stripe",
+    "test": "vitest",
+    "test:ui": "vitest --ui"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.1.0",
+    "@fastify/static": "^8.3.0",
+    "@types/uuid": "^10.0.0",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.44.7",
+    "fastify": "^5.6.1",
+    "fastify-raw-body": "^5.0.0",
+    "nodemailer": "^7.0.10",
+    "pg": "^8.16.3",
+    "stripe": "^19.1.0",
+    "uuid": "^8.3.2"
+  },
+  "devDependencies": {
+    "@fastify/swagger": "^9.0.0",
+    "@fastify/swagger-ui": "^5.0.0",
+    "@types/node": "^24.9.1",
+    "@types/nodemailer": "^7.0.3",
+    "@types/pg": "^8.15.5",
+    "@vitest/ui": "^3.2.4",
+    "drizzle-kit": "^0.31.5",
+    "node-fetch": "^2.7.0",
+    "nodemon": "^3.1.4",
+    "supertest": "^7.1.4",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
