@@ -1,99 +1,55 @@
-## DFWSC Stripe Payment Portal – AI Notes
+# DFWSC Stripe Payment Portal
 
-### Purpose and Direction
+## Project Overview
+This is a payment portal for DFW Software Consulting clients that integrates with Stripe for payment processing. The system allows clients to onboard, create payments, and manage their accounts. It also includes the public-facing landing site for the business.
 
-This repository is the DFW Software Consulting payment portal. It exists to:
+## Architecture
+- **Backend**: Node.js/TypeScript with Fastify framework
+- **Database**: PostgreSQL 14+
+- **Frontend**: React application (in `/front` directory)
+- **Containerization**: Docker/Docker Compose
+- **ORM**: Drizzle ORM for database operations
 
-- onboard clients into Stripe Connect (Express)
-- create and track payments on behalf of clients
-- let admins manage client status (active/inactive)
-- handle Stripe webhooks for onboarding and payment events
-- serve the public marketing/landing site for the business
+## Key Features
+- Client onboarding with Stripe Connect Express
+- Payment processing via Stripe (PaymentIntent or Checkout Session)
+- Admin management capabilities
+- Webhook handling for Stripe events
+- Client status management (active/inactive)
+- Public marketing/landing pages (Home, Pricing, Team)
 
-Moving forward, the app should keep the Stripe flow reliable, secure, and easy to operate. Any work should preserve the onboarding and payment funnels first, then improve admin visibility and reporting.
+## Docker Environment
+The application runs in Docker containers as defined in `docker-compose.yml`:
+- `api`: Main backend service (port 4242)
+- `web`: Frontend service (port 8080)
+- `db`: PostgreSQL database (port 5432)
+- `mailhog`: Email testing service (port 8025)
 
-### Architecture
+## Development Workflow
+1. All development should be done with the Docker containers running
+2. The backend code is located in `/backend`
+3. Changes to backend code are reflected in the Docker container
+4. Database migrations should be run through the Docker environment
 
-- Backend: Node.js + TypeScript with Fastify (in `backend/`)
-- Database: PostgreSQL 14+ (Drizzle ORM)
-- Frontend: React + Vite (in `front/`)
-- Containerization: Docker / Docker Compose
+## Key Endpoints
+- `GET /api/v1/health` - Health check
+- `POST /api/v1/auth/login` - Admin authentication
+- `PATCH /api/v1/clients/:id` - Update client status (admin only)
+- `POST /api/v1/payments/create` - Create payment
+- `GET /api/v1/reports/payments` - List Stripe payment intents (admin only)
+- `POST /api/v1/accounts` - Create client + onboarding token (admin only)
+- `POST /api/v1/onboard-client/initiate` - Email onboarding link (admin only)
+- `GET /api/v1/onboard-client` - Exchange token for Stripe onboarding link
+- `POST /api/v1/webhooks/stripe` - Stripe webhooks
 
-### User-Facing Experience
+## Working with Docker
+- To rebuild: `docker-compose up -d --build`
+- To view logs: `docker-compose logs -f api`
+- To run commands in container: `docker exec -it dfwsc20-api-1 /bin/sh`
 
-- Landing site: Home, Pricing, Team
-- Client onboarding page: token-based Stripe onboarding
-- Payment success page
-
-### Admin Capabilities
-
-- Admin login with JWT
-- Create clients and onboarding tokens
-- Email onboarding links
-- Enable/disable clients
-- View Stripe payment intents for a client
-
-### Key Services and Ports
-
-- api: Fastify server (port 4242)
-- web: React site (port 8080)
-- db: Postgres (port 5432)
-- mailhog: Mail testing (port 8025)
-
-### Entry Points
-
-- Backend server: `backend/src/server.ts`
-- Fastify app: `backend/src/app.ts`
-- Frontend router: `front/src/App.jsx`
-
-### Important Endpoints
-
-- `GET /api/v1/health` – health check
-- `POST /api/v1/auth/login` – admin authentication
-- `PATCH /api/v1/clients/:id` – update client status (admin only)
-- `POST /api/v1/payments/create` – create payment
-- `GET /api/v1/reports/payments` – list Stripe payment intents (admin only)
-- `POST /api/v1/accounts` – create client and onboarding token (admin only)
-- `POST /api/v1/onboard-client/initiate` – create client + email onboarding link (admin only)
-- `GET /api/v1/onboard-client` – exchange token for Stripe onboarding link
-- `POST /api/v1/webhooks/stripe` – Stripe webhooks
-
-### Environment Notes
-
-- Env files live in `.env` files at the repo root and `backend/`.
-- Backend validates required vars in `backend/src/lib/env.ts`.
-- Stripe keys and webhook secrets are required for API startup.
-
-### Development Workflow
-
-- Run via Docker Compose at the repo root.
-- Rebuild: `docker-compose up -d --build`
-- Logs: `docker-compose logs -f api`
-- Shell into API container: `docker exec -it dfwsc20-api-1 /bin/sh`
-
-### Database and Migrations
-
-- Drizzle schema: `backend/src/db/schema.ts`
-- DB connection: `backend/src/db/client.ts`
-- Migrations run on startup in non-production (see `backend/src/server.ts`).
-
-### Frontend Pages
-
-- Landing site: `front/src/pages/Home.jsx`
-- Pricing: `front/src/pages/Pricing.jsx`
-- Team: `front/src/pages/Team.jsx`
-- Client onboarding: `front/src/pages/OnboardClient.jsx`
-- Payment success: `front/src/pages/PaymentSuccess.jsx`
-
-### Testing
-
-- Backend tests live in `backend/src/__tests__` and `backend/src/routes/*.test.ts`.
-- Run tests in the Docker environment when possible.
-
-### Guardrails for Changes
-
-- Preserve the onboarding and payment flows; treat them as critical paths.
-- Keep backend changes in `backend/`, frontend changes in `front/`.
-- Avoid introducing new dependencies unless necessary.
-- Prefer small, focused diffs.
-- If auth or Stripe flow behavior is unclear, ask before changing.
+## Important Notes
+- The database is persistent in the `pgdata` volume
+- Environment variables are loaded from `.env` files
+- The client status feature allows soft-deletion of clients by setting status to 'inactive'
+- Admin-only endpoints require JWT authentication
+- All changes should be tested in the Docker environment to ensure compatibility
