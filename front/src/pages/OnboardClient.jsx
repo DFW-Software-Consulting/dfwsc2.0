@@ -25,6 +25,9 @@ export default function OnboardClient() {
   const [createdClientInfo, setCreatedClientInfo] = useState(null);
   const [copySuccess, setCopySuccess] = useState("");
 
+  // Toast notifications
+  const [toast, setToast] = useState({ show: false, message: "", type: "" });
+
   useEffect(() => {
     document.title = "Client Stripe Onboarding";
     const urlParams = new URLSearchParams(window.location.search);
@@ -119,25 +122,34 @@ export default function OnboardClient() {
       setNewClientName("");
       setNewClientEmail("");
 
+      // Show success message
+      showToast(`Client ${data.name} created successfully!`, "success");
+
       // Refresh the client list
       await fetchClients();
     } catch (err) {
       console.error('Error creating client:', err);
       setCreateClientError(err.message);
+      showToast(`Error creating client: ${err.message}`, "error");
     } finally {
       setCreateClientLoading(false);
     }
   };
 
+  const showToast = (message, type = "info") => {
+    setToast({ show: true, message, type });
+    setTimeout(() => {
+      setToast({ show: false, message: "", type: "" });
+    }, 5000);
+  };
+
   const copyToClipboard = async (text, type) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopySuccess(`${type} copied to clipboard!`);
-      setTimeout(() => setCopySuccess(""), 2000); // Clear message after 2 seconds
+      showToast(`${type} copied to clipboard!`, "success");
     } catch (err) {
       console.error(`Failed to copy ${type}:`, err);
-      setCopySuccess(`Failed to copy ${type}`);
-      setTimeout(() => setCopySuccess(""), 2000);
+      showToast(`Failed to copy ${type}`, "error");
     }
   };
 
@@ -194,9 +206,7 @@ export default function OnboardClient() {
       );
 
       // Show error to user
-      setClientsError(err.message);
-      // Clear error after 5 seconds
-      setTimeout(() => setClientsError(""), 5000);
+      showToast(`Error updating client status: ${err.message}`, "error");
     }
   };
 
@@ -546,25 +556,33 @@ export default function OnboardClient() {
 
                 {/* Client List */}
                 <div className="mb-6">
-                  <h4 className="text-md font-semibold text-white mb-3">Client List</h4>
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="text-md font-semibold text-white">Client List</h4>
+                    <button
+                      onClick={fetchClients}
+                      className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
+                    >
+                      Refresh
+                    </button>
+                  </div>
 
                   {clientsLoading ? (
-                    <div className="text-center py-4">
-                      <div className="inline-block animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-500"></div>
-                      <p className="mt-2 text-gray-300">Loading clients...</p>
+                    <div className="text-center py-8">
+                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+                      <p className="mt-3 text-gray-300">Loading clients...</p>
                     </div>
                   ) : clientsError ? (
                     <div className="text-center py-4">
                       <p className="text-red-400">{clientsError}</p>
                       <button
                         onClick={fetchClients}
-                        className="mt-2 text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded-md transition-colors"
+                        className="mt-3 text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded-md transition-colors"
                       >
                         Retry
                       </button>
                     </div>
                   ) : clients.length === 0 ? (
-                    <div className="text-center py-4">
+                    <div className="text-center py-8">
                       <p className="text-gray-300">No clients yet</p>
                     </div>
                   ) : (
@@ -601,9 +619,10 @@ export default function OnboardClient() {
                                   onClick={() => updateClientStatus(client.id, client.status)}
                                   className={`px-3 py-1 rounded text-xs font-medium ${
                                     client.status === 'active'
-                                      ? 'bg-red-600 hover:bg-red-700 text-white'
-                                      : 'bg-green-600 hover:bg-green-700 text-white'
+                                      ? 'bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'
+                                      : 'bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 disabled:cursor-not-allowed'
                                   }`}
+                                  title={`${client.status === 'active' ? 'Deactivate' : 'Activate'} client`}
                                 >
                                   {client.status === 'active' ? 'Deactivate' : 'Activate'}
                                 </button>
@@ -615,6 +634,17 @@ export default function OnboardClient() {
                     </div>
                   )}
                 </div>
+
+                {/* Toast notifications */}
+                {toast.show && (
+                  <div className={`fixed bottom-4 right-4 px-6 py-3 rounded-md shadow-lg text-white font-medium z-50 ${
+                    toast.type === 'success' ? 'bg-green-600' :
+                    toast.type === 'error' ? 'bg-red-600' :
+                    toast.type === 'warning' ? 'bg-yellow-600' : 'bg-blue-600'
+                  }`}>
+                    {toast.message}
+                  </div>
+                )}
               </div>
             )}
           </div>
