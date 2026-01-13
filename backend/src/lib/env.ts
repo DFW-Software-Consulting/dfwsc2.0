@@ -13,11 +13,14 @@ const REQUIRED_ENV_VARS = [
   'SMTP_PORT',
   'SMTP_USER',
   'SMTP_PASS',
+  'ADMIN_USERNAME',
+  'ADMIN_PASSWORD',
+  'JWT_SECRET',
 ];
 
 const MASK_KEEP = 6;
 
-const OPTIONAL_ENV_VARS = ['DEFAULT_PROCESS_FEE_CENTS', 'SMTP_FROM', 'ADMIN_API_KEY'];
+const OPTIONAL_ENV_VARS = ['DEFAULT_PROCESS_FEE_CENTS', 'SMTP_FROM', 'ADMIN_API_KEY', 'JWT_EXPIRY'];
 
 export function validateEnv(): Record<string, string> {
   const env: Record<string, string> = {};
@@ -41,6 +44,13 @@ export function validateEnv(): Record<string, string> {
   const useCheckout = env['USE_CHECKOUT'];
   if (useCheckout && !['true', 'false'].includes(useCheckout.toLowerCase())) {
     throw new Error('USE_CHECKOUT must be either "true" or "false".');
+  }
+
+  // Set default for optional env vars
+  if (!process.env['JWT_EXPIRY']) {
+    env['JWT_EXPIRY'] = '1h';
+  } else {
+    env['JWT_EXPIRY'] = process.env['JWT_EXPIRY'];
   }
 
   return env;
