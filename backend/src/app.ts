@@ -101,12 +101,12 @@ export async function buildServer() {
    */
 
   if (process.env.NODE_ENV !== 'production' && env.ENABLE_SWAGGER !== 'false') {
-    const fastifySwagger = await eval('import(\'@fastify/swagger\')');
-    const fastifySwaggerUi = await eval('import(\'@fastify/swagger-ui\')');
-    await server.register(fastifySwagger.default, {
+    const { default: fastifySwagger } = await import('@fastify/swagger');
+    const { default: fastifySwaggerUi } = await import('@fastify/swagger-ui');
+    await server.register(fastifySwagger, {
       openapi: { info: { title: 'Stripe Portal API', version: '1.0.0' } },
     });
-    await server.register(fastifySwaggerUi.default, { routePrefix: '/docs' });
+    await server.register(fastifySwaggerUi, { routePrefix: '/docs' });
     server.log.info('✅ Swagger UI available at /docs');
   } else {
     server.log.info('🚫 Swagger disabled for production');
