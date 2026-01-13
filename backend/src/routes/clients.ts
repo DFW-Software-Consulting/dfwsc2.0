@@ -13,6 +13,34 @@ interface ClientParams {
 }
 
 const clientRoutes: FastifyPluginAsync = async (app) => {
+  // GET /api/v1/clients - List all clients (admin only)
+  app.get('/api/v1/clients', { preHandler: requireAdminJwt }, async (req, res) => {
+    try {
+      // Query all clients from the database
+      const clientList = await db
+        .select({
+          id: clients.id,
+          name: clients.name,
+          email: clients.email,
+          stripeAccountId: clients.stripeAccountId,
+          status: clients.status,
+          createdAt: clients.createdAt,
+        })
+        .from(clients);
+
+      // Format response with proper date serialization
+      return res.status(200).send(
+        clientList.map(client => ({
+          ...client,
+          createdAt: client.createdAt?.toISOString(),
+        }))
+      );
+    } catch (error) {
+      req.log.error(error, 'Error fetching client list');
+      return res.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
   // PATCH /api/v1/clients/:id - Update client status (admin only)
   app.patch<{
     Params: ClientParams;
