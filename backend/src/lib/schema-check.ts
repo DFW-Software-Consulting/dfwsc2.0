@@ -14,6 +14,7 @@ const REQUIRED_TABLES: TableColumns[] = [
       'name',
       'email',
       'stripe_account_id',
+      'status',
       'created_at',
       'updated_at',
     ],
