@@ -1,7 +1,5 @@
 import fastify from 'fastify';
 import fastifyCors from '@fastify/cors';
-import fastifyStatic from '@fastify/static';
-import path from 'path';
 import fastifyRawBody from 'fastify-raw-body';
 
 import connectRoutes from './routes/connect';
@@ -51,10 +49,6 @@ export async function buildServer() {
   server.register(fastifyCors, {
     origin: allowedOrigins.length === 0 ? true : allowedOrigins,
     credentials: true,
-  });
-
-  server.register(fastifyStatic, {
-    root: path.join(__dirname, '../public'),
   });
 
   server.register(fastifyRawBody, {
@@ -120,11 +114,7 @@ export async function buildServer() {
   server.register(webhooksRoute, { prefix: '/api/v1' });
   server.register(clientRoutes, { prefix: '/api/v1' });
 
-  // SPA fallback: serve index.html for non-API routes (React Router support)
-  server.setNotFoundHandler((request, reply) => {
-    if (!request.url.startsWith('/api')) {
-      return reply.sendFile('index.html');
-    }
+  server.setNotFoundHandler((_request, reply) => {
     reply.code(404).send({ error: 'Not Found' });
   });
 
