@@ -22,11 +22,11 @@ export default function AdminDashboard() {
     if (isLoggedIn) {
       fetchClients();
     }
-  }, [isLoggedIn]);
+  }, [isLoggedIn, fetchClients]);
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
-  }, []);
+  }, [showToast]);
 
   const hideToast = useCallback(() => {
     setToast({ show: false, message: "", type: "" });
@@ -35,6 +35,7 @@ export default function AdminDashboard() {
   const fetchClients = useCallback(async () => {
     const token = sessionStorage.getItem("adminToken");
     if (!token) {
+      showToast("Session expired. You have been logged out.", "warning");
       setIsLoggedIn(false);
       return;
     }
@@ -56,6 +57,7 @@ export default function AdminDashboard() {
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
           sessionStorage.removeItem("adminToken");
+          showToast("Session expired. You have been logged out.", "warning");
           setIsLoggedIn(false);
           throw new Error("Session expired. Please log in again.");
         }
