@@ -1,7 +1,7 @@
 # DFWSC Stripe Payment Portal
 
 ## Project Overview
-This is a payment portal for DFW Software Consulting clients that integrates with Stripe for payment processing. The system allows clients to onboard, create payments, and manage their accounts. It also includes the public-facing landing site for the business.
+This is a payment portal for DFW Software Consulting clients that integrates with Stripe for payment processing. The system allows clients to onboard, create payments, and manage their accounts.
 
 ## Architecture
 - **Backend**: Node.js/TypeScript with Fastify framework
@@ -11,12 +11,11 @@ This is a payment portal for DFW Software Consulting clients that integrates wit
 - **ORM**: Drizzle ORM for database operations
 
 ## Key Features
-- Client onboarding with Stripe Connect Express
-- Payment processing via Stripe (PaymentIntent or Checkout Session)
+- Client onboarding with Stripe Connect
+- Payment processing via Stripe
 - Admin management capabilities
 - Webhook handling for Stripe events
 - Client status management (active/inactive)
-- Public marketing/landing pages (Home, Pricing, Team)
 
 ## Docker Environment
 The application runs in Docker containers as defined in `docker-compose.yml`:
@@ -36,11 +35,7 @@ The application runs in Docker containers as defined in `docker-compose.yml`:
 - `POST /api/v1/auth/login` - Admin authentication
 - `PATCH /api/v1/clients/:id` - Update client status (admin only)
 - `POST /api/v1/payments/create` - Create payment
-- `GET /api/v1/reports/payments` - List Stripe payment intents (admin only)
-- `POST /api/v1/accounts` - Create client + onboarding token (admin only)
-- `POST /api/v1/onboard-client/initiate` - Email onboarding link (admin only)
-- `GET /api/v1/onboard-client` - Exchange token for Stripe onboarding link
-- `POST /api/v1/webhooks/stripe` - Stripe webhooks
+- `POST /api/v1/connect/initiate` - Initiate client onboarding
 
 ## Working with Docker
 - To rebuild: `docker-compose up -d --build`
