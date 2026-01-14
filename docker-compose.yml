@@ -3,10 +3,11 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.api
+      target: development
     env_file:
       - backend/.env
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
     ports:
       - "4242:4242"
     depends_on:

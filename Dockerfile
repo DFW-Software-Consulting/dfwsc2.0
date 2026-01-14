@@ -49,7 +49,7 @@ COPY --from=backend-builder /app/backend/dist ./dist
 COPY --from=backend-builder /app/backend/drizzle.config.ts ./drizzle.config.ts
 
 # Copy built frontend from frontend-builder
-COPY --from=frontend-builder /app/backend/public ./public
+COPY --from=frontend-builder /app/front/dist ./public
 
 # Install curl for health checks
 RUN apk add --no-cache curl

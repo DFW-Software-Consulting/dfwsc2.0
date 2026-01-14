@@ -1,0 +1,33 @@
+services:
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+      target: development
+    volumes:
+      - ./backend/src:/app/src:ro
+      - ./backend/package.json:/app/package.json:ro
+      - ./backend/tsconfig.json:/app/tsconfig.json:ro
+      - ./backend/tsconfig.build.json:/app/tsconfig.build.json:ro
+      - ./backend/drizzle.config.ts:/app/drizzle.config.ts:ro
+      - ./backend/drizzle:/app/drizzle:ro
+    command: npm run dev
+    environment:
+      NODE_ENV: development
+
+  web:
+    build:
+      context: ./front
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./front/src:/app/src:ro
+      - ./front/public:/app/public:ro
+      - ./front/index.html:/app/index.html:ro
+      - ./front/vite.config.js:/app/vite.config.js:ro
+      - ./front/tailwind.config.js:/app/tailwind.config.js:ro
+      - ./front/package.json:/app/package.json:ro
+    command: npm run dev -- --host
+    environment:
+      NODE_ENV: development
+    ports:
+      - "5174:5173"

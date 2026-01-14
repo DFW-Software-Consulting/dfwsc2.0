@@ -52,41 +52,73 @@ dfwsc2.0/
 - PostgreSQL 14+
 - npm or yarn
 
-### Setup
+### Quick Start
 
-1. **Install dependencies:**
+1. **Clone and setup:**
    ```bash
-   npm run install:all
-   ```
-
-2. **Configure environment:**
-   ```bash
-   # Backend configuration
+   # Install dependencies
+   make install
+   
+   # Copy environment files
    cp backend/.env.example backend/.env
-   # Edit backend/.env with your Stripe keys, database URL, SMTP settings
+   cp front/.env.example front/.env
+   
+   # Edit backend/.env with your Stripe keys and other settings
+   # Edit front/.env if needed (defaults work for Docker dev mode)
    ```
 
-3. **Run database migrations:**
+2. **Start development environment with hot reload:**
    ```bash
-   npm run db:migrate
+   # Generate and run migrations
+   make setup
+   
+   # Start Docker dev mode with hot reload
+   make dev-up-build
    ```
 
-### Development Options
+3. **Access your app:**
+   - Frontend (Vite HMR): http://localhost:5174
+   - Backend API: http://localhost:4242
+   - Swagger UI: http://localhost:4242/docs
+   - Mailhog: http://localhost:8025
 
-#### Option 1: Hot Reload (Recommended for development)
-Run frontend and backend separately with hot reload:
+### Development Modes
+
+#### Option 1: Docker with Hot Reload (Recommended)
+Development mode with Docker, including hot reload for both frontend and backend:
+
+```bash
+# Start dev stack with hot reload
+make dev-up-build
+
+# View logs
+make dev-logs
+
+# Stop
+make dev-down
+```
+
+**Services:**
+- **Frontend (Vite HMR):** http://localhost:5174
+- **Backend (nodemon):** http://localhost:4242
+- **Swagger UI:** http://localhost:4242/docs
+- **Mailhog:** http://localhost:8025
+- **PostgreSQL:** localhost:5432
+
+Code changes in `backend/src` or `front/src` will automatically reload!
+
+#### Option 2: Local Development (No Docker)
+Run frontend and backend locally with hot reload:
 
 ```bash
 # Terminal 1 - Backend API (port 4242)
-npm run dev:backend
+make dev-backend
 
 # Terminal 2 - Frontend dev server (port 5173)
-npm run dev:frontend
+make dev-frontend
 ```
 
-- **Frontend:** http://localhost:5173 (with hot reload)
-- **Backend:** http://localhost:4242
-- Frontend makes API calls to backend at http://localhost:4242/api/v1/*
+**Note:** Requires local PostgreSQL running on port 5432.
 
 ### Building for Production
 
@@ -98,20 +130,37 @@ npm run build
 npm start
 ```
 
-## 🐳 Docker Deployment
+## 🐳 Docker Commands
 
-### Compose (Recommended)
+### Development Mode (Hot Reload)
 ```bash
-make down
-make up-build
+make dev-up-build    # Build and start dev stack with hot reload
+make dev-up          # Start existing dev stack
+make dev-down        # Stop dev stack
+make dev-logs        # View backend logs
 ```
 
-Services (default):
-- **Web UI:** http://localhost:8080
+### Production Mode
+```bash
+make up-build        # Build and start production stack
+make up              # Start existing stack
+make down            # Stop stack
+make down-v          # Stop and remove volumes
+make logs            # View backend logs
+make ps              # Show container status
+```
+
+### Database
+```bash
+make migrate         # Run database migrations
+make db-generate     # Generate new migrations
+make sh              # Shell into API container
+```
+
+**Production Services:**
+- **Web UI (nginx):** http://localhost:8080
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
-
-If you want the UI on port 80, change the `web` service port mapping in `docker-compose.yml`.
 
 ## 📡 API Routes
 
@@ -139,41 +188,49 @@ React Router handles these client-side routes:
 
 ## 🔐 Environment Variables
 
-### Backend (.env)
+### Backend (backend/.env)
+
+Copy `backend/.env.example` to `backend/.env` and configure:
 
 ```env
-# Stripe
-STRIPE_SECRET_KEY=sk_...
+# Stripe Configuration
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
 # Server
 PORT=4242
-FRONTEND_ORIGIN=http://localhost:8080
-API_BASE_URL=http://localhost:4242
 
-# Database
-DATABASE_URL=postgresql://user:pass@localhost:5432/stripe_portal
+# CORS (for Docker hot reload dev mode)
+FRONTEND_ORIGIN=http://localhost:5174,http://localhost:4242
+
+# Database (use 'db' for Docker, 'localhost' for local dev)
+DATABASE_URL=postgresql://postgres:postgres@db:5432/stripe_portal
 
 # Email (SMTP)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
 SMTP_PASS=your-app-password
+SMTP_FROM=noreply@yourdomain.com
 
-# Payment Config
-USE_CHECKOUT=true
-DEFAULT_PROCESS_FEE_CENTS=100
+# Optional
+ENABLE_SWAGGER=true
 ```
 
-### Frontend (.env)
+### Frontend (front/.env)
+
+Copy `front/.env.example` to `front/.env`:
 
 ```env
-# In docker, nginx proxies /api to the API container
-VITE_API_URL=/api/v1
+# For Docker hot reload dev mode
+VITE_API_URL=http://localhost:4242/api/v1
 
-# For local dev without nginx, use:
-# VITE_API_URL=http://localhost:4242/api/v1
+# For Docker production (nginx proxy)
+# VITE_API_URL=/api/v1
 ```
+
+**See `.env.example` files for complete documentation.**
 
 ## 📦 NPM Scripts
 
