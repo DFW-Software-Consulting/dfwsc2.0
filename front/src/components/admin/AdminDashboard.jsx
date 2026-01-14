@@ -18,15 +18,9 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  useEffect(() => {
-    if (isLoggedIn) {
-      fetchClients();
-    }
-  }, [isLoggedIn, fetchClients]);
-
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
-  }, [showToast]);
+  }, []);
 
   const hideToast = useCallback(() => {
     setToast({ show: false, message: "", type: "" });
