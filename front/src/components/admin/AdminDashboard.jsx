@@ -15,8 +15,9 @@ export default function AdminDashboard() {
     const storedToken = sessionStorage.getItem("adminToken");
     if (storedToken) {
       setIsLoggedIn(true);
+      fetchClients();
     }
-  }, []);
+  }, [fetchClients]);
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
@@ -76,7 +77,8 @@ export default function AdminDashboard() {
 
   const handleLoginSuccess = useCallback(() => {
     setIsLoggedIn(true);
-  }, []);
+    fetchClients();
+  }, [fetchClients]);
 
   const handleLogout = useCallback(() => {
     sessionStorage.removeItem("adminToken");
