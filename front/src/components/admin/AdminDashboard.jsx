@@ -147,6 +147,7 @@ export default function AdminDashboard() {
           clients={clients}
           onStatusChange={handleStatusChange}
           showToast={showToast}
+          onSessionExpired={handleLogout}
           loading={clientsLoading}
           error={clientsError}
           onRefresh={fetchClients}

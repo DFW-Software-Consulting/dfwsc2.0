@@ -5,6 +5,7 @@ export default function ClientList({
   clients,
   onStatusChange,
   showToast,
+  onSessionExpired,
   loading,
   error,
   onRefresh,
@@ -20,7 +21,8 @@ export default function ClientList({
     async (clientId, currentStatus) => {
       const token = sessionStorage.getItem("adminToken");
       if (!token) {
-        showToast?.("Session expired. Please log in again.", "error");
+        showToast?.("Session expired. You have been logged out.", "warning");
+        onSessionExpired?.();
         return;
       }
 
@@ -46,7 +48,8 @@ export default function ClientList({
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {
             sessionStorage.removeItem("adminToken");
-            throw new Error("Session expired. Please log in again.");
+            onSessionExpired?.();
+            throw new Error("Session expired. You have been logged out.");
           } else if (res.status === 404) {
             throw new Error("Client not found");
           }
