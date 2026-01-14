@@ -11,14 +11,6 @@ export default function AdminDashboard() {
   const [clientsError, setClientsError] = useState("");
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
 
-  useEffect(() => {
-    const storedToken = sessionStorage.getItem("adminToken");
-    if (storedToken) {
-      setIsLoggedIn(true);
-      fetchClients();
-    }
-  }, [fetchClients]);
-
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
   }, []);
@@ -74,6 +66,14 @@ export default function AdminDashboard() {
       setClientsLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const storedToken = sessionStorage.getItem("adminToken");
+    if (storedToken) {
+      setIsLoggedIn(true);
+      fetchClients();
+    }
+  }, [fetchClients]);
 
   const handleLoginSuccess = useCallback(() => {
     setIsLoggedIn(true);
