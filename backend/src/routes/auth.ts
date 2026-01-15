@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
-import { signJwt } from '../lib/auth.js';
-import { rateLimit } from '../lib/rate-limit.js';
+import { signJwt } from '../lib/auth';
+import { rateLimit } from '../lib/rate-limit';
 
 interface LoginRequest {
   username: string;
