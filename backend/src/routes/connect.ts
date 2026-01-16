@@ -166,6 +166,13 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes in milliseconds
 
       // Update the onboarding token record with the state and expiration
+      request.log.info({
+        token_id: onboardingRecord.id,
+        old_status: onboardingRecord.status,
+        new_status: 'in_progress',
+        timestamp: new Date().toISOString()
+      }, 'Updating onboarding token status to in_progress');
+
       await db
         .update(onboardingTokens)
         .set({
@@ -247,6 +254,13 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       await db.update(clients).set({ stripeAccountId: account }).where(eq(clients.id, client_id));
 
       // Update the onboarding token status to completed
+      request.log.info({
+        token_id: onboardingRecord.id,
+        old_status: onboardingRecord.status,
+        new_status: 'completed',
+        timestamp: new Date().toISOString()
+      }, 'Updating onboarding token status to completed');
+
       await db
         .update(onboardingTokens)
         .set({ status: 'completed' })
