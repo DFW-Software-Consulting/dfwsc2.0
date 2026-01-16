@@ -31,7 +31,7 @@ None
   - Added nullable columns to maintain backward compatibility
 
 ### Task 2 – Generate state parameter in /onboard-client
-- Commit: `pending`
+- Commit: `c33aed4`
 - Files touched: `backend/src/routes/connect.ts`
 - Commands:
   - Modified `/onboard-client` handler to generate state parameter
@@ -42,3 +42,17 @@ None
 - Notes/decisions:
   - Used crypto.randomBytes(32) to generate secure state parameter
   - State expires after 30 minutes to prevent replay attacks
+
+### Task 3 – Validate state in /connect/callback
+- Commit: `pending`
+- Files touched: `backend/src/routes/connect.ts`
+- Commands:
+  - Modified `/connect/callback` handler to validate state parameter
+  - Added checks for missing, invalid, and expired state
+  - Added verification that account matches client's expected account
+  - Added protection against overwriting existing stripeAccountId
+- Tests/coverage:
+  - Validation logic implemented for all required cases
+- Notes/decisions:
+  - Implemented comprehensive state validation to prevent CSRF attacks
+  - Added logging for security monitoring of invalid attempts

@@ -196,8 +196,57 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
     },
     async (request, reply) => {
-      const { client_id, account } = request.query as { client_id: string; account: string };
+      const { client_id, account, state } = request.query as { client_id: string; account: string; state: string };
 
+      // Validate presence of state parameter
+      if (!state) {
+        request.log.warn({ client_id, account }, 'Missing state parameter in callback');
+        return reply.code(400).send({ error: 'Missing state parameter.' });
+      }
+
+      // Retrieve the onboarding token record to validate the state
+      const [onboardingRecord] = await db
+        .select()
+        .from(onboardingTokens)
+        .where(and(eq(onboardingTokens.clientId, client_id)))
+        .limit(1);
+
+      if (!onboardingRecord) {
+        request.log.warn({ client_id, account, state }, 'Onboarding record not found for client');
+        return reply.code(400).send({ error: 'Invalid request parameters.' });
+      }
+
+      // Check if state matches
+      if (onboardingRecord.state !== state) {
+        request.log.warn({ client_id, account, state, expectedState: onboardingRecord.state }, 'Invalid state parameter');
+        return reply.code(400).send({ error: 'Invalid state parameter.' });
+      }
+
+      // Check if state has expired
+      if (onboardingRecord.stateExpiresAt && new Date() > new Date(onboardingRecord.stateExpiresAt)) {
+        request.log.warn({ client_id, account, state }, 'Expired state parameter');
+        return reply.code(400).send({ error: 'Expired state parameter.' });
+      }
+
+      // Verify that the account parameter matches what we expect for the client
+      // This prevents an attacker from providing a different account ID
+      const [clientRecord] = await db.select().from(clients).where(eq(clients.id, client_id));
+      if (!clientRecord) {
+        request.log.warn({ client_id, account }, 'Client record not found');
+        return reply.code(400).send({ error: 'Invalid client ID.' });
+      }
+
+      // If the client already has a stripeAccountId, verify it matches the one being set
+      if (clientRecord.stripeAccountId && clientRecord.stripeAccountId !== account) {
+        request.log.warn({
+          client_id,
+          account,
+          existingAccount: clientRecord.stripeAccountId
+        }, 'Attempt to overwrite existing stripeAccountId');
+        return reply.code(400).send({ error: 'Stripe account already linked to this client.' });
+      }
+
+      // Update the client's stripeAccountId
       await db.update(clients).set({ stripeAccountId: account }).where(eq(clients.id, client_id));
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '') || 'https://dfwsc.com';
