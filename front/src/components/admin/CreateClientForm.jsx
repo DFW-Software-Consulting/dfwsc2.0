@@ -47,7 +47,7 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
       try {
         const token = sessionStorage.getItem("adminToken");
         const res = await fetch(
-          `${import.meta.env.VITE_API_URL}/v1/accounts`,
+          `${import.meta.env.VITE_API_URL}/accounts`,
           {
             method: "POST",
             headers: {

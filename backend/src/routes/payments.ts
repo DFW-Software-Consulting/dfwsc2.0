@@ -114,8 +114,8 @@ const feeAmount = Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
         {
           mode: 'payment',
           line_items: lineItems,
-          success_url: `${frontendOrigin}/payments/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${frontendOrigin}/payments/cancel`,
+          success_url: `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${frontendOrigin}/payment-cancel`,
           payment_intent_data: {
             application_fee_amount: feeAmount,
             description,

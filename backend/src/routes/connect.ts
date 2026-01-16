@@ -151,7 +151,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       }
 
       const baseUrl = resolveServerBaseUrl(request);
-      const callbackUrl = `${baseUrl}/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}`;
+      const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}`;
       const refreshUrl = `${callbackUrl}&refresh=true`;
 
       const accountLink = await stripe.accountLinks.create({
@@ -181,7 +181,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       await db.update(clients).set({ stripeAccountId: account }).where(eq(clients.id, client_id));
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '') || 'https://dfwsc.com';
-      const redirectUrl = `${frontendOrigin}/onboarding-success.html`;
+      const redirectUrl = `${frontendOrigin}/onboarding-success`;
 
       reply.redirect(redirectUrl);
     },

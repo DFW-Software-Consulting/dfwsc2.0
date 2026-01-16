@@ -32,7 +32,7 @@ export default function AdminDashboard() {
 
     try {
       const res = await fetch(
-        `${import.meta.env.VITE_API_URL}/v1/clients`,
+        `${import.meta.env.VITE_API_URL}/clients`,
         {
           headers: {
             Authorization: `Bearer ${token}`,

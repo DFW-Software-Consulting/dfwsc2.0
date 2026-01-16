@@ -23,7 +23,7 @@ export default function OnboardClient() {
 
     try {
       const res = await fetch(
-        `${import.meta.env.VITE_API_URL}/v1/onboard-client?token=${encodeURIComponent(token)}`,
+        `${import.meta.env.VITE_API_URL}/onboard-client?token=${encodeURIComponent(token)}`,
         {
           headers: {
             Accept: "application/json",
