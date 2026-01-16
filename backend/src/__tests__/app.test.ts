@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 
 const webhookHelper = new Stripe('sk_test_12345', { apiVersion: '2023-10-16' });
 
 vi.mock('drizzle-orm', () => ({
   eq: (_field: unknown, value: unknown) => ({ value }),
+  and: (...conditions: any[]) => ({ all: conditions }),
 }));
 
 const dataStore = {
   clients: new Map<string, any>(),
+  onboardingTokens: new Map<string, any>(),
   webhookEvents: new Map<string, any>(),
 };
 
@@ -82,18 +85,57 @@ function isTable(table: any, name: string): boolean {
   return resolveTableName(table) === name;
 }
 
+function createWhereResult(rowsPromise: Promise<any[]>) {
+  return {
+    limit: async () => (await rowsPromise).slice(0, 1),
+    then: rowsPromise.then.bind(rowsPromise),
+    catch: rowsPromise.catch.bind(rowsPromise),
+    finally: rowsPromise.finally.bind(rowsPromise),
+  };
+}
+
+function findOnboardingTokenByToken(token?: string) {
+  if (!token) {
+    return undefined;
+  }
+  for (const record of dataStore.onboardingTokens.values()) {
+    if (record.token === token) {
+      return record;
+    }
+  }
+  return undefined;
+}
+
 const dbMock = {
   select: vi.fn(() => ({
     from: (table: any) => ({
-      where: (expr: any) => ({
-        limit: async () => {
+      where: (expr: any) => {
+        const rowsPromise = (async () => {
           if (isTable(table, 'clients')) {
-            const row = dataStore.clients.get(expr.value);
+            const row = dataStore.clients.get(expr?.value);
             return row ? [row] : [];
           }
+
+          if (isTable(table, 'onboarding_tokens')) {
+            if (expr?.all?.length) {
+              const tokenValue = expr.all[0]?.value;
+              const statusValue = expr.all[1]?.value;
+              const record = findOnboardingTokenByToken(tokenValue);
+              if (record && record.status === statusValue) {
+                return [record];
+              }
+              return [];
+            }
+
+            const record = dataStore.onboardingTokens.get(expr?.value);
+            return record ? [record] : [];
+          }
+
           return [];
-        },
-      }),
+        })();
+
+        return createWhereResult(rowsPromise);
+      },
     }),
   })),
   insert: vi.fn((table: any) => ({
@@ -117,6 +159,19 @@ const dbMock = {
         }
       }
 
+      if (isTable(table, 'onboarding_tokens')) {
+        const next = {
+          id: payload.id,
+          clientId: payload.clientId,
+          token: payload.token,
+          status: payload.status ?? 'pending',
+          email: payload.email,
+          createdAt: payload.createdAt ?? new Date(),
+          updatedAt: new Date(),
+        };
+        dataStore.onboardingTokens.set(payload.id, next);
+      }
+
       return {
         onConflictDoNothing: async () => {},
       };
@@ -127,6 +182,15 @@ const dbMock = {
       where: async (expr: any) => {
         if (isTable(table, 'clients')) {
           const row = dataStore.clients.get(expr.value);
+          if (!row) {
+            return { rowCount: 0 };
+          }
+          Object.assign(row, values);
+          return { rowCount: 1 };
+        }
+
+        if (isTable(table, 'onboarding_tokens')) {
+          const row = dataStore.onboardingTokens.get(expr.value);
           if (!row) {
             return { rowCount: 0 };
           }
@@ -228,9 +292,11 @@ beforeEach(async () => {
   process.env.STRIPE_SECRET_KEY = 'sk_test_12345';
   process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_secret';
   process.env.FRONTEND_ORIGIN = 'http://localhost:5173';
-  process.env.DATABASE_URL = 'postgres://postgres:postgres@localhost:5432/test';
+  process.env.DATABASE_URL =
+    process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/test';
   process.env.API_BASE_URL = 'http://localhost:4242';
   process.env.USE_CHECKOUT = 'false';
+  process.env.JWT_SECRET = 'test_jwt_secret_minimum_32_characters_long';
 
   // MailHog config
   process.env.SMTP_HOST = 'mailhog';
@@ -245,6 +311,7 @@ beforeEach(async () => {
   }
 
   dataStore.clients.clear();
+  dataStore.onboardingTokens.clear();
   dataStore.webhookEvents.clear();
   mailhogMessages.length = 0;
 
@@ -255,6 +322,7 @@ afterEach(() => {
   delete process.env.API_BASE_URL;
   delete process.env.FRONTEND_ORIGIN;
   delete process.env.USE_CHECKOUT;
+  delete process.env.DEFAULT_PROCESS_FEE_CENTS;
 });
 
 async function createServer({ skipEnvValidation = false }: { skipEnvValidation?: boolean } = {}) {
@@ -278,7 +346,7 @@ describe('route guards and validation', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       payload: {},
       headers: {
         'idempotency-key': 'abc',
@@ -303,7 +371,7 @@ describe('route guards and validation', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       headers: {
         'x-api-role': 'admin',
       },
@@ -327,7 +395,7 @@ describe('payments', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       headers: {
         'x-api-role': 'admin',
         'idempotency-key': 'missing-client',
@@ -351,7 +419,7 @@ describe('payments', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       headers: {
         'x-api-role': 'admin',
         'idempotency-key': 'no-connect',
@@ -380,7 +448,7 @@ describe('payments', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       headers: {
         'x-api-role': 'admin',
         'idempotency-key': 'test-key',
@@ -419,7 +487,7 @@ describe('payments', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       headers: {
         'x-api-role': 'admin',
         'idempotency-key': 'invalid-fee',
@@ -437,13 +505,15 @@ describe('payments', () => {
   });
 
   it('rejects fees that exceed the payment amount', async () => {
+    process.env.DEFAULT_PROCESS_FEE_CENTS = '2000';
+
     const server = await createServer();
 
     seedClient({ id: 'client_fee', stripeAccountId: 'acct_123' });
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       headers: {
         'x-api-role': 'admin',
         'idempotency-key': 'too-high-fee',
@@ -471,7 +541,7 @@ describe('payments', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       headers: {
         'x-api-role': 'admin',
         'idempotency-key': 'checkout-key',
@@ -506,7 +576,7 @@ describe('payments', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       headers: {
         'x-api-role': 'admin',
         'idempotency-key': 'missing-line-items',
@@ -532,7 +602,7 @@ describe('payments', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/payments/create',
+      url: '/api/v1/payments/create',
       headers: {
         'x-api-role': 'admin',
         'idempotency-key': 'no-frontend',
@@ -559,133 +629,108 @@ describe('payments', () => {
 });
 
 describe('connect onboarding', () => {
-  it('requires body fields and idempotency header', async () => {
+  it('creates an onboarding token and client via /accounts', async () => {
     const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
 
     const response = await server.inject({
       method: 'POST',
-      url: '/connect/onboard',
+      url: '/api/v1/accounts',
       headers: {
-        'x-api-role': 'admin',
-      },
-      payload: {},
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: 'clientId, name, email are required.' });
-
-    const headerResponse = await server.inject({
-      method: 'POST',
-      url: '/connect/onboard',
-      headers: {
-        'x-api-role': 'admin',
-      },
-      payload: { clientId: 'client_1', name: 'Client', email: 'client@example.com' },
-    });
-
-    expect(headerResponse.statusCode).toBe(400);
-    expect(headerResponse.json()).toEqual({ error: 'Idempotency-Key header is required.' });
-
-    await server.close();
-  });
-
-  it('creates an account link and stores the account id', async () => {
-    stripeMock.accounts.create.mockResolvedValue({ id: 'acct_new' });
-    stripeMock.accountLinks.create.mockResolvedValue({ url: 'https://connect.stripe.com/setup/mock' });
-
-    const server = await createServer();
-
-    const response = await server.inject({
-      method: 'POST',
-      url: '/connect/onboard',
-      headers: {
-        'x-api-role': 'admin',
-        'idempotency-key': 'connect-key',
+        authorization: `Bearer ${adminToken}`,
       },
       payload: {
-        clientId: 'client_new',
         name: 'New Client',
         email: 'owner@example.com',
       },
     });
 
     expect(response.statusCode).toBe(201);
-    expect(stripeMock.accounts.create).toHaveBeenCalled();
-    expect(stripeMock.accountLinks.create).toHaveBeenCalledWith(
-      expect.objectContaining({ account: 'acct_new' }),
-      expect.objectContaining({ idempotencyKey: 'connect-key' }),
-    );
+    const body = response.json();
+    expect(body.onboardingToken).toBeDefined();
+    expect(body.onboardingUrlHint).toContain(body.onboardingToken);
 
-    const savedClient = dataStore.clients.get('client_new');
-    expect(savedClient?.stripeAccountId).toBe('acct_new');
+    const savedClient = Array.from(dataStore.clients.values()).find(client => client.email === 'owner@example.com');
+    expect(savedClient).toBeDefined();
     await server.close();
   });
 
-  it('updates an existing client record when onboarding again', async () => {
-    stripeMock.accounts.create.mockResolvedValue({ id: 'acct_existing' });
+  it('sends onboarding email via /onboard-client/initiate', async () => {
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/v1/onboard-client/initiate',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      payload: {
+        name: 'Client',
+        email: 'client@example.com',
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ message: 'Onboarding email sent successfully.' });
+    expect(mailhogMessages.length).toBe(1);
+    expect(mailhogMessages[0].Content.Headers.Subject[0]).toBe('DFW Software Consulting - Stripe Onboarding');
+    expect(mailhogMessages[0].Content.Headers.To[0]).toBe('client@example.com');
+    await server.close();
+  });
+
+  it('creates an account link from a pending onboarding token', async () => {
+    stripeMock.accounts.create.mockResolvedValue({ id: 'acct_new' });
     stripeMock.accountLinks.create.mockResolvedValue({ url: 'https://connect.stripe.com/setup/mock' });
 
+    process.env.API_BASE_URL = 'https://api.example.com';
+
+    const clientId = 'client_onboard';
     seedClient({
-      id: 'client_existing',
+      id: clientId,
       stripeAccountId: null,
-      name: 'Old Name',
-      email: 'old@example.com',
+      name: 'Pending Client',
+      email: 'pending@example.com',
+    });
+
+    const onboardingTokenId = 'token_1';
+    const onboardingToken = 'token_value_1';
+    dataStore.onboardingTokens.set(onboardingTokenId, {
+      id: onboardingTokenId,
+      clientId,
+      token: onboardingToken,
+      status: 'pending',
+      email: 'pending@example.com',
+      createdAt: new Date(),
+      updatedAt: new Date(),
     });
 
     const server = await createServer();
 
     const response = await server.inject({
-      method: 'POST',
-      url: '/connect/onboard',
-      headers: {
-        'x-api-role': 'admin',
-        'idempotency-key': 'connect-update',
-      },
-      payload: {
-        clientId: 'client_existing',
-        name: 'Updated Name',
-        email: 'updated@example.com',
-      },
+      method: 'GET',
+      url: `/api/v1/onboard-client?token=${onboardingToken}`,
     });
 
-    expect(response.statusCode).toBe(201);
-    const savedClient = dataStore.clients.get('client_existing');
-    expect(savedClient?.name).toBe('Updated Name');
-    expect(savedClient?.email).toBe('updated@example.com');
-    expect(savedClient?.stripeAccountId).toBe('acct_existing');
-    await server.close();
-  });
-
-  it('builds callback URLs from API_BASE_URL when provided', async () => {
-    stripeMock.accounts.create.mockResolvedValue({ id: 'acct_base_url' });
-    stripeMock.accountLinks.create.mockResolvedValue({ url: 'https://connect.stripe.com/setup/mock' });
-
-    process.env.API_BASE_URL = 'https://api.example.com';
-
-    const server = await createServer();
-
-    await server.inject({
-      method: 'POST',
-      url: '/connect/onboard',
-      headers: {
-        'x-api-role': 'admin',
-        'idempotency-key': 'connect-base-url',
-      },
-      payload: {
-        clientId: 'client_base_url',
-        name: 'Client Base',
-        email: 'base@example.com',
-      },
-    });
-
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ url: 'https://connect.stripe.com/setup/mock' });
+    expect(stripeMock.accounts.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'pending@example.com',
+        metadata: { clientId },
+      }),
+    );
     expect(stripeMock.accountLinks.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        refresh_url: 'https://api.example.com/connect/callback?client_id=client_base_url&refresh=true',
-        return_url: 'https://api.example.com/connect/callback?client_id=client_base_url',
+        refresh_url: 'https://api.example.com/api/v1/connect/callback?client_id=client_onboard&refresh=true',
+        return_url: 'https://api.example.com/api/v1/connect/callback?client_id=client_onboard',
       }),
-      expect.any(Object),
     );
 
+    const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
+    expect(updatedToken?.status).toBe('completed');
+    const updatedClient = dataStore.clients.get(clientId);
+    expect(updatedClient?.stripeAccountId).toBe('acct_new');
     await server.close();
   });
 });
@@ -708,14 +753,12 @@ describe('connect callback', () => {
 
     const response = await server.inject({
       method: 'GET',
-      url: `/connect/callback?client_id=${clientId}&account=acct_789`,
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_789`,
     });
 
     expect(response.statusCode).toBe(302);
     expect(origin).toBeDefined();
-    expect(response.headers.location).toBe(
-      `${origin}/connect/success?client_id=${encodeURIComponent(clientId)}&stripe_account_id=acct_789`,
-    );
+    expect(response.headers.location).toBe(`${origin}/onboarding-success`);
 
     const updatedClient = dataStore.clients.get(clientId);
     expect(updatedClient?.stripeAccountId).toBe('acct_789');
@@ -723,7 +766,7 @@ describe('connect callback', () => {
     await server.close();
   });
 
-  it('returns JSON payload when no frontend origin is configured', async () => {
+  it('redirects to the default frontend when no frontend origin is configured', async () => {
     delete process.env.FRONTEND_ORIGIN;
 
     const clientId = 'client_json';
@@ -740,39 +783,39 @@ describe('connect callback', () => {
 
     const response = await server.inject({
       method: 'GET',
-      url: `/connect/callback?client_id=${clientId}&account=acct_json`,
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_json`,
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ clientId, stripeAccountId: 'acct_json', status: 'saved' });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe('https://dfwsc.com/onboarding-success');
 
     await server.close();
   });
 
-  it('returns 404 when the client cannot be found', async () => {
+  it('redirects even when the client cannot be found', async () => {
     const server = await createServer();
 
     const response = await server.inject({
       method: 'GET',
-      url: '/connect/callback?client_id=missing&account=acct_missing',
+      url: '/api/v1/connect/callback?client_id=missing&account=acct_missing',
     });
 
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: 'Client not found.' });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe(`${process.env.FRONTEND_ORIGIN}/onboarding-success`);
 
     await server.close();
   });
 
-  it('validates the required query parameters', async () => {
+  it('redirects even when required query parameters are missing', async () => {
     const server = await createServer();
 
     const response = await server.inject({
       method: 'GET',
-      url: '/connect/callback',
+      url: '/api/v1/connect/callback',
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: 'client_id, account are required.' });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe(`${process.env.FRONTEND_ORIGIN}/onboarding-success`);
 
     await server.close();
   });
@@ -781,12 +824,13 @@ describe('connect callback', () => {
 describe('reports', () => {
   it('requires a client id query parameter', async () => {
     const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
 
     const response = await server.inject({
       method: 'GET',
-      url: '/reports/payments',
+      url: '/api/v1/reports/payments',
       headers: {
-        'x-api-role': 'admin',
+        authorization: `Bearer ${adminToken}`,
       },
     });
 
@@ -797,12 +841,13 @@ describe('reports', () => {
 
   it('returns 404 when the client does not exist', async () => {
     const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
 
     const response = await server.inject({
       method: 'GET',
-      url: '/reports/payments?clientId=unknown',
+      url: '/api/v1/reports/payments?clientId=unknown',
       headers: {
-        'x-api-role': 'admin',
+        authorization: `Bearer ${adminToken}`,
       },
     });
 
@@ -815,12 +860,13 @@ describe('reports', () => {
     seedClient({ id: 'client_invalid_limit', stripeAccountId: 'acct_123' });
 
     const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
 
     const response = await server.inject({
       method: 'GET',
-      url: '/reports/payments?clientId=client_invalid_limit&limit=200',
+      url: '/api/v1/reports/payments?clientId=client_invalid_limit&limit=200',
       headers: {
-        'x-api-role': 'admin',
+        authorization: `Bearer ${adminToken}`,
       },
     });
 
@@ -833,14 +879,15 @@ describe('reports', () => {
     stripeMock.paymentIntents.list.mockResolvedValue({ data: [], has_more: false });
 
     const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
 
     seedClient({ id: 'client_1', stripeAccountId: 'acct_123' });
 
     const response = await server.inject({
       method: 'GET',
-      url: '/reports/payments?clientId=client_1&limit=5',
+      url: '/api/v1/reports/payments?clientId=client_1&limit=5',
       headers: {
-        'x-api-role': 'admin',
+        authorization: `Bearer ${adminToken}`,
       },
     });
 
@@ -859,7 +906,7 @@ describe('webhooks', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/webhooks/stripe',
+      url: '/api/v1/webhooks/stripe',
       payload: '{}',
       headers: {
         'content-type': 'application/json',
@@ -876,7 +923,7 @@ describe('webhooks', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/webhooks/stripe',
+      url: '/api/v1/webhooks/stripe',
       payload: '{}',
       headers: {
         'stripe-signature': 'invalid',
@@ -900,7 +947,7 @@ describe('webhooks', () => {
 
     const response = await server.inject({
       method: 'POST',
-      url: '/webhooks/stripe',
+      url: '/api/v1/webhooks/stripe',
       payload,
       headers: {
         'stripe-signature': signature,
@@ -915,24 +962,27 @@ describe('webhooks', () => {
 });
 
 describe('email', () => {
-  it('sends a test email', async () => {
+  it('sends an onboarding email', async () => {
     const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
 
     const response = await server.inject({
-      method: 'GET',
-      url: '/test-email',
+      method: 'POST',
+      url: '/api/v1/onboard-client/initiate',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      payload: {
+        name: 'Test Client',
+        email: 'test@example.com',
+      },
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ success: true, message: 'Test email sent successfully.' });
-
-    const messagesResponse = await fetch('http://localhost:1025/api/v2/messages');
-    const messages = await messagesResponse.json();
-
-    expect(messages.total).toBe(1);
-    const email = messages.items[0];
-    expect(email.Content.Headers.Subject[0]).toBe('Test Email from Stripe Payment Portal');
-    expect(email.Content.Headers.To[0]).toBe('test@example.com');
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ message: 'Onboarding email sent successfully.' });
+    expect(mailhogMessages.length).toBe(1);
+    expect(mailhogMessages[0].Content.Headers.Subject[0]).toBe('DFW Software Consulting - Stripe Onboarding');
+    expect(mailhogMessages[0].Content.Headers.To[0]).toBe('test@example.com');
     await server.close();
   });
 });
