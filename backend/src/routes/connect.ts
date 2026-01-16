@@ -159,8 +159,24 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         await db.update(clients).set({ stripeAccountId }).where(eq(clients.id, clientRecord.id));
       }
 
+      // Generate a cryptographically secure state parameter
+      const state = crypto.randomBytes(32).toString('hex');
+
+      // Set expiration time to 30 minutes from now
+      const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes in milliseconds
+
+      // Update the onboarding token record with the state and expiration
+      await db
+        .update(onboardingTokens)
+        .set({
+          status: 'completed',
+          state: state,
+          stateExpiresAt: stateExpiresAt
+        })
+        .where(eq(onboardingTokens.id, onboardingRecord.id));
+
       const baseUrl = resolveServerBaseUrl(request);
-      const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}`;
+      const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
       const refreshUrl = `${callbackUrl}&refresh=true`;
 
       const accountLink = await stripe.accountLinks.create({
@@ -169,11 +185,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return_url: callbackUrl,
         type: 'account_onboarding',
       });
-
-      await db
-        .update(onboardingTokens)
-        .set({ status: 'completed' })
-        .where(eq(onboardingTokens.id, onboardingRecord.id));
 
       return reply.send({ url: accountLink.url });
     },

@@ -20,7 +20,7 @@ None
 ## Implementation Progress
 
 ### Task 1 – Add state columns to onboarding_tokens
-- Commit: `pending`
+- Commit: `7386ca1`
 - Files touched: `backend/src/db/schema.ts`, `backend/drizzle/0002_connect_state.sql`
 - Commands:
   - Created migration file adding `state` and `state_expires_at` columns
@@ -29,3 +29,16 @@ None
   - Schema updated successfully
 - Notes/decisions:
   - Added nullable columns to maintain backward compatibility
+
+### Task 2 – Generate state parameter in /onboard-client
+- Commit: `pending`
+- Files touched: `backend/src/routes/connect.ts`
+- Commands:
+  - Modified `/onboard-client` handler to generate state parameter
+  - Added 30-minute expiry for state parameter
+  - Included state in callback URL
+- Tests/coverage:
+  - State is 64-char hex string as expected
+- Notes/decisions:
+  - Used crypto.randomBytes(32) to generate secure state parameter
+  - State expires after 30 minutes to prevent replay attacks
