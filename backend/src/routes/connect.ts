@@ -3,7 +3,7 @@ import { stripe } from '../lib/stripe';
 import { db } from '../db/client';
 import { clients, onboardingTokens } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { requireRole, requireAdminJwt } from '../lib/auth';
+import { requireAdminJwt } from '../lib/auth';
 import { rateLimit } from '../lib/rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
@@ -24,6 +24,10 @@ function resolveServerBaseUrl(request: FastifyRequest): string {
   return `${protocol}://${host}`.replace(/\/$/, '');
 }
 
+function generateApiKey(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
 export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/accounts',
@@ -35,8 +39,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       request.log.info({ body: request.body, headers: request.headers }, 'Received request in /accounts handler');
       const { name, email } = request.body as { name: string; email: string };
       const clientId = uuidv4();
+      const apiKey = generateApiKey();
 
-      await db.insert(clients).values({ id: clientId, name, email });
+      await db.insert(clients).values({ id: clientId, name, email, apiKey });
 
       const token = crypto.randomBytes(32).toString('hex');
       const onboardingTokenId = uuidv4();
@@ -54,6 +59,8 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       return reply.code(201).send({
         onboardingToken: token,
         onboardingUrlHint,
+        apiKey,
+        clientId,
       });
     },
   );
@@ -67,8 +74,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const { name, email } = request.body as { name: string; email: string };
       const clientId = uuidv4();
+      const apiKey = generateApiKey();
 
-      await db.insert(clients).values({ id: clientId, name, email });
+      await db.insert(clients).values({ id: clientId, name, email, apiKey });
 
       const token = crypto.randomBytes(32).toString('hex');
       const onboardingTokenId = uuidv4();
@@ -109,6 +117,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       return reply.code(201).send({
         message: 'Onboarding email sent successfully.',
         clientId,
+        apiKey,
       });
     },
   );

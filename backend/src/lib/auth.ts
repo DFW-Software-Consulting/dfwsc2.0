@@ -1,6 +1,9 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/client';
+import { clients } from '../db/schema';
 
 export type Role = 'admin' | 'client';
 
@@ -13,6 +16,23 @@ export function requireRole(allowedRoles: Role[]) {
       return reply.code(403).send({ error: 'Forbidden' });
     }
   };
+}
+
+export async function requireApiKey(request: FastifyRequest, reply: FastifyReply) {
+  const apiKeyHeader = request.headers['x-api-key'];
+  const apiKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
+
+  if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
+    return reply.code(401).send({ error: 'API key is required.' });
+  }
+
+  const [client] = await db.select().from(clients).where(eq(clients.apiKey, apiKey)).limit(1);
+
+  if (!client || client.status === 'inactive') {
+    return reply.code(401).send({ error: 'Invalid or inactive API key.' });
+  }
+
+  (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = client;
 }
 
 /**
