@@ -44,7 +44,7 @@ None
   - State expires after 30 minutes to prevent replay attacks
 
 ### Task 3 – Validate state in /connect/callback
-- Commit: `pending`
+- Commit: `64a8e85`
 - Files touched: `backend/src/routes/connect.ts`
 - Commands:
   - Modified `/connect/callback` handler to validate state parameter
@@ -56,3 +56,15 @@ None
 - Notes/decisions:
   - Implemented comprehensive state validation to prevent CSRF attacks
   - Added logging for security monitoring of invalid attempts
+
+### Task 4 – Integration test
+- Commit: `pending`
+- Files touched: `backend/src/__tests__/integration/connect-callback-state.test.ts`
+- Commands:
+  - Created comprehensive integration test for state validation
+  - Tests cover valid state, missing state, invalid state, expired state, and mismatched account scenarios
+- Tests/coverage:
+  - All validation cases covered with appropriate HTTP status codes and error messages
+- Notes/decisions:
+  - Test follows existing patterns from payments-api-key.test.ts
+  - Proper cleanup implemented to avoid test data conflicts
