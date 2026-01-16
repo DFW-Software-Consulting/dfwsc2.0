@@ -169,7 +169,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       await db
         .update(onboardingTokens)
         .set({
-          status: 'completed',
+          status: 'in_progress',
           state: state,
           stateExpiresAt: stateExpiresAt
         })
