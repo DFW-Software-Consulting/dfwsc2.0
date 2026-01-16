@@ -9,6 +9,8 @@ STRIPE_WEBHOOK_SECRET=whsec_********************************
 
 # Application runtime
 PORT=4242
+# Local dev: http://localhost:5173 (npm)
+# Docker dev/prod: http://localhost:8080
 FRONTEND_ORIGIN=http://localhost:5173
 USE_CHECKOUT=false
 # Optional when the public URL differs from the local host header

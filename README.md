@@ -88,6 +88,18 @@ npm run dev:frontend
 - **Backend:** http://localhost:4242
 - Frontend makes API calls to backend at http://localhost:4242/api/v1/*
 
+If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:8080`.
+
+#### Option 2: Docker Dev Stack (Full stack in containers)
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+- **Web UI:** http://localhost:8080
+- **API:** http://localhost:4242
+- **Mailhog:** http://localhost:8025
+- **Stripe CLI:** forwards webhooks to `/api/v1/webhooks/stripe`
+
 ### Building for Production
 
 ```bash
@@ -110,6 +122,8 @@ Services (default):
 - **Web UI:** http://localhost:8080
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
+
+For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:5174`.
 
 If you want the UI on port 80, change the `web` service port mapping in `docker-compose.yml`.
 
@@ -138,7 +152,7 @@ React Router handles these client-side routes:
 - `/` - Home page
 - `/pricing` - Pricing page
 - `/team` - Team page
-- `/onboard-client?token=<token>` - Client Stripe onboarding
+- `/onboard?token=<token>` - Client Stripe onboarding
 
 ## 🔐 Environment Variables
 
@@ -151,6 +165,8 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 
 # Server
 PORT=4242
+# For local dev: http://localhost:5173 (npm)
+# For Docker dev/prod: http://localhost:8080
 FRONTEND_ORIGIN=http://localhost:8080
 API_BASE_URL=http://localhost:4242
 
