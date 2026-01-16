@@ -24,6 +24,8 @@ describe('Client Management API', () => {
     mockNonAdminToken = jwt.sign({ username: 'user', role: 'user' }, jwtSecret, {
       expiresIn: '1h',
     });
+    await db.delete(clients).where(eq(clients.id, mockClientId));
+    await db.delete(clients).where(eq(clients.id, mockSecondClientId));
     // Mock clients in the database for testing
     await db.insert(clients).values([
       {
