@@ -8,21 +8,22 @@ import supertest from 'supertest';
 
 describe('Client Management API', () => {
   let app: any;
+  let mockAdminToken: string;
+  let mockNonAdminToken: string;
   const mockClientId = 'test-client-id-123';
   const mockSecondClientId = 'test-client-id-456';
-  const mockAdminToken = jwt.sign(
-    { username: 'admin', role: 'admin' },
-    process.env.JWT_SECRET || 'your_jwt_secret_minimum_32_characters_long_random_string',
-    { expiresIn: '1h' }
-  );
-  const mockNonAdminToken = jwt.sign(
-    { username: 'user', role: 'user' },
-    process.env.JWT_SECRET || 'your_jwt_secret_minimum_32_characters_long_random_string',
-    { expiresIn: '1h' }
-  );
 
   beforeEach(async () => {
     app = await buildServer();
+    await app.ready();
+    const jwtSecret =
+      process.env.JWT_SECRET || 'your_jwt_secret_minimum_32_characters_long_random_string';
+    mockAdminToken = jwt.sign({ username: 'admin', role: 'admin' }, jwtSecret, {
+      expiresIn: '1h',
+    });
+    mockNonAdminToken = jwt.sign({ username: 'user', role: 'user' }, jwtSecret, {
+      expiresIn: '1h',
+    });
     // Mock clients in the database for testing
     await db.insert(clients).values([
       {
@@ -46,6 +47,7 @@ describe('Client Management API', () => {
     // Clean up test data
     await db.delete(clients).where(eq(clients.id, mockClientId));
     await db.delete(clients).where(eq(clients.id, mockSecondClientId));
+    await app.close();
   });
 
   describe('GET /api/v1/clients', () => {
