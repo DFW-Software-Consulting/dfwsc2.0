@@ -1,3 +1,22 @@
+import { vi } from 'vitest';
+
+// Mock Stripe before importing other modules
+vi.mock('../../lib/stripe', async () => {
+  const mockAccounts = {
+    create: vi.fn(),
+  };
+  const mockAccountLinks = {
+    create: vi.fn(),
+  };
+
+  return {
+    stripe: {
+      accounts: mockAccounts,
+      accountLinks: mockAccountLinks,
+    }
+  };
+});
+
 import { buildServer } from '../../app';
 import { db } from '../../db/client';
 import { clients, onboardingTokens } from '../../db/schema';
@@ -8,6 +27,15 @@ describe('Connect Callback State Validation Integration', () => {
   let app: any;
 
   beforeAll(async () => {
+    // Set up environment variables for testing
+    process.env.STRIPE_SECRET_KEY = 'sk_test_12345';
+    process.env.FRONTEND_ORIGIN = 'http://localhost:5173';
+
+    // Mock Stripe methods
+    const { stripe } = await import('../../lib/stripe');
+    stripe.accounts.create.mockResolvedValue({ id: 'acct_test123456789' });
+    stripe.accountLinks.create.mockResolvedValue({ url: 'https://connect.stripe.com/setup/mock' });
+
     app = await buildServer();
   });
 
