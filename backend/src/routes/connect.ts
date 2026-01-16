@@ -204,22 +204,19 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'Missing state parameter.' });
       }
 
-      // Retrieve the onboarding token record to validate the state
+      // Retrieve the onboarding token record by both client_id and state to ensure validity
       const [onboardingRecord] = await db
         .select()
         .from(onboardingTokens)
-        .where(and(eq(onboardingTokens.clientId, client_id)))
+        .where(and(
+          eq(onboardingTokens.clientId, client_id),
+          eq(onboardingTokens.state, state)
+        ))
         .limit(1);
 
       if (!onboardingRecord) {
-        request.log.warn({ client_id, account, state }, 'Onboarding record not found for client');
-        return reply.code(400).send({ error: 'Invalid request parameters.' });
-      }
-
-      // Check if state matches
-      if (onboardingRecord.state !== state) {
-        request.log.warn({ client_id, account, state, expectedState: onboardingRecord.state }, 'Invalid state parameter');
-        return reply.code(400).send({ error: 'Invalid state parameter.' });
+        request.log.warn({ client_id, account, state }, 'Invalid or expired state parameter');
+        return reply.code(400).send({ error: 'Invalid or expired state parameter.' });
       }
 
       // Check if state has expired

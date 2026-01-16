@@ -137,7 +137,7 @@ describe('Connect Callback State Validation Integration', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({
-      error: 'Invalid state parameter.'
+      error: 'Invalid or expired state parameter.'
     });
 
     // Clean up
