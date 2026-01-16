@@ -26,10 +26,13 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
     return reply.code(401).send({ error: 'API key is required.' });
   }
 
+  // Note: In a production environment, API keys should be hashed and compared using a constant-time function
+  // For this implementation, we're using direct comparison as per the original design
   const [client] = await db.select().from(clients).where(eq(clients.apiKey, apiKey)).limit(1);
 
   if (!client || client.status === 'inactive') {
-    return reply.code(401).send({ error: 'Invalid or inactive API key.' });
+    // To prevent user enumeration, return the same error regardless of whether the key exists
+    return reply.code(401).send({ error: 'Invalid API key.' });
   }
 
   (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = client;

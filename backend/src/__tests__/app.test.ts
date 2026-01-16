@@ -471,7 +471,7 @@ describe('payments', () => {
     });
 
     expect(response.statusCode).toBe(401);
-    expect(response.json()).toEqual({ error: 'Invalid or inactive API key.' });
+    expect(response.json()).toEqual({ error: 'Invalid API key.' });
     await server.close();
   });
 
