@@ -246,6 +246,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       // Update the client's stripeAccountId
       await db.update(clients).set({ stripeAccountId: account }).where(eq(clients.id, client_id));
 
+      // Update the onboarding token status to completed
+      await db
+        .update(onboardingTokens)
+        .set({ status: 'completed' })
+        .where(eq(onboardingTokens.id, onboardingRecord.id));
+
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '') || 'https://dfwsc.com';
       const redirectUrl = `${frontendOrigin}/onboarding-success`;
 
