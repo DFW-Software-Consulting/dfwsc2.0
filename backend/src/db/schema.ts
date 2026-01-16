@@ -28,6 +28,8 @@ export const onboardingTokens = pgTable("onboarding_tokens", {
   token: text("token").notNull().unique(),
   status: text("status").notNull(),
   email: text("email").notNull(),
+  state: text("state"),
+  stateExpiresAt: timestamp("state_expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
