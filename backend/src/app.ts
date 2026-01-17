@@ -1,7 +1,5 @@
 import fastify from 'fastify';
 import fastifyCors from '@fastify/cors';
-import fastifyStatic from '@fastify/static';
-import path from 'path';
 import fastifyRawBody from 'fastify-raw-body';
 
 import connectRoutes from './routes/connect';
@@ -9,6 +7,8 @@ import paymentsRoutes from './routes/payments';
 import webhooksRoute from './routes/webhooks';
 import configRoutes from './routes/config';
 import healthRoutes from './routes/health';
+import authRoutes from './routes/auth';
+import clientRoutes from './routes/clients';
 import { sendMail } from './lib/mailer';
 import { validateEnv, logMaskedEnvSummary } from './lib/env';
 
@@ -49,10 +49,6 @@ export async function buildServer() {
   server.register(fastifyCors, {
     origin: allowedOrigins.length === 0 ? true : allowedOrigins,
     credentials: true,
-  });
-
-  server.register(fastifyStatic, {
-    root: path.join(__dirname, '../public'),
   });
 
   server.register(fastifyRawBody, {
@@ -98,13 +94,13 @@ export async function buildServer() {
    * ------------------------------------------------------------
    */
 
-  if (process.env.NODE_ENV !== 'production' && env.ENABLE_SWAGGER !== 'false') {
-    const fastifySwagger = await eval('import(\'@fastify/swagger\')');
-    const fastifySwaggerUi = await eval('import(\'@fastify/swagger-ui\')');
-    await server.register(fastifySwagger.default, {
+  if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_SWAGGER !== 'false') {
+    const { default: fastifySwagger } = await import('@fastify/swagger');
+    const { default: fastifySwaggerUi } = await import('@fastify/swagger-ui');
+    await server.register(fastifySwagger, {
       openapi: { info: { title: 'Stripe Portal API', version: '1.0.0' } },
     });
-    await server.register(fastifySwaggerUi.default, { routePrefix: '/docs' });
+    await server.register(fastifySwaggerUi, { routePrefix: '/docs' });
     server.log.info('✅ Swagger UI available at /docs');
   } else {
     server.log.info('🚫 Swagger disabled for production');
@@ -112,15 +108,13 @@ export async function buildServer() {
 
   server.register(configRoutes);
   server.register(healthRoutes, { prefix: '/api/v1' });
+  server.register(authRoutes, { prefix: '/api/v1' });
   server.register(connectRoutes, { prefix: '/api/v1' });
   server.register(paymentsRoutes, { prefix: '/api/v1' });
   server.register(webhooksRoute, { prefix: '/api/v1' });
+  server.register(clientRoutes, { prefix: '/api/v1' });
 
-  // SPA fallback: serve index.html for non-API routes (React Router support)
-  server.setNotFoundHandler((request, reply) => {
-    if (!request.url.startsWith('/api')) {
-      return reply.sendFile('index.html');
-    }
+  server.setNotFoundHandler((_request, reply) => {
     reply.code(404).send({ error: 'Not Found' });
   });
 

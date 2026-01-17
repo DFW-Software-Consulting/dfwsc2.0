@@ -52,73 +52,53 @@ dfwsc2.0/
 - PostgreSQL 14+
 - npm or yarn
 
-### Quick Start
+### Setup
 
-1. **Clone and setup:**
+1. **Install dependencies:**
    ```bash
-   # Install dependencies
-   make install
-   
-   # Copy environment files
+   npm run install:all
+   ```
+
+2. **Configure environment:**
+   ```bash
+   # Backend configuration
    cp backend/.env.example backend/.env
-   cp front/.env.example front/.env
-   
-   # Edit backend/.env with your Stripe keys and other settings
-   # Edit front/.env if needed (defaults work for Docker dev mode)
+   # Edit backend/.env with your Stripe keys, database URL, SMTP settings
    ```
 
-2. **Start development environment with hot reload:**
+3. **Run database migrations:**
    ```bash
-   # Generate and run migrations
-   make setup
-   
-   # Start Docker dev mode with hot reload
-   make dev-up-build
+   npm run db:migrate
    ```
 
-3. **Access your app:**
-   - Frontend (Vite HMR): http://localhost:5174
-   - Backend API: http://localhost:4242
-   - Swagger UI: http://localhost:4242/docs
-   - Mailhog: http://localhost:8025
+### Development Options
 
-### Development Modes
-
-#### Option 1: Docker with Hot Reload (Recommended)
-Development mode with Docker, including hot reload for both frontend and backend:
-
-```bash
-# Start dev stack with hot reload
-make dev-up-build
-
-# View logs
-make dev-logs
-
-# Stop
-make dev-down
-```
-
-**Services:**
-- **Frontend (Vite HMR):** http://localhost:5174
-- **Backend (nodemon):** http://localhost:4242
-- **Swagger UI:** http://localhost:4242/docs
-- **Mailhog:** http://localhost:8025
-- **PostgreSQL:** localhost:5432
-
-Code changes in `backend/src` or `front/src` will automatically reload!
-
-#### Option 2: Local Development (No Docker)
-Run frontend and backend locally with hot reload:
+#### Option 1: Hot Reload (Recommended for development)
+Run frontend and backend separately with hot reload:
 
 ```bash
 # Terminal 1 - Backend API (port 4242)
-make dev-backend
+npm run dev:backend
 
 # Terminal 2 - Frontend dev server (port 5173)
-make dev-frontend
+npm run dev:frontend
 ```
 
-**Note:** Requires local PostgreSQL running on port 5432.
+- **Frontend:** http://localhost:5173 (with hot reload)
+- **Backend:** http://localhost:4242
+- Frontend makes API calls to backend at http://localhost:4242/api/v1/*
+
+If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:8080`.
+
+#### Option 2: Docker Dev Stack (Full stack in containers)
+```bash
+docker compose -f docker-compose.dev.yml up --build
+```
+
+- **Web UI:** http://localhost:8080
+- **API:** http://localhost:4242
+- **Mailhog:** http://localhost:8025
+- **Stripe CLI:** forwards webhooks to `/api/v1/webhooks/stripe`
 
 ### Building for Production
 
@@ -130,37 +110,22 @@ npm run build
 npm start
 ```
 
-## 🐳 Docker Commands
+## 🐳 Docker Deployment
 
-### Development Mode (Hot Reload)
+### Compose (Recommended)
 ```bash
-make dev-up-build    # Build and start dev stack with hot reload
-make dev-up          # Start existing dev stack
-make dev-down        # Stop dev stack
-make dev-logs        # View backend logs
+make down
+make up-build
 ```
 
-### Production Mode
-```bash
-make up-build        # Build and start production stack
-make up              # Start existing stack
-make down            # Stop stack
-make down-v          # Stop and remove volumes
-make logs            # View backend logs
-make ps              # Show container status
-```
-
-### Database
-```bash
-make migrate         # Run database migrations
-make db-generate     # Generate new migrations
-make sh              # Shell into API container
-```
-
-**Production Services:**
-- **Web UI (nginx):** http://localhost:8080
+Services (default):
+- **Web UI:** http://localhost:8080
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
+
+For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:5174`.
+
+If you want the UI on port 80, change the `web` service port mapping in `docker-compose.yml`.
 
 ## 📡 API Routes
 
@@ -169,6 +134,9 @@ All API routes are prefixed with `/api/v1`:
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | GET | `/api/v1/health` | Health check | Public |
+| POST | `/api/v1/auth/login` | Admin login (returns JWT token) | Public |
+| GET | `/api/v1/clients` | List all clients | Admin (JWT) |
+| PATCH | `/api/v1/clients/:id` | Update client status | Admin (JWT) |
 | POST | `/api/v1/accounts` | Create client account | Admin |
 | POST | `/api/v1/onboard-client/initiate` | Send onboarding email | Admin |
 | GET | `/api/v1/onboard-client` | Get Stripe onboarding link | Public |
@@ -184,53 +152,55 @@ React Router handles these client-side routes:
 - `/` - Home page
 - `/pricing` - Pricing page
 - `/team` - Team page
-- `/onboard-client?token=<token>` - Client Stripe onboarding
+- `/onboard?token=<token>` - Client Stripe onboarding
 
 ## 🔐 Environment Variables
 
-### Backend (backend/.env)
-
-Copy `backend/.env.example` to `backend/.env` and configure:
+### Backend (.env)
 
 ```env
-# Stripe Configuration
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_PUBLISHABLE_KEY=pk_test_...
+# Stripe
+STRIPE_SECRET_KEY=sk_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
 # Server
 PORT=4242
+# For local dev: http://localhost:5173 (npm)
+# For Docker dev/prod: http://localhost:8080
+FRONTEND_ORIGIN=http://localhost:8080
+API_BASE_URL=http://localhost:4242
 
-# CORS (for Docker hot reload dev mode)
-FRONTEND_ORIGIN=http://localhost:5174,http://localhost:4242
-
-# Database (use 'db' for Docker, 'localhost' for local dev)
-DATABASE_URL=postgresql://postgres:postgres@db:5432/stripe_portal
+# Database
+DATABASE_URL=postgresql://user:pass@localhost:5432/stripe_portal
 
 # Email (SMTP)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
 SMTP_PASS=your-app-password
-SMTP_FROM=noreply@yourdomain.com
 
-# Optional
-ENABLE_SWAGGER=true
+# Admin Authentication (JWT)
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=changeme_secure_password
+JWT_SECRET=your_jwt_secret_minimum_32_characters_long
+JWT_EXPIRY=1h
+
+# Payment Config
+USE_CHECKOUT=true
+DEFAULT_PROCESS_FEE_CENTS=100
 ```
 
-### Frontend (front/.env)
+**Admin Authentication:** The backend uses JWT tokens for admin endpoints (client list, status management). Configure `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `JWT_SECRET` (minimum 32 characters). `JWT_EXPIRY` is optional (defaults to `1h`). See `backend/.env.example` for detailed documentation.
 
-Copy `front/.env.example` to `front/.env`:
+### Frontend (.env)
 
 ```env
-# For Docker hot reload dev mode
-VITE_API_URL=http://localhost:4242/api/v1
+# In docker, nginx proxies /api to the API container
+VITE_API_URL=/api/v1
 
-# For Docker production (nginx proxy)
-# VITE_API_URL=/api/v1
+# For local dev without nginx, use:
+# VITE_API_URL=http://localhost:4242/api/v1
 ```
-
-**See `.env.example` files for complete documentation.**
 
 ## 📦 NPM Scripts
 

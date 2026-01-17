@@ -4,21 +4,23 @@ import { stripe } from '../lib/stripe';
 import { db } from '../db/client';
 import { clients } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { requireRole } from '../lib/auth';
+import { requireApiKey, requireAdminJwt } from '../lib/auth';
 import { rateLimit } from '../lib/rate-limit';
-
-const useCheckout = (process.env.USE_CHECKOUT ?? 'false').toLowerCase() === 'true';
 
 function extractIdempotencyKey(request: FastifyRequest): string | undefined {
   const key = request.headers['idempotency-key'];
   return Array.isArray(key) ? key[0] : key;
 }
 
+type RequestWithClient = FastifyRequest & { client?: typeof clients.$inferSelect };
+
 export default async function paymentsRoutes(fastify: FastifyInstance) {
+  // Compute useCheckout flag at route registration time
+  const useCheckout = (process.env.USE_CHECKOUT ?? 'false').toLowerCase() === 'true';
   fastify.post(
     '/payments/create',
     {
-      preHandler: [rateLimit({ max: 20, windowMs: 60_000 }), requireRole(['admin', 'client'])],
+      preHandler: [rateLimit({ max: 20, windowMs: 60_000 }), requireApiKey],
     },
     async (request, reply) => {
       const idempotencyKey = extractIdempotencyKey(request);
@@ -27,7 +29,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
 
       const {
-        clientId,
         amount,
         currency,
         description,
@@ -35,7 +36,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         applicationFeeAmount,
         lineItems,
       } = request.body as {
-        clientId?: string;
         amount?: number;
         currency?: string;
         description?: string;
@@ -44,14 +44,12 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         lineItems?: Stripe.Checkout.SessionCreateParams.LineItem[];
       };
 
-      if (!clientId) {
-        return reply.code(400).send({ error: 'clientId is required.' });
+      const client = (request as RequestWithClient).client;
+      if (!client) {
+        return reply.code(500).send({ error: 'Unable to resolve client from API key.' });
       }
 
-      const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
-      if (!client) {
-        return reply.code(404).send({ error: 'Client not found.' });
-      }
+      const clientId = client.id;
 
       if (!client.stripeAccountId) {
         return reply.code(400).send({ error: 'Client does not have a connected Stripe account.' });
@@ -62,7 +60,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           return reply.code(400).send({ error: 'amount and currency are required for PaymentIntents.' });
         }
 
-const feeAmount = Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
+        const feeAmount = Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
         if (feeAmount < 0 || feeAmount > amount) {
           return reply
             .code(400)
@@ -114,8 +112,8 @@ const feeAmount = Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
         {
           mode: 'payment',
           line_items: lineItems,
-          success_url: `${frontendOrigin}/payments/success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${frontendOrigin}/payments/cancel`,
+          success_url: `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${frontendOrigin}/payment-cancel`,
           payment_intent_data: {
             application_fee_amount: feeAmount,
             description,
@@ -137,7 +135,7 @@ const feeAmount = Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
 
   fastify.get(
     '/reports/payments',
-    { preHandler: requireRole(['admin']) },
+    { preHandler: requireAdminJwt },
     async (request, reply) => {
       const { clientId, limit, starting_after, ending_before } = request.query as {
         clientId?: string;

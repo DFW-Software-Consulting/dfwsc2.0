@@ -27,6 +27,10 @@ Create a `.env` file based on `env.example`.
 | `SMTP_USER` | ✅ | Username/login for the SMTP server. |
 | `SMTP_PASS` | ✅ | Password/API key for the SMTP server. |
 | `SMTP_FROM` | ❌ | Friendly from address used in onboarding emails. Defaults to `SMTP_USER` when omitted. |
+| `ADMIN_USERNAME` | ✅ | Username for admin login to access client management endpoints. |
+| `ADMIN_PASSWORD` | ✅ | Password for admin authentication. Supports plain text (dev) or bcrypt hash (production). |
+| `JWT_SECRET` | ✅ | Secret key for signing JWT tokens. Must be minimum 32 characters. Generate with: `openssl rand -base64 32` |
+| `JWT_EXPIRY` | ❌ | JWT token expiration time. Defaults to `1h`. Supported formats: `1h`, `30m`, `7d`, `24h`. |
 
 ## Database Schema
 
@@ -43,13 +47,16 @@ The database only stores the connected account mapping and raw webhook payloads.
 | Method & Path | Purpose | Role |
 | --- | --- | --- |
 | `GET /api/v1/health` | Health check. | Public |
+| `POST /api/v1/auth/login` | Admin login endpoint. Returns JWT token for authentication. Rate limited to 5 requests per 15 minutes. | Public |
+| `GET /api/v1/clients` | List all clients with their status and Stripe account information. | Admin (JWT) |
+| `PATCH /api/v1/clients/:id` | Update client status (`active` or `inactive`). Soft-deletes clients without removing from database. | Admin (JWT) |
 | `POST /api/v1/accounts` | Create a client record and onboarding token. | Admin |
 | `POST /api/v1/onboard-client/initiate` | Email onboarding link to a client. | Admin |
 | `GET /api/v1/onboard-client` | Exchange onboarding token for a Stripe onboarding link. | Public |
 | `GET /api/v1/connect/callback` | Stripe onboarding return URL. Persists the `account` query parameter to the client record and redirects to the frontend success page. | Public |
-| `POST /api/v1/payments/create` | Create a PaymentIntent or Checkout Session for a client’s connected account. Requires an `Idempotency-Key` header. | Admin or Client |
+| `POST /api/v1/payments/create` | Create a PaymentIntent or Checkout Session for a client's connected account. Requires an `Idempotency-Key` header. | Admin or Client |
 | `POST /api/v1/webhooks/stripe` | Verify the Stripe signature, store the raw event payload, mark the event as processed, and log basic status updates. | Stripe |
-| `GET /api/v1/reports/payments` | List PaymentIntents for a client’s connected account with Stripe pagination parameters. | Admin |
+| `GET /api/v1/reports/payments` | List PaymentIntents for a client's connected account with Stripe pagination parameters. | Admin |
 
 Non-listed endpoints from earlier versions have been removed (invoices, refunds, ledgers, customer CRUD, etc.).
 

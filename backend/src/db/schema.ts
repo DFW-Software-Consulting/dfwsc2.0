@@ -4,7 +4,11 @@ export const clients = pgTable("clients", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull(),
+  apiKey: text("api_key").unique(),
   stripeAccountId: text("stripe_account_id"),
+  status: text("status", { enum: ["active", "inactive"] })
+    .default("active")
+    .notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
@@ -24,6 +28,8 @@ export const onboardingTokens = pgTable("onboarding_tokens", {
   token: text("token").notNull().unique(),
   status: text("status").notNull(),
   email: text("email").notNull(),
+  state: text("state"),
+  stateExpiresAt: timestamp("state_expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

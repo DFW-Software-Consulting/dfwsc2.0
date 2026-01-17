@@ -1,4 +1,9 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/client';
+import { clients } from '../db/schema';
 
 export type Role = 'admin' | 'client';
 
@@ -11,4 +16,98 @@ export function requireRole(allowedRoles: Role[]) {
       return reply.code(403).send({ error: 'Forbidden' });
     }
   };
+}
+
+export async function requireApiKey(request: FastifyRequest, reply: FastifyReply) {
+  const apiKeyHeader = request.headers['x-api-key'];
+  const apiKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
+
+  if (typeof apiKey !== 'string' || apiKey.trim().length === 0) {
+    return reply.code(401).send({ error: 'API key is required.' });
+  }
+
+  // Note: In a production environment, API keys should be hashed and compared using a constant-time function
+  // For this implementation, we're using direct comparison as per the original design
+  const [client] = await db.select().from(clients).where(eq(clients.apiKey, apiKey)).limit(1);
+
+  if (!client || client.status === 'inactive') {
+    // To prevent user enumeration, return the same error regardless of whether the key exists
+    return reply.code(401).send({ error: 'Invalid API key.' });
+  }
+
+  (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = client;
+}
+
+/**
+ * Verifies a plaintext password against a bcrypt hash
+ * @param plaintext - The plain password to verify
+ * @param hashed - The bcrypt hash to compare against
+ * @returns Promise resolving to true if passwords match, false otherwise
+ */
+export async function verifyPassword(plaintext: string, hashed: string): Promise<boolean> {
+  return bcrypt.compare(plaintext, hashed);
+}
+
+/**
+ * Signs a JWT token with the given payload
+ * @param payload - The payload to include in the token (must include role)
+ * @returns Signed JWT token string
+ */
+export function signJwt(payload: { role: string }): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is not configured');
+  }
+
+  const expiresIn = process.env.JWT_EXPIRY || '1h';
+  return jwt.sign(payload, secret, { expiresIn } as jwt.SignOptions);
+}
+
+/**
+ * Middleware to require and verify JWT authentication for admin routes
+ * Expects Authorization header in format: "Bearer <token>"
+ * Validates token signature, expiry, and admin role claim
+ */
+export async function requireAdminJwt(request: FastifyRequest, reply: FastifyReply) {
+  const authHeader = request.headers.authorization;
+
+  // Check for Authorization header
+  if (!authHeader) {
+    return reply.code(401).send({ error: 'Authorization header required' });
+  }
+
+  // Validate Bearer token format
+  const parts = authHeader.split(' ');
+  if (parts.length !== 2 || parts[0] !== 'Bearer') {
+    return reply.code(401).send({ error: 'Invalid authorization header format. Expected: Bearer <token>' });
+  }
+
+  const token = parts[1];
+
+  // Verify JWT
+  try {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      throw new Error('JWT_SECRET is not configured');
+    }
+
+    const decoded = jwt.verify(token, secret) as jwt.JwtPayload & { role: string };
+
+    // Verify role claim
+    if (decoded.role !== 'admin') {
+      return reply.code(403).send({ error: 'Forbidden: Admin role required' });
+    }
+
+    // Optionally attach decoded payload to request for use in route handlers
+    // (request as any).user = decoded;
+  } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) {
+      return reply.code(401).send({ error: 'Token expired' });
+    }
+    if (error instanceof jwt.JsonWebTokenError) {
+      return reply.code(401).send({ error: 'Invalid token' });
+    }
+    // Unknown error
+    return reply.code(401).send({ error: 'Authentication failed' });
+  }
 }
