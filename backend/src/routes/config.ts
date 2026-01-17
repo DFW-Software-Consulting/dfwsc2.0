@@ -1,23 +1,26 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 
-function resolveApiBaseUrl(request: FastifyRequest): string {
-  if (process.env.API_BASE_URL) {
-    return process.env.API_BASE_URL.replace(/\/$/, '');
+function resolveApiBaseUrl(): string {
+  if (!process.env.API_BASE_URL) {
+    throw new Error('API_BASE_URL environment variable is required but not set');
   }
 
-  const host = request.headers['x-forwarded-host'] ?? request.headers.host;
-  const protocol = (request.headers['x-forwarded-proto'] as string) ?? request.protocol;
-
-  return `${protocol}://${host}`.replace(/\/$/, '');
+  return process.env.API_BASE_URL.replace(/\/$/, '');
 }
 
 export default async function configRoutes(fastify: FastifyInstance) {
   fastify.get('/app-config.js', (request, reply) => {
-    const apiUrl = resolveApiBaseUrl(request);
-    const script = `window.API_URL = '${apiUrl}';`;
+    try {
+      const apiUrl = resolveApiBaseUrl();
+      // Use JSON.stringify for safe JavaScript string embedding to prevent XSS
+      const script = `window.API_URL = ${JSON.stringify(apiUrl)};`;
 
-    reply
-      .header('Content-Type', 'application/javascript')
-      .send(script);
+      reply
+        .header('Content-Type', 'application/javascript')
+        .send(script);
+    } catch (error) {
+      request.log.error(error, 'Failed to resolve API base URL');
+      reply.status(500).send({ error: 'Internal Server Error: API_BASE_URL not configured' });
+    }
   });
 }
