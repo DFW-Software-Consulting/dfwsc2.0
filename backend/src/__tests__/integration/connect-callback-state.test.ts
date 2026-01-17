@@ -343,4 +343,86 @@ describe('Connect Callback State Validation Integration', () => {
     await db.delete(clients).where(eq(clients.id, clientId));
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenId));
   });
+
+  it('should reject state parameter from different client (cross-client injection)', async () => {
+    // Create two separate clients
+    const clientAId = randomUUID();
+    const clientBId = randomUUID();
+    const testEmailA = 'test-a@example.com';
+    const testEmailB = 'test-b@example.com';
+
+    await db.insert(clients).values({
+      id: clientAId,
+      name: 'Test Client A',
+      email: testEmailA,
+      apiKey: 'test_api_key_' + randomUUID().replace(/-/g, ''),
+      status: 'active'
+    });
+
+    await db.insert(clients).values({
+      id: clientBId,
+      name: 'Test Client B',
+      email: testEmailB,
+      apiKey: 'test_api_key_' + randomUUID().replace(/-/g, ''),
+      status: 'active'
+    });
+
+    // Create onboarding tokens with states for both clients
+    const onboardingTokenAId = randomUUID();
+    const onboardingTokenBId = randomUUID();
+    const stateA = 'state_a_' + randomUUID().replace(/-/g, '');
+    const stateB = 'state_b_' + randomUUID().replace(/-/g, '');
+    const testStripeAccount = 'acct_test123456789';
+
+    // Set states to expire in 30 minutes from now
+    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+    await db.insert(onboardingTokens).values({
+      id: onboardingTokenAId,
+      clientId: clientAId,
+      token: 'test_token_a_' + randomUUID().replace(/-/g, ''),
+      status: 'in_progress',
+      email: testEmailA,
+      state: stateA,
+      stateExpiresAt: stateExpiresAt
+    });
+
+    await db.insert(onboardingTokens).values({
+      id: onboardingTokenBId,
+      clientId: clientBId,
+      token: 'test_token_b_' + randomUUID().replace(/-/g, ''),
+      status: 'in_progress',
+      email: testEmailB,
+      state: stateB,
+      stateExpiresAt: stateExpiresAt
+    });
+
+    // Attempt to use Client A's client_id with Client B's state (cross-client injection)
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/connect/callback?client_id=${clientAId}&account=${testStripeAccount}&state=${stateB}`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'Invalid or expired state parameter.'
+    });
+
+    // Also test the reverse: Client B's client_id with Client A's state
+    const response2 = await app.inject({
+      method: 'GET',
+      url: `/api/v1/connect/callback?client_id=${clientBId}&account=${testStripeAccount}&state=${stateA}`,
+    });
+
+    expect(response2.statusCode).toBe(400);
+    expect(response2.json()).toEqual({
+      error: 'Invalid or expired state parameter.'
+    });
+
+    // Clean up
+    await db.delete(clients).where(eq(clients.id, clientAId));
+    await db.delete(clients).where(eq(clients.id, clientBId));
+    await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenAId));
+    await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenBId));
+  });
 });
