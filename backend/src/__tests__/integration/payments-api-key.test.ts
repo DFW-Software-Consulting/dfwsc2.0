@@ -8,6 +8,19 @@ describe('Payments API Key Authentication Integration', () => {
   let app: any;
 
   beforeAll(async () => {
+    // Set up environment variables for testing
+    process.env.STRIPE_SECRET_KEY = 'sk_test_12345';
+    process.env.FRONTEND_ORIGIN = 'http://localhost:5173';
+    process.env.API_BASE_URL = 'http://localhost:4242';
+    process.env.USE_CHECKOUT = 'false';
+    process.env.JWT_SECRET = 'test_jwt_secret_minimum_32_characters_long';
+
+    // MailHog config
+    process.env.SMTP_HOST = 'mailhog';
+    process.env.SMTP_PORT = '1025';
+    process.env.SMTP_USER = 'test';
+    process.env.SMTP_PASS = 'test';
+
     app = await buildServer();
   });
 

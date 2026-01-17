@@ -30,6 +30,7 @@ describe('Connect Callback State Validation Integration', () => {
     // Set up environment variables for testing
     process.env.STRIPE_SECRET_KEY = 'sk_test_12345';
     process.env.FRONTEND_ORIGIN = 'http://localhost:5173';
+    process.env.API_BASE_URL = 'http://localhost:4242';
 
     // Mock Stripe methods
     const { stripe } = await import('../../lib/stripe');
