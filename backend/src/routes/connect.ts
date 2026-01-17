@@ -62,6 +62,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const onboardingUrlHint = `${frontendOrigin}/onboard?token=${token}`;
 
       return reply.code(201).send({
+        name,
         onboardingToken: token,
         onboardingUrlHint,
         apiKey,
