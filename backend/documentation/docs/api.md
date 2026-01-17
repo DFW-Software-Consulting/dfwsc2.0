@@ -4,9 +4,10 @@ This reference aggregates the Fastify routes exposed by the Stripe Payment Porta
 
 ## Authentication & Headers
 
-### API Role Header (Legacy)
-- `x-api-role`: required for some protected routes. Accepts `admin` or `client` depending on endpoint.
-- Note: Being phased out in favor of JWT Bearer token authentication for admin endpoints.
+### Client API Key (Client Authentication)
+- `x-api-key`: Required for client-specific endpoints like `/payments/create`.
+- The key is returned once upon client creation via `/accounts`.
+- This key authenticates the client and binds the request to them.
 
 ### JWT Bearer Token (Admin Authentication)
 - `Authorization`: Required for admin-protected routes. Format: `Bearer <jwt_token>`
@@ -176,19 +177,27 @@ Authorization: Bearer <jwt_token>
 ---
 
 ### Connect Onboarding (`src/routes/connect.ts`)
-- `POST /connect/onboard`
-  - Body: `{ clientId, name, email }`.
-  - Headers: `x-api-role: admin`, `Idempotency-Key`.
-  - Response: `{ clientId, stripeAccountId, url }` (Stripe onboarding link).
+- `POST /accounts`
+  - Body: `{ name, email }`.
+  - Headers: `Authorization: Bearer <jwt_token>`.
+  - Response: `{ name, onboardingToken, onboardingUrlHint, apiKey, clientId }`.
+- `POST /onboard-client/initiate`
+  - Body: `{ name, email }`.
+  - Headers: `Authorization: Bearer <jwt_token>`.
+  - Response: `{ message, clientId, apiKey }`.
+- `GET /onboard-client`
+  - Query: `token`.
+  - Response: `{ url }` (Stripe onboarding link).
 - `GET /connect/callback`
-  - Query: `client_id`, `account`.
-  - Response: Redirect to `${FRONTEND_ORIGIN}/connect/success` when configured, otherwise JSON `{ clientId, stripeAccountId, status }`.
+  - Query: `client_id`, `state`.
+  - Response: Redirect to `${FRONTEND_ORIGIN}/onboarding-success`.
 
 ### Payments (`src/routes/payments.ts`)
 - `POST /payments/create`
-  - PaymentIntent mode: `{ clientId, amount, currency, description?, metadata?, applicationFeeAmount? }`.
-  - Checkout mode: `{ clientId, lineItems, description?, metadata?, applicationFeeAmount?, amount? }`.
-  - Headers: `x-api-role: admin|client`, `Idempotency-Key`.
+  - PaymentIntent mode: `{ amount, currency, description?, metadata? }`.
+  - Checkout mode: `{ lineItems, description?, metadata?, amount? }`.
+  - **Note**: The `applicationFeeAmount` is configured on the server via the `DEFAULT_PROCESS_FEE_CENTS` environment variable and is not accepted in the request body.
+  - Headers: `x-api-key: <client_api_key>`, `Idempotency-Key`.
   - Response: PaymentIntent `{ clientSecret, paymentIntentId }` or Checkout `{ url }`.
 
 ### Reports (`src/routes/payments.ts`)

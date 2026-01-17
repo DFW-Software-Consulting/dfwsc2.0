@@ -816,6 +816,50 @@ describe('connect onboarding', () => {
 });
 
 describe('connect callback', () => {
+  it('rejects callback without state', async () => {
+    const server = await createServer();
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/connect/callback?client_id=client_1&account=acct_123',
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Missing state parameter.' });
+    await server.close();
+  });
+
+  it('rejects callback with invalid state', async () => {
+    const server = await createServer();
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/connect/callback?client_id=client_1&account=acct_123&state=invalid',
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Invalid or expired state parameter.' });
+    await server.close();
+  });
+
+  it('rejects callback with expired state', async () => {
+    const clientId = 'client_expired_state';
+    const onboardingTokenId = 'token_expired';
+    dataStore.onboardingTokens.set(onboardingTokenId, {
+      id: onboardingTokenId,
+      clientId,
+      token: 'expired_token',
+      status: 'in_progress',
+      email: 'test@test.com',
+      state: 'expired_state_val',
+      stateExpiresAt: new Date(Date.now() - 1000), // Expired
+    });
+    const server = await createServer();
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_123&state=expired_state_val`,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Expired state parameter.' });
+    await server.close();
+  });
+
   it('redirects to the frontend success page when the client exists', async () => {
     const clientId = 'client_existing';
     seedClient({
@@ -1033,6 +1077,25 @@ describe('webhooks', () => {
 
     expect(response.statusCode).toBe(200);
     expect(dataStore.webhookEvents.has('evt_test')).toBe(true);
+    await server.close();
+  });
+});
+
+describe('app-config', () => {
+  it('returns API_URL from environment variables, ignoring host headers', async () => {
+    process.env.API_BASE_URL = 'https://my-api.com/api';
+    const server = await createServer();
+    const response = await server.inject({
+      method: 'GET',
+      url: '/app-config.js',
+      headers: {
+        'host': 'evil.com',
+        'x-forwarded-host': 'evil.com',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toBe('application/javascript');
+    expect(response.body).toBe('window.API_URL = "https://my-api.com/api";');
     await server.close();
   });
 });
