@@ -94,7 +94,7 @@ export async function buildServer() {
    * ------------------------------------------------------------
    */
 
-  if (process.env.NODE_ENV !== 'production' && env.ENABLE_SWAGGER !== 'false') {
+  if (process.env.NODE_ENV !== 'production' && process.env.ENABLE_SWAGGER !== 'false') {
     const { default: fastifySwagger } = await import('@fastify/swagger');
     const { default: fastifySwaggerUi } = await import('@fastify/swagger-ui');
     await server.register(fastifySwagger, {
