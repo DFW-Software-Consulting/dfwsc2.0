@@ -14,7 +14,7 @@
   "author": "Jeremy Ashley",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --exec ts-node src/server.ts",
+    "dev": "nodemon --exec ts-node src/index.ts",
     "dev:client": "cd client && npm run dev",
     "start": "node dist/server.js",
     "build": "npm run build:client && npm run build:server",

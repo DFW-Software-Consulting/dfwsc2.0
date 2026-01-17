@@ -1,14 +1,8 @@
-(async () => {
-  if (process.env.NODE_ENV !== 'production') {
-    await import('dotenv/config');
-  }
-})();
-
 import { buildServer } from './app';
 import { runMigrations } from './lib/migrate';
 import { verifyDatabaseSchema } from './lib/schema-check';
 
-async function start() {
+export async function start() {
   const server = await buildServer();
 
   try {
@@ -23,4 +17,7 @@ async function start() {
   }
 }
 
-start();
+// For backward compatibility when running directly
+if (require.main === module) {
+  start();
+}

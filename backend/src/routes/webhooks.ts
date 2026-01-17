@@ -6,13 +6,13 @@ import { webhookEvents, clients } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-if (!webhookSecret) {
-  throw new Error('STRIPE_WEBHOOK_SECRET environment variable is required.');
-}
-const resolvedWebhookSecret = webhookSecret;
-
 export default async function webhooksRoute(fastify: FastifyInstance) {
+  // Validate required environment variable at route registration time
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    throw new Error('STRIPE_WEBHOOK_SECRET environment variable is required.');
+  }
+  const resolvedWebhookSecret = webhookSecret;
   fastify.post('/webhooks/stripe', { config: { rawBody: true } }, async (request, reply) => {
     const signature = request.headers['stripe-signature'];
     if (typeof signature !== 'string') {

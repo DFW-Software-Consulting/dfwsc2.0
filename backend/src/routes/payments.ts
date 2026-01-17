@@ -7,8 +7,6 @@ import { eq } from 'drizzle-orm';
 import { requireApiKey, requireAdminJwt } from '../lib/auth';
 import { rateLimit } from '../lib/rate-limit';
 
-const useCheckout = (process.env.USE_CHECKOUT ?? 'false').toLowerCase() === 'true';
-
 function extractIdempotencyKey(request: FastifyRequest): string | undefined {
   const key = request.headers['idempotency-key'];
   return Array.isArray(key) ? key[0] : key;
@@ -17,6 +15,8 @@ function extractIdempotencyKey(request: FastifyRequest): string | undefined {
 type RequestWithClient = FastifyRequest & { client?: typeof clients.$inferSelect };
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
+  // Compute useCheckout flag at route registration time
+  const useCheckout = (process.env.USE_CHECKOUT ?? 'false').toLowerCase() === 'true';
   fastify.post(
     '/payments/create',
     {

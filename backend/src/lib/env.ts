@@ -1,8 +1,6 @@
 import dotenv from 'dotenv';
 import { FastifyInstance } from 'fastify';
 
-dotenv.config();
-
 const REQUIRED_ENV_VARS = [
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
@@ -23,6 +21,10 @@ const MASK_KEEP = 6;
 const OPTIONAL_ENV_VARS = ['DEFAULT_PROCESS_FEE_CENTS', 'SMTP_FROM', 'ADMIN_API_KEY', 'JWT_EXPIRY'];
 
 export function validateEnv(): Record<string, string> {
+  // Load dotenv only when validation is called
+  if (process.env.NODE_ENV !== 'production') {
+    dotenv.config();
+  }
   const env: Record<string, string> = {};
   const missing: string[] = [];
 
