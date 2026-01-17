@@ -23,6 +23,11 @@ import { clients, onboardingTokens } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 
+// Constants for test values
+const TEST_STRIPE_ACCOUNT = 'acct_test123456789';
+const TEST_EMAIL_A = 'test-a@example.com';
+const TEST_EMAIL_B = 'test-b@example.com';
+
 describe('Connect Callback State Validation Integration', () => {
   let app: any;
 
@@ -348,13 +353,11 @@ describe('Connect Callback State Validation Integration', () => {
     // Create two separate clients
     const clientAId = randomUUID();
     const clientBId = randomUUID();
-    const testEmailA = 'test-a@example.com';
-    const testEmailB = 'test-b@example.com';
 
     await db.insert(clients).values({
       id: clientAId,
       name: 'Test Client A',
-      email: testEmailA,
+      email: TEST_EMAIL_A,
       apiKey: 'test_api_key_' + randomUUID().replace(/-/g, ''),
       status: 'active'
     });
@@ -362,7 +365,7 @@ describe('Connect Callback State Validation Integration', () => {
     await db.insert(clients).values({
       id: clientBId,
       name: 'Test Client B',
-      email: testEmailB,
+      email: TEST_EMAIL_B,
       apiKey: 'test_api_key_' + randomUUID().replace(/-/g, ''),
       status: 'active'
     });
@@ -372,7 +375,6 @@ describe('Connect Callback State Validation Integration', () => {
     const onboardingTokenBId = randomUUID();
     const stateA = 'state_a_' + randomUUID().replace(/-/g, '');
     const stateB = 'state_b_' + randomUUID().replace(/-/g, '');
-    const testStripeAccount = 'acct_test123456789';
 
     // Set states to expire in 30 minutes from now
     const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -382,7 +384,7 @@ describe('Connect Callback State Validation Integration', () => {
       clientId: clientAId,
       token: 'test_token_a_' + randomUUID().replace(/-/g, ''),
       status: 'in_progress',
-      email: testEmailA,
+      email: TEST_EMAIL_A,
       state: stateA,
       stateExpiresAt: stateExpiresAt
     });
@@ -392,7 +394,7 @@ describe('Connect Callback State Validation Integration', () => {
       clientId: clientBId,
       token: 'test_token_b_' + randomUUID().replace(/-/g, ''),
       status: 'in_progress',
-      email: testEmailB,
+      email: TEST_EMAIL_B,
       state: stateB,
       stateExpiresAt: stateExpiresAt
     });
@@ -400,7 +402,7 @@ describe('Connect Callback State Validation Integration', () => {
     // Attempt to use Client A's client_id with Client B's state (cross-client injection)
     const response = await app.inject({
       method: 'GET',
-      url: `/api/v1/connect/callback?client_id=${clientAId}&account=${testStripeAccount}&state=${stateB}`,
+      url: `/api/v1/connect/callback?client_id=${clientAId}&account=${TEST_STRIPE_ACCOUNT}&state=${stateB}`,
     });
 
     expect(response.statusCode).toBe(400);
@@ -411,7 +413,7 @@ describe('Connect Callback State Validation Integration', () => {
     // Also test the reverse: Client B's client_id with Client A's state
     const response2 = await app.inject({
       method: 'GET',
-      url: `/api/v1/connect/callback?client_id=${clientBId}&account=${testStripeAccount}&state=${stateA}`,
+      url: `/api/v1/connect/callback?client_id=${clientBId}&account=${TEST_STRIPE_ACCOUNT}&state=${stateA}`,
     });
 
     expect(response2.statusCode).toBe(400);
