@@ -7,15 +7,23 @@ Implements Stripe Connect onboarding flows. Admins can register or update client
 - `x-api-role` header must be `admin` for protected handlers via `requireRole(['admin'])`.
 - `Idempotency-Key` header enforces safe retries on `POST /connect/onboard`.
 - `API_BASE_URL` (optional) — overrides base URL when computing onboarding callbacks.
-- `FRONTEND_ORIGIN` (optional) — used to redirect from `/connect/callback` to a success page when available.
+- `FRONTEND_ORIGIN` (required) — used to build onboarding URLs for `/accounts` and `/onboard-client/initiate` endpoints; also used to redirect from `/connect/callback` to a success page when available.
 - Database: reads/writes the `clients` table via Drizzle.
 - Stripe SDK: `stripe.accounts.create` and `stripe.accountLinks.create`.
 
 ## Key Endpoints
-- `POST /connect/onboard`
-  - Body: `{ clientId, name, email }`.
-  - Ensures the client record exists, creates or reuses a Stripe Express account, and returns `{ clientId, stripeAccountId, url }`.
-  - Guards: rate limited to 5 requests per minute per IP and requires the admin role.
+- `POST /accounts`
+  - Body: `{ name, email }`.
+  - Creates a new client record and onboarding token, returns `{ onboardingToken, onboardingUrlHint, apiKey, clientId }`.
+  - Onboarding URL is built using `FRONTEND_ORIGIN` environment variable.
+  - If `FRONTEND_ORIGIN` is not configured, returns HTTP 500 with error message.
+  - Guards: rate limited to 10 requests per minute per IP and requires the admin role.
+- `POST /onboard-client/initiate`
+  - Body: `{ name, email }`.
+  - Creates a new client record and onboarding token, sends onboarding email with onboarding URL.
+  - Onboarding URL is built using `FRONTEND_ORIGIN` environment variable.
+  - If `FRONTEND_ORIGIN` is not configured, returns HTTP 500 with error message.
+  - Guards: rate limited to 10 requests per minute per IP and requires the admin role.
 - `GET /connect/callback`
   - Query parameters: `client_id`, `account`.
   - Persists the Stripe account ID to the client record and optionally redirects to `${FRONTEND_ORIGIN}/connect/success` with query params.

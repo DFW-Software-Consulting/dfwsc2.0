@@ -54,7 +54,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         email: email,
       });
 
-      const onboardingUrlHint = `https://dfwsc.com/onboard?token=${token}`;
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
+      if (!frontendOrigin) {
+        return reply.code(500).send({ error: 'FRONTEND_ORIGIN is not configured.' });
+      }
+
+      const onboardingUrlHint = `${frontendOrigin}/onboard?token=${token}`;
 
       return reply.code(201).send({
         onboardingToken: token,
@@ -89,7 +94,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         email: email,
       });
 
-      const onboardingUrl = `https://dfwsc.com/onboard?token=${token}`;
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
+      if (!frontendOrigin) {
+        return reply.code(500).send({ error: 'FRONTEND_ORIGIN is not configured.' });
+      }
+
+      const onboardingUrl = `${frontendOrigin}/onboard?token=${token}`;
 
       const mailHtml = `
         <h1>Welcome to DFW Software Consulting</h1>
