@@ -26,6 +26,7 @@ import { randomUUID } from 'crypto';
 
 describe('Onboarding Token Lifecycle Integration', () => {
   let app: any;
+  const originalEnv = { ...process.env };
 
   beforeAll(async () => {
     // Set up environment variables for testing
@@ -42,6 +43,14 @@ describe('Onboarding Token Lifecycle Integration', () => {
   });
 
   afterAll(async () => {
+    // Restore original environment
+    Object.keys(process.env).forEach(key => {
+      if (!(key in originalEnv)) {
+        delete process.env[key];
+      }
+    });
+    Object.assign(process.env, originalEnv);
+
     if (app) {
       await app.close();
     }
