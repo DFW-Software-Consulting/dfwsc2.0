@@ -14,6 +14,7 @@ const REQUIRED_ENV_VARS = [
   'ADMIN_USERNAME',
   'ADMIN_PASSWORD',
   'JWT_SECRET',
+  'API_BASE_URL',
 ];
 
 const MASK_KEEP = 6;
