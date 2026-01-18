@@ -41,6 +41,7 @@ The application runs in Docker containers as defined in `docker-compose.yml`:
 - To rebuild: `docker-compose up -d --build`
 - To view logs: `docker-compose logs -f api`
 - To run commands in container: `docker exec -it dfwsc20-api-1 /bin/sh`
+- To run tests in containers: `make test` (stack up) or `make test-up` (start stack + run)
 
 ## Important Notes
 - The database is persistent in the `pgdata` volume
