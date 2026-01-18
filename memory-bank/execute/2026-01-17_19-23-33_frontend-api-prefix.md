@@ -16,7 +16,18 @@ env: {target: "local", notes: ""}
 ## Execution Log
 
 ### Task 6 – Update .env.example for clarity
+- **Commit:** `e79541c`
 - **Summary:** Update the .env.example to use `/api/v1` consistently for documentation clarity
 - **Files/Interfaces:** `front/.env.example:7`
 - **Current:** `VITE_API_URL=http://localhost:4242/api` (missing `/v1`)
 - **Change to:** `VITE_API_URL=http://localhost:4242/api/v1`
+- **Commands:**
+  - `edit front/.env.example` → Updated VITE_API_URL to include /v1 suffix
+- **Notes/decisions:**
+  - Also updated the comments to reflect the correct API version in examples
+
+### Gate Results
+- Gate C: pass + All frontend API calls already used correct relative paths; only documentation fix needed
+
+### Follow-ups
+- No follow-ups needed; issue was limited to documentation inconsistency
