@@ -28,6 +28,55 @@ function generateApiKey(): string {
   return crypto.randomBytes(32).toString('hex');
 }
 
+interface ClientWithToken {
+  clientId: string;
+  apiKey: string;
+  token: string;
+}
+
+async function createClientWithOnboardingToken(
+  name: string,
+  email: string
+): Promise<ClientWithToken> {
+  // Input validation
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    throw new Error('Name is required and must be a non-empty string');
+  }
+
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
+    throw new Error('Valid email is required');
+  }
+
+  const clientId = uuidv4();
+  const apiKey = generateApiKey();
+
+  await db.insert(clients).values({ id: clientId, name, email, apiKey });
+
+  const token = crypto.randomBytes(32).toString('hex');
+  const onboardingTokenId = uuidv4();
+
+  try {
+    await db.insert(onboardingTokens).values({
+      id: onboardingTokenId,
+      clientId: clientId,
+      token: token,
+      status: 'pending',
+      email: email,
+    });
+  } catch (error) {
+    // If inserting the onboarding token fails, try to clean up the client record
+    try {
+      await db.delete(clients).where(eq(clients.id, clientId));
+    } catch (cleanupError) {
+      // If cleanup fails, log the error but don't throw to avoid masking the original error
+      console.error(`Failed to clean up client record after onboarding token insertion failed: ${cleanupError}`);
+    }
+    throw error; // Re-throw the original error
+  }
+
+  return { clientId, apiKey, token };
+}
+
 export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.post(
     '/accounts',
@@ -38,21 +87,8 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       request.log.info({ body: request.body, headers: request.headers }, 'Received request in /accounts handler');
       const { name, email } = request.body as { name: string; email: string };
-      const clientId = uuidv4();
-      const apiKey = generateApiKey();
 
-      await db.insert(clients).values({ id: clientId, name, email, apiKey });
-
-      const token = crypto.randomBytes(32).toString('hex');
-      const onboardingTokenId = uuidv4();
-
-      await db.insert(onboardingTokens).values({
-        id: onboardingTokenId,
-        clientId: clientId,
-        token: token,
-        status: 'pending',
-        email: email,
-      });
+      const { clientId, apiKey, token } = await createClientWithOnboardingToken(name, email);
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
       if (!frontendOrigin) {
@@ -79,21 +115,8 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const { name, email } = request.body as { name: string; email: string };
-      const clientId = uuidv4();
-      const apiKey = generateApiKey();
 
-      await db.insert(clients).values({ id: clientId, name, email, apiKey });
-
-      const token = crypto.randomBytes(32).toString('hex');
-      const onboardingTokenId = uuidv4();
-
-      await db.insert(onboardingTokens).values({
-        id: onboardingTokenId,
-        clientId: clientId,
-        token: token,
-        status: 'pending',
-        email: email,
-      });
+      const { clientId, apiKey, token } = await createClientWithOnboardingToken(name, email);
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
       if (!frontendOrigin) {
