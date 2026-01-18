@@ -18,6 +18,22 @@ This reference aggregates the Fastify routes exposed by the Stripe Payment Porta
 ### Other Headers
 - `Idempotency-Key`: recommended/required on all POST routes that mutate Stripe state.
 
+## Response Conventions
+
+### Error Format
+Most error responses follow this shape:
+```json
+{ "error": "Human-readable message" }
+```
+
+Validation errors may include additional details depending on the route. Always check the HTTP status code first.
+
+### Pagination
+Endpoints that proxy Stripe list responses use Stripe-style pagination:
+- `limit` (1-100) controls page size.
+- `starting_after` and `ending_before` provide cursor-based paging.
+- Responses include `{ data, hasMore }` (or `{ data, has_more }` when returned directly from Stripe).
+
 ## Endpoints
 
 ### Admin Authentication (`src/routes/auth.ts`)

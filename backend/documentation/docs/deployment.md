@@ -86,4 +86,23 @@ server {
 
 ## 4. Healthcheck
 
-The application has a healthcheck endpoint at `/health`. The `docker-compose.prod.yml` file is configured to use this endpoint to check the health of the application and restart it if it becomes unresponsive.
+The application has a healthcheck endpoint at `/api/v1/health`. The `docker-compose.prod.yml` file is configured to use this endpoint to check the health of the application and restart it if it becomes unresponsive.
+
+## 5. Logging & Monitoring
+
+- **Container logs**: `docker compose logs -f app` (API) and `docker compose logs -f web` (nginx/front).
+- **Stripe webhooks**: monitor for repeated delivery attempts or signature failures.
+- **Database health**: monitor connection pool errors and slow queries in Postgres logs.
+
+## 6. Backups & Restore
+
+- **Backups**: schedule regular Postgres backups (daily recommended) and test restores monthly.
+- **Restore**: restore the database to a staging environment first, then promote or re-point the app after verification.
+- **Retention**: keep at least 7-14 days of snapshots for rollback or audits.
+
+## 7. Incident Response & Rollback
+
+1. **Identify**: verify service health via `/health` and container logs.
+2. **Mitigate**: scale down traffic or roll back to a known good image/tag.
+3. **Recover**: restore the database if data corruption is suspected.
+4. **Postmortem**: document root cause, remediation, and follow-up actions.

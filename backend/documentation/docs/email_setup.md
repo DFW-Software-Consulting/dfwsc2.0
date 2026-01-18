@@ -38,3 +38,7 @@ The onboarding flow emails tokens to clients via Nodemailer. Configure SMTP cred
 - **TLS errors**: confirm the port and protocol; some providers require `secure: true` (port 465) while others expect STARTTLS (port 587).
 - **Authentication failures**: rotate app-specific passwords or API tokens—some providers block basic auth by default.
 - **Spam filtering**: configure SPF/DKIM/DMARC for the sending domain to keep onboarding emails out of spam folders.
+
+## Template Ownership
+- Onboarding email copy is controlled in the backend mailer helper; update text/HTML there when branding changes.
+- Keep subject lines and sender names aligned with your Stripe Connect onboarding brand settings.

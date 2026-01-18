@@ -29,3 +29,8 @@ stripe trigger payment_intent.succeeded
 - Server logs include info-level entries for payment, charge, and payout events—use `docker compose logs -f api` in containerized setups.
 - Vitest covers signature failures and event persistence (`src/__tests__/app.test.ts`). Run `npm test` before pushing changes.
 - If signature verification fails, ensure the webhook secret matches the Stripe CLI session or live endpoint.
+
+## Event Handling Policy
+- **Idempotency**: events are stored with `stripe_event_id` and deduplicated using `onConflictDoNothing`.
+- **Retries**: Stripe retries webhook delivery on non-2xx responses; this route always returns `200` when validation succeeds.
+- **Alerting**: monitor API logs and `webhook_events.processed_at` for gaps or repeated failures.

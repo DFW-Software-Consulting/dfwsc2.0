@@ -127,6 +127,10 @@ For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://loc
 
 If you want the UI on port 80, change the `web` service port mapping in `docker-compose.yml`.
 
+### Container Healthchecks & Logs
+- **Healthchecks**: `GET /api/v1/health` for the API; verify container status with `docker compose ps`.
+- **Logs**: `docker compose logs -f api` (backend) and `docker compose logs -f web` (frontend/nginx).
+
 ## 📡 API Routes
 
 All API routes are prefixed with `/api/v1`:
@@ -248,6 +252,15 @@ Additional documentation is available in `backend/documentation/`:
 - Stripe setup guide
 - Email configuration
 - Deployment guide
+- Contributor workflow in `CONTRIBUTING.md`
+- Release process in `RELEASE.md`
+
+## 🧯 Troubleshooting
+
+- **CORS errors**: ensure `FRONTEND_ORIGIN` matches the UI origin (local vs Docker).
+- **Database connection failures**: verify `DATABASE_URL` and container health (`docker compose logs -f db`).
+- **Stripe webhook signature errors**: update `STRIPE_WEBHOOK_SECRET` to match the Stripe CLI or dashboard endpoint.
+- **Onboarding redirect mismatch**: set `API_BASE_URL` when running behind a reverse proxy.
 
 ## 🔄 Migration Notes
 

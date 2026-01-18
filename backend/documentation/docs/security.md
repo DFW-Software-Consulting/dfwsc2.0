@@ -47,3 +47,19 @@
 - Regular security audits to identify potential XSS vulnerabilities
 - Consider migrating to httpOnly cookies as soon as possible
 - Minimize the scope and privileges of stored JWTs
+
+## Additional Controls
+
+### Headers & CSP
+- Set a CSP that restricts script sources to trusted domains.
+- Enable `X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin`.
+- Ensure `FRONTEND_ORIGIN` matches allowed CORS origins.
+
+### Rate Limiting
+- `/api/v1/auth/login` is rate limited; keep limits aligned with threat modeling.
+- Consider adding per-IP limits for onboarding and payment creation endpoints.
+
+### Secret Handling
+- Store secrets in a managed vault (1Password, Vault, or cloud secret manager).
+- Rotate Stripe keys and JWT secrets on a regular cadence.
+- Never log secrets; mask values in startup logs.

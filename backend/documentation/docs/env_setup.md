@@ -97,6 +97,15 @@ JWT_EXPIRY=1h
 - Admin authentication requires all three variables (`ADMIN_USERNAME`, `ADMIN_PASSWORD`, `JWT_SECRET`) to be set; the server will fail to start if any are missing.
 - `JWT_EXPIRY` is optional and defaults to `1h` if not specified.
 
+## Environment Matrix
+
+| Environment | Typical Frontend Origin | API Base URL | Stripe Keys | Notes |
+| --- | --- | --- | --- | --- |
+| Local (npm) | `http://localhost:5173` | `http://localhost:4242` | Test (`sk_test_...`) | Use `.env` in `backend/` |
+| Local (Docker) | `http://localhost:8080` | `http://localhost:4242` | Test (`sk_test_...`) | Use `docker-compose.dev.yml` |
+| Staging | `https://staging.example.com` | `https://api-staging.example.com` | Test or live | Prefer `USE_CHECKOUT=true` |
+| Production | `https://your-frontend-domain.com` | `https://your-api-domain.com` | Live (`sk_live_...`) | Use `.env.prod` |
+
 ## Verification Steps
 1. Copy the template: `cp env.example .env` and edit values.
 2. Run `npm run dev`; the server logs masked env values if everything is configured.

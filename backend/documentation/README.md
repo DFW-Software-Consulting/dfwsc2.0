@@ -39,3 +39,8 @@ documentation/
 - **Keep `CHANGELOG.md`** up to date as you add, update, or retire documentation so contributors can track the history of these guides.
 
 Every file is meant to be short enough to read in a few minutes and detailed enough to operate the service in isolation.
+
+## Ownership & Cadence
+- **Owner**: backend lead maintains docs in this directory.
+- **Update cadence**: refresh after any API, schema, or operational change; review at least monthly.
+- **Changelog**: record doc edits in `CHANGELOG.md` with date and summary.
