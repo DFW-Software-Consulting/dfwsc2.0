@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import logger from "../../utils/logger";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NAME_MIN_LENGTH = 1;
@@ -78,7 +79,7 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
         showToast?.(`Client ${data.name} created successfully!`, "success");
         onClientCreated?.(data);
       } catch (err) {
-        console.error("Error creating client:", err);
+        logger.error("Error creating client:", err);
         setError(err.message);
         showToast?.(`Error creating client: ${err.message}`, "error");
       } finally {
@@ -94,7 +95,7 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
         await navigator.clipboard.writeText(text);
         showToast?.(`${type} copied to clipboard!`, "success");
       } catch (err) {
-        console.error(`Failed to copy ${type}:`, err);
+        logger.error(`Failed to copy ${type}:`, err);
         showToast?.(`Failed to copy ${type}`, "error");
       }
     },
