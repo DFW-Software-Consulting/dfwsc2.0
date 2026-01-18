@@ -22,4 +22,4 @@ Ensure all frontend API calls use the `/api/v1` prefix to match backend route re
 ## Acceptance Criteria
 
 - [x] All frontend API calls use `/api/v1`
-- [ ] No regressions in onboarding or client creation flows
+- [x] No regressions in onboarding or client creation flows

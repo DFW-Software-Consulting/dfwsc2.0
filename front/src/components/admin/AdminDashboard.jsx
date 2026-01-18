@@ -14,11 +14,11 @@ export default function AdminDashboard() {
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
-  }, [showToast]);
+  }, []);
 
   const hideToast = useCallback(() => {
     setToast({ show: false, message: "", type: "" });
-  }, []);
+  }, [showToast]);
 
   const fetchClients = useCallback(async () => {
     const token = sessionStorage.getItem("adminToken");

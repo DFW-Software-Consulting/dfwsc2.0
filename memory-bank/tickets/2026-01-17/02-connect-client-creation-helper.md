@@ -18,10 +18,10 @@ Refactor duplicate client creation and onboarding token creation logic into a sh
 - [x] Identify the shared fields and behavior between both flows
 - [x] Create a helper function to create client + onboarding token
 - [x] Replace inline logic in both endpoints with the helper
-- [ ] Update or add tests if needed
+- [x] Update or add tests if needed
 
 ## Acceptance Criteria
 
 - [x] Shared logic lives in a single helper
 - [x] Both endpoints use the helper
-- [ ] Behavior and responses remain unchanged
+- [x] Behavior and responses remain unchanged

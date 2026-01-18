@@ -18,7 +18,7 @@ Remove the unreachable `else` branch in the Stripe connect callback and delete a
 
 - [x] Remove unreachable `else` branch after the `!state` early return
 - [x] Remove redundant `if (state)` check after the early return
-- [ ] Ensure behavior stays the same for valid and invalid states
+- [x] Ensure behavior stays the same for valid and invalid states
 
 ## Acceptance Criteria
 
