@@ -86,8 +86,8 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
     },
     async (request, reply) => {
-      request.log.info({ body: request.body, headers: request.headers }, 'Received request in /accounts handler');
       const { name, email } = request.body as { name: string; email: string };
+      request.log.info({ name, email }, 'Received request in /accounts handler');
 
       const { clientId, apiKey, token } = await createClientWithOnboardingToken(name, email);
 
@@ -253,12 +253,21 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
     },
     async (request, reply) => {
-      const { client_id, account, state } = request.query as { client_id: string; account: string; state?: string };
+      const { client_id, account, state } = request.query as {
+        client_id: string;
+        account?: string;
+        state?: string;
+      };
 
       // Check if state parameter is missing - return 400 error if missing
       if (!state) {
         request.log.warn({ client_id, account }, 'Missing state parameter');
         return reply.code(400).send({ error: 'Missing state parameter.' });
+      }
+
+      if (!account) {
+        request.log.warn({ client_id, state }, 'Missing account parameter');
+        return reply.code(400).send({ error: 'Missing account parameter.' });
       }
 
       // Retrieve the onboarding token record by both client_id and state to ensure validity
