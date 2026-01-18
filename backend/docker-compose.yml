@@ -2,8 +2,9 @@ services:
   app:
     build:
       context: .
-      target: development
+      dockerfile: Dockerfile.dev
     image: ${PROJECT_NAME:-stripe-portal}:dev
+    working_dir: /app
     env_file:
       - .env
     ports:
@@ -11,7 +12,8 @@ services:
     depends_on:
       - db
     volumes:
-      - ./:/usr/src/app
+      - ./:/app
+      - app_node_modules:/app/node_modules
     command: npm run dev
 
   db:
@@ -42,3 +44,4 @@ services:
 
 volumes:
   pgdata:
+  app_node_modules:
