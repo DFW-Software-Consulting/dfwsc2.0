@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import ConfirmModal from "./ConfirmModal";
+import logger from "../../utils/logger";
 
 export default function ClientList({
   clients,
@@ -67,7 +68,7 @@ export default function ClientList({
           "success"
         );
       } catch (err) {
-        console.error("Error updating client status:", err);
+        logger.error("Error updating client status:", err);
         // Rollback optimistic update
         onStatusChange?.(clientId, currentStatus);
         showToast?.(`Error updating client status: ${err.message}`, "error");
