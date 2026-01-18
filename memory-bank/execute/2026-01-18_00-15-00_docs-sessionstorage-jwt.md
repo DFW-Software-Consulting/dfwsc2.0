@@ -26,7 +26,7 @@ env: {target: "local", notes: ""}
   - Created security.md with JWT storage trade-offs as specified in plan
 
 ### Task T2 – Validate Documentation
-- Commit: `pending`
+- Commit: `eca6fd5`
 - Commands:
   - `read_file` → verified content matches plan requirements
 - Tests/coverage:
@@ -37,3 +37,12 @@ env: {target: "local", notes: ""}
   - Alternatives documented with pros/cons
   - Rationale explains design decision
   - Style consistent with existing documentation
+
+## Gate Results
+- Gate C: ✅ pass - Documentation only change, no code to test/lint/type-check
+- All acceptance tests from plan validated manually
+
+## Follow-ups
+- No follow-up tasks needed
+- No tech debt introduced
+- Documentation is complete and self-contained
