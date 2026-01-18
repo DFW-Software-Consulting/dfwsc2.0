@@ -230,6 +230,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const { client_id, account, state } = request.query as { client_id: string; account: string; state?: string };
 
+      // Check if state parameter is missing - return 400 error if missing
+      if (!state) {
+        request.log.warn({ client_id, account }, 'Missing state parameter');
+        return reply.code(400).send({ error: 'Missing state parameter.' });
+      }
+
       // If state parameter is provided, validate it using the secure flow
       if (state) {
         // Retrieve the onboarding token record by both client_id and state to ensure validity
