@@ -287,8 +287,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const [clientRecord] = await db.select().from(clients).where(eq(clients.id, client_id));
       if (!clientRecord) {
         request.log.warn({ client_id, account }, 'Client record not found');
+        const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
+        if (!frontendOrigin) {
+          request.log.error('FRONTEND_ORIGIN is not configured');
+          return reply.code(500).send({ error: 'Server configuration error: FRONTEND_ORIGIN not set.' });
+        }
         // Still redirect to success page even if client record is not found
-        const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '') || 'https://dfwsc.com';
         const redirectUrl = `${frontendOrigin}/onboarding-success`;
         return reply.redirect(redirectUrl);
       }
@@ -319,7 +323,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         .set({ status: 'completed' })
         .where(eq(onboardingTokens.id, onboardingRecord.id));
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '') || 'https://dfwsc.com';
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
+      if (!frontendOrigin) {
+        request.log.error('FRONTEND_ORIGIN is not configured');
+        return reply.code(500).send({ error: 'Server configuration error: FRONTEND_ORIGIN not set.' });
+      }
       const redirectUrl = `${frontendOrigin}/onboarding-success`;
 
       reply.redirect(redirectUrl);

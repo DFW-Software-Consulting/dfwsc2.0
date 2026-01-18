@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, jsonb, index } from "drizzle-orm/pg-core";
 
 export const clients = pgTable("clients", {
   id: text("id").primaryKey(),
@@ -12,7 +12,9 @@ export const clients = pgTable("clients", {
     .notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+}, (table) => ({
+  apiKeyHashIdx: index("clients_api_key_hash_idx").on(table.apiKeyHash),
+}));
 
 export const webhookEvents = pgTable("webhook_events", {
   id: text("id").primaryKey(),
@@ -25,7 +27,7 @@ export const webhookEvents = pgTable("webhook_events", {
 
 export const onboardingTokens = pgTable("onboarding_tokens", {
   id: text("id").primaryKey(),
-  clientId: text("client_id").notNull(),
+  clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
   token: text("token").notNull().unique(),
   status: text("status").notNull(),
   email: text("email").notNull(),

@@ -44,6 +44,13 @@ export default async function authRoutes(fastify: FastifyInstance) {
           isValid = await bcrypt.compare(password, adminPassword);
         } else {
           // Direct comparison for plaintext (development only)
+          // SECURITY WARNING: Log deprecation notice for plaintext passwords
+          fastify.log.warn(
+            'DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. ' +
+            'This is insecure and will be removed in a future version. ' +
+            'Please use a bcrypt hash instead. Generate one with: ' +
+            'node -e "console.log(require(\'bcryptjs\').hashSync(\'your-password\', 10))"'
+          );
           isValid = password === adminPassword;
         }
       }

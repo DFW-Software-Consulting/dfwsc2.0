@@ -1,6 +1,7 @@
 import fastify from 'fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyRawBody from 'fastify-raw-body';
+import crypto from 'crypto';
 
 import connectRoutes from './routes/connect';
 import paymentsRoutes from './routes/payments';
@@ -9,13 +10,14 @@ import configRoutes from './routes/config';
 import healthRoutes from './routes/health';
 import authRoutes from './routes/auth';
 import clientRoutes from './routes/clients';
-import { sendMail } from './lib/mailer';
 import { validateEnv, logMaskedEnvSummary } from './lib/env';
 
 export async function buildServer() {
   const logger = process.env.NODE_ENV === 'test' ? { level: 'silent' } : true;
   const server = fastify({
     logger,
+    // Generate unique request IDs for tracing
+    genReqId: () => crypto.randomUUID(),
     ajv: {
       customOptions: {
         allErrors: true,
@@ -59,16 +61,21 @@ export async function buildServer() {
     runFirst: true,
   });
 
+  // Add request ID to response headers for debugging and tracing
+  server.addHook('onSend', async (request, reply) => {
+    reply.header('X-Request-Id', request.id);
+  });
+
   server.setErrorHandler((error, request, reply) => {
     const statusCode = error.statusCode ?? (error.validation ? 400 : 500);
 
     if (error.validation) {
-      reply.status(statusCode).send({ error: error.message });
+      reply.status(statusCode).send({ error: error.message, requestId: request.id });
       return;
     }
 
     request.log.error(error, error.message);
-    reply.status(statusCode).send({ error: error.message ?? 'Internal Server Error' });
+    reply.status(statusCode).send({ error: error.message ?? 'Internal Server Error', requestId: request.id });
   });
 
   /**

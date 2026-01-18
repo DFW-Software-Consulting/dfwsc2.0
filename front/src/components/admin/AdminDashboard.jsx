@@ -18,7 +18,7 @@ export default function AdminDashboard() {
 
   const hideToast = useCallback(() => {
     setToast({ show: false, message: "", type: "" });
-  }, [showToast]);
+  }, []);
 
   const fetchClients = useCallback(async () => {
     const token = sessionStorage.getItem("adminToken");
