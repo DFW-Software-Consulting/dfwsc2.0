@@ -207,8 +207,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
         return reply.send({ url: accountLink.url });
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         request.log.error({
-          error: error.message,
+          error: errorMessage,
           token_id: onboardingRecord.id,
           client_id: clientRecord.id
         }, 'Stripe accountLinks.create failed');
