@@ -15,7 +15,7 @@ export default function Toast({ show, message, type = "info", onClose }) {
       const timer = setTimeout(onClose, TOAST_TIMEOUT_MS);
       return () => clearTimeout(timer);
     }
-  }, [show, onClose]);
+  }, [show, message, type, onClose]);
 
   if (!show) return null;
 

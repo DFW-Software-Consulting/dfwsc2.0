@@ -1,12 +1,12 @@
-import { buildServer } from '../../app';
-import { db } from '../../db/client';
-import { clients } from '../../db/schema';
-import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import { hashApiKey } from '../../lib/auth';
+import { vi } from 'vitest';
 
 describe('Payments API Key Authentication Integration', () => {
   let app: any;
+  let db: any;
+  let clients: any;
+  let eq: (left: unknown, right: unknown) => unknown;
+  let hashApiKey: (apiKey: string) => Promise<string>;
 
   beforeAll(async () => {
     // Set up environment variables for testing
@@ -21,6 +21,24 @@ describe('Payments API Key Authentication Integration', () => {
     process.env.SMTP_PORT = '1025';
     process.env.SMTP_USER = 'test';
     process.env.SMTP_PASS = 'test';
+
+    // Ensure this suite uses real bcrypt/drizzle behavior even if other tests mock them.
+    vi.unmock('bcryptjs');
+    vi.unmock('drizzle-orm');
+    vi.resetModules();
+
+    const [{ buildServer }, dbModule, schemaModule, authModule, drizzleModule] = await Promise.all([
+      import('../../app'),
+      import('../../db/client'),
+      import('../../db/schema'),
+      import('../../lib/auth'),
+      import('drizzle-orm'),
+    ]);
+
+    db = dbModule.db;
+    clients = schemaModule.clients;
+    hashApiKey = authModule.hashApiKey;
+    eq = drizzleModule.eq;
 
     app = await buildServer();
   });

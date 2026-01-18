@@ -16,6 +16,7 @@ export default function ClientList({
     isOpen: false,
     clientId: null,
     clientName: "",
+    currentStatus: "",
   });
 
   const updateClientStatus = useCallback(
@@ -98,16 +99,25 @@ export default function ClientList({
   );
 
   const handleConfirmDeactivate = useCallback(() => {
-    setConfirmModal(prev => {
-      if (prev.clientId) {
-        updateClientStatus(prev.clientId, prev.currentStatus);
-      }
-      return { isOpen: false, clientId: null, clientName: "", currentStatus: "" };
+    const { clientId, currentStatus } = confirmModal;
+    setConfirmModal({
+      isOpen: false,
+      clientId: null,
+      clientName: "",
+      currentStatus: "",
     });
-  }, [updateClientStatus]);
+    if (clientId) {
+      updateClientStatus(clientId, currentStatus);
+    }
+  }, [confirmModal, updateClientStatus]);
 
   const handleCancelDeactivate = () => {
-    setConfirmModal({ isOpen: false, clientId: null, clientName: "", currentStatus: "" });
+    setConfirmModal({
+      isOpen: false,
+      clientId: null,
+      clientName: "",
+      currentStatus: "",
+    });
   };
 
   if (loading) {
