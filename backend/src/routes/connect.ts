@@ -237,86 +237,63 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'Missing state parameter.' });
       }
 
-      // If state parameter is provided, validate it using the secure flow
-      if (state) {
-        // Retrieve the onboarding token record by both client_id and state to ensure validity
-        const [onboardingRecord] = await db
-          .select()
-          .from(onboardingTokens)
-          .where(and(
-            eq(onboardingTokens.clientId, client_id),
-            eq(onboardingTokens.state, state)
-          ))
-          .limit(1);
+      // Retrieve the onboarding token record by both client_id and state to ensure validity
+      const [onboardingRecord] = await db
+        .select()
+        .from(onboardingTokens)
+        .where(and(
+          eq(onboardingTokens.clientId, client_id),
+          eq(onboardingTokens.state, state)
+        ))
+        .limit(1);
 
-        if (!onboardingRecord) {
-          request.log.warn({ client_id, account, state }, 'Invalid or expired state parameter');
-          return reply.code(400).send({ error: 'Invalid or expired state parameter.' });
-        }
-
-        // Check if state has expired
-        if (onboardingRecord.stateExpiresAt && new Date() > new Date(onboardingRecord.stateExpiresAt)) {
-          request.log.warn({ client_id, account, state }, 'Expired state parameter');
-          return reply.code(400).send({ error: 'Expired state parameter.' });
-        }
-
-        // Verify that the account parameter matches what we expect for the client
-        // This prevents an attacker from providing a different account ID
-        const [clientRecord] = await db.select().from(clients).where(eq(clients.id, client_id));
-        if (!clientRecord) {
-          request.log.warn({ client_id, account }, 'Client record not found');
-          // Still redirect to success page even if client record is not found
-          const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '') || 'https://dfwsc.com';
-          const redirectUrl = `${frontendOrigin}/onboarding-success`;
-          return reply.redirect(redirectUrl);
-        }
-
-        // If the client already has a stripeAccountId, verify it matches the one being set
-        if (clientRecord.stripeAccountId && clientRecord.stripeAccountId !== account) {
-          request.log.warn({
-            client_id,
-            account,
-            existingAccount: clientRecord.stripeAccountId
-          }, 'Attempt to overwrite existing stripeAccountId');
-          return reply.code(400).send({ error: 'Stripe account already linked to this client.' });
-        }
-
-        // Update the client's stripeAccountId
-        await db.update(clients).set({ stripeAccountId: account }).where(eq(clients.id, client_id));
-
-        // Update the onboarding token status to completed
-        request.log.info({
-          token_id: onboardingRecord.id,
-          old_status: onboardingRecord.status,
-          new_status: 'completed',
-          timestamp: new Date().toISOString()
-        }, 'Updating onboarding token status to completed');
-
-        await db
-          .update(onboardingTokens)
-          .set({ status: 'completed' })
-          .where(eq(onboardingTokens.id, onboardingRecord.id));
-      } else {
-        // If no state parameter provided, just validate client_id and account exist and update if needed
-        // Still redirect to success page even if state is missing
-        if (client_id && account) {
-          // Update the client's stripeAccountId if client exists
-          const [clientRecord] = await db.select().from(clients).where(eq(clients.id, client_id));
-          if (clientRecord) {
-            // If the client already has a stripeAccountId, verify it matches the one being set
-            if (clientRecord.stripeAccountId && clientRecord.stripeAccountId !== account) {
-              request.log.warn({
-                client_id,
-                account,
-                existingAccount: clientRecord.stripeAccountId
-              }, 'Attempt to overwrite existing stripeAccountId');
-              return reply.code(400).send({ error: 'Stripe account already linked to this client.' });
-            }
-
-            await db.update(clients).set({ stripeAccountId: account }).where(eq(clients.id, client_id));
-          }
-        }
+      if (!onboardingRecord) {
+        request.log.warn({ client_id, account, state }, 'Invalid or expired state parameter');
+        return reply.code(400).send({ error: 'Invalid or expired state parameter.' });
       }
+
+      // Check if state has expired
+      if (onboardingRecord.stateExpiresAt && new Date() > new Date(onboardingRecord.stateExpiresAt)) {
+        request.log.warn({ client_id, account, state }, 'Expired state parameter');
+        return reply.code(400).send({ error: 'Expired state parameter.' });
+      }
+
+      // Verify that the account parameter matches what we expect for the client
+      // This prevents an attacker from providing a different account ID
+      const [clientRecord] = await db.select().from(clients).where(eq(clients.id, client_id));
+      if (!clientRecord) {
+        request.log.warn({ client_id, account }, 'Client record not found');
+        // Still redirect to success page even if client record is not found
+        const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '') || 'https://dfwsc.com';
+        const redirectUrl = `${frontendOrigin}/onboarding-success`;
+        return reply.redirect(redirectUrl);
+      }
+
+      // If the client already has a stripeAccountId, verify it matches the one being set
+      if (clientRecord.stripeAccountId && clientRecord.stripeAccountId !== account) {
+        request.log.warn({
+          client_id,
+          account,
+          existingAccount: clientRecord.stripeAccountId
+        }, 'Attempt to overwrite existing stripeAccountId');
+        return reply.code(400).send({ error: 'Stripe account already linked to this client.' });
+      }
+
+      // Update the client's stripeAccountId
+      await db.update(clients).set({ stripeAccountId: account }).where(eq(clients.id, client_id));
+
+      // Update the onboarding token status to completed
+      request.log.info({
+        token_id: onboardingRecord.id,
+        old_status: onboardingRecord.status,
+        new_status: 'completed',
+        timestamp: new Date().toISOString()
+      }, 'Updating onboarding token status to completed');
+
+      await db
+        .update(onboardingTokens)
+        .set({ status: 'completed' })
+        .where(eq(onboardingTokens.id, onboardingRecord.id));
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '') || 'https://dfwsc.com';
       const redirectUrl = `${frontendOrigin}/onboarding-success`;
