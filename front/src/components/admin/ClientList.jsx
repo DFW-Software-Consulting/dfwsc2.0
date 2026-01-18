@@ -97,15 +97,17 @@ export default function ClientList({
   );
 
   const handleConfirmDeactivate = useCallback(() => {
-    if (confirmModal.clientId) {
-      updateClientStatus(confirmModal.clientId, confirmModal.currentStatus);
-    }
-    setConfirmModal({ isOpen: false, clientId: null, clientName: "" });
-  }, [confirmModal, updateClientStatus]);
+    setConfirmModal(prev => {
+      if (prev.clientId) {
+        updateClientStatus(prev.clientId, prev.currentStatus);
+      }
+      return { isOpen: false, clientId: null, clientName: "", currentStatus: "" };
+    });
+  }, [updateClientStatus]);
 
-  const handleCancelDeactivate = useCallback(() => {
-    setConfirmModal({ isOpen: false, clientId: null, clientName: "" });
-  }, []);
+  const handleCancelDeactivate = () => {
+    setConfirmModal({ isOpen: false, clientId: null, clientName: "", currentStatus: "" });
+  };
 
   if (loading) {
     return (
