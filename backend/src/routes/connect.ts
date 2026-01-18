@@ -176,35 +176,49 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       // Set expiration time to 30 minutes from now
       const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes in milliseconds
 
-      // Update the onboarding token record with the state and expiration
-      request.log.info({
-        token_id: onboardingRecord.id,
-        old_status: onboardingRecord.status,
-        new_status: 'in_progress',
-        timestamp: new Date().toISOString()
-      }, 'Updating onboarding token status to in_progress');
-
-      await db
-        .update(onboardingTokens)
-        .set({
-          status: 'in_progress',
-          state: state,
-          stateExpiresAt: stateExpiresAt
-        })
-        .where(eq(onboardingTokens.id, onboardingRecord.id));
-
       const baseUrl = resolveServerBaseUrl(request);
       const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
       const refreshUrl = `${callbackUrl}&refresh=true`;
 
-      const accountLink = await stripe.accountLinks.create({
-        account: stripeAccountId,
-        refresh_url: refreshUrl,
-        return_url: callbackUrl,
-        type: 'account_onboarding',
-      });
+      try {
+        const accountLink = await stripe.accountLinks.create({
+          account: stripeAccountId,
+          refresh_url: refreshUrl,
+          return_url: callbackUrl,
+          type: 'account_onboarding',
+        });
 
-      return reply.send({ url: accountLink.url });
+        // Only update the onboarding token status to in_progress after successful Stripe API call
+        request.log.info({
+          token_id: onboardingRecord.id,
+          old_status: onboardingRecord.status,
+          new_status: 'in_progress',
+          timestamp: new Date().toISOString()
+        }, 'Updating onboarding token status to in_progress');
+
+        await db
+          .update(onboardingTokens)
+          .set({
+            status: 'in_progress',
+            state: state,
+            stateExpiresAt: stateExpiresAt
+          })
+          .where(eq(onboardingTokens.id, onboardingRecord.id));
+
+        return reply.send({ url: accountLink.url });
+      } catch (error) {
+        request.log.error({
+          error: error.message,
+          token_id: onboardingRecord.id,
+          client_id: clientRecord.id
+        }, 'Stripe accountLinks.create failed');
+
+        // Return 502 Bad Gateway error, token remains in pending status for retry
+        return reply.code(502).send({
+          error: 'Failed to create Stripe account link. Please try again.',
+          code: 'STRIPE_ACCOUNT_LINK_FAILED'
+        });
+      }
     },
   );
 
