@@ -1,4 +1,4 @@
-import { FastifyInstance, FastifyRequest } from 'fastify';
+import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import Stripe from 'stripe';
 import { stripe } from '../lib/stripe';
 import { db } from '../db/client';
@@ -14,13 +14,36 @@ function extractIdempotencyKey(request: FastifyRequest): string | undefined {
 
 type RequestWithClient = FastifyRequest & { client?: typeof clients.$inferSelect };
 
+function resolvePaymentRateLimitKey(request: RequestWithClient): string {
+  const client = request.client;
+  if (client?.stripeAccountId) {
+    return `stripe:${client.stripeAccountId}`;
+  }
+
+  return request.ip || 'unknown';
+}
+
+async function requireStripeAccountForPayments(request: RequestWithClient, reply: FastifyReply) {
+  const client = request.client;
+  if (!client) {
+    return reply.code(401).send({ error: 'API key is required.' });
+  }
+  if (!client.stripeAccountId) {
+    return reply.code(400).send({ error: 'Client does not have a connected Stripe account.' });
+  }
+}
+
 export default async function paymentsRoutes(fastify: FastifyInstance) {
   // Compute useCheckout flag at route registration time
   const useCheckout = (process.env.USE_CHECKOUT ?? 'false').toLowerCase() === 'true';
   fastify.post(
     '/payments/create',
     {
-      preHandler: [rateLimit({ max: 20, windowMs: 60_000 }), requireApiKey],
+      preHandler: [
+        requireApiKey,
+        requireStripeAccountForPayments,
+        rateLimit({ max: 20, windowMs: 60_000, keyGenerator: resolvePaymentRateLimitKey }),
+      ],
     },
     async (request, reply) => {
       const idempotencyKey = extractIdempotencyKey(request);
