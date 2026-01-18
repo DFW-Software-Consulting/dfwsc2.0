@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import AdminDashboard from "../components/admin/AdminDashboard";
+import logger from "../utils/logger";
 
 export default function OnboardClient() {
   const [token, setToken] = useState("");
@@ -59,7 +60,7 @@ export default function OnboardClient() {
       setMessage("Redirecting to Stripe...");
       window.location.href = data.url;
     } catch (err) {
-      console.error("Onboarding error:", err);
+      logger.error("Onboarding error:", err);
       setMessage(`Error: ${err.message}`);
     } finally {
       setLoading(false);
