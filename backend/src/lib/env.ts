@@ -14,12 +14,11 @@ const REQUIRED_ENV_VARS = [
   'ADMIN_USERNAME',
   'ADMIN_PASSWORD',
   'JWT_SECRET',
-  'API_BASE_URL',
 ];
 
 const MASK_KEEP = 6;
 
-const OPTIONAL_ENV_VARS = ['DEFAULT_PROCESS_FEE_CENTS', 'SMTP_FROM', 'ADMIN_API_KEY', 'JWT_EXPIRY'];
+const OPTIONAL_ENV_VARS = ['API_BASE_URL', 'DEFAULT_PROCESS_FEE_CENTS', 'SMTP_FROM', 'ADMIN_API_KEY'];
 
 export function validateEnv(): Record<string, string> {
   // Load dotenv only when validation is called
@@ -38,6 +37,13 @@ export function validateEnv(): Record<string, string> {
     }
   }
 
+  for (const key of OPTIONAL_ENV_VARS) {
+    const value = process.env[key];
+    if (value) {
+      env[key] = value;
+    }
+  }
+
   if (missing.length > 0) {
     throw new Error(
       `Missing required environment variables: ${missing.join(', ')}. Please update your environment before starting the server.`,
@@ -50,11 +56,7 @@ export function validateEnv(): Record<string, string> {
   }
 
   // Set default for optional env vars
-  if (!process.env['JWT_EXPIRY']) {
-    env['JWT_EXPIRY'] = '1h';
-  } else {
-    env['JWT_EXPIRY'] = process.env['JWT_EXPIRY'];
-  }
+  env['JWT_EXPIRY'] = process.env['JWT_EXPIRY'] ?? '1h';
 
   return env;
 }

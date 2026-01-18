@@ -40,11 +40,11 @@ async function createClientWithOnboardingToken(
 ): Promise<ClientWithToken> {
   // Input validation
   if (!name || typeof name !== 'string' || name.trim().length === 0) {
-    throw new Error('Name is required and must be a non-empty string');
+    throw Object.assign(new Error('Name is required and must be a non-empty string'), { statusCode: 400 });
   }
 
   if (!email || typeof email !== 'string' || !email.includes('@')) {
-    throw new Error('Valid email is required');
+    throw Object.assign(new Error('Valid email is required'), { statusCode: 400 });
   }
 
   const clientId = uuidv4();
