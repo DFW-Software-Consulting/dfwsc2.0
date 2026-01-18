@@ -221,6 +221,11 @@ const dbMock = {
               return matches;
             }
 
+            if (isColumn(expr?.field, 'token')) {
+              const record = findOnboardingTokenByToken(expr?.value);
+              return record ? [record] : [];
+            }
+
             const record = dataStore.onboardingTokens.get(expr?.value);
             return record ? [record] : [];
           }
@@ -862,7 +867,7 @@ describe('connect onboarding', () => {
       expect.objectContaining({
         account: 'acct_new',
         type: 'account_onboarding',
-        refresh_url: `https://api.example.com/api/v1/connect/callback?client_id=client_onboard&state=${updatedToken?.state}&refresh=true`,
+        refresh_url: `https://api.example.com/api/v1/connect/refresh?token=${onboardingToken}`,
         return_url: `https://api.example.com/api/v1/connect/callback?client_id=client_onboard&state=${updatedToken?.state}`,
       }),
     );
@@ -961,7 +966,7 @@ describe('connect callback', () => {
     await server.close();
   });
 
-  it('redirects to the default frontend when no frontend origin is configured', async () => {
+  it('fails when no frontend origin is configured for the connect callback', async () => {
     delete process.env.FRONTEND_ORIGIN;
 
     const clientId = 'client_json';
@@ -992,8 +997,8 @@ describe('connect callback', () => {
       url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_json&state=${state}`,
     });
 
-    expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toBe('https://dfwsc.com/onboarding-success');
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: 'Server configuration error: FRONTEND_ORIGIN not set.' });
 
     await server.close();
   });
@@ -1036,6 +1041,46 @@ describe('connect callback', () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: 'Missing state parameter.' });
+
+    await server.close();
+  });
+
+  it('rejects callback when account is missing and preserves onboarding state', async () => {
+    const clientId = 'client_missing_account';
+    seedClient({
+      id: clientId,
+      name: 'Missing Account Client',
+      email: 'missing-account@example.com',
+      stripeAccountId: null,
+    });
+    const onboardingTokenId = 'token_missing_account';
+    const state = 'state_missing_account';
+    dataStore.onboardingTokens.set(onboardingTokenId, {
+      id: onboardingTokenId,
+      clientId,
+      token: 'token_value_missing_account',
+      status: 'in_progress',
+      email: 'missing-account@example.com',
+      state,
+      stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: `/api/v1/connect/callback?client_id=${clientId}&state=${state}`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Missing account parameter.' });
+
+    const updatedClient = dataStore.clients.get(clientId);
+    expect(updatedClient?.stripeAccountId).toBeNull();
+    const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
+    expect(updatedToken?.status).toBe('in_progress');
 
     await server.close();
   });

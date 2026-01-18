@@ -34,6 +34,83 @@ interface ClientWithToken {
   token: string;
 }
 
+interface AccountLinkContext {
+  accountLinkUrl: string;
+}
+
+async function createAccountLinkForToken(
+  request: FastifyRequest,
+  token: string
+): Promise<AccountLinkContext> {
+  const [onboardingRecord] = await db
+    .select()
+    .from(onboardingTokens)
+    .where(eq(onboardingTokens.token, token))
+    .limit(1);
+
+  if (!onboardingRecord || (onboardingRecord.status !== 'pending' && onboardingRecord.status !== 'in_progress')) {
+    throw Object.assign(
+      new Error('Onboarding token not found, is invalid, or has already been used.'),
+      { statusCode: 404 }
+    );
+  }
+
+  const [clientRecord] = await db.select().from(clients).where(eq(clients.id, onboardingRecord.clientId));
+
+  if (!clientRecord) {
+    throw Object.assign(new Error('Client record not found.'), { statusCode: 404 });
+  }
+
+  let stripeAccountId = clientRecord.stripeAccountId;
+
+  if (!stripeAccountId) {
+    const account = await stripe.accounts.create({
+      type: 'express',
+      email: clientRecord.email,
+      metadata: { clientId: clientRecord.id },
+    });
+    stripeAccountId = account.id;
+
+    await db.update(clients).set({ stripeAccountId }).where(eq(clients.id, clientRecord.id));
+  }
+
+  // Generate a cryptographically secure state parameter
+  const state = crypto.randomBytes(32).toString('hex');
+
+  // Set expiration time to 30 minutes from now
+  const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes in milliseconds
+
+  const baseUrl = resolveServerBaseUrl(request);
+  const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
+  const refreshUrl = `${baseUrl}/api/v1/connect/refresh?token=${encodeURIComponent(token)}`;
+
+  const accountLink = await stripe.accountLinks.create({
+    account: stripeAccountId,
+    refresh_url: refreshUrl,
+    return_url: callbackUrl,
+    type: 'account_onboarding',
+  });
+
+  // Only update the onboarding token status to in_progress after successful Stripe API call
+  request.log.info({
+    token_id: onboardingRecord.id,
+    old_status: onboardingRecord.status,
+    new_status: 'in_progress',
+    timestamp: new Date().toISOString()
+  }, 'Updating onboarding token status to in_progress');
+
+  await db
+    .update(onboardingTokens)
+    .set({
+      status: 'in_progress',
+      state: state,
+      stateExpiresAt: stateExpiresAt
+    })
+    .where(eq(onboardingTokens.id, onboardingRecord.id));
+
+  return { accountLinkUrl: accountLink.url };
+}
+
 async function createClientWithOnboardingToken(
   name: string,
   email: string
@@ -164,85 +241,54 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const { token } = request.query as { token: string };
-
-      const [onboardingRecord] = await db
-        .select()
-        .from(onboardingTokens)
-        .where(and(eq(onboardingTokens.token, token), eq(onboardingTokens.status, 'pending')))
-        .limit(1);
-
-      if (!onboardingRecord) {
-        return reply.code(404).send({ error: 'Onboarding token not found, is invalid, or has already been used.' });
-      }
-
-      const [clientRecord] = await db.select().from(clients).where(eq(clients.id, onboardingRecord.clientId));
-
-      if (!clientRecord) {
-        return reply.code(404).send({ error: 'Client record not found.' });
-      }
-
-      let stripeAccountId = clientRecord.stripeAccountId;
-
-      if (!stripeAccountId) {
-        const account = await stripe.accounts.create({
-          type: 'express',
-          email: clientRecord.email,
-          metadata: { clientId: clientRecord.id },
-        });
-        stripeAccountId = account.id;
-
-        await db.update(clients).set({ stripeAccountId }).where(eq(clients.id, clientRecord.id));
-      }
-
-      // Generate a cryptographically secure state parameter
-      const state = crypto.randomBytes(32).toString('hex');
-
-      // Set expiration time to 30 minutes from now
-      const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes in milliseconds
-
-      const baseUrl = resolveServerBaseUrl(request);
-      const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
-      const refreshUrl = `${callbackUrl}&refresh=true`;
-
       try {
-        const accountLink = await stripe.accountLinks.create({
-          account: stripeAccountId,
-          refresh_url: refreshUrl,
-          return_url: callbackUrl,
-          type: 'account_onboarding',
-        });
-
-        // Only update the onboarding token status to in_progress after successful Stripe API call
-        request.log.info({
-          token_id: onboardingRecord.id,
-          old_status: onboardingRecord.status,
-          new_status: 'in_progress',
-          timestamp: new Date().toISOString()
-        }, 'Updating onboarding token status to in_progress');
-
-        await db
-          .update(onboardingTokens)
-          .set({
-            status: 'in_progress',
-            state: state,
-            stateExpiresAt: stateExpiresAt
-          })
-          .where(eq(onboardingTokens.id, onboardingRecord.id));
-
-        return reply.send({ url: accountLink.url });
+        const { accountLinkUrl } = await createAccountLinkForToken(request, token);
+        return reply.send({ url: accountLinkUrl });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
+        const statusCode = error instanceof Error && 'statusCode' in error && typeof error.statusCode === 'number'
+          ? error.statusCode
+          : 502;
         request.log.error({
           error: errorMessage,
-          token_id: onboardingRecord.id,
-          client_id: clientRecord.id
+          token
         }, 'Stripe accountLinks.create failed');
 
-        // Return 502 Bad Gateway error, token remains in pending status for retry
+        if (statusCode === 404) {
+          return reply.code(404).send({ error: errorMessage });
+        }
+
+        // Return 502 Bad Gateway error, token remains in pending or in_progress status for retry
         return reply.code(502).send({
           error: 'Failed to create Stripe account link. Please try again.',
           code: 'STRIPE_ACCOUNT_LINK_FAILED'
         });
+      }
+    },
+  );
+
+  fastify.get(
+    '/connect/refresh',
+    {
+
+    },
+    async (request, reply) => {
+      const { token } = request.query as { token: string };
+
+      try {
+        const { accountLinkUrl } = await createAccountLinkForToken(request, token);
+        return reply.redirect(accountLinkUrl);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const statusCode = error instanceof Error && 'statusCode' in error && typeof error.statusCode === 'number'
+          ? error.statusCode
+          : 502;
+        request.log.error({
+          error: errorMessage,
+          token
+        }, 'Stripe accountLinks.create failed during refresh');
+
+        return reply.code(statusCode).send({ error: errorMessage });
       }
     },
   );
@@ -306,12 +352,15 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.redirect(redirectUrl);
       }
 
+      const existingStripeAccountId =
+        clientRecord.stripeAccountId ?? (clientRecord as { stripe_account_id?: string }).stripe_account_id ?? null;
+
       // If the client already has a stripeAccountId, verify it matches the one being set
-      if (clientRecord.stripeAccountId && clientRecord.stripeAccountId !== account) {
+      if (existingStripeAccountId && existingStripeAccountId !== account) {
         request.log.warn({
           client_id,
           account,
-          existingAccount: clientRecord.stripeAccountId
+          existingAccount: existingStripeAccountId
         }, 'Attempt to overwrite existing stripeAccountId');
         return reply.code(400).send({ error: 'Stripe account already linked to this client.' });
       }
