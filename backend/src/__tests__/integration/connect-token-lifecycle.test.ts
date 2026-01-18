@@ -110,4 +110,80 @@ describe('Onboarding Token Lifecycle Integration', () => {
     await db.delete(clients).where(eq(clients.email, 'test@example.com'));
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, tokenRecord.id));
   });
+
+  it('allows retry when stripe.accountLinks.create fails', async () => {
+    // Create an admin JWT token for authentication
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET || 'test_jwt_secret');
+
+    // Call POST /api/v1/accounts endpoint which creates a client and a token with 'pending' status
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/accounts',
+      headers: {
+        'Authorization': `Bearer ${adminToken}`
+      },
+      payload: {
+        name: 'Retry Test Client',
+        email: 'retry-test@example.com'
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+
+    // Get the token record
+    const [tokenRecord] = await db.select()
+      .from(onboardingTokens)
+      .where(eq(onboardingTokens.email, 'retry-test@example.com'));
+
+    expect(tokenRecord).toBeDefined();
+    expect(tokenRecord.status).toBe('pending');
+
+    // Mock stripe.accountLinks.create to reject on first call
+    const { stripe } = await import('../../lib/stripe');
+    stripe.accountLinks.create.mockRejectedValueOnce(new Error('Stripe API failed'));
+
+    // Call /onboard-client endpoint which should fail due to Stripe error
+    const failedOnboardResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/onboard-client?token=${tokenRecord.token}`,
+    });
+
+    expect(failedOnboardResponse.statusCode).toBe(502);
+    expect(failedOnboardResponse.json()).toEqual({
+      error: 'Failed to create Stripe account link. Please try again.',
+      code: 'STRIPE_ACCOUNT_LINK_FAILED'
+    });
+
+    // Verify token still has 'pending' status after failure
+    const [stillPendingToken] = await db.select()
+      .from(onboardingTokens)
+      .where(eq(onboardingTokens.id, tokenRecord.id));
+
+    expect(stillPendingToken.status).toBe('pending');
+
+    // Reset the mock to succeed on the next call
+    stripe.accountLinks.create.mockResolvedValueOnce({ url: 'https://connect.stripe.com/setup/success' });
+
+    // Call /onboard-client endpoint again which should now succeed
+    const successOnboardResponse = await app.inject({
+      method: 'GET',
+      url: `/api/v1/onboard-client?token=${tokenRecord.token}`,
+    });
+
+    expect(successOnboardResponse.statusCode).toBe(200);
+    expect(successOnboardResponse.json()).toEqual({
+      url: 'https://connect.stripe.com/setup/success'
+    });
+
+    // Verify status changed to 'in_progress' after successful retry
+    const [updatedToken] = await db.select()
+      .from(onboardingTokens)
+      .where(eq(onboardingTokens.id, tokenRecord.id));
+
+    expect(updatedToken.status).toBe('in_progress');
+
+    // Clean up
+    await db.delete(clients).where(eq(clients.email, 'retry-test@example.com'));
+    await db.delete(onboardingTokens).where(eq(onboardingTokens.id, tokenRecord.id));
+  });
 });
