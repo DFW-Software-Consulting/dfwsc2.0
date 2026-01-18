@@ -170,13 +170,28 @@ const dbMock = {
 
           if (isTable(table, 'onboarding_tokens')) {
             if (expr?.all?.length) {
-              const tokenValue = expr.all[0]?.value;
-              const statusValue = expr.all[1]?.value;
-              const record = findOnboardingTokenByToken(tokenValue);
-              if (record && record.status === statusValue) {
-                return [record];
-              }
-              return [];
+              const records = Array.from(dataStore.onboardingTokens.values());
+              const matches = records.filter(record =>
+                expr.all.every((condition: any) => {
+                  if (!condition) {
+                    return false;
+                  }
+                  if (isColumn(condition.field, 'token')) {
+                    return record.token === condition.value;
+                  }
+                  if (isColumn(condition.field, 'status')) {
+                    return record.status === condition.value;
+                  }
+                  if (isColumn(condition.field, 'client_id') || isColumn(condition.field, 'clientId')) {
+                    return record.clientId === condition.value;
+                  }
+                  if (isColumn(condition.field, 'state')) {
+                    return record.state === condition.value;
+                  }
+                  return false;
+                }),
+              );
+              return matches;
             }
 
             const record = dataStore.onboardingTokens.get(expr?.value);
@@ -222,6 +237,8 @@ const dbMock = {
           token: payload.token,
           status: payload.status ?? 'pending',
           email: payload.email,
+          state: payload.state ?? null,
+          stateExpiresAt: payload.stateExpiresAt ?? null,
           createdAt: payload.createdAt ?? new Date(),
           updatedAt: new Date(),
         };
@@ -800,15 +817,18 @@ describe('connect onboarding', () => {
         metadata: { clientId },
       }),
     );
+    const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
+    expect(updatedToken?.status).toBe('in_progress');
+    expect(updatedToken?.state).toBeDefined();
     expect(stripeMock.accountLinks.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        refresh_url: 'https://api.example.com/api/v1/connect/callback?client_id=client_onboard&refresh=true',
-        return_url: 'https://api.example.com/api/v1/connect/callback?client_id=client_onboard',
+        account: 'acct_new',
+        type: 'account_onboarding',
+        refresh_url: `https://api.example.com/api/v1/connect/callback?client_id=client_onboard&state=${updatedToken?.state}&refresh=true`,
+        return_url: `https://api.example.com/api/v1/connect/callback?client_id=client_onboard&state=${updatedToken?.state}`,
       }),
     );
 
-    const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
-    expect(updatedToken?.status).toBe('completed');
     const updatedClient = dataStore.clients.get(clientId);
     expect(updatedClient?.stripeAccountId).toBe('acct_new');
     await server.close();
@@ -868,6 +888,19 @@ describe('connect callback', () => {
       email: 'existing@example.com',
       stripeAccountId: null,
     });
+    const onboardingTokenId = 'token_existing';
+    const state = 'state_existing';
+    dataStore.onboardingTokens.set(onboardingTokenId, {
+      id: onboardingTokenId,
+      clientId,
+      token: 'token_value_existing',
+      status: 'in_progress',
+      email: 'existing@example.com',
+      state,
+      stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
 
     const server = await createServer();
 
@@ -875,7 +908,7 @@ describe('connect callback', () => {
 
     const response = await server.inject({
       method: 'GET',
-      url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_789`,
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_789&state=${state}`,
     });
 
     expect(response.statusCode).toBe(302);
@@ -884,6 +917,8 @@ describe('connect callback', () => {
 
     const updatedClient = dataStore.clients.get(clientId);
     expect(updatedClient?.stripeAccountId).toBe('acct_789');
+    const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
+    expect(updatedToken?.status).toBe('completed');
 
     await server.close();
   });
@@ -898,12 +933,25 @@ describe('connect callback', () => {
       email: 'json@example.com',
       stripeAccountId: null,
     });
+    const onboardingTokenId = 'token_json';
+    const state = 'state_json';
+    dataStore.onboardingTokens.set(onboardingTokenId, {
+      id: onboardingTokenId,
+      clientId,
+      token: 'token_value_json',
+      status: 'in_progress',
+      email: 'json@example.com',
+      state,
+      stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
 
     const server = await createServer({ skipEnvValidation: true });
 
     const response = await server.inject({
       method: 'GET',
-      url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_json`,
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_json&state=${state}`,
     });
 
     expect(response.statusCode).toBe(302);
@@ -913,11 +961,25 @@ describe('connect callback', () => {
   });
 
   it('redirects even when the client cannot be found', async () => {
+    const clientId = 'missing';
+    const onboardingTokenId = 'token_missing';
+    const state = 'state_missing';
+    dataStore.onboardingTokens.set(onboardingTokenId, {
+      id: onboardingTokenId,
+      clientId,
+      token: 'token_value_missing',
+      status: 'in_progress',
+      email: 'missing@example.com',
+      state,
+      stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
     const server = await createServer();
 
     const response = await server.inject({
       method: 'GET',
-      url: '/api/v1/connect/callback?client_id=missing&account=acct_missing',
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_missing&state=${state}`,
     });
 
     expect(response.statusCode).toBe(302);
@@ -926,7 +988,7 @@ describe('connect callback', () => {
     await server.close();
   });
 
-  it('redirects even when required query parameters are missing', async () => {
+  it('rejects callback when required query parameters are missing', async () => {
     const server = await createServer();
 
     const response = await server.inject({
@@ -934,8 +996,8 @@ describe('connect callback', () => {
       url: '/api/v1/connect/callback',
     });
 
-    expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toBe(`${process.env.FRONTEND_ORIGIN}/onboarding-success`);
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Missing state parameter.' });
 
     await server.close();
   });

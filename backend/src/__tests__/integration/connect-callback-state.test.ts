@@ -45,12 +45,6 @@ describe('Connect Callback State Validation Integration', () => {
     app = await buildServer();
   });
 
-  beforeEach(async () => {
-    // Clear any existing test data
-    await db.delete(clients).where(eq(clients.name, 'Test Client'));
-    await db.delete(onboardingTokens).where(eq(onboardingTokens.email, 'test@example.com'));
-  });
-
   afterAll(async () => {
     if (app) {
       await app.close();

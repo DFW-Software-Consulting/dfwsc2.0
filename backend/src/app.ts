@@ -13,8 +13,9 @@ import { sendMail } from './lib/mailer';
 import { validateEnv, logMaskedEnvSummary } from './lib/env';
 
 export async function buildServer() {
+  const logger = process.env.NODE_ENV === 'test' ? { level: 'silent' } : true;
   const server = fastify({
-    logger: true,
+    logger,
     ajv: {
       customOptions: {
         allErrors: true,

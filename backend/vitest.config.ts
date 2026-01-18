@@ -7,6 +7,7 @@ export default defineConfig({
     testTimeout: 30000, // 30 seconds timeout
     hookTimeout: 30000, // 30 seconds hook timeout
     env: {
+      NODE_ENV: 'test',
       STRIPE_SECRET_KEY: 'sk_test_1234567890',
       STRIPE_WEBHOOK_SECRET: 'whsec_test1234567890',
       DATABASE_URL:

@@ -22,8 +22,6 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: /api/v1
-    ports:
-      - "8080:80"
     depends_on:
       - api
     restart: unless-stopped

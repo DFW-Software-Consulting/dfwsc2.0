@@ -46,6 +46,7 @@ dev-frontend:
 dev-backend:
 	npm run dev:backend
 
+# Run tests using whatever DATABASE_URL the API service already gets from Docker Compose.
 test:
 	$(COMPOSE) exec api npm test
 

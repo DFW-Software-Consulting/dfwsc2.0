@@ -59,6 +59,8 @@ describe('Onboarding Token Lifecycle Integration', () => {
   it('should verify token remains pending until explicit state transition via /onboard-client', async () => {
     // Create an admin JWT token for authentication
     const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET || 'test_jwt_secret');
+    const testEmail = `test-${randomUUID()}@example.com`;
+    const testName = `Test Client ${randomUUID()}`;
 
     // Call POST /api/v1/accounts endpoint which creates a client and a token with 'pending' status
     const response = await app.inject({
@@ -68,17 +70,19 @@ describe('Onboarding Token Lifecycle Integration', () => {
         'Authorization': `Bearer ${adminToken}`
       },
       payload: {
-        name: 'Test Client',
-        email: 'test@example.com'
+        name: testName,
+        email: testEmail
       }
     });
 
     expect(response.statusCode).toBe(201);
+    const responseBody = response.json();
+    const clientId = responseBody.clientId;
 
     // Verify that a token was created with 'pending' status
     const [tokenRecord] = await db.select()
       .from(onboardingTokens)
-      .where(eq(onboardingTokens.email, 'test@example.com'));
+      .where(eq(onboardingTokens.email, testEmail));
 
     expect(tokenRecord).toBeDefined();
     expect(tokenRecord.status).toBe('pending');
@@ -107,13 +111,15 @@ describe('Onboarding Token Lifecycle Integration', () => {
     expect(updatedToken.status).toBe('in_progress');
 
     // Clean up
-    await db.delete(clients).where(eq(clients.email, 'test@example.com'));
+    await db.delete(clients).where(eq(clients.id, clientId));
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, tokenRecord.id));
   });
 
   it('allows retry when stripe.accountLinks.create fails', async () => {
     // Create an admin JWT token for authentication
     const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET || 'test_jwt_secret');
+    const testEmail = `retry-${randomUUID()}@example.com`;
+    const testName = `Retry Test Client ${randomUUID()}`;
 
     // Call POST /api/v1/accounts endpoint which creates a client and a token with 'pending' status
     const response = await app.inject({
@@ -123,17 +129,19 @@ describe('Onboarding Token Lifecycle Integration', () => {
         'Authorization': `Bearer ${adminToken}`
       },
       payload: {
-        name: 'Retry Test Client',
-        email: 'retry-test@example.com'
+        name: testName,
+        email: testEmail
       }
     });
 
     expect(response.statusCode).toBe(201);
+    const responseBody = response.json();
+    const clientId = responseBody.clientId;
 
     // Get the token record
     const [tokenRecord] = await db.select()
       .from(onboardingTokens)
-      .where(eq(onboardingTokens.email, 'retry-test@example.com'));
+      .where(eq(onboardingTokens.email, testEmail));
 
     expect(tokenRecord).toBeDefined();
     expect(tokenRecord.status).toBe('pending');
@@ -183,7 +191,7 @@ describe('Onboarding Token Lifecycle Integration', () => {
     expect(updatedToken.status).toBe('in_progress');
 
     // Clean up
-    await db.delete(clients).where(eq(clients.email, 'retry-test@example.com'));
+    await db.delete(clients).where(eq(clients.id, clientId));
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, tokenRecord.id));
   });
 });
