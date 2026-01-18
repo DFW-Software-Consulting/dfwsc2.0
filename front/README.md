@@ -13,6 +13,14 @@ By default the app expects the API at `http://localhost:4242/api/v1` when runnin
 
 Set `VITE_API_URL` in `front/.env` if you want a different API base URL.
 
+## Testing
+
+```bash
+npm test
+```
+
+Frontend tests run with Vitest. Core flow coverage lives in `front/src/__tests__/coreFlows.test.jsx`.
+
 ## Admin Dashboard Flow
 
 The admin dashboard lives on the `/onboard` page alongside the client

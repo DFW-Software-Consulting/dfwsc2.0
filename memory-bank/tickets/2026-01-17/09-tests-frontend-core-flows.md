@@ -14,13 +14,13 @@ Add frontend component or E2E tests to cover onboarding and payment creation flo
 
 ## Tasks
 
-- [ ] Decide on test approach (component tests vs E2E)
-- [ ] Add tests for onboarding flow
-- [ ] Add tests for client creation/payment flow
-- [ ] Document how to run the tests
+- [x] Decide on test approach (component tests vs E2E)
+- [x] Add tests for onboarding flow
+- [x] Add tests for client creation/payment flow
+- [x] Document how to run the tests
 
 ## Acceptance Criteria
 
-- [ ] At least one automated test covers onboarding
-- [ ] At least one automated test covers payment or client creation
-- [ ] Test instructions are documented
+- [x] At least one automated test covers onboarding
+- [x] At least one automated test covers payment or client creation
+- [x] Test instructions are documented

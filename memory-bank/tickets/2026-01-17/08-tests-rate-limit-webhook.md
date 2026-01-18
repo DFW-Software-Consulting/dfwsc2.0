@@ -14,12 +14,12 @@ Fill gaps in tests for auth rate limiting and webhook signature validation edge 
 
 ## Tasks
 
-- [ ] Add auth rate limit tests for edge conditions (reset, retry windows)
-- [ ] Add webhook signature validation tests for edge cases
-- [ ] Ensure tests run in Docker environment
+- [x] Add auth rate limit tests for edge conditions (reset, retry windows)
+- [x] Add webhook signature validation tests for edge cases
+- [x] Ensure tests run in Docker environment
 
 ## Acceptance Criteria
 
-- [ ] Rate limit edge cases are covered by tests
-- [ ] Webhook signature edge cases are covered by tests
-- [ ] Tests run successfully in the containerized setup
+- [x] Rate limit edge cases are covered by tests
+- [x] Webhook signature edge cases are covered by tests
+- [x] Tests run successfully in the containerized setup

@@ -15,14 +15,14 @@ Store API keys as hashes instead of plaintext to reduce risk if the database is 
 
 ## Tasks
 
-- [ ] Choose a secure hashing approach suitable for API keys
-- [ ] Update API key creation to store hashed values
-- [ ] Update API key validation to compare against hashes
-- [ ] Plan data migration for existing keys
-- [ ] Update documentation to reflect storage change
+- [x] Choose a secure hashing approach suitable for API keys
+- [x] Update API key creation to store hashed values
+- [x] Update API key validation to compare against hashes
+- [x] Plan data migration for existing keys
+- [x] Update documentation to reflect storage change
 
 ## Acceptance Criteria
 
-- [ ] API keys are stored as hashes in the database
-- [ ] Authentication validates using hashes
-- [ ] Existing keys remain usable or have a clear migration plan
+- [x] API keys are stored as hashes in the database
+- [x] Authentication validates using hashes
+- [x] Existing keys remain usable or have a clear migration plan

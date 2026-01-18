@@ -16,12 +16,12 @@ Remove the unreachable `else` branch in the Stripe connect callback and delete a
 
 ## Tasks
 
-- [ ] Remove unreachable `else` branch after the `!state` early return
-- [ ] Remove redundant `if (state)` check after the early return
+- [x] Remove unreachable `else` branch after the `!state` early return
+- [x] Remove redundant `if (state)` check after the early return
 - [ ] Ensure behavior stays the same for valid and invalid states
 
 ## Acceptance Criteria
 
-- [ ] Connect callback logic has no unreachable branches
-- [ ] Redundant check is removed without changing behavior
-- [ ] Existing tests continue to pass
+- [x] Connect callback logic has no unreachable branches
+- [x] Redundant check is removed without changing behavior
+- [x] Existing tests continue to pass

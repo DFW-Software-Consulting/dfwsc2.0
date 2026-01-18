@@ -181,6 +181,7 @@ Authorization: Bearer <jwt_token>
   - Body: `{ name, email }`.
   - Headers: `Authorization: Bearer <jwt_token>`.
   - Response: `{ name, onboardingToken, onboardingUrlHint, apiKey, clientId }`.
+  - Notes: `apiKey` is returned once and stored hashed at rest; migrate existing keys using `backend/src/lib/migrate-api-keys.ts`.
 - `POST /onboard-client/initiate`
   - Body: `{ name, email }`.
   - Headers: `Authorization: Bearer <jwt_token>`.

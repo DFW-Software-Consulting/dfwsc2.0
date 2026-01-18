@@ -15,12 +15,12 @@ Add missing dependencies to React hooks to avoid stale closures and clarify inte
 
 ## Tasks
 
-- [ ] Add `showToast` to the `fetchClients` dependency array
-- [ ] Add `onSessionExpired` to the `updateClientStatus` dependency array
+- [x] Add `showToast` to the `fetchClients` dependency array
+- [x] Add `onSessionExpired` to the `updateClientStatus` dependency array
 - [ ] Verify no lint warnings and behavior unchanged
 
 ## Acceptance Criteria
 
-- [ ] Dependency arrays list all referenced values
+- [x] Dependency arrays list all referenced values
 - [ ] No React hook lint warnings
 - [ ] UI behavior unchanged

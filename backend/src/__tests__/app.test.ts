@@ -4,6 +4,13 @@ import Stripe from 'stripe';
 
 const webhookHelper = new Stripe('sk_test_12345', { apiVersion: '2023-10-16' });
 
+vi.mock('bcryptjs', () => ({
+  default: {
+    hash: async (plaintext: string) => `hashed:${plaintext}`,
+    compare: async (plaintext: string, hashed: string) => hashed === `hashed:${plaintext}`,
+  },
+}));
+
 vi.mock('drizzle-orm', () => ({
   eq: (field: unknown, value: unknown) => ({ value, field }),
   and: (...conditions: any[]) => ({ all: conditions }),
@@ -156,6 +163,26 @@ function findClientByApiKey(apiKey?: string) {
 const dbMock = {
   select: vi.fn(() => ({
     from: (table: any) => ({
+      ...(() => {
+        const rowsPromise = (async () => {
+          if (isTable(table, 'clients')) {
+            return Array.from(dataStore.clients.values());
+          }
+          if (isTable(table, 'onboarding_tokens')) {
+            return Array.from(dataStore.onboardingTokens.values());
+          }
+          if (isTable(table, 'webhook_events')) {
+            return Array.from(dataStore.webhookEvents.values());
+          }
+          return [];
+        })();
+
+        return {
+          then: rowsPromise.then.bind(rowsPromise),
+          catch: rowsPromise.catch.bind(rowsPromise),
+          finally: rowsPromise.finally.bind(rowsPromise),
+        };
+      })(),
       where: (expr: any) => {
         const rowsPromise = (async () => {
           if (isTable(table, 'clients')) {
@@ -209,19 +236,24 @@ const dbMock = {
     values: (payload: any) => {
       if (isTable(table, 'clients')) {
         const existing = dataStore.clients.get(payload.id);
-        const apiKey = payload.apiKey ?? existing?.apiKey ?? `api-key-${payload.id ?? Date.now()}`;
+        const apiKey = payload.apiKey ?? existing?.apiKey ?? null;
+        const apiKeyHash =
+          payload.apiKeyHash ?? existing?.apiKeyHash ?? (apiKey ? `hashed:${apiKey}` : null);
         const next = {
           id: payload.id,
           name: payload.name ?? existing?.name,
           email: payload.email ?? existing?.email,
           apiKey,
+          apiKeyHash,
           status: payload.status ?? existing?.status ?? 'active',
           stripeAccountId: payload.stripeAccountId ?? existing?.stripeAccountId ?? null,
           createdAt: existing?.createdAt ?? new Date(),
           updatedAt: new Date(),
         };
         dataStore.clients.set(payload.id, next);
-        dataStore.clientsByApiKey.set(apiKey, payload.id);
+        if (apiKey) {
+          dataStore.clientsByApiKey.set(apiKey, payload.id);
+        }
       }
 
       if (isTable(table, 'webhook_events')) {
@@ -261,6 +293,9 @@ const dbMock = {
           Object.assign(row, values);
           if (values.apiKey) {
             dataStore.clientsByApiKey.set(values.apiKey, row.id);
+          }
+          if (Object.prototype.hasOwnProperty.call(values, 'apiKeyHash')) {
+            row.apiKeyHash = values.apiKeyHash;
           }
           return { rowCount: 1 };
         }
@@ -349,6 +384,7 @@ function seedClient({
   name = 'Acme Corp',
   email = 'billing@acme.test',
   apiKey = `api-key-${id}`,
+  apiKeyHash,
   status = 'active',
 }: {
   id: string;
@@ -356,6 +392,7 @@ function seedClient({
   name?: string;
   email?: string;
   apiKey?: string;
+  apiKeyHash?: string | null;
   status?: string;
 }) {
   dataStore.clients.set(id, {
@@ -363,6 +400,7 @@ function seedClient({
     name,
     email,
     apiKey,
+    apiKeyHash: apiKeyHash ?? `hashed:${apiKey}`,
     status,
     stripeAccountId: stripeAccountId ?? null,
     createdAt: new Date(),
@@ -741,7 +779,7 @@ describe('connect onboarding', () => {
 
     const savedClient = Array.from(dataStore.clients.values()).find(client => client.email === 'owner@example.com');
     expect(savedClient).toBeDefined();
-    expect(savedClient?.apiKey).toBe(body.apiKey);
+    expect(savedClient?.apiKeyHash).toBe(`hashed:${body.apiKey}`);
     expect(savedClient?.id).toBe(body.clientId);
     await server.close();
   });
@@ -768,7 +806,7 @@ describe('connect onboarding', () => {
     expect(body.apiKey).toBeDefined();
     expect(body.clientId).toBeDefined();
     const savedClient = Array.from(dataStore.clients.values()).find(client => client.email === 'client@example.com');
-    expect(savedClient?.apiKey).toBe(body.apiKey);
+    expect(savedClient?.apiKeyHash).toBe(`hashed:${body.apiKey}`);
     expect(savedClient?.id).toBe(body.clientId);
     expect(mailhogMessages.length).toBe(1);
     expect(mailhogMessages[0].Content.Headers.Subject[0]).toBe('DFW Software Consulting - Stripe Onboarding');

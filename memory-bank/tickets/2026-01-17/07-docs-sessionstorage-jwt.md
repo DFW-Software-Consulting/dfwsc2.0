@@ -14,11 +14,11 @@ Document the security trade-offs of storing admin JWTs in `sessionStorage` and l
 
 ## Tasks
 
-- [ ] Add documentation describing pros/cons of `sessionStorage`
-- [ ] Note alternatives (httpOnly cookies + CSRF tokens)
-- [ ] Mention why current choice was made
+- [x] Add documentation describing pros/cons of `sessionStorage`
+- [x] Note alternatives (httpOnly cookies + CSRF tokens)
+- [x] Mention why current choice was made
 
 ## Acceptance Criteria
 
-- [ ] Documentation clearly explains the trade-off
-- [ ] Alternatives are documented
+- [x] Documentation clearly explains the trade-off
+- [x] Alternatives are documented

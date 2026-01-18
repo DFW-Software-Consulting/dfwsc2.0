@@ -107,6 +107,64 @@ describe('Auth Rate Limit Integration', () => {
     await server.close();
   });
 
+  it('should allow requests after the rate limit window resets', async () => {
+    const server = await createServer();
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = 1_000_000;
+    nowSpy.mockImplementation(() => now);
+
+    try {
+      for (let i = 0; i < 5; i++) {
+        const response = await server.inject({
+          method: 'POST',
+          url: '/api/v1/auth/login',
+          payload: {
+            username: 'test',
+            password: 'test'
+          },
+          headers: {
+            'content-type': 'application/json',
+          },
+        });
+
+        expect([400, 401]).toContain(response.statusCode);
+      }
+
+      const blockedResponse = await server.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: {
+          username: 'test',
+          password: 'test'
+        },
+        headers: {
+          'content-type': 'application/json',
+        },
+      });
+
+      expect(blockedResponse.statusCode).toBe(429);
+
+      now += 15 * 60 * 1000 + 1;
+
+      const resetResponse = await server.inject({
+        method: 'POST',
+        url: '/api/v1/auth/login',
+        payload: {
+          username: 'test',
+          password: 'test'
+        },
+        headers: {
+          'content-type': 'application/json',
+        },
+      });
+
+      expect([400, 401]).toContain(resetResponse.statusCode);
+    } finally {
+      nowSpy.mockRestore();
+      await server.close();
+    }
+  });
+
   it('should track rate limits per IP address', async () => {
     const server = await createServer();
 

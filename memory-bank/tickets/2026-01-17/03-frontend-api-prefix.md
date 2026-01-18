@@ -15,11 +15,11 @@ Ensure all frontend API calls use the `/api/v1` prefix to match backend route re
 
 ## Tasks
 
-- [ ] Audit frontend API calls for inconsistent prefixes
-- [ ] Update all calls to use `/api/v1`
-- [ ] Confirm no paths are missing the prefix
+- [x] Audit frontend API calls for inconsistent prefixes
+- [x] Update all calls to use `/api/v1`
+- [x] Confirm no paths are missing the prefix
 
 ## Acceptance Criteria
 
-- [ ] All frontend API calls use `/api/v1`
+- [x] All frontend API calls use `/api/v1`
 - [ ] No regressions in onboarding or client creation flows

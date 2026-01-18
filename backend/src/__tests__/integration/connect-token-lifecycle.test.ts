@@ -33,6 +33,7 @@ describe('Onboarding Token Lifecycle Integration', () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_12345';
     process.env.FRONTEND_ORIGIN = 'http://localhost:5173';
     process.env.API_BASE_URL = 'http://localhost:4242';
+    process.env.JWT_SECRET = 'test_jwt_secret_minimum_32_characters_long';
 
     // Mock Stripe methods
     const { stripe } = await import('../../lib/stripe');
@@ -40,6 +41,7 @@ describe('Onboarding Token Lifecycle Integration', () => {
     stripe.accountLinks.create.mockResolvedValue({ url: 'https://connect.stripe.com/setup/mock' });
 
     app = await buildServer();
+    await app.ready();
   });
 
   afterAll(async () => {
@@ -78,11 +80,13 @@ describe('Onboarding Token Lifecycle Integration', () => {
     expect(response.statusCode).toBe(201);
     const responseBody = response.json();
     const clientId = responseBody.clientId;
+    const onboardingToken = responseBody.onboardingToken;
+    expect(onboardingToken).toBeDefined();
 
     // Verify that a token was created with 'pending' status
     const [tokenRecord] = await db.select()
       .from(onboardingTokens)
-      .where(eq(onboardingTokens.email, testEmail));
+      .where(eq(onboardingTokens.token, onboardingToken));
 
     expect(tokenRecord).toBeDefined();
     expect(tokenRecord.status).toBe('pending');
@@ -98,7 +102,7 @@ describe('Onboarding Token Lifecycle Integration', () => {
     // Now call /onboard-client endpoint which should transition status to 'in_progress'
     const onboardResponse = await app.inject({
       method: 'GET',
-      url: `/api/v1/onboard-client?token=${tokenRecord.token}`,
+      url: `/api/v1/onboard-client?token=${encodeURIComponent(onboardingToken)}`,
     });
 
     expect(onboardResponse.statusCode).toBe(200);

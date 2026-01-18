@@ -14,11 +14,11 @@ Replace direct `console.error` usage with a consistent logging utility for produ
 
 ## Tasks
 
-- [ ] Add or select a small logging utility for the frontend
-- [ ] Replace `console.error` usage with the utility
-- [ ] Keep developer-friendly logging in dev builds
+- [x] Add or select a small logging utility for the frontend
+- [x] Replace `console.error` usage with the utility
+- [x] Keep developer-friendly logging in dev builds
 
 ## Acceptance Criteria
 
-- [ ] Console error calls are routed through a utility
-- [ ] Errors remain visible during development
+- [x] Console error calls are routed through a utility
+- [x] Errors remain visible during development
