@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import logger from "../../utils/logger";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -66,7 +67,7 @@ export default function AdminLogin({ onLoginSuccess, showToast }) {
           throw new Error("Login response did not contain token");
         }
       } catch (err) {
-        console.error("Admin login error:", err);
+        logger.error("Admin login error:", err);
         setError(err.message || "Login failed");
         showToast?.(err.message || "Login failed", "error");
       } finally {
