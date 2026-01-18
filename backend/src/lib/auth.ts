@@ -1,7 +1,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../db/client';
 import { clients } from '../db/schema';
 
@@ -26,16 +26,50 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
     return reply.code(401).send({ error: 'API key is required.' });
   }
 
-  // Note: In a production environment, API keys should be hashed and compared using a constant-time function
-  // For this implementation, we're using direct comparison as per the original design
-  const [client] = await db.select().from(clients).where(eq(clients.apiKey, apiKey)).limit(1);
+  try {
+    // First, try to find a client with a matching API key hash
+    const allClientsResult = await db.select().from(clients);
+    // Ensure we have an array to iterate over
+    const allClients = Array.isArray(allClientsResult) ? allClientsResult : [];
 
-  if (!client || client.status === 'inactive') {
+    for (const client of allClients) {
+      if (client.apiKeyHash) {
+        const isValid = await verifyPassword(apiKey, client.apiKeyHash);
+        if (isValid && client.status !== 'inactive') {
+          (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = client;
+          return; // Found valid client, exit early
+        }
+      }
+    }
+
+    // For backward compatibility during migration, also check plaintext keys
+    const [plaintextClient] = await db
+      .select()
+      .from(clients)
+      .where(and(eq(clients.apiKey, apiKey), eq(clients.status, 'active')))
+      .limit(1);
+
+    if (plaintextClient) {
+      (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = plaintextClient;
+      return; // Found valid client with plaintext key
+    }
+
     // To prevent user enumeration, return the same error regardless of whether the key exists
     return reply.code(401).send({ error: 'Invalid API key.' });
+  } catch (error) {
+    console.error('Error in requireApiKey:', error);
+    return reply.code(500).send({ error: 'Internal server error during API key validation.' });
   }
+}
 
-  (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = client;
+/**
+ * Hashes an API key using bcrypt
+ * @param apiKey - The plaintext API key to hash
+ * @returns Promise resolving to the bcrypt hash
+ */
+export async function hashApiKey(apiKey: string): Promise<string> {
+  const saltRounds = 10;
+  return bcrypt.hash(apiKey, saltRounds);
 }
 
 /**

@@ -3,7 +3,7 @@ import { stripe } from '../lib/stripe';
 import { db } from '../db/client';
 import { clients, onboardingTokens } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { requireAdminJwt } from '../lib/auth';
+import { requireAdminJwt, hashApiKey } from '../lib/auth';
 import { rateLimit } from '../lib/rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
@@ -49,8 +49,9 @@ async function createClientWithOnboardingToken(
 
   const clientId = uuidv4();
   const apiKey = generateApiKey();
+  const apiKeyHash = await hashApiKey(apiKey);
 
-  await db.insert(clients).values({ id: clientId, name, email, apiKey });
+  await db.insert(clients).values({ id: clientId, name, email, apiKeyHash });
 
   const token = crypto.randomBytes(32).toString('hex');
   const onboardingTokenId = uuidv4();

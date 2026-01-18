@@ -3,6 +3,7 @@ import { db } from '../../db/client';
 import { clients } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
+import { hashApiKey } from '../../lib/auth';
 
 describe('Payments API Key Authentication Integration', () => {
   let app: any;
@@ -31,15 +32,16 @@ describe('Payments API Key Authentication Integration', () => {
   });
 
   it('should create payment successfully with valid API key', async () => {
-    // Create a client with an API key
+    // Create a client with a hashed API key
     const clientId = randomUUID();
     const apiKey = 'test_api_key_' + randomUUID().replace(/-/g, '');
-    
+    const apiKeyHash = await hashApiKey(apiKey);
+
     await db.insert(clients).values({
       id: clientId,
       name: 'Test Client',
       email: 'test@example.com',
-      apiKey: apiKey,
+      apiKeyHash: apiKeyHash,
       status: 'active'
     });
 
@@ -61,7 +63,7 @@ describe('Payments API Key Authentication Integration', () => {
     // Since Stripe is not mocked, we expect a 400 due to missing Stripe account
     // But importantly, we should NOT get a 401 (unauthorized) which would mean API key auth failed
     expect(response.statusCode).toBe(400); // Expecting 400 because client doesn't have stripeAccountId
-    
+
     // Clean up
     await db.delete(clients).where(eq(clients.id, clientId));
   });
@@ -110,15 +112,16 @@ describe('Payments API Key Authentication Integration', () => {
   });
 
   it('should return 401 for inactive client', async () => {
-    // Create a client with an API key but inactive status
+    // Create a client with a hashed API key but inactive status
     const clientId = randomUUID();
     const apiKey = 'test_inactive_api_key_' + randomUUID().replace(/-/g, '');
+    const apiKeyHash = await hashApiKey(apiKey);
 
     await db.insert(clients).values({
       id: clientId,
       name: 'Inactive Client',
       email: 'inactive@example.com',
-      apiKey: apiKey,
+      apiKeyHash: apiKeyHash,
       status: 'inactive' // This should cause auth to fail
     });
 

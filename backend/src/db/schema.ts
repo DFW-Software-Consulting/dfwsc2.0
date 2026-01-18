@@ -5,6 +5,7 @@ export const clients = pgTable("clients", {
   name: text("name").notNull(),
   email: text("email").notNull(),
   apiKey: text("api_key").unique(),
+  apiKeyHash: text("api_key_hash").unique(),
   stripeAccountId: text("stripe_account_id"),
   status: text("status", { enum: ["active", "inactive"] })
     .default("active")
