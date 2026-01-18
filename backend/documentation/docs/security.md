@@ -5,6 +5,9 @@
 ### Current Approach
 - JWTs stored in `sessionStorage` (see `AdminLogin.jsx:61`)
 
+### Critical Security Warning
+**Storing JWTs in `sessionStorage` creates a significant security vulnerability if any XSS (Cross-Site Scripting) occurs.** Any JavaScript running on the page can access tokens stored in `sessionStorage`, making them immediately compromised in an XSS attack. This approach should be avoided whenever possible.
+
 ### sessionStorage Trade-offs
 
 **Pros:**
@@ -14,26 +17,33 @@
 - Scoped to single tab (isolation)
 
 **Cons:**
-- Vulnerable to XSS attacks (JavaScript accessible)
+- **CRITICAL SECURITY RISK**: Vulnerable to XSS attacks (JavaScript accessible)
 - Not shared across tabs
 - Lost on page refresh (if not persisted elsewhere)
 
-### Alternatives
+### Recommended Alternatives (Preferred)
 
-#### httpOnly Cookies + CSRF Tokens
+#### httpOnly Cookies + CSRF Tokens (Most Secure)
 - Pros: Immune to XSS, automatically sent with requests
 - Cons: Requires CSRF protection, more complex implementation
 
-#### localStorage
+#### In-Memory (React State/Context) (Good Alternative)
+- Pros: Most secure (no storage access), prevents XSS token theft
+- Cons: Lost on refresh, requires re-authentication
+
+#### localStorage (Less Secure)
 - Pros: Persists across sessions, shared across tabs
 - Cons: XSS vulnerable, never auto-clears
 
-#### In-Memory (React State/Context)
-- Pros: Most secure (no storage access)
-- Cons: Lost on refresh, requires re-authentication
+### Rationale for Current Choice (Legacy/Temporary)
+- Admin portal is internal-facing with controlled access (though this does not eliminate XSS risk)
+- **WARNING**: This implementation should be considered temporary or legacy
+- sessionStorage provides automatic cleanup which reduces token exposure window
+- Simple implementation appropriate for current scope but not recommended for future development
+- **Strongly recommend migrating to httpOnly cookies + CSRF tokens for improved security**
 
-### Rationale for Current Choice
-- Admin portal is internal-facing with controlled access
-- sessionStorage provides reasonable balance of security and UX
-- Auto-cleanup on tab close reduces token exposure window
-- Simple implementation appropriate for current scope
+### Security Best Practices
+- Implement Content Security Policy (CSP) to mitigate XSS risks
+- Regular security audits to identify potential XSS vulnerabilities
+- Consider migrating to httpOnly cookies as soon as possible
+- Minimize the scope and privileges of stored JWTs
