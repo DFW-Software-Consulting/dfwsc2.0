@@ -3,6 +3,7 @@ import Toast from "./Toast";
 import AdminLogin from "./AdminLogin";
 import CreateClientForm from "./CreateClientForm";
 import ClientList from "./ClientList";
+import logger from "../../utils/logger";
 
 export default function AdminDashboard() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -60,7 +61,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       setClients(data);
     } catch (err) {
-      console.error("Error fetching clients:", err);
+      logger.error("Error fetching clients:", err);
       setClientsError(err.message);
     } finally {
       setClientsLoading(false);
