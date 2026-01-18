@@ -30,6 +30,13 @@ The application runs in Docker containers as defined in `docker-compose.yml`:
 3. Changes to backend code are reflected in the Docker container
 4. Database migrations should be run through the Docker environment
 
+## Testing
+### Frontend Tests
+- Run frontend tests: `cd front && npm test` or `cd front && npx vitest`
+- Test files are located in `front/src/__tests__`
+- Configuration is in `front/vitest.config.js`
+- Setup file is in `front/src/test/setup.js`
+
 ## Key Endpoints
 - `GET /api/v1/health` - Health check
 - `POST /api/v1/auth/login` - Admin authentication
