@@ -75,7 +75,7 @@ export default function ClientList({
         setLoadingClientId(null);
       }
     },
-    [onStatusChange, showToast]
+    [onStatusChange, showToast, onSessionExpired]
   );
 
   const handleStatusToggle = useCallback(
