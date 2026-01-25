@@ -73,6 +73,14 @@ Major feature branch that builds out a complete Stripe payment portal with:
 9. **Token in sessionStorage** (`AdminLogin.jsx:258`)
    - sessionStorage is fine for SPA, but document the security trade-off vs httpOnly cookies
 
+10. **Outdated onboarding testing docs** (`backend/documentation/docs/testing.md:24-31`)
+    - Docs reference `/connect/onboard` and `x-api-role` header, but onboarding now uses `/api/v1/accounts` or `/api/v1/onboard-client/initiate` with JWT auth
+    - As written, the documented curl example will fail
+
+11. **Webhook test script uses wrong path** (`backend/test-stripe-webhooks.sh:22`)
+    - Script forwards to `/webhooks/stripe`, but the server registers `/api/v1/webhooks/stripe`
+    - Local webhook replay will miss the route unless the path is corrected
+
 ---
 
 ## Security Assessment

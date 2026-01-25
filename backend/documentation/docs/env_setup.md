@@ -1,6 +1,6 @@
 # Environment Setup
 
-Create a `.env` file at the project root based on the template below. These variables power Fastify configuration, Stripe access, database connectivity, and SMTP email delivery.
+Create `backend/.env` based on `backend/.env.example`. These variables power Fastify configuration, Stripe access, database connectivity, and SMTP email delivery.
 
 ```env
 # Stripe credentials
@@ -36,6 +36,14 @@ JWT_EXPIRY=1h
 
 # Optional shared secret for extra admin authentication (deprecated, use JWT auth above)
 # ADMIN_API_KEY=change-me
+```
+
+## Frontend Environment
+
+The React app uses `front/.env` with Vite-prefixed variables. At minimum, set:
+
+```env
+VITE_API_URL=http://localhost:4242/api/v1
 ```
 
 ## Admin Authentication
@@ -92,6 +100,7 @@ JWT_EXPIRY=1h
 ## Notes
 - `USE_CHECKOUT` accepts only `true` or `false`; invalid values will halt server startup.
 - `FRONTEND_ORIGIN` should match the origin serving your frontend so CORS and redirect URLs align.
+- `API_BASE_URL` is required for the `/app-config.js` helper route; set it if that route is used.
 - Ensure `DATABASE_URL` points to a PostgreSQL instance accessible from the server environment.
 - Commit `.env` to secrets storage (e.g., 1Password, Vault) rather than the repository.
 - Admin authentication requires all three variables (`ADMIN_USERNAME`, `ADMIN_PASSWORD`, `JWT_SECRET`) to be set; the server will fail to start if any are missing.
@@ -107,7 +116,7 @@ JWT_EXPIRY=1h
 | Production | `https://your-frontend-domain.com` | `https://your-api-domain.com` | Live (`sk_live_...`) | Use `.env.prod` |
 
 ## Verification Steps
-1. Copy the template: `cp env.example .env` and edit values.
+1. Copy the template: `cp backend/.env.example backend/.env` and edit values.
 2. Run `npm run dev`; the server logs masked env values if everything is configured.
 3. Execute `npm test` to confirm the app can boot and exercise routes with the provided configuration.
 4. Test admin authentication:
