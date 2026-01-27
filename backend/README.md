@@ -31,6 +31,8 @@ Create a `.env` file based on `env.example`.
 | `ADMIN_PASSWORD` | ✅ | Password for admin authentication. Supports plain text (dev) or bcrypt hash (production). |
 | `JWT_SECRET` | ✅ | Secret key for signing JWT tokens. Must be minimum 32 characters. Generate with: `openssl rand -base64 32` |
 | `JWT_EXPIRY` | ❌ | JWT token expiration time. Defaults to `1h`. Supported formats: `1h`, `30m`, `7d`, `24h`. |
+| `ALLOW_ADMIN_SETUP` | ❌ | Set to `true` to enable browser-based admin credential setup. Only works when `ADMIN_PASSWORD` is not set. |
+| `ADMIN_SETUP_TOKEN` | ❌ | Optional secret token required in `X-Setup-Token` header when using the setup endpoint. Adds extra protection. |
 
 ## Database Schema
 
@@ -48,6 +50,8 @@ The database only stores the connected account mapping and raw webhook payloads.
 | --- | --- | --- |
 | `GET /api/v1/health` | Health check. | Public |
 | `POST /api/v1/auth/login` | Admin login endpoint. Returns JWT token for authentication. Rate limited to 5 requests per 15 minutes. | Public |
+| `GET /api/v1/auth/setup/status` | Check if admin setup is allowed. Returns `{ setupAllowed, adminConfigured }`. | Public |
+| `POST /api/v1/auth/setup` | One-time admin credential setup. Only works when `ALLOW_ADMIN_SETUP=true` and no admin is configured. | Public |
 | `GET /api/v1/clients` | List all clients with their status and Stripe account information. | Admin (JWT) |
 | `PATCH /api/v1/clients/:id` | Update client status (`active` or `inactive`). Soft-deletes clients without removing from database. | Admin (JWT) |
 | `POST /api/v1/accounts` | Create a client record and onboarding token. | Admin |
@@ -117,3 +121,42 @@ make test-stripe
 
 Update the `CONNECTED_ACCT` placeholder in `test-stripe-events.sh` with a real test-mode connected account ID before
 triggering the connected account event set.
+
+## Admin Credential Recovery
+
+If you lose access to your admin credentials or need to set up admin access on a new deployment without CLI access, use the browser-based setup flow.
+
+### Recovery Steps
+
+1. **Enable setup mode** by setting the environment variable:
+   ```
+   ALLOW_ADMIN_SETUP=true
+   ```
+   Optionally, add a setup token for extra security:
+   ```
+   ADMIN_SETUP_TOKEN=your-secret-token
+   ```
+
+2. **Remove or unset the existing `ADMIN_PASSWORD`** variable (the setup endpoint only works when no admin password is configured).
+
+3. **Restart your application** to pick up the environment changes.
+
+4. **Navigate to the admin page** (`/admin`) in your browser. You'll see a setup form instead of the login form.
+
+5. **Create your admin credentials** by entering a username and password (minimum 8 characters).
+
+6. **Copy the generated credentials**. The setup form will display:
+   - `ADMIN_USERNAME=<your-username>`
+   - `ADMIN_PASSWORD=<bcrypt-hash>`
+
+7. **Update your environment** with the new credentials.
+
+8. **Remove or set `ALLOW_ADMIN_SETUP=false`** and restart your application.
+
+### Security Considerations
+
+- The setup endpoint is **rate limited** to 3 requests per 15 minutes.
+- Setup can only be used **once per server session**. After a successful setup, the endpoint returns 403 until the server restarts.
+- The `ADMIN_SETUP_TOKEN` header protection is optional but recommended for production deployments.
+- **Never leave `ALLOW_ADMIN_SETUP=true` in production** after completing setup.
+- The generated password hash is bcrypt, which is secure for production use.
