@@ -201,6 +201,37 @@ describe('Connect Callback State Validation Integration', () => {
     await db.delete(clients).where(eq(clients.id, clientId));
   });
 
+  it('should reject request without client_id parameter', async () => {
+    const testStripeAccount = 'acct_test123456789';
+    const state = 'state_' + randomUUID().replace(/-/g, '');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/connect/callback?account=${testStripeAccount}&state=${state}`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'Missing client_id parameter.'
+    });
+  });
+
+  it('should reject request with invalid account parameter format', async () => {
+    const clientId = randomUUID();
+    const invalidAccount = 'invalid_account';
+    const state = 'state_' + randomUUID().replace(/-/g, '');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=${invalidAccount}&state=${state}`,
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({
+      error: 'Invalid account parameter.'
+    });
+  });
+
   it('should reject request with invalid state parameter', async () => {
     const clientId = randomUUID();
     const testStripeAccount = 'acct_test123456789';

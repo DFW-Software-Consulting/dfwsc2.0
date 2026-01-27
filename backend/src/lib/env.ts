@@ -48,14 +48,17 @@ export function validateEnv(): Record<string, string> {
     }
   }
 
-  // Check conditionally required vars (only required if ALLOW_ADMIN_SETUP is not true)
+  // Check conditionally required vars (required unless setup is allowed AND no admin creds exist)
   const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === 'true';
+  const adminUsername = process.env.ADMIN_USERNAME;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  const mustRequireAdminCreds = !allowAdminSetup || !!adminUsername || !!adminPassword;
   for (const key of CONDITIONALLY_REQUIRED_VARS) {
     const value = process.env[key];
     if (value) {
       env[key] = value;
-    } else if (!allowAdminSetup) {
-      // Only required if admin setup mode is not enabled
+    } else if (mustRequireAdminCreds) {
+      // Require both creds when setup is off or either cred is present
       missing.push(key);
     }
   }
