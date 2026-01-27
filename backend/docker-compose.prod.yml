@@ -8,7 +8,7 @@ volumes:
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     container_name: stripe-portal-db
     env_file:
       - .env.prod                       # <-- ensure POSTGRES_* come from here

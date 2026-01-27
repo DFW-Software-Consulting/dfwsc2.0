@@ -5,7 +5,7 @@ Minimal Stripe Connect API for onboarding Express accounts, creating payments wi
 ## Requirements
 
 - Node.js v18+
-- PostgreSQL 14+
+- PostgreSQL 17
 - Stripe account with Connect enabled
 
 ## Environment Variables

@@ -40,7 +40,7 @@ dfwsc2.0/
 - **Node.js 20** - Runtime
 - **Fastify 5** - Web framework
 - **TypeScript** - Type safety
-- **PostgreSQL 16** - Database
+- **PostgreSQL 17** - Database
 - **Drizzle ORM** - Type-safe database toolkit
 - **Stripe API** - Payment processing (Connect)
 - **Nodemailer** - Email delivery
@@ -49,7 +49,7 @@ dfwsc2.0/
 
 ### Prerequisites
 - Node.js 20+
-- PostgreSQL 14+
+- PostgreSQL 17
 - npm or yarn
 
 ### Setup

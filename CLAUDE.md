@@ -5,7 +5,7 @@ This is a payment portal for DFW Software Consulting clients that integrates wit
 
 ## Architecture
 - **Backend**: Node.js/TypeScript with Fastify framework
-- **Database**: PostgreSQL 14+
+- **Database**: PostgreSQL 17
 - **Frontend**: React application (in `/front` directory)
 - **Containerization**: Docker/Docker Compose
 - **ORM**: Drizzle ORM for database operations
