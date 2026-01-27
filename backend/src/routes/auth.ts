@@ -8,6 +8,11 @@ interface LoginRequest {
   password: string;
 }
 
+interface SetupRequest {
+  username: string;
+  password: string;
+}
+
 /**
  * Validates that ADMIN_PASSWORD is bcrypt-hashed in production mode.
  * Throws an error if NODE_ENV=production and password is plaintext.
@@ -65,6 +70,74 @@ export default async function authRoutes(fastify: FastifyInstance) {
       adminConfigured,
     });
   });
+
+  // POST /auth/setup - One-time admin credential setup
+  fastify.post(
+    '/auth/setup',
+    {
+      preHandler: rateLimit({ max: 3, windowMs: 15 * 60 * 1000 }), // 3 requests per 15 minutes
+    },
+    async (request, reply) => {
+      const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === 'true';
+      const adminConfigured = !!process.env.ADMIN_PASSWORD;
+
+      // Check if setup is allowed
+      if (!allowAdminSetup) {
+        return reply.code(403).send({ error: 'Admin setup is not enabled' });
+      }
+
+      if (adminConfigured) {
+        return reply.code(403).send({ error: 'Admin is already configured' });
+      }
+
+      if (setupUsed) {
+        return reply.code(403).send({ error: 'Setup has already been used this session' });
+      }
+
+      // Validate setup token if configured
+      const setupToken = process.env.ADMIN_SETUP_TOKEN;
+      if (setupToken) {
+        const providedToken = request.headers['x-setup-token'];
+        if (providedToken !== setupToken) {
+          fastify.log.warn('Invalid setup token provided');
+          return reply.code(401).send({ error: 'Invalid setup token' });
+        }
+      }
+
+      const { username, password } = request.body as SetupRequest;
+
+      // Validate request body
+      if (!username || !password) {
+        return reply.code(400).send({ error: 'Username and password are required' });
+      }
+
+      if (password.length < 8) {
+        return reply.code(400).send({ error: 'Password must be at least 8 characters' });
+      }
+
+      // Generate bcrypt hash
+      const saltRounds = 10;
+      const passwordHash = await bcrypt.hash(password, saltRounds);
+
+      // Mark setup as used for this session
+      setupUsed = true;
+
+      fastify.log.info({ username }, 'Admin credentials generated via setup endpoint');
+
+      return reply.code(200).send({
+        username,
+        passwordHash,
+        instructions: [
+          '1. Copy the credentials above',
+          '2. Add to your environment configuration:',
+          `   ADMIN_USERNAME=${username}`,
+          `   ADMIN_PASSWORD=${passwordHash}`,
+          '3. Remove or set ALLOW_ADMIN_SETUP=false',
+          '4. Restart your application',
+        ],
+      });
+    },
+  );
 
   // POST /auth/login - Admin login endpoint
   fastify.post(
