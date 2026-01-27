@@ -7,6 +7,7 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [setupTokenValue, setSetupTokenValue] = useState(setupToken || "");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -49,8 +50,8 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
           "Content-Type": "application/json",
         };
 
-        if (setupToken) {
-          headers["X-Setup-Token"] = setupToken;
+        if (setupTokenValue.trim()) {
+          headers["X-Setup-Token"] = setupTokenValue.trim();
         }
 
         const res = await fetch(
@@ -83,7 +84,14 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
         setLoading(false);
       }
     },
-    [username, password, confirmPassword, validateForm, showToast, setupToken]
+    [
+      username,
+      password,
+      confirmPassword,
+      setupTokenValue,
+      validateForm,
+      showToast,
+    ]
   );
 
   const handleCopyCredentials = useCallback(async () => {
@@ -168,6 +176,30 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
       </div>
 
       <form onSubmit={handleSubmit}>
+        <div className="mb-4">
+          <label
+            htmlFor="setupToken"
+            className="block text-sm font-semibold text-gray-200 mb-2"
+          >
+            Setup Token (optional)
+          </label>
+          <input
+            id="setupToken"
+            type="text"
+            value={setupTokenValue}
+            onChange={(e) => setSetupTokenValue(e.target.value)}
+            placeholder="Enter setup token if required"
+            className="block w-full rounded-md border border-gray-600 bg-gray-900/50
+                       px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
+                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            disabled={loading}
+            autoComplete="one-time-code"
+          />
+          <p className="mt-1 text-xs text-gray-400">
+            Required only when ADMIN_SETUP_TOKEN is enabled on the server.
+          </p>
+        </div>
+
         <div className="mb-4">
           <label
             htmlFor="setupUsername"

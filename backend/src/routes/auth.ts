@@ -42,6 +42,7 @@ export function validateAdminPasswordConfig(): boolean {
 
 // Runtime flag to track if setup has been used (resets on container restart)
 let setupUsed = false;
+let setupInProgress = false;
 
 // For testing purposes only - reset the setup state
 export function resetSetupState(): void {
@@ -99,48 +100,67 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return reply.code(403).send({ error: 'Setup has already been used this session' });
       }
 
-      // Validate setup token if configured
-      const setupToken = process.env.ADMIN_SETUP_TOKEN;
-      if (setupToken) {
-        const providedToken = request.headers['x-setup-token'];
-        if (providedToken !== setupToken) {
-          fastify.log.warn('Invalid setup token provided');
-          return reply.code(401).send({ error: 'Invalid setup token' });
+      if (setupInProgress) {
+        return reply.code(409).send({ error: 'Setup is already in progress' });
+      }
+
+      // Block concurrent setup attempts after passing the one-time guard.
+      setupInProgress = true;
+
+      try {
+        // Validate setup token if configured
+        const setupToken = process.env.ADMIN_SETUP_TOKEN;
+        if (setupToken) {
+          const providedToken = request.headers['x-setup-token'];
+          if (providedToken !== setupToken) {
+            fastify.log.warn('Invalid setup token provided');
+            return reply.code(401).send({ error: 'Invalid setup token' });
+          }
         }
+
+        const body = (request.body ?? {}) as Partial<SetupRequest>;
+        const { username, password } = body;
+
+        // Validate request body
+        if (!username || !password) {
+          return reply.code(400).send({ error: 'Username and password are required' });
+        }
+
+        if (password.length < 8) {
+          return reply.code(400).send({ error: 'Password must be at least 8 characters' });
+        }
+
+        let passwordHash: string;
+        try {
+          // Generate bcrypt hash
+          const saltRounds = 10;
+          passwordHash = await bcrypt.hash(password, saltRounds);
+
+          // Mark setup as used for this session
+          setupUsed = true;
+        } catch (error) {
+          fastify.log.error({ error }, 'Error generating admin password hash during setup');
+          return reply.code(500).send({ error: 'Setup failed' });
+        }
+
+        fastify.log.info({ username }, 'Admin credentials generated via setup endpoint');
+
+        return reply.code(200).send({
+          username,
+          passwordHash,
+          instructions: [
+            '1. Copy the credentials above',
+            '2. Add to your environment configuration:',
+            `   ADMIN_USERNAME=${username}`,
+            `   ADMIN_PASSWORD=${passwordHash}`,
+            '3. Remove or set ALLOW_ADMIN_SETUP=false',
+            '4. Restart your application',
+          ],
+        });
+      } finally {
+        // Release in-progress lock even if the request fails early.
+        setupInProgress = false;
       }
-
-      const { username, password } = request.body as SetupRequest;
-
-      // Validate request body
-      if (!username || !password) {
-        return reply.code(400).send({ error: 'Username and password are required' });
-      }
-
-      if (password.length < 8) {
-        return reply.code(400).send({ error: 'Password must be at least 8 characters' });
-      }
-
-      // Generate bcrypt hash
-      const saltRounds = 10;
-      const passwordHash = await bcrypt.hash(password, saltRounds);
-
-      // Mark setup as used for this session
-      setupUsed = true;
-
-      fastify.log.info({ username }, 'Admin credentials generated via setup endpoint');
-
-      return reply.code(200).send({
-        username,
-        passwordHash,
-        instructions: [
-          '1. Copy the credentials above',
-          '2. Add to your environment configuration:',
-          `   ADMIN_USERNAME=${username}`,
-          `   ADMIN_PASSWORD=${passwordHash}`,
-          '3. Remove or set ALLOW_ADMIN_SETUP=false',
-          '4. Restart your application',
-        ],
-      });
     },
   );
 
