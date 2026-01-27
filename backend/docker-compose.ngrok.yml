@@ -1,0 +1,10 @@
+services:
+  ngrok:
+    image: wernight/ngrok
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+      NGROK_PORT: app:3000
+    ports:
+      - "4040:4040"   # ngrok local web UI
+    depends_on:
+      - app

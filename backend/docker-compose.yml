@@ -1,0 +1,47 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    image: ${PROJECT_NAME:-stripe-portal}:dev
+    working_dir: /app
+    env_file:
+      - .env
+    ports:
+      - "4242:4242"
+    depends_on:
+      - db
+    volumes:
+      - ./:/app
+      - app_node_modules:/app/node_modules
+    command: npm run dev
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-stripe_portal}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    environment:
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_DEVICE_NAME: ${STRIPE_DEVICE_NAME:-dfwsc-dev}
+    command: listen --forward-to app:3000/webhooks/stripe
+    depends_on:
+      - app
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "8025:8025"
+    # point SMTP_HOST to mailhog and SMTP_PORT=1025 in .env for dev emailing
+
+volumes:
+  pgdata:
+  app_node_modules:

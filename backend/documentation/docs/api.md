@@ -1,0 +1,237 @@
+# API Reference
+
+This reference aggregates the Fastify routes exposed by the Stripe Payment Portal. Each section links back to the deeper module documentation under `documentation/src/routes/`.
+
+## Authentication & Headers
+
+### Client API Key (Client Authentication)
+- `x-api-key`: Required for client-specific endpoints like `/payments/create`.
+- The key is returned once upon client creation via `/accounts`.
+- This key authenticates the client and binds the request to them.
+
+### JWT Bearer Token (Admin Authentication)
+- `Authorization`: Required for admin-protected routes. Format: `Bearer <jwt_token>`
+- Obtain token via `POST /api/v1/auth/login` endpoint
+- Token expires based on `JWT_EXPIRY` environment variable (default: 1h)
+- Include header in all admin-only endpoints (client list, client status management)
+
+### Other Headers
+- `Idempotency-Key`: recommended/required on all POST routes that mutate Stripe state.
+
+## Response Conventions
+
+### Error Format
+Most error responses follow this shape:
+```json
+{ "error": "Human-readable message" }
+```
+
+Validation errors may include additional details depending on the route. Always check the HTTP status code first.
+
+### Pagination
+Endpoints that proxy Stripe list responses use Stripe-style pagination:
+- `limit` (1-100) controls page size.
+- `starting_after` and `ending_before` provide cursor-based paging.
+- Responses include `{ data, hasMore }` (or `{ data, has_more }` when returned directly from Stripe).
+
+## Endpoints
+
+### Admin Authentication (`src/routes/auth.ts`)
+
+#### POST `/api/v1/auth/login`
+Authenticates an admin user and returns a JWT token for accessing protected endpoints.
+
+**Authentication**: None (public endpoint)
+
+**Rate Limiting**: 5 requests per 15 minutes per IP address
+
+**Request Body**:
+```json
+{
+  "username": "admin",
+  "password": "your_password"
+}
+```
+
+**Success Response** (200 OK):
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "expiresIn": "1h"
+}
+```
+
+**Error Responses**:
+- `400 Bad Request`: Missing username or password
+  ```json
+  { "error": "Username and password are required" }
+  ```
+- `401 Unauthorized`: Invalid credentials
+  ```json
+  { "error": "Invalid credentials" }
+  ```
+- `429 Too Many Requests`: Rate limit exceeded (5 attempts per 15 minutes)
+  ```json
+  { "error": "Rate limit exceeded" }
+  ```
+- `500 Internal Server Error`: Server configuration error or JWT generation failure
+  ```json
+  { "error": "Server configuration error" }
+  ```
+
+**Notes**:
+- Password can be plain text (development) or bcrypt hash (production)
+- Failed login attempts are logged with username for security monitoring
+- Token must be included in `Authorization: Bearer <token>` header for subsequent admin requests
+
+---
+
+### Client Management (`src/routes/clients.ts`)
+
+#### GET `/api/v1/clients`
+Retrieves a list of all clients in the system.
+
+**Authentication**: Required (JWT Bearer token)
+
+**Headers**:
+```
+Authorization: Bearer <jwt_token>
+```
+
+**Query Parameters**: None
+
+**Success Response** (200 OK):
+```json
+[
+  {
+    "id": "client_abc123",
+    "name": "Acme Corporation",
+    "email": "billing@acme.com",
+    "stripeAccountId": "acct_1234567890",
+    "status": "active",
+    "createdAt": "2024-01-15T10:30:00.000Z"
+  },
+  {
+    "id": "client_def456",
+    "name": "Widget Inc",
+    "email": "finance@widget.com",
+    "stripeAccountId": "acct_0987654321",
+    "status": "inactive",
+    "createdAt": "2024-02-20T14:45:00.000Z"
+  }
+]
+```
+
+**Error Responses**:
+- `401 Unauthorized`: Missing or invalid JWT token
+  ```json
+  { "error": "Unauthorized" }
+  ```
+- `500 Internal Server Error`: Database query failure
+  ```json
+  { "error": "Internal server error" }
+  ```
+
+---
+
+#### PATCH `/api/v1/clients/:id`
+Updates the status of a specific client (soft delete/activate).
+
+**Authentication**: Required (JWT Bearer token)
+
+**Headers**:
+```
+Authorization: Bearer <jwt_token>
+```
+
+**URL Parameters**:
+- `id` (string, required): Client ID to update
+
+**Request Body**:
+```json
+{
+  "status": "active" | "inactive"
+}
+```
+
+**Success Response** (200 OK):
+```json
+{
+  "id": "client_abc123",
+  "name": "Acme Corporation",
+  "email": "billing@acme.com",
+  "stripeAccountId": "acct_1234567890",
+  "status": "inactive",
+  "createdAt": "2024-01-15T10:30:00.000Z",
+  "updatedAt": "2024-03-10T16:20:00.000Z"
+}
+```
+
+**Error Responses**:
+- `400 Bad Request`: Invalid status value
+  ```json
+  { "error": "Invalid status value. Must be \"active\" or \"inactive\"." }
+  ```
+- `401 Unauthorized`: Missing or invalid JWT token
+  ```json
+  { "error": "Unauthorized" }
+  ```
+- `404 Not Found`: Client ID does not exist
+  ```json
+  { "error": "Client not found." }
+  ```
+- `500 Internal Server Error`: Database update failure
+  ```json
+  { "error": "Internal server error" }
+  ```
+
+**Notes**:
+- Setting status to `inactive` soft-deletes the client (does not remove from database)
+- `updatedAt` timestamp is automatically set to current time on status change
+- Client remains visible in client list regardless of status
+
+---
+
+### Connect Onboarding (`src/routes/connect.ts`)
+- `POST /accounts`
+  - Body: `{ name, email }`.
+  - Headers: `Authorization: Bearer <jwt_token>`.
+  - Response: `{ name, onboardingToken, onboardingUrlHint, apiKey, clientId }`.
+  - Notes: `apiKey` is returned once and stored hashed at rest; migrate existing keys using `backend/src/lib/migrate-api-keys.ts`.
+- `POST /onboard-client/initiate`
+  - Body: `{ name, email }`.
+  - Headers: `Authorization: Bearer <jwt_token>`.
+  - Response: `{ message, clientId, apiKey }`.
+- `GET /onboard-client`
+  - Query: `token`.
+  - Response: `{ url }` (Stripe onboarding link).
+- `GET /connect/callback`
+  - Query: `client_id`, `state`.
+  - Response: Redirect to `${FRONTEND_ORIGIN}/onboarding-success`.
+
+### Payments (`src/routes/payments.ts`)
+- `POST /payments/create`
+  - PaymentIntent mode: `{ amount, currency, description?, metadata? }`.
+  - Checkout mode: `{ lineItems, description?, metadata?, amount? }`.
+  - **Note**: The `applicationFeeAmount` is configured on the server via the `DEFAULT_PROCESS_FEE_CENTS` environment variable and is not accepted in the request body.
+  - Headers: `x-api-key: <client_api_key>`, `Idempotency-Key`.
+  - Response: PaymentIntent `{ clientSecret, paymentIntentId }` or Checkout `{ url }`.
+
+### Reports (`src/routes/payments.ts`)
+- `GET /reports/payments`
+  - Query: `clientId` (required), `limit?`, `starting_after?`, `ending_before?`.
+  - Headers: `x-api-role: admin`.
+  - Response: `{ clientId, data, hasMore }` with Stripe pagination metadata.
+
+### Webhooks (`src/routes/webhooks.ts`)
+- `POST /webhooks/stripe`
+  - Headers: `Stripe-Signature` from Stripe.
+  - Body: raw JSON webhook payload.
+  - Response: `{ received: true }` after storing the event.
+
+## Swagger UI
+- Available at `/docs` when the server is running. Mirrors the same routes above for quick exploration.
+
+## Testing Shortcuts
+- Run `npm test` to execute Vitest suites that exercise all endpoints with mocked Stripe calls.
+- Use `curl` examples in the route-specific docs and pair them with `stripe listen --forward-to localhost:4242/webhooks/stripe` for full flow validation.

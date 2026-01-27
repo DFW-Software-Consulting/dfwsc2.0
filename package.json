@@ -1,0 +1,26 @@
+{
+  "name": "dfwsc-monorepo",
+  "version": "1.0.0",
+  "description": "DFW Software Consulting - Full-stack payment portal with React frontend and Fastify backend",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix front",
+    "dev:backend": "npm run dev --prefix backend",
+    "build": "npm run build:frontend && npm run build:backend",
+    "build:frontend": "cd front && npm install && npm run build",
+    "build:backend": "cd backend && npm install && npm run build:server",
+    "start": "npm run start --prefix backend",
+    "install:all": "npm install --prefix front && npm install --prefix backend",
+    "test": "npm run test --prefix backend",
+    "db:generate": "npm run db:generate --prefix backend",
+    "db:migrate": "npm run db:migrate --prefix backend"
+  },
+  "keywords": ["stripe", "payment", "portal", "react", "fastify"],
+  "author": "DFW Software Consulting",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DFW-Software-Consulting/dfwsc2.0.git"
+  }
+}
