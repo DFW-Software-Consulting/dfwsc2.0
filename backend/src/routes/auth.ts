@@ -8,7 +8,43 @@ interface LoginRequest {
   password: string;
 }
 
+/**
+ * Validates that ADMIN_PASSWORD is bcrypt-hashed in production mode.
+ * Throws an error if NODE_ENV=production and password is plaintext.
+ * Returns true if validation passes, false if warning-only (dev mode).
+ */
+export function validateAdminPasswordConfig(): boolean {
+  const nodeEnv = process.env.NODE_ENV;
+  const adminPassword = process.env.ADMIN_PASSWORD;
+
+  if (!adminPassword) {
+    // No password set - this will be caught during login attempt
+    return true;
+  }
+
+  const isBcryptHash = /^\$2[aby]\$/.test(adminPassword);
+
+  if (nodeEnv === 'production' && !isBcryptHash) {
+    throw new Error(
+      'SECURITY ERROR: ADMIN_PASSWORD must be a bcrypt hash in production mode. ' +
+      'Plaintext passwords are not allowed. Generate a hash with: ' +
+      'node -e "console.log(require(\'bcryptjs\').hashSync(\'your-password\', 10))"'
+    );
+  }
+
+  return isBcryptHash;
+}
+
 export default async function authRoutes(fastify: FastifyInstance) {
+  // Validate admin password configuration on route registration
+  const isHashed = validateAdminPasswordConfig();
+  if (!isHashed && process.env.ADMIN_PASSWORD) {
+    fastify.log.warn(
+      'DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. ' +
+      'This is insecure and will cause startup failure in production mode. ' +
+      'Please use a bcrypt hash instead.'
+    );
+  }
   // POST /auth/login - Admin login endpoint
   fastify.post(
     '/auth/login',
