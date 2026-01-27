@@ -32,9 +32,6 @@ RUN mkdir -p /app/public && chown -R appuser:appgroup /app/public
 RUN apk add --no-cache curl
 
 USER appuser
-HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
-  CMD-SHELL curl -fsS "http://localhost:${PORT:-4242}/api/v1/health" || exit 1
-
 CMD ["npm", "run", "start"]
 
 FROM node:20-alpine AS development
@@ -55,7 +52,4 @@ RUN mkdir -p /app/public && chown -R appuser:appgroup /app/public
 RUN apk add --no-cache curl
 
 USER appuser
-HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
-  CMD-SHELL curl -fsS "http://localhost:${PORT:-4242}/api/v1/health" || exit 1
-
 CMD ["npm", "run", "start"]
