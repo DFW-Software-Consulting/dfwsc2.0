@@ -18,7 +18,7 @@ const REQUIRED_ENV_VARS = [
 
 const MASK_KEEP = 6;
 
-const OPTIONAL_ENV_VARS = ['API_BASE_URL', 'DEFAULT_PROCESS_FEE_CENTS', 'SMTP_FROM', 'ADMIN_API_KEY'];
+const OPTIONAL_ENV_VARS = ['API_BASE_URL', 'DEFAULT_PROCESS_FEE_CENTS', 'SMTP_FROM', 'ADMIN_API_KEY', 'ALLOW_ADMIN_SETUP', 'ADMIN_SETUP_TOKEN'];
 
 export function validateEnv(): Record<string, string> {
   // Load dotenv only when validation is called
