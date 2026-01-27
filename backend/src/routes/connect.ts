@@ -8,6 +8,8 @@ import { rateLimit } from '../lib/rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import { sendMail } from '../lib/mailer';
+import validator from 'validator';
+import he from 'he';
 
 function resolveServerBaseUrl(request: FastifyRequest): string {
   if (process.env.API_BASE_URL) {
@@ -120,7 +122,7 @@ async function createClientWithOnboardingToken(
     throw Object.assign(new Error('Name is required and must be a non-empty string'), { statusCode: 400 });
   }
 
-  if (!email || typeof email !== 'string' || !email.includes('@')) {
+  if (!email || typeof email !== 'string' || !validator.isEmail(email)) {
     throw Object.assign(new Error('Valid email is required'), { statusCode: 400 });
   }
 
@@ -203,9 +205,10 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const onboardingUrl = `${frontendOrigin}/onboard?token=${token}`;
 
+      const safeName = he.encode(name);
       const mailHtml = `
         <h1>Welcome to DFW Software Consulting</h1>
-        <p>Hi ${name},</p>
+        <p>Hi ${safeName},</p>
         <p>Click the link below to start your Stripe onboarding process.</p>
         <a href="${onboardingUrl}">Onboard Now</a>
         <p>If you did not request this, please ignore this email.</p>
