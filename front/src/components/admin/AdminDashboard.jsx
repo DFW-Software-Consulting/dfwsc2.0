@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 import Toast from "./Toast";
 import AdminLogin from "./AdminLogin";
+import AdminSetup from "./AdminSetup";
 import CreateClientForm from "./CreateClientForm";
 import ClientList from "./ClientList";
 import logger from "../../utils/logger";
 
 export default function AdminDashboard() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [setupAllowed, setSetupAllowed] = useState(false);
+  const [statusLoading, setStatusLoading] = useState(true);
   const [clients, setClients] = useState([]);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientsError, setClientsError] = useState("");
@@ -68,13 +71,38 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  const checkSetupStatus = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL}/auth/setup/status`
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        setSetupAllowed(data.setupAllowed);
+      }
+    } catch (err) {
+      logger.error("Error checking setup status:", err);
+    } finally {
+      setStatusLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const storedToken = sessionStorage.getItem("adminToken");
     if (storedToken) {
       setIsLoggedIn(true);
+      setStatusLoading(false);
       fetchClients();
+    } else {
+      checkSetupStatus();
     }
-  }, [fetchClients]);
+  }, [fetchClients, checkSetupStatus]);
+
+  const handleSetupComplete = useCallback(() => {
+    setSetupAllowed(false);
+    checkSetupStatus();
+  }, [checkSetupStatus]);
 
   const handleLoginSuccess = useCallback(() => {
     setIsLoggedIn(true);
@@ -101,9 +129,24 @@ export default function AdminDashboard() {
   }, []);
 
   if (!isLoggedIn) {
+    if (statusLoading) {
+      return (
+        <div className="flex justify-center items-center py-8">
+          <div className="text-gray-400">Loading...</div>
+        </div>
+      );
+    }
+
     return (
       <>
-        <AdminLogin onLoginSuccess={handleLoginSuccess} showToast={showToast} />
+        {setupAllowed ? (
+          <AdminSetup
+            onSetupComplete={handleSetupComplete}
+            showToast={showToast}
+          />
+        ) : (
+          <AdminLogin onLoginSuccess={handleLoginSuccess} showToast={showToast} />
+        )}
         <Toast
           show={toast.show}
           message={toast.message}
