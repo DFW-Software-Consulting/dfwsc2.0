@@ -43,6 +43,11 @@ export function validateAdminPasswordConfig(): boolean {
 // Runtime flag to track if setup has been used (resets on container restart)
 let setupUsed = false;
 
+// For testing purposes only - reset the setup state
+export function resetSetupState(): void {
+  setupUsed = false;
+}
+
 export default async function authRoutes(fastify: FastifyInstance) {
   // Validate admin password configuration on route registration
   const isHashed = validateAdminPasswordConfig();

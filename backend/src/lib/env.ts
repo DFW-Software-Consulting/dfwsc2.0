@@ -11,9 +11,13 @@ const REQUIRED_ENV_VARS = [
   'SMTP_PORT',
   'SMTP_USER',
   'SMTP_PASS',
+  'JWT_SECRET',
+];
+
+// These vars are required UNLESS ALLOW_ADMIN_SETUP=true (for initial setup flow)
+const CONDITIONALLY_REQUIRED_VARS = [
   'ADMIN_USERNAME',
   'ADMIN_PASSWORD',
-  'JWT_SECRET',
 ];
 
 const MASK_KEEP = 6;
@@ -41,6 +45,18 @@ export function validateEnv(): Record<string, string> {
     const value = process.env[key];
     if (value) {
       env[key] = value;
+    }
+  }
+
+  // Check conditionally required vars (only required if ALLOW_ADMIN_SETUP is not true)
+  const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === 'true';
+  for (const key of CONDITIONALLY_REQUIRED_VARS) {
+    const value = process.env[key];
+    if (value) {
+      env[key] = value;
+    } else if (!allowAdminSetup) {
+      // Only required if admin setup mode is not enabled
+      missing.push(key);
     }
   }
 
