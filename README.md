@@ -21,7 +21,7 @@ dfwsc2.0/
 │   │   ├── lib/             # Utilities (Stripe, mailer, auth, etc.)
 │   │   └── db/              # Database schema & client
 │   ├── package.json
-│   └── Dockerfile.api       # API-only Docker image
+│   └── Dockerfile           # API-only Docker image
 │
 ├── docker-compose.yml        # Runs api + web + db + tooling
 ├── package.json              # Root monorepo scripts
