@@ -35,6 +35,9 @@ export function validateAdminPasswordConfig(): boolean {
   return isBcryptHash;
 }
 
+// Runtime flag to track if setup has been used (resets on container restart)
+let setupUsed = false;
+
 export default async function authRoutes(fastify: FastifyInstance) {
   // Validate admin password configuration on route registration
   const isHashed = validateAdminPasswordConfig();
@@ -45,6 +48,24 @@ export default async function authRoutes(fastify: FastifyInstance) {
       'Please use a bcrypt hash instead.'
     );
   }
+
+  // GET /auth/setup/status - Check if admin setup is allowed
+  fastify.get('/auth/setup/status', async (_request, reply) => {
+    const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === 'true';
+    const adminConfigured = !!process.env.ADMIN_PASSWORD;
+
+    // Setup is only allowed if:
+    // 1. ALLOW_ADMIN_SETUP=true
+    // 2. No ADMIN_PASSWORD is set
+    // 3. Setup hasn't been used this session
+    const setupAllowed = allowAdminSetup && !adminConfigured && !setupUsed;
+
+    return reply.code(200).send({
+      setupAllowed,
+      adminConfigured,
+    });
+  });
+
   // POST /auth/login - Admin login endpoint
   fastify.post(
     '/auth/login',
