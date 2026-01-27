@@ -33,7 +33,7 @@ RUN apk add --no-cache curl
 
 USER appuser
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
-  CMD curl -fsS http://localhost:4242/api/v1/health || exit 1
+  CMD-SHELL curl -fsS "http://localhost:${PORT:-4242}/api/v1/health" || exit 1
 
 CMD ["npm", "run", "start"]
 
@@ -56,6 +56,6 @@ RUN apk add --no-cache curl
 
 USER appuser
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
-  CMD curl -fsS http://localhost:4242/api/v1/health || exit 1
+  CMD-SHELL curl -fsS "http://localhost:${PORT:-4242}/api/v1/health" || exit 1
 
 CMD ["npm", "run", "start"]
