@@ -23,8 +23,8 @@ describe('Production password enforcement', () => {
 
   it('should accept bcrypt hash in production mode', () => {
     process.env.NODE_ENV = 'production';
-    // Example bcrypt hash for "test-password"
-    process.env.ADMIN_PASSWORD = '$2a$10$N9qo8uLOickgx2ZMRZoMy.MRMx5wOL/O.M9/N.j9o.x.x.x.x.x.x';
+    // Real bcrypt hash for "test-password"
+    process.env.ADMIN_PASSWORD = '$2a$10$kW7ozp0Y3axIfPJcfHSNjOih8JPC1JLX8KXg5MUl3e4LoVP.Hwn/C';
 
     expect(() => validateAdminPasswordConfig()).not.toThrow();
     expect(validateAdminPasswordConfig()).toBe(true);
