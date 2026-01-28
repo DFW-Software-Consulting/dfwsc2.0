@@ -4,9 +4,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-# Cache buster - Coolify should pass COMMIT_SHA as build arg
-ARG COMMIT_SHA=unknown
-ENV COMMIT_SHA=$COMMIT_SHA
+# Force cache invalidation - this always runs fresh
+ADD "https://worldtimeapi.org/api/timezone/Etc/UTC" /tmp/cachebust
+RUN cat /tmp/cachebust && rm /tmp/cachebust
 
 COPY . .
 
