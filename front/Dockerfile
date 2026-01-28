@@ -4,6 +4,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
+# Cache buster - Coolify should pass COMMIT_SHA as build arg
+ARG COMMIT_SHA=unknown
+ENV COMMIT_SHA=$COMMIT_SHA
+
 COPY . .
 
 ARG VITE_API_URL=/api/v1
