@@ -4,10 +4,6 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-# Force cache invalidation - this always runs fresh
-ADD "https://worldtimeapi.org/api/timezone/Etc/UTC" /tmp/cachebust
-RUN cat /tmp/cachebust && rm /tmp/cachebust
-
 COPY . .
 
 ARG VITE_API_URL=/api/v1
