@@ -264,7 +264,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'Either email or clientId is required.' });
       }
 
-      // Find the client record
       let clientRecord;
       if (clientId) {
         [clientRecord] = await db.select().from(clients).where(eq(clients.id, clientId));
@@ -276,7 +275,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.code(404).send({ error: 'Client not found.' });
       }
 
-      // Find any existing onboarding token for this client
       const [existingToken] = await db
         .select()
         .from(onboardingTokens)
@@ -285,7 +283,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         .limit(1);
 
       if (existingToken) {
-        // Revoke the old token if it's still pending or in_progress
         if (existingToken.status === 'pending' || existingToken.status === 'in_progress') {
           await db
             .update(onboardingTokens)
@@ -299,7 +296,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         }
       }
 
-      // Generate a new token
       const newToken = crypto.randomBytes(32).toString('hex');
       const newOnboardingTokenId = uuidv4();
 

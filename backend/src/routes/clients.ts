@@ -101,7 +101,6 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         return res.status(400).send({ error: 'processingFeeCents must be a non-negative integer.' });
       }
 
-      // Validate groupId exists if provided
       if (groupId != null) {
         const [group] = await db.select().from(clientGroups).where(eq(clientGroups.id, groupId)).limit(1);
         if (!group) {
