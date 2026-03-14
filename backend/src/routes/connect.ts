@@ -367,22 +367,22 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       // Verify that the account parameter matches what we expect for the client
       // This prevents an attacker from providing a different account ID
       const [clientRecord] = await db.select().from(clients).where(eq(clients.id, normalizedClientId));
-      if (!clientRecord) {
-        request.log.warn({ client_id: normalizedClientId, account: normalizedAccount }, 'Client record not found');
-        return reply.code(404).send({ error: 'Client not found.' });
-      }
 
-      const existingStripeAccountId =
-        clientRecord.stripeAccountId ?? (clientRecord as { stripe_account_id?: string }).stripe_account_id ?? null;
+      if (clientRecord) {
+        const existingStripeAccountId =
+          clientRecord.stripeAccountId ?? (clientRecord as { stripe_account_id?: string }).stripe_account_id ?? null;
 
-      // If the client already has a stripeAccountId, verify it matches the one being set
-      if (existingStripeAccountId && existingStripeAccountId !== normalizedAccount) {
-        request.log.warn({
-          client_id: normalizedClientId,
-          account: normalizedAccount,
-          existingAccount: existingStripeAccountId
-        }, 'Attempt to overwrite existing stripeAccountId');
-        return reply.code(400).send({ error: 'Stripe account already linked to this client.' });
+        // If the client already has a stripeAccountId, verify it matches the one being set
+        if (existingStripeAccountId && existingStripeAccountId !== normalizedAccount) {
+          request.log.warn({
+            client_id: normalizedClientId,
+            account: normalizedAccount,
+            existingAccount: existingStripeAccountId
+          }, 'Attempt to overwrite existing stripeAccountId');
+          return reply.code(400).send({ error: 'Stripe account already linked to this client.' });
+        }
+      } else {
+        request.log.warn({ client_id: normalizedClientId, account: normalizedAccount }, 'Client record not found during callback, proceeding with redirect');
       }
 
       // Update both the client's stripeAccountId and the token status atomically

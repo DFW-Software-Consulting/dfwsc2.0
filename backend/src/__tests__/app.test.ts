@@ -373,6 +373,7 @@ const dbMock = {
       },
     }),
   })),
+  transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(dbMock)),
 };
 
 vi.mock('../db/client', () => ({
