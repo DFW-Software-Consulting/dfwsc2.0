@@ -3,7 +3,7 @@ import { stripe } from '../lib/stripe';
 import { db } from '../db/client';
 import { clients, onboardingTokens } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { requireAdminJwt, hashApiKey } from '../lib/auth';
+import { requireAdminJwt, hashApiKey, sha256Lookup } from '../lib/auth';
 import { rateLimit } from '../lib/rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
@@ -129,8 +129,9 @@ async function createClientWithOnboardingToken(
   const clientId = uuidv4();
   const apiKey = generateApiKey();
   const apiKeyHash = await hashApiKey(apiKey);
+  const apiKeyLookup = sha256Lookup(apiKey);
 
-  await db.insert(clients).values({ id: clientId, name, email, apiKeyHash });
+  await db.insert(clients).values({ id: clientId, name, email, apiKeyHash, apiKeyLookup });
 
   const token = crypto.randomBytes(32).toString('hex');
   const onboardingTokenId = uuidv4();
@@ -170,7 +171,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const { clientId, apiKey, token } = await createClientWithOnboardingToken(name, email);
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(',')[0].trim().replace(/\/$/, '');
       if (!frontendOrigin) {
         return reply.code(500).send({ error: 'FRONTEND_ORIGIN is not configured.' });
       }
@@ -198,7 +199,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const { clientId, apiKey, token } = await createClientWithOnboardingToken(name, email);
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(',')[0].trim().replace(/\/$/, '');
       if (!frontendOrigin) {
         return reply.code(500).send({ error: 'FRONTEND_ORIGIN is not configured.' });
       }
@@ -240,7 +241,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/onboard-client',
     {
-
+      preHandler: [rateLimit({ max: 10, windowMs: 60_000 })],
     },
     async (request, reply) => {
       const { token } = request.query as { token: string };
@@ -273,7 +274,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.get(
     '/connect/refresh',
     {
-
+      preHandler: [rateLimit({ max: 10, windowMs: 60_000 })],
     },
     async (request, reply) => {
       const { token } = request.query as { token: string };
@@ -368,14 +369,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const [clientRecord] = await db.select().from(clients).where(eq(clients.id, normalizedClientId));
       if (!clientRecord) {
         request.log.warn({ client_id: normalizedClientId, account: normalizedAccount }, 'Client record not found');
-        const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
-        if (!frontendOrigin) {
-          request.log.error('FRONTEND_ORIGIN is not configured');
-          return reply.code(500).send({ error: 'Server configuration error: FRONTEND_ORIGIN not set.' });
-        }
-        // Still redirect to success page even if client record is not found
-        const redirectUrl = `${frontendOrigin}/onboarding-success`;
-        return reply.redirect(redirectUrl);
+        return reply.code(404).send({ error: 'Client not found.' });
       }
 
       const existingStripeAccountId =
@@ -391,10 +385,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'Stripe account already linked to this client.' });
       }
 
-      // Update the client's stripeAccountId
-      await db.update(clients).set({ stripeAccountId: normalizedAccount }).where(eq(clients.id, normalizedClientId));
-
-      // Update the onboarding token status to completed
+      // Update both the client's stripeAccountId and the token status atomically
       request.log.info({
         token_id: onboardingRecord.id,
         old_status: onboardingRecord.status,
@@ -402,12 +393,15 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         timestamp: new Date().toISOString()
       }, 'Updating onboarding token status to completed');
 
-      await db
-        .update(onboardingTokens)
-        .set({ status: 'completed' })
-        .where(eq(onboardingTokens.id, onboardingRecord.id));
+      await db.transaction(async (tx) => {
+        await tx.update(clients).set({ stripeAccountId: normalizedAccount }).where(eq(clients.id, normalizedClientId));
+        await tx
+          .update(onboardingTokens)
+          .set({ status: 'completed' })
+          .where(eq(onboardingTokens.id, onboardingRecord.id));
+      });
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(',')[0].trim().replace(/\/$/, '');
       if (!frontendOrigin) {
         request.log.error('FRONTEND_ORIGIN is not configured');
         return reply.code(500).send({ error: 'Server configuration error: FRONTEND_ORIGIN not set.' });

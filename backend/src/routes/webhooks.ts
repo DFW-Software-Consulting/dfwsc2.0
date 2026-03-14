@@ -37,48 +37,50 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       })
       .onConflictDoNothing({ target: webhookEvents.stripeEventId });
 
-    switch (event.type) {
-      case 'account.updated': {
-        const account = event.data.object as Stripe.Account;
-        if (account.details_submitted) {
-          fastify.log.info({ accountId: account.id }, 'Account details submitted, updating client record.');
-          await db
-            .update(clients)
-            .set({
-              name: account.settings?.dashboard.display_name ?? undefined,
-              email: account.email ?? undefined,
-              updatedAt: new Date(),
-            })
-            .where(eq(clients.stripeAccountId, account.id));
+    await db.transaction(async (tx) => {
+      switch (event.type) {
+        case 'account.updated': {
+          const account = event.data.object as Stripe.Account;
+          if (account.details_submitted) {
+            fastify.log.info({ accountId: account.id }, 'Account details submitted, updating client record.');
+            await tx
+              .update(clients)
+              .set({
+                name: account.settings?.dashboard.display_name ?? undefined,
+                email: account.email ?? undefined,
+                updatedAt: new Date(),
+              })
+              .where(eq(clients.stripeAccountId, account.id));
+          }
+          break;
         }
-        break;
+        case 'payment_intent.succeeded':
+        case 'payment_intent.payment_failed': {
+          const intent = event.data.object as Stripe.PaymentIntent;
+          fastify.log.info({ intentId: intent.id, status: intent.status }, 'PaymentIntent event received.');
+          break;
+        }
+        case 'charge.refunded': {
+          const charge = event.data.object as Stripe.Charge;
+          fastify.log.info({ chargeId: charge.id, amountRefunded: charge.amount_refunded }, 'Charge refunded.');
+          break;
+        }
+        case 'payout.paid':
+        case 'payout.failed': {
+          const payout = event.data.object as Stripe.Payout;
+          fastify.log.info({ payoutId: payout.id, status: payout.status }, 'Payout event received.');
+          break;
+        }
+        default: {
+          fastify.log.debug({ eventType: event.type }, 'Unhandled Stripe event type.');
+        }
       }
-      case 'payment_intent.succeeded':
-      case 'payment_intent.payment_failed': {
-        const intent = event.data.object as Stripe.PaymentIntent;
-        fastify.log.info({ intentId: intent.id, status: intent.status }, 'PaymentIntent event received.');
-        break;
-      }
-      case 'charge.refunded': {
-        const charge = event.data.object as Stripe.Charge;
-        fastify.log.info({ chargeId: charge.id, amountRefunded: charge.amount_refunded }, 'Charge refunded.');
-        break;
-      }
-      case 'payout.paid':
-      case 'payout.failed': {
-        const payout = event.data.object as Stripe.Payout;
-        fastify.log.info({ payoutId: payout.id, status: payout.status }, 'Payout event received.');
-        break;
-      }
-      default: {
-        fastify.log.debug({ eventType: event.type }, 'Unhandled Stripe event type.');
-      }
-    }
 
-    await db
-      .update(webhookEvents)
-      .set({ processedAt: new Date() })
-      .where(eq(webhookEvents.stripeEventId, event.id));
+      await tx
+        .update(webhookEvents)
+        .set({ processedAt: new Date() })
+        .where(eq(webhookEvents.stripeEventId, event.id));
+    });
 
     return reply.send({ received: true });
   });

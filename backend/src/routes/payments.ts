@@ -126,7 +126,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           .send({ error: 'applicationFeeAmount cannot exceed the total amount.' });
       }
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.replace(/\/$/, '');
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(',')[0].trim().replace(/\/$/, '');
       if (!frontendOrigin) {
         return reply.code(500).send({ error: 'FRONTEND_ORIGIN is not configured.' });
       }
