@@ -10,7 +10,6 @@ export function sha256Lookup(apiKey: string): string {
   return crypto.createHash('sha256').update(apiKey).digest('hex');
 }
 
-
 export async function requireApiKey(request: FastifyRequest, reply: FastifyReply) {
   const apiKeyHeader = request.headers['x-api-key'];
   const apiKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
@@ -20,7 +19,6 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
   }
 
   try {
-    // Fast path: SHA-256 lookup — O(1) DB query, then single bcrypt verify
     const lookup = sha256Lookup(apiKey);
     const [clientByLookup] = await db
       .select()
@@ -39,7 +37,7 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
       return reply.code(401).send({ error: 'Invalid API key.' });
     }
 
-    // Legacy fallback: O(n) bcrypt scan for clients not yet assigned apiKeyLookup
+    // Legacy fallback for clients not yet migrated to apiKeyLookup
     const legacyClients = await db
       .select()
       .from(clients)

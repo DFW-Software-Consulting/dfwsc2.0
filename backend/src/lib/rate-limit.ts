@@ -9,7 +9,6 @@ type RateLimitOptions = {
 
 const hitBuckets = new Map<string, number[]>();
 
-// Prune keys with no hits in the last 10 minutes to prevent unbounded growth
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 setInterval(() => {
   const cutoff = Date.now() - SWEEP_INTERVAL_MS;
@@ -31,10 +30,6 @@ export function rateLimit(options: RateLimitOptions) {
 
     const hits = hitBuckets.get(key) ?? [];
     const recentHits = hits.filter((timestamp) => timestamp > windowStart);
-
-    if (recentHits.length === 0) {
-      hitBuckets.delete(key);
-    }
 
     if (recentHits.length >= maxForRequest) {
       hitBuckets.set(key, recentHits);
