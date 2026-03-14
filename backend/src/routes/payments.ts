@@ -135,8 +135,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         {
           mode: 'payment',
           line_items: lineItems,
-          success_url: `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${frontendOrigin}/payment-cancel`,
+          success_url: client.paymentSuccessUrl
+            ?? `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: client.paymentCancelUrl
+            ?? `${frontendOrigin}/payment-cancel`,
           payment_intent_data: {
             application_fee_amount: feeAmount,
             description,

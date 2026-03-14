@@ -29,6 +29,13 @@
       "when": 1741824001000,
       "tag": "0003_drop_plaintext_api_key",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1741910401000,
+      "tag": "0004_add_client_return_urls",
+      "breakpoints": true
     }
   ]
 }

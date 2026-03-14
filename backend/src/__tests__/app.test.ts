@@ -722,6 +722,59 @@ describe('payments', () => {
     await server.close();
   });
 
+  it('uses client paymentSuccessUrl as checkout success_url when set', async () => {
+    process.env.USE_CHECKOUT = 'true';
+    stripeMock.checkout.sessions.create.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/mock' });
+
+    const server = await createServer();
+
+    const apiKey = 'api-key-client_custom_url';
+    dataStore.clients.set('client_custom_url', {
+      id: 'client_custom_url',
+      name: 'Custom URL Client',
+      email: 'custom@example.test',
+      apiKey,
+      apiKeyHash: `hashed:${apiKey}`,
+      status: 'active',
+      stripeAccountId: 'acct_custom',
+      paymentSuccessUrl: 'https://myclient.com/thank-you',
+      paymentCancelUrl: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    dataStore.clientsByApiKey.set(apiKey, 'client_custom_url');
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/v1/payments/create',
+      headers: {
+        'x-api-key': apiKey,
+        'idempotency-key': 'custom-url-key',
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: 'usd',
+              product_data: { name: 'Service' },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success_url: 'https://myclient.com/thank-you',
+      }),
+      expect.anything(),
+    );
+    await server.close();
+  });
+
   it('fails when checkout requires a frontend origin but it is not configured', async () => {
     process.env.USE_CHECKOUT = 'true';
     delete process.env.FRONTEND_ORIGIN;

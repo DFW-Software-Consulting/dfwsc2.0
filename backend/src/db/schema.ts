@@ -10,6 +10,8 @@ export const clients = pgTable("clients", {
   status: text("status", { enum: ["active", "inactive"] })
     .default("active")
     .notNull(),
+  paymentSuccessUrl: text("payment_success_url"),
+  paymentCancelUrl: text("payment_cancel_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 }, (table) => ({
