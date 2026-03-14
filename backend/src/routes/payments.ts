@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import Stripe from 'stripe';
 import { stripe } from '../lib/stripe';
 import { db } from '../db/client';
-import { clients } from '../db/schema';
+import { clients, clientGroups } from '../db/schema';
 import { eq } from 'drizzle-orm';
 import { requireApiKey, requireAdminJwt } from '../lib/auth';
 import { rateLimit } from '../lib/rate-limit';
@@ -183,37 +183,65 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     '/reports/payments',
     { preHandler: requireAdminJwt },
     async (request, reply) => {
-      const { clientId, limit, starting_after, ending_before } = request.query as {
+      const { clientId, groupId, limit, starting_after, ending_before } = request.query as {
         clientId?: string;
+        groupId?: string;
         limit?: string;
         starting_after?: string;
         ending_before?: string;
       };
 
-      if (!clientId) {
-        return reply.code(400).send({ error: 'clientId query parameter is required.' });
+      if (!clientId && !groupId) {
+        return reply.code(400).send({ error: 'clientId or groupId query parameter is required.' });
       }
 
-      const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
-      if (!client || !client.stripeAccountId) {
-        return reply.code(404).send({ error: 'Client with connected account not found.' });
+      let parsedLimit: number | undefined;
+      if (limit) {
+        parsedLimit = Number(limit);
+        if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+          return reply.code(400).send({ error: 'limit must be an integer between 1 and 100.' });
+        }
       }
 
       const listParams: Stripe.PaymentIntentListParams = {};
-      if (limit) {
-        const parsed = Number(limit);
-        if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
-          return reply.code(400).send({ error: 'limit must be an integer between 1 and 100.' });
+      if (parsedLimit !== undefined) listParams.limit = parsedLimit;
+      if (starting_after) listParams.starting_after = starting_after;
+      if (ending_before) listParams.ending_before = ending_before;
+
+      // Group report: aggregate across all clients in the group
+      if (groupId) {
+        const [group] = await db.select().from(clientGroups).where(eq(clientGroups.id, groupId)).limit(1);
+        if (!group) {
+          return reply.code(404).send({ error: 'Group not found.' });
         }
-        listParams.limit = parsed;
+
+        const groupClients = await db
+          .select()
+          .from(clients)
+          .where(eq(clients.groupId, groupId));
+
+        const connected = groupClients.filter((c) => c.stripeAccountId);
+        if (connected.length === 0) {
+          return reply.send({ groupId, data: [], hasMore: false });
+        }
+
+        const results = await Promise.all(
+          connected.map(async (c) => {
+            const pi = await stripe.paymentIntents.list(listParams, {
+              stripeAccount: c.stripeAccountId!,
+            });
+            return pi.data.map((p) => ({ ...p, clientId: c.id }));
+          }),
+        );
+
+        const merged = results.flat();
+        return reply.send({ groupId, data: merged, hasMore: false });
       }
 
-      if (starting_after) {
-        listParams.starting_after = starting_after;
-      }
-
-      if (ending_before) {
-        listParams.ending_before = ending_before;
+      // Single-client report
+      const [client] = await db.select().from(clients).where(eq(clients.id, clientId!)).limit(1);
+      if (!client || !client.stripeAccountId) {
+        return reply.code(404).send({ error: 'Client with connected account not found.' });
       }
 
       const paymentIntents = await stripe.paymentIntents.list(listParams, {

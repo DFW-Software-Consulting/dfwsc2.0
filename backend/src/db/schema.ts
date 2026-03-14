@@ -1,5 +1,15 @@
 import { pgTable, text, timestamp, jsonb, index, numeric, integer } from "drizzle-orm/pg-core";
 
+export const clientGroups = pgTable("client_groups", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  status: text("status", { enum: ["active", "inactive"] })
+    .default("active")
+    .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 export const clients = pgTable("clients", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -10,6 +20,7 @@ export const clients = pgTable("clients", {
   status: text("status", { enum: ["active", "inactive"] })
     .default("active")
     .notNull(),
+  groupId: text("group_id").references(() => clientGroups.id),
   paymentSuccessUrl: text("payment_success_url"),
   paymentCancelUrl: text("payment_cancel_url"),
   processingFeePercent: numeric('processing_fee_percent', { precision: 5, scale: 2 }),

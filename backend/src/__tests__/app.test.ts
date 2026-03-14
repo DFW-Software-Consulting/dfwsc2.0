@@ -22,6 +22,7 @@ const dataStore = {
   clientsByApiKey: new Map<string, string>(),
   onboardingTokens: new Map<string, any>(),
   webhookEvents: new Map<string, any>(),
+  clientGroups: new Map<string, any>(),
 };
 
 type MailhogMessage = {
@@ -175,6 +176,9 @@ const dbMock = {
           if (isTable(table, 'webhook_events')) {
             return Array.from(dataStore.webhookEvents.values());
           }
+          if (isTable(table, 'client_groups')) {
+            return Array.from(dataStore.clientGroups.values());
+          }
           return [];
         })();
 
@@ -198,7 +202,18 @@ const dbMock = {
               );
             }
 
+            if (isColumn(expr?.field, 'group_id')) {
+              return Array.from(dataStore.clients.values()).filter(
+                (c) => c.groupId === expr?.value,
+              );
+            }
+
             const row = dataStore.clients.get(expr?.value);
+            return row ? [row] : [];
+          }
+
+          if (isTable(table, 'client_groups')) {
+            const row = dataStore.clientGroups.get(expr?.value);
             return row ? [row] : [];
           }
 
@@ -289,6 +304,17 @@ const dbMock = {
         dataStore.onboardingTokens.set(payload.id, next);
       }
 
+      if (isTable(table, 'client_groups')) {
+        const next = {
+          id: payload.id,
+          name: payload.name,
+          status: payload.status ?? 'active',
+          createdAt: payload.createdAt ?? new Date(),
+          updatedAt: payload.updatedAt ?? new Date(),
+        };
+        dataStore.clientGroups.set(payload.id, next);
+      }
+
       return {
         onConflictDoNothing: async () => {},
       };
@@ -296,41 +322,54 @@ const dbMock = {
   })),
   update: vi.fn((table: any) => ({
     set: (values: any) => ({
-      where: async (expr: any) => {
-        if (isTable(table, 'clients')) {
-          const row = dataStore.clients.get(expr.value);
-          if (!row) {
-            return { rowCount: 0 };
+      where: (expr: any) => {
+        const applyUpdate = () => {
+          if (isTable(table, 'clients')) {
+            const row = dataStore.clients.get(expr.value);
+            if (!row) return null;
+            Object.assign(row, values);
+            if (values.apiKey) {
+              dataStore.clientsByApiKey.set(values.apiKey, row.id);
+            }
+            if (Object.prototype.hasOwnProperty.call(values, 'apiKeyHash')) {
+              row.apiKeyHash = values.apiKeyHash;
+            }
+            return row;
           }
-          Object.assign(row, values);
-          if (values.apiKey) {
-            dataStore.clientsByApiKey.set(values.apiKey, row.id);
+          if (isTable(table, 'client_groups')) {
+            const row = dataStore.clientGroups.get(expr.value);
+            if (!row) return null;
+            Object.assign(row, values);
+            return row;
           }
-          if (Object.prototype.hasOwnProperty.call(values, 'apiKeyHash')) {
-            row.apiKeyHash = values.apiKeyHash;
+          if (isTable(table, 'onboarding_tokens')) {
+            const row = dataStore.onboardingTokens.get(expr.value);
+            if (!row) return null;
+            Object.assign(row, values);
+            return row;
           }
-          return { rowCount: 1 };
-        }
+          if (isTable(table, 'webhook_events')) {
+            const row = dataStore.webhookEvents.get(expr.value);
+            if (!row) return null;
+            Object.assign(row, values);
+            return row;
+          }
+          return null;
+        };
 
-        if (isTable(table, 'onboarding_tokens')) {
-          const row = dataStore.onboardingTokens.get(expr.value);
-          if (!row) {
-            return { rowCount: 0 };
-          }
-          Object.assign(row, values);
-          return { rowCount: 1 };
-        }
-
-        if (isTable(table, 'webhook_events')) {
-          const row = dataStore.webhookEvents.get(expr.value);
-          if (!row) {
-            return { rowCount: 0 };
-          }
-          Object.assign(row, values);
-          return { rowCount: 1 };
-        }
-
-        return { rowCount: 0 };
+        const resultPromise = Promise.resolve(applyUpdate());
+        return {
+          returning: async () => {
+            const row = await resultPromise;
+            return row ? [row] : [];
+          },
+          then: (resolve: any, reject: any) =>
+            resultPromise
+              .then((row) => (row ? { rowCount: 1 } : { rowCount: 0 }))
+              .then(resolve, reject),
+          catch: (reject: any) => resultPromise.catch(reject),
+          finally: (cb: any) => resultPromise.finally(cb),
+        };
       },
     }),
   })),
@@ -447,6 +486,7 @@ beforeEach(async () => {
   dataStore.clientsByApiKey.clear();
   dataStore.onboardingTokens.clear();
   dataStore.webhookEvents.clear();
+  dataStore.clientGroups.clear();
   mailhogMessages.length = 0;
 
   vi.clearAllMocks();
@@ -1147,7 +1187,7 @@ describe('connect callback', () => {
 });
 
 describe('reports', () => {
-  it('requires a client id query parameter', async () => {
+  it('requires clientId or groupId query parameter', async () => {
     const server = await createServer();
     const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
 
@@ -1160,7 +1200,7 @@ describe('reports', () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: 'clientId query parameter is required.' });
+    expect(response.json()).toEqual({ error: 'clientId or groupId query parameter is required.' });
     await server.close();
   });
 
@@ -1327,6 +1367,201 @@ describe('email', () => {
     expect(mailhogMessages.length).toBe(1);
     expect(mailhogMessages[0].Content.Headers.Subject[0]).toBe('DFW Software Consulting - Stripe Onboarding');
     expect(mailhogMessages[0].Content.Headers.To[0]).toBe('test@example.com');
+    await server.close();
+  });
+});
+
+describe('client groups', () => {
+  it('creates a group', async () => {
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/v1/groups',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { name: 'Acme Properties' },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.id).toBeDefined();
+    expect(body.name).toBe('Acme Properties');
+    expect(body.status).toBe('active');
+    await server.close();
+  });
+
+  it('rejects group creation without a name', async () => {
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/v1/groups',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'name is required.' });
+    await server.close();
+  });
+
+  it('lists groups', async () => {
+    dataStore.clientGroups.set('grp_1', { id: 'grp_1', name: 'Group One', status: 'active', createdAt: new Date(), updatedAt: new Date() });
+
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/groups',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.length).toBe(1);
+    expect(body[0].id).toBe('grp_1');
+    await server.close();
+  });
+
+  it('updates a group name and status', async () => {
+    dataStore.clientGroups.set('grp_2', { id: 'grp_2', name: 'Old Name', status: 'active', createdAt: new Date(), updatedAt: new Date() });
+
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/v1/groups/grp_2',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { name: 'New Name', status: 'inactive' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.name).toBe('New Name');
+    expect(body.status).toBe('inactive');
+    await server.close();
+  });
+
+  it('returns 404 when patching a non-existent group', async () => {
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/v1/groups/does_not_exist',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { name: 'Whatever' },
+    });
+
+    expect(response.statusCode).toBe(404);
+    await server.close();
+  });
+
+  it('filters GET /clients by groupId', async () => {
+    dataStore.clientGroups.set('grp_3', { id: 'grp_3', name: 'PropCo', status: 'active', createdAt: new Date(), updatedAt: new Date() });
+    seedClient({ id: 'c_a', stripeAccountId: 'acct_a' });
+    seedClient({ id: 'c_b', stripeAccountId: 'acct_b' });
+    dataStore.clients.get('c_a').groupId = 'grp_3';
+    dataStore.clients.get('c_b').groupId = 'grp_3';
+    seedClient({ id: 'c_other', stripeAccountId: 'acct_other' });
+
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/clients?groupId=grp_3',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.length).toBe(2);
+    expect(body.every((c: any) => c.groupId === 'grp_3')).toBe(true);
+    await server.close();
+  });
+
+  it('assigns a groupId to a client via PATCH /clients/:id', async () => {
+    dataStore.clientGroups.set('grp_4', { id: 'grp_4', name: 'MegaCo', status: 'active', createdAt: new Date(), updatedAt: new Date() });
+    seedClient({ id: 'c_patch', stripeAccountId: 'acct_p' });
+
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/v1/clients/c_patch',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { groupId: 'grp_4' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().groupId).toBe('grp_4');
+    await server.close();
+  });
+
+  it('rejects assigning a non-existent groupId to a client', async () => {
+    seedClient({ id: 'c_bad_grp', stripeAccountId: 'acct_bg' });
+
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'PATCH',
+      url: '/api/v1/clients/c_bad_grp',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { groupId: 'nonexistent_group' },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'Group not found.' });
+    await server.close();
+  });
+
+  it('aggregates payments for a group via GET /reports/payments?groupId=', async () => {
+    dataStore.clientGroups.set('grp_5', { id: 'grp_5', name: 'PropGroup', status: 'active', createdAt: new Date(), updatedAt: new Date() });
+    seedClient({ id: 'gc_1', stripeAccountId: 'acct_gc1' });
+    seedClient({ id: 'gc_2', stripeAccountId: 'acct_gc2' });
+    dataStore.clients.get('gc_1').groupId = 'grp_5';
+    dataStore.clients.get('gc_2').groupId = 'grp_5';
+
+    stripeMock.paymentIntents.list
+      .mockResolvedValueOnce({ data: [{ id: 'pi_gc1' }], has_more: false })
+      .mockResolvedValueOnce({ data: [{ id: 'pi_gc2' }], has_more: false });
+
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/reports/payments?groupId=grp_5',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.groupId).toBe('grp_5');
+    expect(body.data.length).toBe(2);
+    expect(body.data.map((p: any) => p.id)).toEqual(expect.arrayContaining(['pi_gc1', 'pi_gc2']));
+    await server.close();
+  });
+
+  it('returns 404 for reports with a non-existent groupId', async () => {
+    const server = await createServer();
+    const adminToken = jwt.sign({ role: 'admin' }, process.env.JWT_SECRET!, { expiresIn: '1h' });
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/v1/reports/payments?groupId=no_such_group',
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: 'Group not found.' });
     await server.close();
   });
 });
