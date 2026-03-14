@@ -9,7 +9,7 @@ This document outlines the steps to deploy the Stripe Payment Portal in a produc
 
 ## 1. Environment Variables
 
-Create a `.env.prod` file in the root of the project with the following content:
+Create a `backend/.env` file with the following content (or copy from `backend/.env.example`):
 
 ```
 # --- Stripe (keep test while staging; switch to live when ready) ---
@@ -63,7 +63,7 @@ This command will:
 
 ## 3. Reverse Proxy Configuration
 
-The `docker-compose.prod.yml` file is configured to use an external network named `server_proxy`. You need to have a reverse proxy (e.g., Nginx) running in the same network to route traffic to the application.
+The application exposes port 4242 (API) and 8080 (frontend via nginx). Point a reverse proxy (e.g., Nginx or Traefik) at these ports. Example Nginx configuration:
 
 Here is an example Nginx configuration:
 

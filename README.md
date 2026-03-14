@@ -88,14 +88,14 @@ npm run dev:frontend
 - **Backend:** http://localhost:4242
 - Frontend makes API calls to backend at http://localhost:4242/api/v1/*
 
-If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:8080`.
+If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:1919`.
 
 #### Option 2: Docker Dev Stack (Full stack in containers)
 ```bash
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-- **Web UI:** http://localhost:8080
+- **Web UI:** http://localhost:1919
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
 - **Stripe CLI:** forwards webhooks to `/api/v1/webhooks/stripe`
@@ -123,7 +123,7 @@ Services (default):
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
 
-For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:5174`.
+For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:1919`.
 
 If you want the UI on port 80, change the `web` service port mapping in `docker-compose.yml`.
 
@@ -252,8 +252,6 @@ Additional documentation is available in `backend/documentation/`:
 - Stripe setup guide
 - Email configuration
 - Deployment guide
-- Contributor workflow in `CONTRIBUTING.md`
-- Release process in `RELEASE.md`
 
 ## 🧯 Troubleshooting
 

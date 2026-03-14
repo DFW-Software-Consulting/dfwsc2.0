@@ -42,7 +42,7 @@ The application runs in Docker containers as defined in `docker-compose.yml`:
 - `POST /api/v1/auth/login` - Admin authentication
 - `PATCH /api/v1/clients/:id` - Update client status (admin only)
 - `POST /api/v1/payments/create` - Create payment
-- `POST /api/v1/connect/initiate` - Initiate client onboarding
+- `POST /api/v1/onboard-client/initiate` - Initiate client onboarding
 
 ## Working with Docker
 - To rebuild: `docker-compose up -d --build`
