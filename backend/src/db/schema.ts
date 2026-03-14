@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, jsonb, index, numeric, integer } from "drizzle-orm/pg-core";
 
 export const clients = pgTable("clients", {
   id: text("id").primaryKey(),
@@ -12,6 +12,8 @@ export const clients = pgTable("clients", {
     .notNull(),
   paymentSuccessUrl: text("payment_success_url"),
   paymentCancelUrl: text("payment_cancel_url"),
+  processingFeePercent: numeric('processing_fee_percent', { precision: 5, scale: 2 }),
+  processingFeeCents: integer('processing_fee_cents'),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 }, (table) => ({

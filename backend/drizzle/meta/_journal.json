@@ -36,6 +36,13 @@
       "when": 1741910401000,
       "tag": "0004_add_client_return_urls",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1741996801000,
+      "tag": "0005_add_client_processing_fee",
+      "breakpoints": true
     }
   ]
 }

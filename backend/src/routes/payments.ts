@@ -23,6 +23,19 @@ function resolvePaymentRateLimitKey(request: RequestWithClient): string {
   return request.ip || 'unknown';
 }
 
+function resolveClientFee(client: typeof clients.$inferSelect, amount?: number): number {
+  if (client.processingFeePercent !== null && client.processingFeePercent !== undefined) {
+    if (typeof amount !== 'number') {
+      throw new Error('amount is required when client uses a percentage-based fee.');
+    }
+    return Math.round(amount * parseFloat(client.processingFeePercent) / 100);
+  }
+  if (client.processingFeeCents !== null && client.processingFeeCents !== undefined) {
+    return client.processingFeeCents;
+  }
+  return Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
+}
+
 async function requireStripeAccountForPayments(request: RequestWithClient, reply: FastifyReply) {
   const client = request.client;
   if (!client) {
@@ -56,14 +69,12 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         currency,
         description,
         metadata,
-        applicationFeeAmount,
         lineItems,
       } = request.body as {
         amount?: number;
         currency?: string;
         description?: string;
         metadata?: Record<string, string>;
-        applicationFeeAmount?: number;
         lineItems?: Stripe.Checkout.SessionCreateParams.LineItem[];
       };
 
@@ -83,7 +94,12 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           return reply.code(400).send({ error: 'amount and currency are required for PaymentIntents.' });
         }
 
-        const feeAmount = Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
+        let feeAmount: number;
+        try {
+          feeAmount = resolveClientFee(client, amount);
+        } catch (e: unknown) {
+          return reply.code(400).send({ error: (e as Error).message });
+        }
         if (feeAmount < 0 || feeAmount > amount) {
           return reply
             .code(400)
@@ -115,7 +131,12 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'lineItems are required when USE_CHECKOUT=true.' });
       }
 
-      const feeAmount = Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
+      let feeAmount: number;
+      try {
+        feeAmount = resolveClientFee(client, amount);
+      } catch (e: unknown) {
+        return reply.code(400).send({ error: (e as Error).message });
+      }
       if (feeAmount < 0) {
         return reply.code(400).send({ error: 'applicationFeeAmount must be zero or positive.' });
       }

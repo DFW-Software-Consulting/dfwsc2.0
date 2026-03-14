@@ -8,6 +8,8 @@ interface ClientPatchBody {
   status?: 'active' | 'inactive';
   paymentSuccessUrl?: string | null;
   paymentCancelUrl?: string | null;
+  processingFeePercent?: number | null;
+  processingFeeCents?: number | null;
 }
 
 interface ClientParams {
@@ -34,6 +36,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           email: clients.email,
           stripeAccountId: clients.stripeAccountId,
           status: clients.status,
+          processingFeePercent: clients.processingFeePercent,
+          processingFeeCents: clients.processingFeeCents,
           createdAt: clients.createdAt,
         })
         .from(clients);
@@ -57,7 +61,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
   }>('/clients/:id', { preHandler: requireAdminJwt }, async (req, res) => {
     try {
       const { id } = req.params;
-      const { status, paymentSuccessUrl, paymentCancelUrl } = req.body;
+      const { status, paymentSuccessUrl, paymentCancelUrl, processingFeePercent, processingFeeCents } = req.body;
 
       if (status !== undefined && status !== 'active' && status !== 'inactive') {
         return res.status(400).send({
@@ -71,6 +75,18 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
 
       if (paymentCancelUrl != null && !isValidHttpsUrl(paymentCancelUrl)) {
         return res.status(400).send({ error: 'paymentCancelUrl must be a valid HTTPS URL.' });
+      }
+
+      if (processingFeePercent != null && processingFeeCents != null) {
+        return res.status(400).send({ error: 'Set one fee type, not both.' });
+      }
+
+      if (processingFeePercent != null && (processingFeePercent <= 0 || processingFeePercent > 100)) {
+        return res.status(400).send({ error: 'processingFeePercent must be greater than 0 and at most 100.' });
+      }
+
+      if (processingFeeCents != null && (!Number.isInteger(processingFeeCents) || processingFeeCents < 0)) {
+        return res.status(400).send({ error: 'processingFeeCents must be a non-negative integer.' });
       }
 
       const existingClient = await db
@@ -88,11 +104,15 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         status?: 'active' | 'inactive';
         paymentSuccessUrl?: string | null;
         paymentCancelUrl?: string | null;
+        processingFeePercent?: string | null;
+        processingFeeCents?: number | null;
       } = { updatedAt: new Date() };
 
       if (status !== undefined) setValues.status = status;
       if ('paymentSuccessUrl' in req.body) setValues.paymentSuccessUrl = paymentSuccessUrl;
       if ('paymentCancelUrl' in req.body) setValues.paymentCancelUrl = paymentCancelUrl;
+      if ('processingFeePercent' in req.body) setValues.processingFeePercent = processingFeePercent != null ? String(processingFeePercent) : null;
+      if ('processingFeeCents' in req.body) setValues.processingFeeCents = processingFeeCents;
 
       const updatedClients = await db
         .update(clients)
@@ -113,6 +133,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         status: updatedClient.status,
         paymentSuccessUrl: updatedClient.paymentSuccessUrl,
         paymentCancelUrl: updatedClient.paymentCancelUrl,
+        processingFeePercent: updatedClient.processingFeePercent,
+        processingFeeCents: updatedClient.processingFeeCents,
         createdAt: updatedClient.createdAt?.toISOString(),
         updatedAt: updatedClient.updatedAt?.toISOString(),
       });
