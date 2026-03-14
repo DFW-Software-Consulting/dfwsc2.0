@@ -12,7 +12,9 @@
     "build:backend": "cd backend && npm install && npm run build:server",
     "start": "npm run start --prefix backend",
     "install:all": "npm install --prefix front && npm install --prefix backend",
-    "test": "npm run test --prefix backend",
+    "test": "npm run test:front && npm run test:back",
+    "test:front": "npm run test --prefix front",
+    "test:back": "npm run test --prefix backend",
     "db:generate": "npm run db:generate --prefix backend",
     "db:migrate": "npm run db:migrate --prefix backend"
   },
