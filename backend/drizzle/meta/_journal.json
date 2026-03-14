@@ -15,6 +15,20 @@
       "when": 1737158400000,
       "tag": "0001_add_index_and_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1741824000000,
+      "tag": "0002_add_api_key_lookup",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1741824001000,
+      "tag": "0003_drop_plaintext_api_key",
+      "breakpoints": true
     }
   ]
 }

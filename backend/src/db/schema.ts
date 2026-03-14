@@ -4,8 +4,8 @@ export const clients = pgTable("clients", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull(),
-  apiKey: text("api_key").unique(),
   apiKeyHash: text("api_key_hash").unique(),
+  apiKeyLookup: text("api_key_lookup").unique(),
   stripeAccountId: text("stripe_account_id"),
   status: text("status", { enum: ["active", "inactive"] })
     .default("active")
@@ -14,6 +14,7 @@ export const clients = pgTable("clients", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 }, (table) => ({
   apiKeyHashIdx: index("clients_api_key_hash_idx").on(table.apiKeyHash),
+  apiKeyLookupIdx: index("clients_api_key_lookup_idx").on(table.apiKeyLookup),
 }));
 
 export const webhookEvents = pgTable("webhook_events", {

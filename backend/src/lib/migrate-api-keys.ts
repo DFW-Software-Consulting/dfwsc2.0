@@ -1,6 +1,6 @@
 import { db } from '../db/client';
 import { clients } from '../db/schema';
-import { hashApiKey } from '../lib/auth';
+import { hashApiKey, sha256Lookup } from '../lib/auth';
 import { eq, isNotNull } from 'drizzle-orm';
 
 /**
@@ -25,11 +25,12 @@ async function migrateApiKeys() {
         
         // Hash the plaintext API key
         const hashedKey = await hashApiKey(client.apiKey);
-        
+        const lookupHash = sha256Lookup(client.apiKey);
+
         // Update the client record with the hash and clear the plaintext
         await db
           .update(clients)
-          .set({ apiKeyHash: hashedKey, apiKey: null })
+          .set({ apiKeyHash: hashedKey, apiKeyLookup: lookupHash, apiKey: null })
           .where(eq(clients.id, client.id));
           
         console.log(`Successfully migrated client: ${client.id}`);
