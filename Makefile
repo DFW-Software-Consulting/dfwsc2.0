@@ -52,7 +52,7 @@ test:
 
 test-up:
 	$(COMPOSE) up -d
-	$(COMPOSE) exec api npm test
+	$(COMPOSE) exec api sh -c "until [ -f node_modules/.bin/vitest ]; do sleep 1; done && npm test"
 
 prod:
 	docker compose -f docker-compose.prod.yml up -d
