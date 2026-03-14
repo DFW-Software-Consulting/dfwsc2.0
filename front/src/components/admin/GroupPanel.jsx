@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import logger from "../../utils/logger";
+import GroupMembersModal from "./GroupMembersModal";
 
 function formatFee(group) {
   if (group.processingFeePercent != null) return `${group.processingFeePercent}%`;
@@ -253,13 +254,14 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
 
 // ─── Group Panel ─────────────────────────────────────────────────────────────
 
-export default function GroupPanel({ showToast, onSessionExpired, onGroupsChanged }) {
+export default function GroupPanel({ showToast, onSessionExpired, onGroupsChanged, onClientUpdated }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [newGroupName, setNewGroupName] = useState("");
   const [creating, setCreating] = useState(false);
   const [editingGroup, setEditingGroup] = useState(null);
+  const [managingGroup, setManagingGroup] = useState(null);
   const [togglingId, setTogglingId] = useState(null);
 
   const fetchGroups = useCallback(async () => {
@@ -441,6 +443,12 @@ export default function GroupPanel({ showToast, onSessionExpired, onGroupsChange
                         Edit
                       </button>
                       <button
+                        onClick={() => setManagingGroup(g)}
+                        className="px-3 py-1 rounded text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white transition-colors"
+                      >
+                        Members
+                      </button>
+                      <button
                         onClick={() => handleToggleStatus(g)}
                         disabled={togglingId === g.id}
                         className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
@@ -470,6 +478,15 @@ export default function GroupPanel({ showToast, onSessionExpired, onGroupsChange
           onClose={() => setEditingGroup(null)}
           onSaved={handleGroupSaved}
           showToast={showToast}
+        />
+      )}
+      {managingGroup && (
+        <GroupMembersModal
+          group={managingGroup}
+          onClose={() => setManagingGroup(null)}
+          showToast={showToast}
+          onSessionExpired={onSessionExpired}
+          onClientUpdated={onClientUpdated}
         />
       )}
     </div>

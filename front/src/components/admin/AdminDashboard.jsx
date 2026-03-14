@@ -236,6 +236,7 @@ export default function AdminDashboard() {
           showToast={showToast}
           onSessionExpired={handleLogout}
           onGroupsChanged={handleGroupsChanged}
+          onClientUpdated={handleClientUpdated}
         />
       )}
 
