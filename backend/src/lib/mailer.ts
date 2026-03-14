@@ -48,7 +48,7 @@ function resolveTransporter(): Transporter {
 
 export async function sendMail(payload: MailPayload): Promise<void> {
   const transporter = resolveTransporter();
-  const from = process.env.SMTP_FROM ?? process.env.SMTP_USER ?? '';
+  const from = process.env.SMTP_FROM ?? `${process.env.SMTP_USER ?? 'noreply'}@${process.env.SMTP_HOST ?? 'localhost'}`;
 
   await transporter.sendMail({
     from,

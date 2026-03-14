@@ -50,7 +50,21 @@ async function createAccountLinkForToken(
     .where(eq(onboardingTokens.token, token))
     .limit(1);
 
-  if (!onboardingRecord || (onboardingRecord.status !== 'pending' && onboardingRecord.status !== 'in_progress')) {
+  if (!onboardingRecord) {
+    throw Object.assign(
+      new Error('Onboarding token not found, is invalid, or has already been used.'),
+      { statusCode: 404 }
+    );
+  }
+
+  if (onboardingRecord.status === 'revoked') {
+    throw Object.assign(
+      new Error('This onboarding link has been replaced. Please check your email for a new link.'),
+      { statusCode: 404 }
+    );
+  }
+
+  if (onboardingRecord.status !== 'pending' && onboardingRecord.status !== 'in_progress') {
     throw Object.assign(
       new Error('Onboarding token not found, is invalid, or has already been used.'),
       { statusCode: 404 }
@@ -234,6 +248,113 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         message: 'Onboarding email sent successfully.',
         clientId,
         apiKey,
+      });
+    },
+  );
+
+  fastify.post(
+    '/onboard-client/resend',
+    {
+      preHandler: [rateLimit({ max: 5, windowMs: 60_000 }), requireAdminJwt],
+    },
+    async (request, reply) => {
+      const { email, clientId } = request.body as { email?: string; clientId?: string };
+
+      if (!email && !clientId) {
+        return reply.code(400).send({ error: 'Either email or clientId is required.' });
+      }
+
+      // Find the client record
+      let clientRecord;
+      if (clientId) {
+        [clientRecord] = await db.select().from(clients).where(eq(clients.id, clientId));
+      } else {
+        [clientRecord] = await db.select().from(clients).where(eq(clients.email, email!));
+      }
+
+      if (!clientRecord) {
+        return reply.code(404).send({ error: 'Client not found.' });
+      }
+
+      // Find any existing onboarding token for this client
+      const [existingToken] = await db
+        .select()
+        .from(onboardingTokens)
+        .where(eq(onboardingTokens.clientId, clientRecord.id))
+        .orderBy(onboardingTokens.createdAt)
+        .limit(1);
+
+      if (existingToken) {
+        // Revoke the old token if it's still pending or in_progress
+        if (existingToken.status === 'pending' || existingToken.status === 'in_progress') {
+          await db
+            .update(onboardingTokens)
+            .set({ status: 'revoked', updatedAt: new Date() })
+            .where(eq(onboardingTokens.id, existingToken.id));
+          request.log.info({
+            token_id: existingToken.id,
+            old_status: existingToken.status,
+            new_status: 'revoked'
+          }, 'Revoked old onboarding token');
+        }
+      }
+
+      // Generate a new token
+      const newToken = crypto.randomBytes(32).toString('hex');
+      const newOnboardingTokenId = uuidv4();
+
+      await db.insert(onboardingTokens).values({
+        id: newOnboardingTokenId,
+        clientId: clientRecord.id,
+        token: newToken,
+        status: 'pending',
+        email: clientRecord.email,
+      });
+
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(',')[0].trim().replace(/\/$/, '');
+      if (!frontendOrigin) {
+        return reply.code(500).send({ error: 'FRONTEND_ORIGIN is not configured.' });
+      }
+
+      const onboardingUrl = `${frontendOrigin}/onboard?token=${newToken}`;
+
+      const safeName = he.encode(clientRecord.name);
+      const mailHtml = `
+        <h1>Stripe Onboarding Link Refreshed</h1>
+        <p>Hi ${safeName},</p>
+        <p>Your previous onboarding link has expired or been invalidated.</p>
+        <p>Click the new link below to continue with your Stripe onboarding process.</p>
+        <a href="${onboardingUrl}">Continue Onboarding</a>
+        <p>If you did not request this, please contact us.</p>
+        <p><strong>Note:</strong> This link will expire in 30 minutes.</p>
+      `;
+
+      const mailText = `
+        Stripe Onboarding Link Refreshed
+        Hi ${clientRecord.name},
+        Your previous onboarding link has expired or been invalidated.
+        Click the new link below to continue with your Stripe onboarding process.
+        ${onboardingUrl}
+        If you did not request this, please contact us.
+        Note: This link will expire in 30 minutes.
+      `;
+
+      await sendMail({
+        to: clientRecord.email,
+        subject: 'DFW Software Consulting - New Onboarding Link',
+        html: mailHtml,
+        text: mailText,
+      });
+
+      request.log.info({
+        client_id: clientRecord.id,
+        client_email: clientRecord.email,
+        new_token_id: newOnboardingTokenId
+      }, 'Onboarding token resent successfully');
+
+      return reply.code(200).send({
+        message: 'New onboarding link sent successfully.',
+        clientId: clientRecord.id,
       });
     },
   );

@@ -28,6 +28,7 @@ export default function ClientList({
   onRefresh,
 }) {
   const [loadingClientId, setLoadingClientId] = useState(null);
+  const [resendingClientId, setResendingClientId] = useState(null);
   const [editingClient, setEditingClient] = useState(null);
   const [confirmModal, setConfirmModal] = useState({
     isOpen: false,
@@ -119,6 +120,50 @@ export default function ClientList({
     setConfirmModal({ isOpen: false, clientId: null, clientName: "", currentStatus: "" });
   };
 
+  const handleResendLink = async (client) => {
+    const token = sessionStorage.getItem("adminToken");
+    if (!token) {
+      showToast?.("Session expired. You have been logged out.", "warning");
+      onSessionExpired?.();
+      return;
+    }
+
+    setResendingClientId(client.id);
+
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL}/onboard-client/resend`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ clientId: client.id }),
+        },
+      );
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          sessionStorage.removeItem("adminToken");
+          onSessionExpired?.();
+          throw new Error("Session expired. You have been logged out.");
+        }
+        throw new Error(data.error || `HTTP ${res.status}: ${res.statusText}`);
+      }
+
+      showToast?.("New onboarding link sent successfully!", "success");
+      logger.info(`Resent onboarding link for client: ${client.email}`);
+    } catch (err) {
+      logger.error("Error resending onboarding link:", err);
+      showToast?.(`Error: ${err.message}`, "error");
+    } finally {
+      setResendingClientId(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="text-center py-8">
@@ -156,7 +201,7 @@ export default function ClientList({
         <table className="min-w-full divide-y divide-gray-700">
           <thead>
             <tr>
-              {["Name", "Email", "Status", "Group", "Fee", "Stripe Account", "Actions"].map((h) => (
+              {["Name", "Email", "Status", "Onboarding", "Group", "Fee", "Stripe Account", "Actions"].map((h) => (
                 <th
                   key={h}
                   className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
@@ -169,6 +214,9 @@ export default function ClientList({
           <tbody className="divide-y divide-gray-800">
             {clients.map((client) => {
               const groupName = groups.find((g) => g.id === client.groupId)?.name;
+              const onboardingStatus = client.stripeAccountId 
+                ? "Completed" 
+                : "Pending";
               return (
                 <tr key={client.id} className="hover:bg-gray-700/50">
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-200">
@@ -188,6 +236,17 @@ export default function ClientList({
                       {client.status.charAt(0).toUpperCase() + client.status.slice(1)}
                     </span>
                   </td>
+                  <td className="px-3 py-2 whitespace-nowrap text-sm">
+                    <span
+                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                        onboardingStatus === "Completed"
+                          ? "bg-blue-800 text-blue-200"
+                          : "bg-yellow-800 text-yellow-200"
+                      }`}
+                    >
+                      {onboardingStatus}
+                    </span>
+                  </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-200">
                     {groupName ?? <span className="text-gray-500">—</span>}
                   </td>
@@ -199,6 +258,43 @@ export default function ClientList({
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm">
                     <div className="flex gap-2">
+                      <button
+                        onClick={() => handleResendLink(client)}
+                        disabled={resendingClientId === client.id || !!client.stripeAccountId}
+                        title={client.stripeAccountId ? "Already onboarded" : "Resend onboarding link"}
+                        className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          resendingClientId === client.id
+                            ? "bg-gray-500 text-white"
+                            : "bg-purple-600 hover:bg-purple-700 text-white"
+                        }`}
+                      >
+                        {resendingClientId === client.id ? (
+                          <span className="inline-flex items-center">
+                            <svg
+                              className="animate-spin -ml-1 mr-1 h-3 w-3 text-white"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="4"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              />
+                            </svg>
+                            Sending...
+                          </span>
+                        ) : (
+                          "Resend Link"
+                        )}
+                      </button>
                       <button
                         onClick={() => setEditingClient(client)}
                         className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
