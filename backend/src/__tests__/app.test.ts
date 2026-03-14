@@ -14,6 +14,7 @@ vi.mock('bcryptjs', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: (field: unknown, value: unknown) => ({ value, field }),
   and: (...conditions: any[]) => ({ all: conditions }),
+  isNull: (field: unknown) => ({ isNull: true, field }),
 }));
 
 const dataStore = {
@@ -189,6 +190,12 @@ const dbMock = {
             if (isColumn(expr?.field, 'api_key')) {
               const client = findClientByApiKey(expr?.value);
               return client ? [client] : [];
+            }
+
+            if (expr?.isNull) {
+              return Array.from(dataStore.clients.values()).filter(
+                client => client.apiKeyLookup == null,
+              );
             }
 
             const row = dataStore.clients.get(expr?.value);
