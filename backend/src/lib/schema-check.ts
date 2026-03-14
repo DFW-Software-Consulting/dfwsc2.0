@@ -13,6 +13,8 @@ const REQUIRED_TABLES: TableColumns[] = [
       'id',
       'name',
       'email',
+      'api_key_hash',
+      'api_key_lookup',
       'stripe_account_id',
       'status',
       'created_at',
@@ -28,6 +30,18 @@ const REQUIRED_TABLES: TableColumns[] = [
       'payload',
       'processed_at',
       'created_at',
+    ],
+  },
+  {
+    table: 'onboarding_tokens',
+    columns: [
+      'id',
+      'client_id',
+      'token',
+      'status',
+      'email',
+      'created_at',
+      'updated_at',
     ],
   },
 ];
