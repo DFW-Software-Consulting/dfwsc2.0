@@ -6,6 +6,10 @@ export const clientGroups = pgTable("client_groups", {
   status: text("status", { enum: ["active", "inactive"] })
     .default("active")
     .notNull(),
+  processingFeePercent: numeric('processing_fee_percent', { precision: 5, scale: 2 }),
+  processingFeeCents: integer('processing_fee_cents'),
+  paymentSuccessUrl: text('payment_success_url'),
+  paymentCancelUrl: text('payment_cancel_url'),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

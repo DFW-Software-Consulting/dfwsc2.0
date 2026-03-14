@@ -23,7 +23,11 @@ function resolvePaymentRateLimitKey(request: RequestWithClient): string {
   return request.ip || 'unknown';
 }
 
-function resolveClientFee(client: typeof clients.$inferSelect, amount?: number): number {
+function resolveClientFee(
+  client: typeof clients.$inferSelect,
+  group: typeof clientGroups.$inferSelect | null,
+  amount?: number,
+): number {
   if (client.processingFeePercent !== null && client.processingFeePercent !== undefined) {
     if (typeof amount !== 'number') {
       throw new Error('amount is required when client uses a percentage-based fee.');
@@ -32,6 +36,15 @@ function resolveClientFee(client: typeof clients.$inferSelect, amount?: number):
   }
   if (client.processingFeeCents !== null && client.processingFeeCents !== undefined) {
     return client.processingFeeCents;
+  }
+  if (group?.processingFeePercent !== null && group?.processingFeePercent !== undefined) {
+    if (typeof amount !== 'number') {
+      throw new Error('amount is required when group uses a percentage-based fee.');
+    }
+    return Math.round(amount * parseFloat(group.processingFeePercent) / 100);
+  }
+  if (group?.processingFeeCents !== null && group?.processingFeeCents !== undefined) {
+    return group.processingFeeCents;
   }
   return Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
 }
@@ -89,6 +102,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'Client does not have a connected Stripe account.' });
       }
 
+      const group = client.groupId
+        ? (await db.select().from(clientGroups).where(eq(clientGroups.id, client.groupId)).limit(1))[0] ?? null
+        : null;
+
       if (!useCheckout) {
         if (typeof amount !== 'number' || !currency) {
           return reply.code(400).send({ error: 'amount and currency are required for PaymentIntents.' });
@@ -96,7 +113,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
         let feeAmount: number;
         try {
-          feeAmount = resolveClientFee(client, amount);
+          feeAmount = resolveClientFee(client, group, amount);
         } catch (e: unknown) {
           return reply.code(400).send({ error: (e as Error).message });
         }
@@ -133,7 +150,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       let feeAmount: number;
       try {
-        feeAmount = resolveClientFee(client, amount);
+        feeAmount = resolveClientFee(client, group, amount);
       } catch (e: unknown) {
         return reply.code(400).send({ error: (e as Error).message });
       }
@@ -157,8 +174,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           mode: 'payment',
           line_items: lineItems,
           success_url: client.paymentSuccessUrl
+            ?? group?.paymentSuccessUrl
             ?? `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: client.paymentCancelUrl
+            ?? group?.paymentCancelUrl
             ?? `${frontendOrigin}/payment-cancel`,
           payment_intent_data: {
             application_fee_amount: feeAmount,
