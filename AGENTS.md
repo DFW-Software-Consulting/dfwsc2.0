@@ -18,7 +18,7 @@ This is a payment portal for DFW Software Consulting clients that integrates wit
 - Client status management (active/inactive)
 
 ## Docker Environment
-The application runs in Docker containers as defined in `docker-compose.yml`:
+The application runs in Docker containers as defined in `docker-compose.base.yml` (base) and `docker-compose.dev.yml` (dev overrides):
 - `api`: Main backend service (port 4242)
 - `web`: Frontend service (port 8080)
 - `db`: PostgreSQL database (port 5432)

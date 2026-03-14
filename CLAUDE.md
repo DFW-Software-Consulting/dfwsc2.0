@@ -1,58 +1,105 @@
-# DFWSC Stripe Payment Portal
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-This is a payment portal for DFW Software Consulting clients that integrates with Stripe for payment processing. The system allows clients to onboard, create payments, and manage their accounts.
+Payment portal for DFW Software Consulting clients integrating Stripe Connect. Clients onboard via Stripe Express accounts and process payments through the platform.
+
+## Monorepo Structure
+- `backend/` — Fastify/TypeScript API server
+- `front/` — React frontend
+- Root `package.json` delegates to workspace subdirectories
+
+## Commands
+
+### Dev stack (Docker — preferred for all backend work)
+```sh
+make up           # Start dev stack (api, web, db, mailhog, stripe-cli)
+make up-build     # Build + start
+make down         # Stop
+make down-v       # Stop + remove volumes (destroys pgdata)
+make logs         # Tail API logs
+make sh           # Shell into API container
+make test         # Run backend tests inside running container
+make test-up      # Start stack then run backend tests
+```
+
+### Running tests
+```sh
+# Backend (must be inside container or with DATABASE_URL set):
+make test
+# Single test file:
+docker compose -f docker-compose.base.yml -f docker-compose.dev.yml exec api npx vitest run src/__tests__/app.test.ts
+
+# Frontend:
+cd front && npm test        # or npx vitest
+```
+
+### Database migrations
+```sh
+npm run db:generate   # Generate migration from schema changes
+npm run db:migrate    # Apply migrations
+```
+
+### Swagger UI
+Available at `http://localhost:4242/docs` in dev. Disabled when `ENABLE_SWAGGER=false` or `NODE_ENV=production`.
 
 ## Architecture
-- **Backend**: Node.js/TypeScript with Fastify framework
-- **Database**: PostgreSQL 17
-- **Frontend**: React application (in `/front` directory)
-- **Containerization**: Docker/Docker Compose
-- **ORM**: Drizzle ORM for database operations
 
-## Key Features
-- Client onboarding with Stripe Connect
-- Payment processing via Stripe
-- Admin management capabilities
-- Webhook handling for Stripe events
-- Client status management (active/inactive)
+### Request auth — two separate schemes
+- **Client routes** (`POST /payments/create`): `X-Api-Key` header. Auth uses a two-field strategy — `apiKeyLookup` (SHA256 hash for O(1) DB lookup) + `apiKeyHash` (bcrypt for verification). A legacy fallback iterates all clients with null `apiKeyLookup` for backward compatibility.
+- **Admin routes**: JWT Bearer token obtained from `POST /api/v1/auth/login`. Token must carry `role: "admin"` claim.
+
+### Payment flow — USE_CHECKOUT toggle
+`USE_CHECKOUT` env var switches between two Stripe payment modes:
+- `false` (default): Creates a **PaymentIntent** via Stripe Connect. Returns `clientSecret` for frontend Elements.
+- `true`: Creates a **Checkout Session**. Returns a `url` for redirect. Requires `lineItems` in request body.
+
+Both modes use `application_fee_amount` from `DEFAULT_PROCESS_FEE_CENTS` and require an `Idempotency-Key` header.
+
+### Onboarding flow
+1. Admin calls `POST /api/v1/accounts` or `POST /api/v1/onboard-client/initiate` → creates client record + `onboardingTokens` row (status: `pending`) + returns API key (only time it's shown plaintext).
+2. Client visits frontend `/onboard?token=...` → frontend calls `GET /api/v1/onboard-client?token=...` → creates Stripe Express account + account link, transitions token to `in_progress`, stores CSRF `state` with 30-min expiry.
+3. Stripe redirects to `GET /api/v1/connect/callback?client_id=...&state=...&account=...` → validates state, links `stripeAccountId` to client, marks token `completed` in a DB transaction.
+4. `GET /api/v1/connect/refresh?token=...` regenerates an account link for incomplete onboarding sessions.
+
+### Rate limiting
+In-memory sliding-window rate limiter (`lib/rate-limit.ts`). Not Redis-backed — not suitable for multi-instance deployments. Admin/onboard routes: 10 req/min per IP. Payment routes: 20 req/min per Stripe account ID (falls back to IP).
+
+### Database schema (Drizzle ORM, PostgreSQL 17)
+Three tables:
+- `clients` — `id`, `name`, `email`, `apiKeyHash`, `apiKeyLookup`, `stripeAccountId`, `status` (active/inactive)
+- `onboarding_tokens` — `clientId` (FK→clients), `token`, `status`, `state`, `stateExpiresAt`
+- `webhook_events` — idempotency table for Stripe webhook deduplication
+
+### Environment variables
+Required: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `FRONTEND_ORIGIN`, `USE_CHECKOUT`, `DATABASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`.
+
+Optional: `API_BASE_URL`, `DEFAULT_PROCESS_FEE_CENTS`, `SMTP_FROM`, `ENABLE_SWAGGER`, `JWT_EXPIRY` (default `1h`).
+
+Bootstrap mode (skip admin creds on first run): set `ALLOW_ADMIN_SETUP=true` + `ADMIN_SETUP_TOKEN`.
+
+### Full API route map
+All routes prefixed `/api/v1` except `/docs`.
+
+| Method | Path | Auth |
+|--------|------|------|
+| GET | `/api/v1/health` | none |
+| POST | `/api/v1/auth/login` | none |
+| POST | `/api/v1/accounts` | admin JWT + rate limit |
+| POST | `/api/v1/onboard-client/initiate` | admin JWT + rate limit |
+| GET | `/api/v1/onboard-client` | rate limit |
+| GET | `/api/v1/connect/refresh` | rate limit |
+| GET | `/api/v1/connect/callback` | none (state CSRF) |
+| POST | `/api/v1/payments/create` | API key + rate limit |
+| GET | `/api/v1/reports/payments` | admin JWT |
+| GET | `/api/v1/clients` | admin JWT |
+| PATCH | `/api/v1/clients/:id` | admin JWT |
+| POST | `/api/v1/webhooks/stripe` | Stripe signature |
 
 ## Docker Environment
-The application runs in Docker containers as defined in `docker-compose.yml`:
-- `api`: Main backend service (port 4242)
-- `web`: Frontend service (port 8080)
-- `db`: PostgreSQL database (port 5432)
-- `mailhog`: Email testing service (port 8025)
-
-## Development Workflow
-1. All development should be done with the Docker containers running
-2. The backend code is located in `/backend`
-3. Changes to backend code are reflected in the Docker container
-4. Database migrations should be run through the Docker environment
-
-## Testing
-### Frontend Tests
-- Run frontend tests: `cd front && npm test` or `cd front && npx vitest`
-- Test files are located in `front/src/__tests__`
-- Configuration is in `front/vitest.config.js`
-- Setup file is in `front/src/test/setup.js`
-
-## Key Endpoints
-- `GET /api/v1/health` - Health check
-- `POST /api/v1/auth/login` - Admin authentication
-- `PATCH /api/v1/clients/:id` - Update client status (admin only)
-- `POST /api/v1/payments/create` - Create payment
-- `POST /api/v1/onboard-client/initiate` - Initiate client onboarding
-
-## Working with Docker
-- To rebuild: `docker-compose up -d --build`
-- To view logs: `docker-compose logs -f api`
-- To run commands in container: `docker exec -it dfwsc20-api-1 /bin/sh`
-- To run tests in containers: `make test` (stack up) or `make test-up` (start stack + run)
-
-## Important Notes
-- The database is persistent in the `pgdata` volume
-- Environment variables are loaded from `.env` files
-- The client status feature allows soft-deletion of clients by setting status to 'inactive'
-- Admin-only endpoints require JWT authentication
-- All changes should be tested in the Docker environment to ensure compatibility
+- `api`: port 4242
+- `web`: port 8080
+- `db`: PostgreSQL, port 5432 (localhost only in prod)
+- `mailhog`: SMTP testing, UI port 8025
+- `stripe-cli`: webhook forwarding in dev

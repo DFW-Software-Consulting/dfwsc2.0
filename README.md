@@ -23,7 +23,7 @@ dfwsc2.0/
 │   ├── package.json
 │   └── Dockerfile           # API-only Docker image
 │
-├── docker-compose.yml        # Runs api + web + db + tooling
+├── docker-compose.base.yml   # Base services config (extended by dev/prod)
 ├── package.json              # Root monorepo scripts
 └── .gitignore                # Ignore node_modules, build outputs, etc.
 ```
@@ -125,7 +125,7 @@ Services (default):
 
 For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:1919`.
 
-If you want the UI on port 80, change the `web` service port mapping in `docker-compose.yml`.
+If you want the UI on port 80, change the `web` service port mapping in `docker-compose.base.yml`.
 
 ### Container Healthchecks & Logs
 - **Healthchecks**: `GET /api/v1/health` for the API; verify container status with `docker compose ps`.

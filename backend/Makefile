@@ -4,7 +4,7 @@ DOCKER := docker
 COMPOSE := docker compose
 
 # Compose files
-DEV_FILES := -f docker-compose.yml
+DEV_FILES := -f docker-compose.base.yml
 PROD_FILES := -f docker-compose.prod.yml
 NGROK_FILES := -f docker-compose.ngrok.yml
 

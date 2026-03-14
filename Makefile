@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml
+COMPOSE := docker compose -f docker-compose.base.yml -f docker-compose.dev.yml
 
 .PHONY: help up up-build down down-v logs ps sh dev-frontend dev-backend test test-up prod prod-build
 
