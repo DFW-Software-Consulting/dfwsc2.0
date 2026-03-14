@@ -1,22 +1,15 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { eq, and } from 'drizzle-orm';
+import crypto from 'crypto';
+import { eq, and, isNull } from 'drizzle-orm';
 import { db } from '../db/client';
 import { clients } from '../db/schema';
 
-export type Role = 'admin' | 'client';
-
-export function requireRole(allowedRoles: Role[]) {
-  return async function roleGuard(request: FastifyRequest, reply: FastifyReply) {
-    const roleHeader = request.headers['x-api-role'];
-    const role = Array.isArray(roleHeader) ? roleHeader[0] : roleHeader;
-
-    if (typeof role !== 'string' || !allowedRoles.includes(role as Role)) {
-      return reply.code(403).send({ error: 'Forbidden' });
-    }
-  };
+export function sha256Lookup(apiKey: string): string {
+  return crypto.createHash('sha256').update(apiKey).digest('hex');
 }
+
 
 export async function requireApiKey(request: FastifyRequest, reply: FastifyReply) {
   const apiKeyHeader = request.headers['x-api-key'];
@@ -27,34 +20,41 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
   }
 
   try {
-    // First, try to find a client with a matching API key hash
-    const allClientsResult = await db.select().from(clients);
-    // Ensure we have an array to iterate over
-    const allClients = Array.isArray(allClientsResult) ? allClientsResult : [];
+    // Fast path: SHA-256 lookup — O(1) DB query, then single bcrypt verify
+    const lookup = sha256Lookup(apiKey);
+    const [clientByLookup] = await db
+      .select()
+      .from(clients)
+      .where(and(eq(clients.apiKeyLookup, lookup), eq(clients.status, 'active')))
+      .limit(1);
 
-    for (const client of allClients) {
+    if (clientByLookup) {
+      const isValid = clientByLookup.apiKeyHash
+        ? await verifyPassword(apiKey, clientByLookup.apiKeyHash)
+        : false;
+      if (isValid) {
+        (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = clientByLookup;
+        return;
+      }
+      return reply.code(401).send({ error: 'Invalid API key.' });
+    }
+
+    // Legacy fallback: O(n) bcrypt scan for clients not yet assigned apiKeyLookup
+    const legacyClients = await db
+      .select()
+      .from(clients)
+      .where(isNull(clients.apiKeyLookup));
+
+    for (const client of legacyClients) {
       if (client.apiKeyHash) {
         const isValid = await verifyPassword(apiKey, client.apiKeyHash);
         if (isValid && client.status !== 'inactive') {
           (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = client;
-          return; // Found valid client, exit early
+          return;
         }
       }
     }
 
-    // For backward compatibility during migration, also check plaintext keys
-    const [plaintextClient] = await db
-      .select()
-      .from(clients)
-      .where(and(eq(clients.apiKey, apiKey), eq(clients.status, 'active')))
-      .limit(1);
-
-    if (plaintextClient) {
-      (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = plaintextClient;
-      return; // Found valid client with plaintext key
-    }
-
-    // To prevent user enumeration, return the same error regardless of whether the key exists
     return reply.code(401).send({ error: 'Invalid API key.' });
   } catch (error) {
     console.error('Error in requireApiKey:', error);

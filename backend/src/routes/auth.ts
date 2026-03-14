@@ -1,7 +1,10 @@
 import { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
+import { existsSync, writeFileSync } from 'fs';
 import { signJwt } from '../lib/auth';
 import { rateLimit } from '../lib/rate-limit';
+
+const SETUP_FLAG_FILE = process.env.SETUP_FLAG_PATH ?? '/tmp/admin-setup-used';
 
 interface LoginRequest {
   username: string;
@@ -40,8 +43,8 @@ export function validateAdminPasswordConfig(): boolean {
   return isBcryptHash;
 }
 
-// Runtime flag to track if setup has been used (resets on container restart)
-let setupUsed = false;
+// Persisted flag: survives restarts if SETUP_FLAG_PATH points to a mounted volume
+let setupUsed = existsSync(SETUP_FLAG_FILE);
 let setupInProgress = false;
 
 // For testing purposes only - reset the setup state
@@ -136,7 +139,8 @@ export default async function authRoutes(fastify: FastifyInstance) {
           const saltRounds = 10;
           passwordHash = await bcrypt.hash(password, saltRounds);
 
-          // Mark setup as used for this session
+          // Persist flag so setup stays blocked across container restarts
+          try { writeFileSync(SETUP_FLAG_FILE, '1'); } catch { /* non-fatal */ }
           setupUsed = true;
         } catch (error) {
           fastify.log.error({ error }, 'Error generating admin password hash during setup');
