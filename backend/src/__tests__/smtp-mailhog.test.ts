@@ -61,7 +61,7 @@ beforeEach(async () => {
   }
 });
 
-describe('SMTP (MailHog)', () => {
+describe.skipIf(!process.env.MAILHOG_ENABLED)('SMTP (MailHog)', () => {
   it('delivers an email via SMTP transport', async () => {
     const recipient = 'smtp-test@example.com';
     const subject = 'SMTP Smoke Test';
