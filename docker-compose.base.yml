@@ -4,7 +4,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     env_file:
-      - backend/.env
+      - .env
     environment:
       NODE_ENV: development
       ENABLE_SWAGGER: 'false'
@@ -48,7 +48,7 @@ services:
   stripe-cli:
     image: stripe/stripe-cli:latest
     env_file:
-      - backend/.env
+      - .env
     environment:
       STRIPE_DEVICE_NAME: ${STRIPE_DEVICE_NAME:-dfwsc-dev}
     command: listen --api-key $STRIPE_SECRET_KEY --forward-to api:4242/api/v1/webhooks/stripe

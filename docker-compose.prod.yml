@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
       target: builder
     env_file:
-      - backend/.env
+      - .env
     depends_on:
       db:
         condition: service_healthy
@@ -17,7 +17,7 @@ services:
       dockerfile: Dockerfile
       target: production
     env_file:
-      - backend/.env
+      - .env
     environment:
       NODE_ENV: production
     ports:

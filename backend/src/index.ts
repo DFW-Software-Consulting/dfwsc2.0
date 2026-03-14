@@ -1,8 +1,9 @@
 import dotenv from 'dotenv';
+import path from 'path';
 
 // Load environment variables synchronously before any other imports
 if (process.env.NODE_ENV !== 'production') {
-  dotenv.config();
+  dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 }
 
 // Now import and start the server after env vars are loaded
