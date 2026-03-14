@@ -44,7 +44,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-stripe_portal}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -58,9 +58,8 @@ services:
     env_file:
       - backend/.env
     environment:
-      STRIPE_API_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_DEVICE_NAME: ${STRIPE_DEVICE_NAME:-dfwsc-dev}
-    command: listen --forward-to api:4242/api/v1/webhooks/stripe
+    command: listen --api-key $STRIPE_SECRET_KEY --forward-to api:4242/api/v1/webhooks/stripe
     depends_on:
       - api
 
