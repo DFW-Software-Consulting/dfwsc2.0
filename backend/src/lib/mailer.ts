@@ -134,9 +134,7 @@ export async function sendInvoiceEmail(opts: {
     opts.dueDate ? `Due: ${opts.dueDate.toLocaleDateString()}` : "",
     ``,
     `Pay here: ${opts.payUrl}`,
-  ]
-    .filter((line) => line !== undefined)
-    .join("\n");
+  ].join("\n");
 
   await sendMail({ to: opts.to, subject, text, html });
 }

@@ -153,7 +153,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN ?? "";
       const payUrl = `${frontendOrigin}/pay/${token}`;
-      const paymentsRemaining = totalPayments != null ? totalPayments : null;
+      const paymentsRemaining = totalPayments ?? null;
 
       await sendInvoiceEmail({
         to: client.email,
