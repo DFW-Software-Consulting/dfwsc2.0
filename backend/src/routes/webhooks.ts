@@ -88,6 +88,38 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           );
           break;
         }
+        case "invoice.payment_succeeded": {
+          const inv = event.data.object as Stripe.Invoice;
+          fastify.log.info(
+            { invoiceId: inv.id, clientId: inv.metadata?.clientId },
+            "Invoice payment succeeded."
+          );
+          break;
+        }
+        case "invoice.payment_failed": {
+          const inv = event.data.object as Stripe.Invoice;
+          fastify.log.warn(
+            { invoiceId: inv.id, clientId: inv.metadata?.clientId },
+            "Invoice payment failed."
+          );
+          break;
+        }
+        case "customer.subscription.updated": {
+          const sub = event.data.object as Stripe.Subscription;
+          fastify.log.info(
+            { subId: sub.id, status: sub.status, clientId: sub.metadata?.clientId },
+            "Subscription updated."
+          );
+          break;
+        }
+        case "customer.subscription.deleted": {
+          const sub = event.data.object as Stripe.Subscription;
+          fastify.log.info(
+            { subId: sub.id, clientId: sub.metadata?.clientId },
+            "Subscription deleted."
+          );
+          break;
+        }
         default: {
           fastify.log.debug({ eventType: event.type }, "Unhandled Stripe event type.");
         }

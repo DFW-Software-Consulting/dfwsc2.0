@@ -1,10 +1,12 @@
-import crypto from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
+import type Stripe from "stripe";
 import { db } from "../db/client";
-import { clients, invoices, subscriptions } from "../db/schema";
+import { clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { sendInvoiceEmail } from "../lib/mailer";
+import { stripe } from "../lib/stripe";
+import { ensureStripeCustomer, toStripeInterval } from "../lib/stripe-billing";
 
 interface CreateSubscriptionBody {
   clientId: string;
@@ -29,56 +31,46 @@ interface SubscriptionFilterQuery {
   clientId?: string;
 }
 
-function addBillingInterval(date: Date, interval: "monthly" | "quarterly" | "yearly"): Date {
-  const next = new Date(date);
-  if (interval === "monthly") {
-    next.setMonth(next.getMonth() + 1);
-  } else if (interval === "quarterly") {
-    next.setMonth(next.getMonth() + 3);
-  } else {
-    next.setFullYear(next.getFullYear() + 1);
-  }
-  return next;
-}
+function formatStripeSub(sub: Stripe.Subscription, clientId: string, clientName?: string | null) {
+  const item = sub.items.data[0];
+  const rawStatus = sub.pause_collection ? "paused" : sub.status;
+  // Normalize Stripe's 'canceled' to 'cancelled'
+  const status = (rawStatus as string) === "canceled" ? "cancelled" : rawStatus;
+  // current_period_end exists at runtime but may not be in all SDK type versions
+  const periodEnd = (sub as unknown as { current_period_end?: number }).current_period_end;
 
-function formatSubscription(
-  sub: typeof subscriptions.$inferSelect & { clientName?: string | null }
-) {
   return {
     id: sub.id,
-    clientId: sub.clientId,
-    clientName: sub.clientName ?? null,
-    amountCents: sub.amountCents,
-    description: sub.description,
-    interval: sub.interval,
-    totalPayments: sub.totalPayments,
-    paymentsMade: sub.paymentsMade,
-    status: sub.status,
-    nextBillingDate: sub.nextBillingDate?.toISOString() ?? null,
-    createdAt: sub.createdAt?.toISOString() ?? null,
-    updatedAt: sub.updatedAt?.toISOString() ?? null,
+    clientId,
+    clientName: clientName ?? null,
+    amountCents: item?.price?.unit_amount ?? 0,
+    description: sub.metadata?.description ?? "",
+    interval: sub.metadata?.interval ?? "monthly",
+    totalPayments: sub.metadata?.totalPayments ? Number(sub.metadata.totalPayments) : null,
+    status,
+    currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+    createdAt: new Date(sub.created * 1000).toISOString(),
   };
 }
 
-function formatInvoice(inv: typeof invoices.$inferSelect) {
+function formatStripeInvoice(inv: Stripe.Invoice, clientId?: string | null) {
   return {
     id: inv.id,
-    clientId: inv.clientId,
-    subscriptionId: inv.subscriptionId,
-    amountCents: inv.amountCents,
-    description: inv.description,
-    dueDate: inv.dueDate?.toISOString() ?? null,
+    clientId: clientId ?? inv.metadata?.clientId ?? null,
+    amountCents: inv.amount_due,
+    description: inv.description ?? "",
+    dueDate: inv.due_date ? new Date(inv.due_date * 1000).toISOString() : null,
     status: inv.status,
-    paymentToken: inv.paymentToken,
-    paidAt: inv.paidAt?.toISOString() ?? null,
-    mockPaymentId: inv.mockPaymentId,
-    createdAt: inv.createdAt?.toISOString() ?? null,
-    updatedAt: inv.updatedAt?.toISOString() ?? null,
+    hostedUrl: inv.hosted_invoice_url ?? null,
+    paidAt: inv.status_transitions?.paid_at
+      ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
+      : null,
+    createdAt: new Date(inv.created * 1000).toISOString(),
   };
 }
 
 const subscriptionRoutes: FastifyPluginAsync = async (app) => {
-  // POST /subscriptions — create subscription + first invoice
+  // POST /subscriptions — create Stripe subscription + send first invoice
   app.post<{ Body: CreateSubscriptionBody }>(
     "/subscriptions",
     { preHandler: requireAdminJwt },
@@ -112,66 +104,60 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         return res.status(404).send({ error: "Client not found." });
       }
 
-      const now = new Date();
-      const nextBillingDate = addBillingInterval(now, interval);
-      const subId = crypto.randomUUID();
+      const customerId = await ensureStripeCustomer(client);
 
-      await db.insert(subscriptions).values({
-        id: subId,
+      const price = await stripe.prices.create({
+        unit_amount: amountCents,
+        currency: "usd",
+        recurring: toStripeInterval(interval),
+        product_data: { name: description.trim() },
+      });
+
+      const subMetadata: Record<string, string> = {
         clientId,
-        amountCents,
         description: description.trim(),
         interval,
-        totalPayments: totalPayments ?? null,
-        paymentsMade: 0,
-        status: "active",
-        nextBillingDate,
-        createdAt: now,
-        updatedAt: now,
+      };
+      if (totalPayments != null) {
+        subMetadata.totalPayments = String(totalPayments);
+      }
+
+      const sub = await stripe.subscriptions.create({
+        customer: customerId,
+        items: [{ price: price.id }],
+        collection_method: "send_invoice",
+        days_until_due: 30,
+        metadata: subMetadata,
       });
 
-      const token = crypto.randomBytes(32).toString("hex");
-      const invoiceId = crypto.randomUUID();
+      // Finalize first invoice if it's a draft
+      let firstInvoice: Stripe.Invoice | null = null;
+      if (sub.latest_invoice) {
+        const latestInvoiceId =
+          typeof sub.latest_invoice === "string" ? sub.latest_invoice : sub.latest_invoice.id;
+        let inv = await stripe.invoices.retrieve(latestInvoiceId);
+        if (inv.status === "draft") {
+          inv = await stripe.invoices.finalizeInvoice(inv.id);
+        }
+        firstInvoice = inv;
+      }
 
-      await db.insert(invoices).values({
-        id: invoiceId,
-        clientId,
-        subscriptionId: subId,
-        amountCents,
-        description: description.trim(),
-        dueDate: nextBillingDate,
-        status: "pending",
-        paymentToken: token,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      const [sub] = await db
-        .select()
-        .from(subscriptions)
-        .where(eq(subscriptions.id, subId))
-        .limit(1);
-
-      const [invoice] = await db.select().from(invoices).where(eq(invoices.id, invoiceId)).limit(1);
-
-      const frontendOrigin = process.env.FRONTEND_ORIGIN ?? "";
-      const payUrl = `${frontendOrigin}/pay/${token}`;
-      const paymentsRemaining = totalPayments ?? null;
+      const hostedInvoiceUrl = firstInvoice?.hosted_invoice_url ?? null;
 
       await sendInvoiceEmail({
         to: client.email,
         clientName: client.name,
         amountCents,
         description: description.trim(),
-        dueDate: nextBillingDate,
-        payUrl,
+        dueDate: null,
+        payUrl: hostedInvoiceUrl ?? "",
         isSubscription: true,
-        paymentsRemaining,
+        paymentsRemaining: totalPayments ?? null,
       }).catch(() => {});
 
       return res.status(201).send({
-        subscription: formatSubscription({ ...sub, clientName: client.name }),
-        invoice: formatInvoice(invoice),
+        subscription: formatStripeSub(sub, clientId, client.name),
+        hostedInvoiceUrl,
       });
     }
   );
@@ -183,35 +169,39 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { clientId } = req.query;
 
-      const rows = await db
-        .select({
-          id: subscriptions.id,
-          clientId: subscriptions.clientId,
-          clientName: clients.name,
-          amountCents: subscriptions.amountCents,
-          description: subscriptions.description,
-          interval: subscriptions.interval,
-          totalPayments: subscriptions.totalPayments,
-          paymentsMade: subscriptions.paymentsMade,
-          status: subscriptions.status,
-          nextBillingDate: subscriptions.nextBillingDate,
-          createdAt: subscriptions.createdAt,
-          updatedAt: subscriptions.updatedAt,
-        })
-        .from(subscriptions)
-        .leftJoin(clients, eq(subscriptions.clientId, clients.id));
+      if (clientId) {
+        const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+        if (!client?.stripeCustomerId) {
+          return res.status(200).send([]);
+        }
 
-      const filtered = clientId ? rows.filter((r) => r.clientId === clientId) : rows;
+        const list = await stripe.subscriptions.list({
+          customer: client.stripeCustomerId,
+          limit: 100,
+        });
+        return res
+          .status(200)
+          .send(list.data.map((sub) => formatStripeSub(sub, clientId, client.name)));
+      }
+
+      const list = await stripe.subscriptions.list({ limit: 100 });
+
+      const clientIds = [
+        ...new Set(list.data.map((sub) => sub.metadata?.clientId).filter(Boolean) as string[]),
+      ];
+
+      const clientRows =
+        clientIds.length > 0
+          ? await db.select().from(clients).where(inArray(clients.id, clientIds))
+          : [];
+
+      const clientMap = new Map(clientRows.map((c) => [c.id, c.name]));
 
       return res.status(200).send(
-        filtered.map((r) =>
-          formatSubscription({
-            ...r,
-            nextBillingDate: r.nextBillingDate ?? null,
-            createdAt: r.createdAt ?? null,
-            updatedAt: r.updatedAt ?? null,
-          })
-        )
+        list.data.map((sub) => {
+          const cid = sub.metadata?.clientId ?? "";
+          return formatStripeSub(sub, cid, clientMap.get(cid) ?? null);
+        })
       );
     }
   );
@@ -223,30 +213,46 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { id } = req.params;
 
-      const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.id, id)).limit(1);
-
-      if (!sub) {
+      let sub: Stripe.Subscription;
+      try {
+        sub = await stripe.subscriptions.retrieve(id, {
+          expand: ["latest_invoice", "items.data.price"],
+        });
+      } catch {
         return res.status(404).send({ error: "Subscription not found." });
       }
 
-      const [client] = await db.select().from(clients).where(eq(clients.id, sub.clientId)).limit(1);
+      const clientId = sub.metadata?.clientId ?? "";
 
-      const subInvoices = await db.select().from(invoices).where(eq(invoices.subscriptionId, id));
+      let clientName: string | null = null;
+      if (clientId) {
+        const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+        clientName = client?.name ?? null;
+      }
+
+      const invoiceList = await stripe.invoices.list({ subscription: id, limit: 100 });
 
       return res.status(200).send({
-        ...formatSubscription({ ...sub, clientName: client?.name ?? null }),
-        invoices: subInvoices.map(formatInvoice),
+        ...formatStripeSub(sub, clientId, clientName),
+        invoices: invoiceList.data.map((inv) => formatStripeInvoice(inv, clientId)),
       });
     }
   );
 
-  // PATCH /subscriptions/:id — pause, cancel, resume, or edit fields
+  // PATCH /subscriptions/:id — pause, cancel, resume, or update totalPayments
   app.patch<{ Params: SubscriptionParams; Body: SubscriptionPatchBody }>(
     "/subscriptions/:id",
     { preHandler: requireAdminJwt },
     async (req, res) => {
       const { id } = req.params;
       const { status, totalPayments, amountCents, description } = req.body;
+
+      if (amountCents !== undefined || description !== undefined) {
+        return res.status(400).send({
+          error:
+            "Editing amountCents and description is not supported. Only totalPayments and status can be changed.",
+        });
+      }
 
       if (status !== undefined) {
         const ALLOWED_STATUSES = ["paused", "cancelled", "active"];
@@ -263,47 +269,46 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      if (amountCents !== undefined) {
-        if (!Number.isInteger(amountCents) || amountCents <= 0) {
-          return res.status(422).send({ error: "amountCents must be a positive integer." });
-        }
-      }
-
-      if (description !== undefined) {
-        if (!description || description.trim().length === 0) {
-          return res.status(422).send({ error: "description must not be blank." });
-        }
-      }
-
-      const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.id, id)).limit(1);
-
-      if (!sub) {
+      let sub: Stripe.Subscription;
+      try {
+        sub = await stripe.subscriptions.retrieve(id);
+      } catch {
         return res.status(404).send({ error: "Subscription not found." });
       }
 
-      if (sub.status === "completed") {
-        return res.status(422).send({ error: "Cannot modify a completed subscription." });
+      if ((sub.status as string) === "canceled") {
+        return res.status(422).send({ error: "Cannot modify a cancelled subscription." });
       }
 
-      if (status === "active" && sub.status === "cancelled") {
+      if (status === "active" && (sub.status as string) === "canceled") {
         return res.status(422).send({ error: "Cannot resume a cancelled subscription." });
       }
 
-      const updates: Record<string, unknown> = { updatedAt: new Date() };
-      if (status !== undefined) updates.status = status;
-      if (totalPayments !== undefined) updates.totalPayments = totalPayments;
-      if (amountCents !== undefined) updates.amountCents = amountCents;
-      if (description !== undefined) updates.description = description.trim();
+      let updated = sub;
 
-      await db.update(subscriptions).set(updates).where(eq(subscriptions.id, id));
+      if (status === "paused") {
+        updated = await stripe.subscriptions.update(id, {
+          pause_collection: { behavior: "void" },
+        });
+      } else if (status === "active") {
+        // Pass "" to clear pause_collection (Stripe Emptyable field)
+        // biome-ignore lint/suspicious/noExplicitAny: Stripe SDK requires "" to clear Emptyable fields
+        updated = await stripe.subscriptions.update(id, { pause_collection: "" as any });
+      } else if (status === "cancelled") {
+        updated = await stripe.subscriptions.update(id, { cancel_at_period_end: true });
+      }
 
-      const [updated] = await db
-        .select()
-        .from(subscriptions)
-        .where(eq(subscriptions.id, id))
-        .limit(1);
+      if (totalPayments !== undefined) {
+        updated = await stripe.subscriptions.update(id, {
+          metadata: {
+            ...updated.metadata,
+            totalPayments: totalPayments !== null ? String(totalPayments) : "",
+          },
+        });
+      }
 
-      return res.status(200).send(formatSubscription(updated));
+      const clientId = updated.metadata?.clientId ?? "";
+      return res.status(200).send(formatStripeSub(updated, clientId));
     }
   );
 };
