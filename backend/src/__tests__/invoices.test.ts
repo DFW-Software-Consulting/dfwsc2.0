@@ -39,15 +39,6 @@ function resolveColumnName(col: any): string | undefined {
   return typeof sym === "string" ? sym : undefined;
 }
 
-function colIs(col: any, name: string): boolean {
-  const resolved = resolveColumnName(col);
-  if (!resolved) return false;
-  if (resolved === name) return true;
-  const camel = name.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-  return resolved === camel;
-}
-
-// Builds a thenable + limited chain from a rows promise
 function chainable(rowsPromise: Promise<any[]>) {
   return {
     limit: (_n: number) => rowsPromise.then((rows) => rows.slice(0, _n)),
@@ -94,7 +85,6 @@ const dbMock = {
       const basePromise = Promise.resolve(baseRows);
 
       return {
-        // leftJoin — just enrich rows with the joined table data
         leftJoin: (_joinTable: any, _on: any) => ({
           where: (expr: any) => {
             const filtered = filterByExpr(baseRows, expr).map(enrichWithClientName);
@@ -141,7 +131,6 @@ const dbMock = {
         const updatedRows = [...targets];
         const result = Promise.resolve(updatedRows);
         return {
-          // Support .returning() for atomic conditional updates
           returning: () => result,
           then: result.then.bind(result),
           catch: result.catch.bind(result),
@@ -177,8 +166,6 @@ vi.mock("../lib/stripe", () => ({
   },
 }));
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
 function makeAdminJwt() {
   return jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 }
@@ -189,13 +176,11 @@ describe("Invoice pay flow (one-time invoice)", () => {
   let capturedToken: string;
 
   beforeEach(async () => {
-    // Reset stores
     dataStore.clients.clear();
     dataStore.invoices.clear();
     dataStore.subscriptions.clear();
     sentEmails.length = 0;
 
-    // Seed test client
     dataStore.clients.set(TEST_CLIENT_ID, {
       id: TEST_CLIENT_ID,
       name: "Test Client Co",
@@ -230,7 +215,6 @@ describe("Invoice pay flow (one-time invoice)", () => {
   it("creates an invoice, fetches it, pays it, and guards against double-pay", async () => {
     const adminToken = makeAdminJwt();
 
-    // Step 1: Create invoice
     const createRes = await app.inject({
       method: "POST",
       url: "/api/v1/invoices",
@@ -255,7 +239,6 @@ describe("Invoice pay flow (one-time invoice)", () => {
 
     capturedToken = created.paymentToken;
 
-    // Step 2: Fetch invoice via public pay endpoint
     const getRes = await app.inject({
       method: "GET",
       url: `/api/v1/invoices/pay/${capturedToken}`,
@@ -267,7 +250,6 @@ describe("Invoice pay flow (one-time invoice)", () => {
     expect(fetched.description).toBe("Website hosting — March 2026");
     expect(fetched.status).toBe("pending");
 
-    // Step 3: Pay the invoice (mock payment)
     const payRes = await app.inject({
       method: "POST",
       url: `/api/v1/invoices/pay/${capturedToken}`,
@@ -281,7 +263,6 @@ describe("Invoice pay flow (one-time invoice)", () => {
     expect(payBody.payment.amount).toBe(9900);
     expect(payBody.payment.id).toMatch(/^mock_pi_/);
 
-    // Step 4: Re-visit — invoice shows paid (idempotency guard returns 409)
     const revisitRes = await app.inject({
       method: "POST",
       url: `/api/v1/invoices/pay/${capturedToken}`,
@@ -289,7 +270,6 @@ describe("Invoice pay flow (one-time invoice)", () => {
 
     expect(revisitRes.statusCode).toBe(409);
 
-    // Confirm GET still shows paid
     const getAgainRes = await app.inject({
       method: "GET",
       url: `/api/v1/invoices/pay/${capturedToken}`,
@@ -304,5 +284,691 @@ describe("Invoice pay flow (one-time invoice)", () => {
       url: "/api/v1/invoices/pay/unknown-token-that-does-not-exist",
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+function setTestEnv() {
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
+  process.env.STRIPE_SECRET_KEY = "sk_test_12345";
+  process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
+  process.env.FRONTEND_ORIGIN = "http://localhost:8080";
+  process.env.DATABASE_URL = process.env.DATABASE_URL ?? "db-mocked-in-tests";
+  process.env.SMTP_HOST = "localhost";
+  process.env.SMTP_PORT = "1025";
+  process.env.SMTP_USER = "test";
+  process.env.SMTP_PASS = "test";
+  process.env.ADMIN_USERNAME = "admin";
+  process.env.ADMIN_PASSWORD = "password";
+}
+
+function seedBaseClient(id = "client-001") {
+  dataStore.clients.set(id, {
+    id,
+    name: "Test Corp",
+    email: "billing@testcorp.test",
+    status: "active",
+    apiKeyHash: null,
+    apiKeyLookup: null,
+    stripeAccountId: null,
+  });
+}
+
+describe("POST /invoices — input validation", () => {
+  let app: Awaited<ReturnType<typeof import("../app").buildServer>>;
+
+  beforeEach(async () => {
+    dataStore.clients.clear();
+    dataStore.invoices.clear();
+    dataStore.subscriptions.clear();
+    sentEmails.length = 0;
+    seedBaseClient();
+    setTestEnv();
+    const { buildServer } = await import("../app");
+    app = await buildServer();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    vi.resetModules();
+  });
+
+  it("returns 400 when clientId is missing", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ amountCents: 5000, description: "Service fee" }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/clientId/);
+  });
+
+  it.each([
+    { label: "zero", value: 0 },
+    { label: "negative", value: -100 },
+    { label: "float", value: 9.99 },
+    { label: "string", value: "fifty" },
+  ])("returns 400 for invalid amountCents ($label)", async ({ value }) => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: "client-001",
+        amountCents: value,
+        description: "Service fee",
+      }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/amountCents/);
+  });
+
+  it.each([
+    { label: "empty string", value: "" },
+    { label: "whitespace only", value: "   " },
+  ])("returns 400 for invalid description ($label)", async ({ value }) => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId: "client-001", amountCents: 5000, description: value }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/description/);
+  });
+
+  it("returns 404 when client does not exist", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: "ghost-client",
+        amountCents: 5000,
+        description: "Service fee",
+      }),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).error).toMatch(/Client not found/);
+  });
+
+  it("accepts an optional dueDate and sends an email", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: "client-001",
+        amountCents: 15000,
+        description: "Consulting Q2",
+        dueDate: "2026-06-30T00:00:00.000Z",
+      }),
+    });
+    expect(res.statusCode).toBe(201);
+    const body = JSON.parse(res.body);
+    expect(body.dueDate).not.toBeNull();
+    expect(body.description).toBe("Consulting Q2");
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0].to).toBe("billing@testcorp.test");
+  });
+});
+
+describe("GET /invoices — list and filters", () => {
+  let app: Awaited<ReturnType<typeof import("../app").buildServer>>;
+
+  beforeEach(async () => {
+    dataStore.clients.clear();
+    dataStore.invoices.clear();
+    dataStore.subscriptions.clear();
+    sentEmails.length = 0;
+
+    const now = new Date();
+    dataStore.clients.set("client-A", {
+      id: "client-A",
+      name: "Alpha Inc",
+      email: "a@test.com",
+      status: "active",
+      apiKeyHash: null,
+      apiKeyLookup: null,
+      stripeAccountId: null,
+    });
+    dataStore.clients.set("client-B", {
+      id: "client-B",
+      name: "Beta LLC",
+      email: "b@test.com",
+      status: "active",
+      apiKeyHash: null,
+      apiKeyLookup: null,
+      stripeAccountId: null,
+    });
+
+    dataStore.invoices.set("inv-1", {
+      id: "inv-1",
+      clientId: "client-A",
+      status: "pending",
+      amountCents: 1000,
+      description: "Alpha pending",
+      paymentToken: "tok-a1",
+      subscriptionId: null,
+      dueDate: null,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    dataStore.invoices.set("inv-2", {
+      id: "inv-2",
+      clientId: "client-B",
+      status: "paid",
+      amountCents: 2000,
+      description: "Beta paid",
+      paymentToken: "tok-b2",
+      subscriptionId: null,
+      dueDate: null,
+      paidAt: now,
+      mockPaymentId: "mock_pi_abc",
+      createdAt: now,
+      updatedAt: now,
+    });
+    dataStore.invoices.set("inv-3", {
+      id: "inv-3",
+      clientId: "client-A",
+      status: "cancelled",
+      amountCents: 3000,
+      description: "Alpha cancelled",
+      paymentToken: "tok-a3",
+      subscriptionId: null,
+      dueDate: null,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    setTestEnv();
+    const { buildServer } = await import("../app");
+    app = await buildServer();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    vi.resetModules();
+  });
+
+  it("returns 401 without admin JWT", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/v1/invoices" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns all invoices with no filter", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/invoices",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toHaveLength(3);
+  });
+
+  it("filters by clientId", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/invoices?clientId=client-A",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body).toHaveLength(2);
+    expect(body.every((inv: any) => inv.clientId === "client-A")).toBe(true);
+  });
+
+  it("filters by status", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/invoices?status=paid",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body).toHaveLength(1);
+    expect(body[0].status).toBe("paid");
+    expect(body[0].clientId).toBe("client-B");
+  });
+
+  it("returns empty array when filters match nothing", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/invoices?status=pending&clientId=client-B",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toHaveLength(0);
+  });
+});
+
+describe("POST /invoices/pay/:token — edge cases", () => {
+  let app: Awaited<ReturnType<typeof import("../app").buildServer>>;
+
+  beforeEach(async () => {
+    dataStore.clients.clear();
+    dataStore.invoices.clear();
+    dataStore.subscriptions.clear();
+    sentEmails.length = 0;
+
+    const now = new Date();
+    seedBaseClient();
+    dataStore.invoices.set("inv-cancelled", {
+      id: "inv-cancelled",
+      clientId: "client-001",
+      status: "cancelled",
+      amountCents: 5000,
+      description: "Cancelled invoice",
+      paymentToken: "token-cancelled",
+      subscriptionId: null,
+      dueDate: null,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    setTestEnv();
+    const { buildServer } = await import("../app");
+    app = await buildServer();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    vi.resetModules();
+  });
+
+  it("returns 404 for an unknown payment token", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices/pay/completely-unknown-token",
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).error).toMatch(/Invoice not found/);
+  });
+
+  it("returns 422 when the invoice has been cancelled", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices/pay/token-cancelled",
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error).toMatch(/cancelled/);
+  });
+
+  it("returns 409 when a concurrent request beats the atomic update (race condition)", async () => {
+    const now = new Date();
+    dataStore.invoices.set("inv-race", {
+      id: "inv-race",
+      clientId: "client-001",
+      status: "pending",
+      amountCents: 5000,
+      description: "Race condition invoice",
+      paymentToken: "tok-race",
+      subscriptionId: null,
+      dueDate: null,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    dbMock.update.mockImplementationOnce((_table: any) => ({
+      set: (_values: any) => ({
+        where: (_expr: any) => {
+          const empty = Promise.resolve([]);
+          return {
+            returning: () => empty,
+            then: empty.then.bind(empty),
+            catch: empty.catch.bind(empty),
+            finally: empty.finally.bind(empty),
+          };
+        },
+      }),
+    }));
+
+    const res = await app.inject({ method: "POST", url: "/api/v1/invoices/pay/tok-race" });
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).error).toMatch(/already been paid/);
+  });
+});
+
+describe("PATCH /invoices/:id — cancel", () => {
+  let app: Awaited<ReturnType<typeof import("../app").buildServer>>;
+
+  beforeEach(async () => {
+    dataStore.clients.clear();
+    dataStore.invoices.clear();
+    dataStore.subscriptions.clear();
+    sentEmails.length = 0;
+
+    const now = new Date();
+    seedBaseClient();
+    dataStore.invoices.set("inv-pending", {
+      id: "inv-pending",
+      clientId: "client-001",
+      status: "pending",
+      amountCents: 7500,
+      description: "Pending invoice",
+      paymentToken: "tok-pending",
+      subscriptionId: null,
+      dueDate: null,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    dataStore.invoices.set("inv-paid", {
+      id: "inv-paid",
+      clientId: "client-001",
+      status: "paid",
+      amountCents: 7500,
+      description: "Paid invoice",
+      paymentToken: "tok-paid",
+      subscriptionId: null,
+      dueDate: null,
+      paidAt: now,
+      mockPaymentId: "mock_pi_xyz",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    setTestEnv();
+    const { buildServer } = await import("../app");
+    app = await buildServer();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    vi.resetModules();
+  });
+
+  it("returns 401 without admin JWT", async () => {
+    const res = await app.inject({ method: "PATCH", url: "/api/v1/invoices/inv-pending" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("cancels a pending invoice", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/invoices/inv-pending",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.id).toBe("inv-pending");
+    expect(body.status).toBe("cancelled");
+    expect(dataStore.invoices.get("inv-pending")?.status).toBe("cancelled");
+  });
+
+  it("returns 404 when invoice does not exist", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/invoices/no-such-invoice",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}` },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).error).toMatch(/Invoice not found/);
+  });
+
+  it("returns 422 when trying to cancel a non-pending invoice", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/invoices/inv-paid",
+      headers: { Authorization: `Bearer ${makeAdminJwt()}` },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).error).toMatch(/pending/);
+  });
+});
+
+describe("triggerAutoAdvance — subscription billing cycle", () => {
+  let app: Awaited<ReturnType<typeof import("../app").buildServer>>;
+
+  beforeEach(async () => {
+    dataStore.clients.clear();
+    dataStore.invoices.clear();
+    dataStore.subscriptions.clear();
+    sentEmails.length = 0;
+    seedBaseClient();
+    setTestEnv();
+    const { buildServer } = await import("../app");
+    app = await buildServer();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    vi.resetModules();
+  });
+
+  it("advances billing date by one month and creates the next invoice (monthly)", async () => {
+    const billingDate = new Date("2026-03-15T12:00:00.000Z");
+    const subId = "sub-monthly-001";
+
+    dataStore.subscriptions.set(subId, {
+      id: subId,
+      clientId: "client-001",
+      status: "active",
+      amountCents: 9900,
+      description: "Monthly retainer",
+      interval: "monthly",
+      paymentsMade: 0,
+      totalPayments: null,
+      nextBillingDate: billingDate,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+    dataStore.invoices.set("inv-sub-1", {
+      id: "inv-sub-1",
+      clientId: "client-001",
+      subscriptionId: subId,
+      status: "pending",
+      amountCents: 9900,
+      description: "Monthly retainer",
+      paymentToken: "tok-sub-month-1",
+      dueDate: billingDate,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/v1/invoices/pay/tok-sub-month-1" });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).invoice.status).toBe("paid");
+
+    const sub = dataStore.subscriptions.get(subId);
+    expect(sub?.paymentsMade).toBe(1);
+
+    // next billing date should be ~1 month later
+    const diffDays =
+      (new Date(sub?.nextBillingDate).getTime() - billingDate.getTime()) / 86_400_000;
+    expect(diffDays).toBeGreaterThanOrEqual(28);
+    expect(diffDays).toBeLessThanOrEqual(32);
+
+    // a new invoice should have been queued for the next cycle
+    expect(dataStore.invoices.size).toBe(2);
+    const nextInv = Array.from(dataStore.invoices.values()).find((i) => i.id !== "inv-sub-1");
+    expect(nextInv?.subscriptionId).toBe(subId);
+    expect(nextInv?.status).toBe("pending");
+    expect(nextInv?.amountCents).toBe(9900);
+  });
+
+  it("advances billing date by one quarter (quarterly interval)", async () => {
+    const billingDate = new Date("2026-01-15T12:00:00.000Z");
+    const subId = "sub-quarterly-001";
+
+    dataStore.subscriptions.set(subId, {
+      id: subId,
+      clientId: "client-001",
+      status: "active",
+      amountCents: 29700,
+      description: "Quarterly plan",
+      interval: "quarterly",
+      paymentsMade: 0,
+      totalPayments: null,
+      nextBillingDate: billingDate,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+    dataStore.invoices.set("inv-q1", {
+      id: "inv-q1",
+      clientId: "client-001",
+      subscriptionId: subId,
+      status: "pending",
+      amountCents: 29700,
+      description: "Quarterly plan",
+      paymentToken: "tok-quarterly-1",
+      dueDate: billingDate,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/v1/invoices/pay/tok-quarterly-1" });
+    expect(res.statusCode).toBe(200);
+
+    const sub = dataStore.subscriptions.get(subId);
+    expect(sub?.paymentsMade).toBe(1);
+
+    const diffDays =
+      (new Date(sub?.nextBillingDate).getTime() - billingDate.getTime()) / 86_400_000;
+    expect(diffDays).toBeGreaterThanOrEqual(88);
+    expect(diffDays).toBeLessThanOrEqual(93);
+  });
+
+  it("advances billing date by one year (yearly interval)", async () => {
+    const billingDate = new Date("2026-03-15T12:00:00.000Z");
+    const subId = "sub-yearly-001";
+
+    dataStore.subscriptions.set(subId, {
+      id: subId,
+      clientId: "client-001",
+      status: "active",
+      amountCents: 99000,
+      description: "Annual plan",
+      interval: "yearly",
+      paymentsMade: 0,
+      totalPayments: null,
+      nextBillingDate: billingDate,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+    dataStore.invoices.set("inv-yr1", {
+      id: "inv-yr1",
+      clientId: "client-001",
+      subscriptionId: subId,
+      status: "pending",
+      amountCents: 99000,
+      description: "Annual plan",
+      paymentToken: "tok-yearly-1",
+      dueDate: billingDate,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/v1/invoices/pay/tok-yearly-1" });
+    expect(res.statusCode).toBe(200);
+
+    const sub = dataStore.subscriptions.get(subId);
+    expect(sub?.paymentsMade).toBe(1);
+
+    const diffDays =
+      (new Date(sub?.nextBillingDate).getTime() - billingDate.getTime()) / 86_400_000;
+    expect(diffDays).toBeGreaterThanOrEqual(365);
+    expect(diffDays).toBeLessThanOrEqual(366);
+  });
+
+  it("marks subscription completed when final payment is made", async () => {
+    const billingDate = new Date("2026-03-15T12:00:00.000Z");
+    const subId = "sub-final-001";
+
+    dataStore.subscriptions.set(subId, {
+      id: subId,
+      clientId: "client-001",
+      status: "active",
+      amountCents: 20000,
+      description: "3-month project",
+      interval: "monthly",
+      paymentsMade: 2,
+      totalPayments: 3,
+      nextBillingDate: billingDate,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+    dataStore.invoices.set("inv-final", {
+      id: "inv-final",
+      clientId: "client-001",
+      subscriptionId: subId,
+      status: "pending",
+      amountCents: 20000,
+      description: "3-month project",
+      paymentToken: "tok-final-pay",
+      dueDate: billingDate,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/v1/invoices/pay/tok-final-pay" });
+    expect(res.statusCode).toBe(200);
+
+    const sub = dataStore.subscriptions.get(subId);
+    expect(sub?.status).toBe("completed");
+    expect(sub?.paymentsMade).toBe(3);
+    // no new invoice created
+    expect(dataStore.invoices.size).toBe(1);
+  });
+
+  it("does not advance a paused subscription", async () => {
+    const billingDate = new Date("2026-03-15T12:00:00.000Z");
+    const subId = "sub-paused-001";
+
+    dataStore.subscriptions.set(subId, {
+      id: subId,
+      clientId: "client-001",
+      status: "paused",
+      amountCents: 5000,
+      description: "Paused plan",
+      interval: "monthly",
+      paymentsMade: 1,
+      totalPayments: null,
+      nextBillingDate: billingDate,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+    dataStore.invoices.set("inv-paused", {
+      id: "inv-paused",
+      clientId: "client-001",
+      subscriptionId: subId,
+      status: "pending",
+      amountCents: 5000,
+      description: "Paused plan",
+      paymentToken: "tok-paused",
+      dueDate: billingDate,
+      paidAt: null,
+      mockPaymentId: null,
+      createdAt: billingDate,
+      updatedAt: billingDate,
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/v1/invoices/pay/tok-paused" });
+    // payment itself still succeeds
+    expect(res.statusCode).toBe(200);
+
+    // subscription state unchanged
+    const sub = dataStore.subscriptions.get(subId);
+    expect(sub?.status).toBe("paused");
+    expect(sub?.paymentsMade).toBe(1);
+    // no new invoice created
+    expect(dataStore.invoices.size).toBe(1);
   });
 });
