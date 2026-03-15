@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import logger from "../../utils/logger";
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -36,24 +36,19 @@ export default function AdminLogin({ onLoginSuccess, showToast }) {
       setError("");
 
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL}/auth/login`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              username: username.trim(),
-              password,
-            }),
-          }
-        );
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/auth/login`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            username: username.trim(),
+            password,
+          }),
+        });
 
         if (!res.ok) {
-          const errorData = await res
-            .json()
-            .catch(() => ({ error: "Invalid credentials" }));
+          const errorData = await res.json().catch(() => ({ error: "Invalid credentials" }));
           throw new Error(errorData.error || "Login failed");
         }
 
@@ -80,10 +75,7 @@ export default function AdminLogin({ onLoginSuccess, showToast }) {
   return (
     <form onSubmit={handleSubmit}>
       <div className="mb-4">
-        <label
-          htmlFor="adminUsername"
-          className="block text-sm font-semibold text-gray-200 mb-2"
-        >
+        <label htmlFor="adminUsername" className="block text-sm font-semibold text-gray-200 mb-2">
           Username
         </label>
         <input
@@ -101,10 +93,7 @@ export default function AdminLogin({ onLoginSuccess, showToast }) {
       </div>
 
       <div className="mb-6">
-        <label
-          htmlFor="adminPassword"
-          className="block text-sm font-semibold text-gray-200 mb-2"
-        >
+        <label htmlFor="adminPassword" className="block text-sm font-semibold text-gray-200 mb-2">
           Password
         </label>
         <input
@@ -119,9 +108,7 @@ export default function AdminLogin({ onLoginSuccess, showToast }) {
           disabled={loading}
           autoComplete="current-password"
         />
-        <p className="mt-1 text-xs text-gray-400">
-          Minimum {MIN_PASSWORD_LENGTH} characters
-        </p>
+        <p className="mt-1 text-xs text-gray-400">Minimum {MIN_PASSWORD_LENGTH} characters</p>
       </div>
 
       <button

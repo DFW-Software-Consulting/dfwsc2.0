@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import logger from "../../utils/logger";
 
 export default function GroupMembersModal({
@@ -15,7 +15,9 @@ export default function GroupMembersModal({
   const modalRef = useRef(null);
 
   useEffect(() => {
-    const handleEscape = (e) => { if (e.key === "Escape") onClose(); };
+    const handleEscape = (e) => {
+      if (e.key === "Escape") onClose();
+    };
     document.addEventListener("keydown", handleEscape);
     document.body.style.overflow = "hidden";
     return () => {
@@ -54,54 +56,60 @@ export default function GroupMembersModal({
     }
   }, [onSessionExpired]);
 
-  useEffect(() => { fetchClients(); }, [fetchClients]);
+  useEffect(() => {
+    fetchClients();
+  }, [fetchClients]);
 
-  const handleAction = useCallback(async (client, newGroupId) => {
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) return;
-    setActioningId(client.id);
-    // Optimistic update
-    setClients((prev) =>
-      prev.map((c) => c.id === client.id ? { ...c, groupId: newGroupId } : c)
-    );
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/clients/${client.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ groupId: newGroupId }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Failed to update client" }));
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      const updated = await res.json();
-      setClients((prev) => prev.map((c) => c.id === updated.id ? updated : c));
-      onClientUpdated?.(updated);
-      showToast?.(
-        newGroupId
-          ? `${client.name} added to ${group.name}`
-          : `${client.name} removed from ${group.name}`,
-        "success"
-      );
-    } catch (err) {
-      // Rollback
+  const handleAction = useCallback(
+    async (client, newGroupId) => {
+      const token = sessionStorage.getItem("adminToken");
+      if (!token) return;
+      setActioningId(client.id);
+      // Optimistic update
       setClients((prev) =>
-        prev.map((c) => c.id === client.id ? { ...c, groupId: client.groupId } : c)
+        prev.map((c) => (c.id === client.id ? { ...c, groupId: newGroupId } : c))
       );
-      logger.error("Error updating client group:", err);
-      showToast?.(err.message, "error");
-    } finally {
-      setActioningId(null);
-    }
-  }, [group.id, group.name, onClientUpdated, showToast]);
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/clients/${client.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ groupId: newGroupId }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: "Failed to update client" }));
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+        const updated = await res.json();
+        setClients((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        onClientUpdated?.(updated);
+        showToast?.(
+          newGroupId
+            ? `${client.name} added to ${group.name}`
+            : `${client.name} removed from ${group.name}`,
+          "success"
+        );
+      } catch (err) {
+        // Rollback
+        setClients((prev) =>
+          prev.map((c) => (c.id === client.id ? { ...c, groupId: client.groupId } : c))
+        );
+        logger.error("Error updating client group:", err);
+        showToast?.(err.message, "error");
+      } finally {
+        setActioningId(null);
+      }
+    },
+    [group.name, onClientUpdated, showToast]
+  );
 
   const members = clients.filter((c) => c.groupId === group.id);
   const available = clients.filter((c) => c.groupId !== group.id);
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener
     <div
       ref={modalRef}
       onClick={handleBackdropClick}
@@ -116,6 +124,7 @@ export default function GroupMembersModal({
             {group.name} — Members
           </h3>
           <button
+            type="button"
             onClick={onClose}
             className="text-gray-400 hover:text-white text-2xl leading-none"
             aria-label="Close"
@@ -162,6 +171,7 @@ export default function GroupMembersModal({
                         <td className="px-3 py-2 text-sm text-gray-400">{c.email}</td>
                         <td className="px-3 py-2 text-sm text-right">
                           <button
+                            type="button"
                             onClick={() => handleAction(c, null)}
                             disabled={actioningId === c.id}
                             className="px-3 py-1 rounded text-xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -207,6 +217,7 @@ export default function GroupMembersModal({
                         </td>
                         <td className="px-3 py-2 text-sm text-right">
                           <button
+                            type="button"
                             onClick={() => handleAction(c, group.id)}
                             disabled={actioningId === c.id}
                             className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"

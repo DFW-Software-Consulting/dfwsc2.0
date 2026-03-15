@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000; // 600_000 ms
 
@@ -13,11 +13,11 @@ afterAll(() => {
 // Fresh module import per test so hitBuckets starts empty
 async function getRateLimit() {
   vi.resetModules();
-  const mod = await import('../../lib/rate-limit');
+  const mod = await import("../../lib/rate-limit");
   return mod.rateLimit;
 }
 
-function makeMocks(ip = '127.0.0.1') {
+function makeMocks(ip = "127.0.0.1") {
   const reply = {
     code: vi.fn().mockReturnThis(),
     send: vi.fn().mockReturnThis(),
@@ -29,13 +29,13 @@ function makeMocks(ip = '127.0.0.1') {
   return { request, reply };
 }
 
-describe('rateLimit', () => {
+describe("rateLimit", () => {
   beforeEach(() => {
     vi.resetModules();
     // Keep fake timers active but don't advance them between tests
   });
 
-  it('allows requests up to max without blocking', async () => {
+  it("allows requests up to max without blocking", async () => {
     const rateLimit = await getRateLimit();
     const guard = rateLimit({ max: 3, windowMs: 60_000 });
     const { request, reply } = makeMocks();
@@ -48,7 +48,7 @@ describe('rateLimit', () => {
     expect(reply.send).not.toHaveBeenCalled();
   });
 
-  it('returns 429 when max is exceeded', async () => {
+  it("returns 429 when max is exceeded", async () => {
     const rateLimit = await getRateLimit();
     const guard = rateLimit({ max: 2, windowMs: 60_000 });
     const { request, reply } = makeMocks();
@@ -61,14 +61,14 @@ describe('rateLimit', () => {
     await guard(request as any, reply as any);
 
     expect(reply.code).toHaveBeenCalledWith(429);
-    expect(reply.send).toHaveBeenCalledWith({ error: 'Too Many Requests' });
+    expect(reply.send).toHaveBeenCalledWith({ error: "Too Many Requests" });
   });
 
-  it('uses a custom keyGenerator when provided', async () => {
+  it("uses a custom keyGenerator when provided", async () => {
     const rateLimit = await getRateLimit();
-    const keyGenerator = vi.fn().mockReturnValue('custom-key');
+    const keyGenerator = vi.fn().mockReturnValue("custom-key");
     const guard = rateLimit({ max: 1, windowMs: 60_000, keyGenerator });
-    const { request, reply } = makeMocks('10.0.0.1');
+    const { request, reply } = makeMocks("10.0.0.1");
 
     await guard(request as any, reply as any);
     await guard(request as any, reply as any); // should block
@@ -77,7 +77,7 @@ describe('rateLimit', () => {
     expect(reply.code).toHaveBeenCalledWith(429);
   });
 
-  it('uses a custom maxGenerator when provided', async () => {
+  it("uses a custom maxGenerator when provided", async () => {
     const rateLimit = await getRateLimit();
     // maxGenerator returns a higher limit than `max`
     const maxGenerator = vi.fn().mockReturnValue(5);
@@ -102,7 +102,7 @@ describe('rateLimit', () => {
       code: vi.fn().mockReturnThis(),
       send: vi.fn().mockReturnThis(),
     };
-    const request = { ip: '', headers: {} };
+    const request = { ip: "", headers: {} };
 
     await guard(request as any, reply as any); // ok
     await guard(request as any, reply as any); // blocked — same "unknown" bucket
@@ -110,12 +110,12 @@ describe('rateLimit', () => {
     expect(reply.code).toHaveBeenCalledWith(429);
   });
 
-  it('sweep interval cleans stale entries so keys can make requests again', async () => {
+  it("sweep interval cleans stale entries so keys can make requests again", async () => {
     const rateLimit = await getRateLimit();
 
     // Window is 1 ms so hits expire almost immediately (relative to fake time)
     const guard = rateLimit({ max: 1, windowMs: 1 });
-    const { request, reply } = makeMocks('sweep-test-ip');
+    const { request, reply } = makeMocks("sweep-test-ip");
 
     // Use up the budget at fake time T=0
     await guard(request as any, reply as any);

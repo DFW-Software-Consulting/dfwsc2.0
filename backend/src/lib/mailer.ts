@@ -1,4 +1,4 @@
-import nodemailer, { Transporter } from 'nodemailer';
+import nodemailer, { type Transporter } from "nodemailer";
 
 type MailPayload = {
   to: string;
@@ -16,12 +16,12 @@ export function createTransport(): Transporter {
   const pass = process.env.SMTP_PASS;
 
   if (!host || !portValue || !user || !pass) {
-    throw new Error('SMTP configuration is incomplete.');
+    throw new Error("SMTP configuration is incomplete.");
   }
 
   const port = Number(portValue);
   if (!Number.isInteger(port) || port <= 0) {
-    throw new Error('SMTP_PORT must be a positive integer.');
+    throw new Error("SMTP_PORT must be a positive integer.");
   }
 
   const secure = port === 465;
@@ -48,7 +48,9 @@ function resolveTransporter(): Transporter {
 
 export async function sendMail(payload: MailPayload): Promise<void> {
   const transporter = resolveTransporter();
-  const from = process.env.SMTP_FROM ?? `${process.env.SMTP_USER ?? 'noreply'}@${process.env.SMTP_HOST ?? 'localhost'}`;
+  const from =
+    process.env.SMTP_FROM ??
+    `${process.env.SMTP_USER ?? "noreply"}@${process.env.SMTP_HOST ?? "localhost"}`;
 
   await transporter.sendMail({
     from,

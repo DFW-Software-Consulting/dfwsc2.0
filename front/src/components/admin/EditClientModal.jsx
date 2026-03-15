@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import logger from "../../utils/logger";
 
 export default function EditClientModal({ client, groups, onClose, onSaved, showToast }) {
@@ -28,7 +28,9 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
   }, [client]);
 
   useEffect(() => {
-    const handleEscape = (e) => { if (e.key === "Escape") onClose(); };
+    const handleEscape = (e) => {
+      if (e.key === "Escape") onClose();
+    };
     document.addEventListener("keydown", handleEscape);
     document.body.style.overflow = "hidden";
     return () => {
@@ -45,8 +47,10 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
     if (feeType !== "none" || !groupId) return null;
     const group = groups.find((g) => g.id === groupId);
     if (!group) return null;
-    if (group.processingFeePercent != null) return `${group.processingFeePercent}% (from group "${group.name}")`;
-    if (group.processingFeeCents != null) return `$${(group.processingFeeCents / 100).toFixed(2)} flat (from group "${group.name}")`;
+    if (group.processingFeePercent != null)
+      return `${group.processingFeePercent}% (from group "${group.name}")`;
+    if (group.processingFeeCents != null)
+      return `$${(group.processingFeeCents / 100).toFixed(2)} flat (from group "${group.name}")`;
     return null;
   })();
 
@@ -63,7 +67,7 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
 
     if (feeType === "percent") {
       const v = parseFloat(feeValue);
-      if (isNaN(v) || v <= 0 || v > 100) {
+      if (Number.isNaN(v) || v <= 0 || v > 100) {
         setError("Fee percent must be greater than 0 and at most 100.");
         return;
       }
@@ -71,7 +75,7 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
       body.processingFeeCents = null;
     } else if (feeType === "cents") {
       const v = parseInt(feeValue, 10);
-      if (isNaN(v) || v < 0 || !Number.isInteger(v)) {
+      if (Number.isNaN(v) || v < 0 || !Number.isInteger(v)) {
         setError("Fee must be a non-negative whole number of cents.");
         return;
       }
@@ -118,6 +122,7 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
   }, [client.id, feeType, feeValue, groupId, successUrl, cancelUrl, onClose, onSaved, showToast]);
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener
     <div
       ref={modalRef}
       onClick={handleBackdropClick}
@@ -132,6 +137,7 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
             Edit Client
           </h3>
           <button
+            type="button"
             onClick={onClose}
             className="text-gray-400 hover:text-white text-2xl leading-none"
             aria-label="Close"
@@ -146,10 +152,14 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
 
         {/* Group assignment */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-300 mb-1">
+          <label
+            htmlFor="edit-client-group"
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
             Group
           </label>
           <select
+            id="edit-client-group"
             value={groupId}
             onChange={(e) => setGroupId(e.target.value)}
             className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
@@ -168,7 +178,10 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
 
         {/* Processing fee */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label
+            htmlFor="edit-client-fee-value"
+            className="block text-sm font-medium text-gray-300 mb-2"
+          >
             Processing Fee
           </label>
           <div className="flex flex-wrap gap-4 mb-2">
@@ -199,6 +212,7 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
           </div>
           {feeType !== "none" && (
             <input
+              id="edit-client-fee-value"
               type="number"
               value={feeValue}
               onChange={(e) => setFeeValue(e.target.value)}
@@ -210,9 +224,7 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
             />
           )}
           {inheritedFee && (
-            <p className="mt-1.5 text-xs text-blue-400">
-              Will inherit: {inheritedFee}
-            </p>
+            <p className="mt-1.5 text-xs text-blue-400">Will inherit: {inheritedFee}</p>
           )}
           {feeType === "none" && !inheritedFee && groupId && (
             <p className="mt-1.5 text-xs text-gray-400">
@@ -220,18 +232,20 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
             </p>
           )}
           {feeType === "none" && !groupId && (
-            <p className="mt-1.5 text-xs text-gray-400">
-              Will use platform default fee.
-            </p>
+            <p className="mt-1.5 text-xs text-gray-400">Will use platform default fee.</p>
           )}
         </div>
 
         {/* Redirect URLs */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-300 mb-1">
+          <label
+            htmlFor="edit-client-success-url"
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
             Payment Success URL
           </label>
           <input
+            id="edit-client-success-url"
             type="url"
             value={successUrl}
             onChange={(e) => setSuccessUrl(e.target.value)}
@@ -241,10 +255,14 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
           />
         </div>
         <div className="mb-5">
-          <label className="block text-sm font-medium text-gray-300 mb-1">
+          <label
+            htmlFor="edit-client-cancel-url"
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
             Payment Cancel URL
           </label>
           <input
+            id="edit-client-cancel-url"
             type="url"
             value={cancelUrl}
             onChange={(e) => setCancelUrl(e.target.value)}
@@ -262,12 +280,14 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
 
         <div className="flex justify-end gap-3">
           <button
+            type="button"
             onClick={onClose}
             className="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-medium transition-colors"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleSave}
             disabled={loading}
             className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors

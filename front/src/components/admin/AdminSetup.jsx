@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import logger from "../../utils/logger";
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -54,22 +54,17 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
           headers["X-Setup-Token"] = setupTokenValue.trim();
         }
 
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL}/auth/setup`,
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              username: username.trim(),
-              password,
-            }),
-          }
-        );
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/auth/setup`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            username: username.trim(),
+            password,
+          }),
+        });
 
         if (!res.ok) {
-          const errorData = await res
-            .json()
-            .catch(() => ({ error: "Setup failed" }));
+          const errorData = await res.json().catch(() => ({ error: "Setup failed" }));
           throw new Error(errorData.error || "Setup failed");
         }
 
@@ -84,14 +79,7 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
         setLoading(false);
       }
     },
-    [
-      username,
-      password,
-      confirmPassword,
-      setupTokenValue,
-      validateForm,
-      showToast,
-    ]
+    [username, password, setupTokenValue, validateForm, showToast]
   );
 
   const handleCopyCredentials = useCallback(async () => {
@@ -114,12 +102,10 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
     return (
       <div className="space-y-4">
         <div className="bg-green-900/30 border border-green-600 rounded-lg p-4">
-          <h3 className="text-lg font-semibold text-green-400 mb-2">
-            Admin Credentials Generated
-          </h3>
+          <h3 className="text-lg font-semibold text-green-400 mb-2">Admin Credentials Generated</h3>
           <p className="text-sm text-gray-300 mb-4">
-            Copy these credentials and add them to your environment configuration.
-            This setup can only be done once.
+            Copy these credentials and add them to your environment configuration. This setup can
+            only be done once.
           </p>
         </div>
 
@@ -133,11 +119,10 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
             <span className="text-blue-400 break-all">{result.passwordHash}</span>
           </div>
           <button
+            type="button"
             onClick={handleCopyCredentials}
             className={`w-full rounded-md py-2 px-4 font-semibold transition-all duration-200 ${
-              copied
-                ? "bg-green-600 text-white"
-                : "bg-blue-600 hover:bg-blue-700 text-white"
+              copied ? "bg-green-600 text-white" : "bg-blue-600 hover:bg-blue-700 text-white"
             }`}
           >
             {copied ? "Copied!" : "Copy Credentials"}
@@ -148,12 +133,14 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
           <h4 className="text-sm font-semibold text-gray-200 mb-2">Next Steps:</h4>
           <ol className="list-decimal list-inside text-sm text-gray-400 space-y-1">
             {result.instructions.map((instruction, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: static list
               <li key={index}>{instruction}</li>
             ))}
           </ol>
         </div>
 
         <button
+          type="button"
           onClick={onSetupComplete}
           className="w-full rounded-md bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 transition-all duration-200"
         >
@@ -166,21 +153,16 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
   return (
     <div>
       <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4 mb-4">
-        <h3 className="text-sm font-semibold text-yellow-400 mb-1">
-          Initial Admin Setup
-        </h3>
+        <h3 className="text-sm font-semibold text-yellow-400 mb-1">Initial Admin Setup</h3>
         <p className="text-xs text-gray-300">
-          No admin account is configured. Create your admin credentials below.
-          This can only be done once.
+          No admin account is configured. Create your admin credentials below. This can only be done
+          once.
         </p>
       </div>
 
       <form onSubmit={handleSubmit}>
         <div className="mb-4">
-          <label
-            htmlFor="setupToken"
-            className="block text-sm font-semibold text-gray-200 mb-2"
-          >
+          <label htmlFor="setupToken" className="block text-sm font-semibold text-gray-200 mb-2">
             Setup Token (optional)
           </label>
           <input
@@ -201,10 +183,7 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
         </div>
 
         <div className="mb-4">
-          <label
-            htmlFor="setupUsername"
-            className="block text-sm font-semibold text-gray-200 mb-2"
-          >
+          <label htmlFor="setupUsername" className="block text-sm font-semibold text-gray-200 mb-2">
             Admin Username
           </label>
           <input
@@ -222,10 +201,7 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
         </div>
 
         <div className="mb-4">
-          <label
-            htmlFor="setupPassword"
-            className="block text-sm font-semibold text-gray-200 mb-2"
-          >
+          <label htmlFor="setupPassword" className="block text-sm font-semibold text-gray-200 mb-2">
             Password
           </label>
           <input
@@ -240,9 +216,7 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
             disabled={loading}
             autoComplete="new-password"
           />
-          <p className="mt-1 text-xs text-gray-400">
-            Minimum {MIN_PASSWORD_LENGTH} characters
-          </p>
+          <p className="mt-1 text-xs text-gray-400">Minimum {MIN_PASSWORD_LENGTH} characters</p>
         </div>
 
         <div className="mb-6">

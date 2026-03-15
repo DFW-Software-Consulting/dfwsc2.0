@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
-import Toast from "./Toast";
+import { useCallback, useEffect, useState } from "react";
+import logger from "../../utils/logger";
 import AdminLogin from "./AdminLogin";
 import AdminSetup from "./AdminSetup";
-import CreateClientForm from "./CreateClientForm";
 import ClientList from "./ClientList";
+import CreateClientForm from "./CreateClientForm";
 import GroupPanel from "./GroupPanel";
 import PaymentReports from "./PaymentReports";
-import logger from "../../utils/logger";
+import Toast from "./Toast";
 
 const TABS = [
   { id: "clients", label: "Clients" },
@@ -62,9 +62,7 @@ export default function AdminDashboard() {
           setIsLoggedIn(false);
           throw new Error("Session expired. Please log in again.");
         }
-        const errorData = await res
-          .json()
-          .catch(() => ({ error: "Failed to fetch clients" }));
+        const errorData = await res.json().catch(() => ({ error: "Failed to fetch clients" }));
         throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
       }
 
@@ -126,9 +124,7 @@ export default function AdminDashboard() {
   }, [fetchClients]);
 
   const handleStatusChange = useCallback((clientId, newStatus) => {
-    setClients((prev) =>
-      prev.map((c) => (c.id === clientId ? { ...c, status: newStatus } : c)),
-    );
+    setClients((prev) => prev.map((c) => (c.id === clientId ? { ...c, status: newStatus } : c)));
   }, []);
 
   const handleClientUpdated = useCallback((updated) => {
@@ -156,12 +152,7 @@ export default function AdminDashboard() {
         ) : (
           <AdminLogin onLoginSuccess={handleLoginSuccess} showToast={showToast} />
         )}
-        <Toast
-          show={toast.show}
-          message={toast.message}
-          type={toast.type}
-          onClose={hideToast}
-        />
+        <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
       </>
     );
   }
@@ -174,6 +165,7 @@ export default function AdminDashboard() {
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-lg font-semibold text-white">Welcome, Admin!</h3>
         <button
+          type="button"
           onClick={handleLogout}
           className="text-sm bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded-md transition-colors"
         >
@@ -186,6 +178,7 @@ export default function AdminDashboard() {
         {TABS.map((tab) => (
           <button
             key={tab.id}
+            type="button"
             onClick={() => setActiveTab(tab.id)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
               activeTab === tab.id
@@ -201,14 +194,12 @@ export default function AdminDashboard() {
       {/* Clients tab */}
       {activeTab === "clients" && (
         <>
-          <CreateClientForm
-            onClientCreated={handleClientCreated}
-            showToast={showToast}
-          />
+          <CreateClientForm onClientCreated={handleClientCreated} showToast={showToast} />
           <div className="mb-6">
             <div className="flex justify-between items-center mb-3">
               <h4 className="text-md font-semibold text-white">Client List</h4>
               <button
+                type="button"
                 onClick={fetchClients}
                 className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
               >
@@ -250,12 +241,7 @@ export default function AdminDashboard() {
         />
       )}
 
-      <Toast
-        show={toast.show}
-        message={toast.message}
-        type={toast.type}
-        onClose={hideToast}
-      />
+      <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
     </div>
   );
 }

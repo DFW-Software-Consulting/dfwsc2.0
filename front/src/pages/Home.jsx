@@ -1,27 +1,27 @@
-import { useEffect } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { scrollToSection } from '../utils/scrollToSection.js'
-import Hero from '../components/Hero.jsx'
-import ValueProps from '../components/ValueProps.jsx'
-import Services from '../components/Services.jsx'
-import CaseStudies from '../components/CaseStudies.jsx'
-import Banner from '../components/Banner.jsx'
-import Values from '../components/Values.jsx'
-import Contact from '../components/Contact.jsx'
+import { useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import Banner from "../components/Banner.jsx";
+import CaseStudies from "../components/CaseStudies.jsx";
+import Contact from "../components/Contact.jsx";
+import Hero from "../components/Hero.jsx";
+import Services from "../components/Services.jsx";
+import ValueProps from "../components/ValueProps.jsx";
+import Values from "../components/Values.jsx";
+import { scrollToSection } from "../utils/scrollToSection.js";
 
 export default function Home() {
-  const location = useLocation()
-  const navigate = useNavigate()
+  const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (location.state?.scrollTo) {
-      const id = location.state.scrollTo
+      const id = location.state.scrollTo;
       requestAnimationFrame(() => {
-        scrollToSection(id)
-      })
-      navigate(location.pathname, { replace: true, state: {} })
+        scrollToSection(id);
+      });
+      navigate(location.pathname, { replace: true, state: {} });
     }
-  }, [location, navigate])
+  }, [location, navigate]);
 
   return (
     <>
@@ -41,5 +41,5 @@ export default function Home() {
       />
       <Contact />
     </>
-  )
+  );
 }

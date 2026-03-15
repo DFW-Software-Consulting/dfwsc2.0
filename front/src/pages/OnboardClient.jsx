@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import logger from "../utils/logger";
 
 export default function OnboardClient() {
@@ -36,9 +36,7 @@ export default function OnboardClient() {
       const isJson = contentType.includes("application/json");
 
       if (!res.ok) {
-        const errPayload = isJson
-          ? await res.json().catch(() => ({}))
-          : await res.text();
+        const errPayload = isJson ? await res.json().catch(() => ({})) : await res.text();
         const errText =
           typeof errPayload === "string"
             ? errPayload.slice(0, 200)
@@ -76,16 +74,12 @@ export default function OnboardClient() {
     >
       <div className="w-full max-w-xl mx-auto">
         <div className="bg-gray-800/60 backdrop-blur-md p-8 rounded-2xl shadow-xl border border-gray-700">
-          <h1 className="text-3xl font-bold text-center mb-4 text-white">
-            Stripe Account Setup
-          </h1>
+          <h1 className="text-3xl font-bold text-center mb-4 text-white">Stripe Account Setup</h1>
 
           <p className="text-center text-gray-300 mb-8">
             Please enter the onboarding token provided by{" "}
-            <span className="text-blue-400 font-semibold">
-              DFW Software Consulting
-            </span>{" "}
-            to set up your Stripe account.
+            <span className="text-blue-400 font-semibold">DFW Software Consulting</span> to set up
+            your Stripe account.
           </p>
 
           <div className="mb-6">
@@ -108,6 +102,7 @@ export default function OnboardClient() {
           </div>
 
           <button
+            type="button"
             onClick={handleSubmit}
             disabled={loading}
             className="mt-6 w-full rounded-md bg-blue-600 hover:bg-blue-700
@@ -119,11 +114,7 @@ export default function OnboardClient() {
           </button>
 
           {message && (
-            <p
-              className={`mt-4 text-center text-sm ${
-                isError ? "text-red-400" : "text-blue-400"
-              }`}
-            >
+            <p className={`mt-4 text-center text-sm ${isError ? "text-red-400" : "text-blue-400"}`}>
               {message}
             </p>
           )}

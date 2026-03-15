@@ -1,33 +1,33 @@
-import { FastifyInstance, FastifyRequest } from 'fastify';
-import { stripe } from '../lib/stripe';
-import { db } from '../db/client';
-import { clients, onboardingTokens } from '../db/schema';
-import { eq, and } from 'drizzle-orm';
-import { requireAdminJwt, hashApiKey, sha256Lookup } from '../lib/auth';
-import { rateLimit } from '../lib/rate-limit';
-import { v4 as uuidv4 } from 'uuid';
-import crypto from 'crypto';
-import { sendMail } from '../lib/mailer';
-import validator from 'validator';
-import he from 'he';
+import crypto from "node:crypto";
+import { and, eq } from "drizzle-orm";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import he from "he";
+import { v4 as uuidv4 } from "uuid";
+import validator from "validator";
+import { db } from "../db/client";
+import { clients, onboardingTokens } from "../db/schema";
+import { hashApiKey, requireAdminJwt, sha256Lookup } from "../lib/auth";
+import { sendMail } from "../lib/mailer";
+import { rateLimit } from "../lib/rate-limit";
+import { stripe } from "../lib/stripe";
 
 function resolveServerBaseUrl(request: FastifyRequest): string {
   if (process.env.API_BASE_URL) {
-    return process.env.API_BASE_URL.replace(/\/$/, '');
+    return process.env.API_BASE_URL.replace(/\/$/, "");
   }
 
-  const host = request.headers['x-forwarded-host'] ?? request.headers.host;
-  const protocol = (request.headers['x-forwarded-proto'] as string) ?? request.protocol;
+  const host = request.headers["x-forwarded-host"] ?? request.headers.host;
+  const protocol = (request.headers["x-forwarded-proto"] as string) ?? request.protocol;
 
   if (!host || !protocol) {
-    throw new Error('Unable to determine server base URL for onboarding.');
+    throw new Error("Unable to determine server base URL for onboarding.");
   }
 
-  return `${protocol}://${host}`.replace(/\/$/, '');
+  return `${protocol}://${host}`.replace(/\/$/, "");
 }
 
 function generateApiKey(): string {
-  return crypto.randomBytes(32).toString('hex');
+  return crypto.randomBytes(32).toString("hex");
 }
 
 interface ClientWithToken {
@@ -52,36 +52,39 @@ async function createAccountLinkForToken(
 
   if (!onboardingRecord) {
     throw Object.assign(
-      new Error('Onboarding token not found, is invalid, or has already been used.'),
+      new Error("Onboarding token not found, is invalid, or has already been used."),
       { statusCode: 404 }
     );
   }
 
-  if (onboardingRecord.status === 'revoked') {
+  if (onboardingRecord.status === "revoked") {
     throw Object.assign(
-      new Error('This onboarding link has been replaced. Please check your email for a new link.'),
+      new Error("This onboarding link has been replaced. Please check your email for a new link."),
       { statusCode: 404 }
     );
   }
 
-  if (onboardingRecord.status !== 'pending' && onboardingRecord.status !== 'in_progress') {
+  if (onboardingRecord.status !== "pending" && onboardingRecord.status !== "in_progress") {
     throw Object.assign(
-      new Error('Onboarding token not found, is invalid, or has already been used.'),
+      new Error("Onboarding token not found, is invalid, or has already been used."),
       { statusCode: 404 }
     );
   }
 
-  const [clientRecord] = await db.select().from(clients).where(eq(clients.id, onboardingRecord.clientId));
+  const [clientRecord] = await db
+    .select()
+    .from(clients)
+    .where(eq(clients.id, onboardingRecord.clientId));
 
   if (!clientRecord) {
-    throw Object.assign(new Error('Client record not found.'), { statusCode: 404 });
+    throw Object.assign(new Error("Client record not found."), { statusCode: 404 });
   }
 
   let stripeAccountId = clientRecord.stripeAccountId;
 
   if (!stripeAccountId) {
     const account = await stripe.accounts.create({
-      type: 'express',
+      type: "express",
       email: clientRecord.email,
       metadata: { clientId: clientRecord.id },
     });
@@ -91,7 +94,7 @@ async function createAccountLinkForToken(
   }
 
   // Generate a cryptographically secure state parameter
-  const state = crypto.randomBytes(32).toString('hex');
+  const state = crypto.randomBytes(32).toString("hex");
 
   // Set expiration time to 30 minutes from now
   const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes in milliseconds
@@ -104,23 +107,26 @@ async function createAccountLinkForToken(
     account: stripeAccountId,
     refresh_url: refreshUrl,
     return_url: callbackUrl,
-    type: 'account_onboarding',
+    type: "account_onboarding",
   });
 
   // Only update the onboarding token status to in_progress after successful Stripe API call
-  request.log.info({
-    token_id: onboardingRecord.id,
-    old_status: onboardingRecord.status,
-    new_status: 'in_progress',
-    timestamp: new Date().toISOString()
-  }, 'Updating onboarding token status to in_progress');
+  request.log.info(
+    {
+      token_id: onboardingRecord.id,
+      old_status: onboardingRecord.status,
+      new_status: "in_progress",
+      timestamp: new Date().toISOString(),
+    },
+    "Updating onboarding token status to in_progress"
+  );
 
   await db
     .update(onboardingTokens)
     .set({
-      status: 'in_progress',
+      status: "in_progress",
       state: state,
-      stateExpiresAt: stateExpiresAt
+      stateExpiresAt: stateExpiresAt,
     })
     .where(eq(onboardingTokens.id, onboardingRecord.id));
 
@@ -132,12 +138,14 @@ async function createClientWithOnboardingToken(
   email: string
 ): Promise<ClientWithToken> {
   // Input validation
-  if (!name || typeof name !== 'string' || name.trim().length === 0) {
-    throw Object.assign(new Error('Name is required and must be a non-empty string'), { statusCode: 400 });
+  if (!name || typeof name !== "string" || name.trim().length === 0) {
+    throw Object.assign(new Error("Name is required and must be a non-empty string"), {
+      statusCode: 400,
+    });
   }
 
-  if (!email || typeof email !== 'string' || !validator.isEmail(email)) {
-    throw Object.assign(new Error('Valid email is required'), { statusCode: 400 });
+  if (!email || typeof email !== "string" || !validator.isEmail(email)) {
+    throw Object.assign(new Error("Valid email is required"), { statusCode: 400 });
   }
 
   const clientId = uuidv4();
@@ -147,7 +155,7 @@ async function createClientWithOnboardingToken(
 
   await db.insert(clients).values({ id: clientId, name, email, apiKeyHash, apiKeyLookup });
 
-  const token = crypto.randomBytes(32).toString('hex');
+  const token = crypto.randomBytes(32).toString("hex");
   const onboardingTokenId = uuidv4();
 
   try {
@@ -155,7 +163,7 @@ async function createClientWithOnboardingToken(
       id: onboardingTokenId,
       clientId: clientId,
       token: token,
-      status: 'pending',
+      status: "pending",
       email: email,
     });
   } catch (error) {
@@ -164,7 +172,9 @@ async function createClientWithOnboardingToken(
       await db.delete(clients).where(eq(clients.id, clientId));
     } catch (cleanupError) {
       // If cleanup fails, log the error but don't throw to avoid masking the original error
-      console.error(`Failed to clean up client record after onboarding token insertion failed: ${cleanupError}`);
+      console.error(
+        `Failed to clean up client record after onboarding token insertion failed: ${cleanupError}`
+      );
     }
     throw error; // Re-throw the original error
   }
@@ -174,20 +184,19 @@ async function createClientWithOnboardingToken(
 
 export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.post(
-    '/accounts',
+    "/accounts",
     {
-
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
     },
     async (request, reply) => {
       const { name, email } = request.body as { name: string; email: string };
-      request.log.info({ name, email }, 'Received request in /accounts handler');
+      request.log.info({ name, email }, "Received request in /accounts handler");
 
       const { clientId, apiKey, token } = await createClientWithOnboardingToken(name, email);
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(',')[0].trim().replace(/\/$/, '');
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
       if (!frontendOrigin) {
-        return reply.code(500).send({ error: 'FRONTEND_ORIGIN is not configured.' });
+        return reply.code(500).send({ error: "FRONTEND_ORIGIN is not configured." });
       }
 
       const onboardingUrlHint = `${frontendOrigin}/onboard?token=${token}`;
@@ -199,13 +208,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         apiKey,
         clientId,
       });
-    },
+    }
   );
 
   fastify.post(
-    '/onboard-client/initiate',
+    "/onboard-client/initiate",
     {
-
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
     },
     async (request, reply) => {
@@ -213,9 +221,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const { clientId, apiKey, token } = await createClientWithOnboardingToken(name, email);
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(',')[0].trim().replace(/\/$/, '');
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
       if (!frontendOrigin) {
-        return reply.code(500).send({ error: 'FRONTEND_ORIGIN is not configured.' });
+        return reply.code(500).send({ error: "FRONTEND_ORIGIN is not configured." });
       }
 
       const onboardingUrl = `${frontendOrigin}/onboard?token=${token}`;
@@ -239,21 +247,21 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       await sendMail({
         to: email,
-        subject: 'DFW Software Consulting - Stripe Onboarding',
+        subject: "DFW Software Consulting - Stripe Onboarding",
         html: mailHtml,
         text: mailText,
       });
 
       return reply.code(201).send({
-        message: 'Onboarding email sent successfully.',
+        message: "Onboarding email sent successfully.",
         clientId,
         apiKey,
       });
-    },
+    }
   );
 
   fastify.post(
-    '/onboard-client/resend',
+    "/onboard-client/resend",
     {
       preHandler: [rateLimit({ max: 5, windowMs: 60_000 }), requireAdminJwt],
     },
@@ -261,18 +269,15 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const { email, clientId } = request.body as { email?: string; clientId?: string };
 
       if (!email && !clientId) {
-        return reply.code(400).send({ error: 'Either email or clientId is required.' });
+        return reply.code(400).send({ error: "Either email or clientId is required." });
       }
 
-      let clientRecord;
-      if (clientId) {
-        [clientRecord] = await db.select().from(clients).where(eq(clients.id, clientId));
-      } else {
-        [clientRecord] = await db.select().from(clients).where(eq(clients.email, email!));
-      }
+      const [clientRecord] = clientId
+        ? await db.select().from(clients).where(eq(clients.id, clientId))
+        : await db.select().from(clients).where(eq(clients.email, email!));
 
       if (!clientRecord) {
-        return reply.code(404).send({ error: 'Client not found.' });
+        return reply.code(404).send({ error: "Client not found." });
       }
 
       const [existingToken] = await db
@@ -283,33 +288,36 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         .limit(1);
 
       if (existingToken) {
-        if (existingToken.status === 'pending' || existingToken.status === 'in_progress') {
+        if (existingToken.status === "pending" || existingToken.status === "in_progress") {
           await db
             .update(onboardingTokens)
-            .set({ status: 'revoked', updatedAt: new Date() })
+            .set({ status: "revoked", updatedAt: new Date() })
             .where(eq(onboardingTokens.id, existingToken.id));
-          request.log.info({
-            token_id: existingToken.id,
-            old_status: existingToken.status,
-            new_status: 'revoked'
-          }, 'Revoked old onboarding token');
+          request.log.info(
+            {
+              token_id: existingToken.id,
+              old_status: existingToken.status,
+              new_status: "revoked",
+            },
+            "Revoked old onboarding token"
+          );
         }
       }
 
-      const newToken = crypto.randomBytes(32).toString('hex');
+      const newToken = crypto.randomBytes(32).toString("hex");
       const newOnboardingTokenId = uuidv4();
 
       await db.insert(onboardingTokens).values({
         id: newOnboardingTokenId,
         clientId: clientRecord.id,
         token: newToken,
-        status: 'pending',
+        status: "pending",
         email: clientRecord.email,
       });
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(',')[0].trim().replace(/\/$/, '');
+      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
       if (!frontendOrigin) {
-        return reply.code(500).send({ error: 'FRONTEND_ORIGIN is not configured.' });
+        return reply.code(500).send({ error: "FRONTEND_ORIGIN is not configured." });
       }
 
       const onboardingUrl = `${frontendOrigin}/onboard?token=${newToken}`;
@@ -337,26 +345,29 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       await sendMail({
         to: clientRecord.email,
-        subject: 'DFW Software Consulting - New Onboarding Link',
+        subject: "DFW Software Consulting - New Onboarding Link",
         html: mailHtml,
         text: mailText,
       });
 
-      request.log.info({
-        client_id: clientRecord.id,
-        client_email: clientRecord.email,
-        new_token_id: newOnboardingTokenId
-      }, 'Onboarding token resent successfully');
+      request.log.info(
+        {
+          client_id: clientRecord.id,
+          client_email: clientRecord.email,
+          new_token_id: newOnboardingTokenId,
+        },
+        "Onboarding token resent successfully"
+      );
 
       return reply.code(200).send({
-        message: 'New onboarding link sent successfully.',
+        message: "New onboarding link sent successfully.",
         clientId: clientRecord.id,
       });
-    },
+    }
   );
 
   fastify.get(
-    '/onboard-client',
+    "/onboard-client",
     {
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 })],
     },
@@ -367,13 +378,17 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.send({ url: accountLinkUrl });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        const statusCode = error instanceof Error && 'statusCode' in error && typeof error.statusCode === 'number'
-          ? error.statusCode
-          : 502;
-        request.log.error({
-          error: errorMessage,
-          token
-        }, 'Stripe accountLinks.create failed');
+        const statusCode =
+          error instanceof Error && "statusCode" in error && typeof error.statusCode === "number"
+            ? error.statusCode
+            : 502;
+        request.log.error(
+          {
+            error: errorMessage,
+            token,
+          },
+          "Stripe accountLinks.create failed"
+        );
 
         if (statusCode === 404) {
           return reply.code(404).send({ error: errorMessage });
@@ -381,15 +396,15 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
         // Return 502 Bad Gateway error, token remains in pending or in_progress status for retry
         return reply.code(502).send({
-          error: 'Failed to create Stripe account link. Please try again.',
-          code: 'STRIPE_ACCOUNT_LINK_FAILED'
+          error: "Failed to create Stripe account link. Please try again.",
+          code: "STRIPE_ACCOUNT_LINK_FAILED",
         });
       }
-    },
+    }
   );
 
   fastify.get(
-    '/connect/refresh',
+    "/connect/refresh",
     {
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 })],
     },
@@ -401,131 +416,159 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.redirect(accountLinkUrl);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        const statusCode = error instanceof Error && 'statusCode' in error && typeof error.statusCode === 'number'
-          ? error.statusCode
-          : 502;
-        request.log.error({
-          error: errorMessage,
-          token
-        }, 'Stripe accountLinks.create failed during refresh');
+        const statusCode =
+          error instanceof Error && "statusCode" in error && typeof error.statusCode === "number"
+            ? error.statusCode
+            : 502;
+        request.log.error(
+          {
+            error: errorMessage,
+            token,
+          },
+          "Stripe accountLinks.create failed during refresh"
+        );
 
         return reply.code(statusCode).send({ error: errorMessage });
       }
-    },
+    }
   );
 
-  fastify.get(
-    '/connect/callback',
-    {
+  fastify.get("/connect/callback", {}, async (request, reply) => {
+    const { client_id, account, state } = request.query as {
+      client_id: string;
+      account?: string;
+      state?: string;
+    };
+    const normalizedClientId = (client_id ?? "").trim();
+    const normalizedState = (state ?? "").trim();
 
-    },
-    async (request, reply) => {
-      const { client_id, account, state } = request.query as {
-        client_id: string;
-        account?: string;
-        state?: string;
-      };
-      const normalizedClientId = (client_id ?? '').trim();
-      const normalizedState = (state ?? '').trim();
+    // Check if state parameter is missing - return 400 error if missing
+    if (!normalizedState) {
+      request.log.warn({ client_id, account }, "Missing state parameter");
+      return reply.code(400).send({ error: "Missing state parameter." });
+    }
 
-      // Check if state parameter is missing - return 400 error if missing
-      if (!normalizedState) {
-        request.log.warn({ client_id, account }, 'Missing state parameter');
-        return reply.code(400).send({ error: 'Missing state parameter.' });
-      }
+    if (!account) {
+      request.log.warn({ client_id, state }, "Missing account parameter");
+      return reply.code(400).send({ error: "Missing account parameter." });
+    }
+    const normalizedAccount = account.trim();
+    if (!normalizedAccount) {
+      request.log.warn({ client_id, state }, "Missing account parameter");
+      return reply.code(400).send({ error: "Missing account parameter." });
+    }
+    if (!normalizedClientId) {
+      request.log.warn({ account, state }, "Missing client_id parameter");
+      return reply.code(400).send({ error: "Missing client_id parameter." });
+    }
+    if (!/^acct_[A-Za-z0-9]+$/.test(normalizedAccount)) {
+      request.log.warn(
+        { client_id: normalizedClientId, account: normalizedAccount },
+        "Invalid account parameter format"
+      );
+      return reply.code(400).send({ error: "Invalid account parameter." });
+    }
 
-      if (!account) {
-        request.log.warn({ client_id, state }, 'Missing account parameter');
-        return reply.code(400).send({ error: 'Missing account parameter.' });
-      }
-      const normalizedAccount = account.trim();
-      if (!normalizedAccount) {
-        request.log.warn({ client_id, state }, 'Missing account parameter');
-        return reply.code(400).send({ error: 'Missing account parameter.' });
-      }
-      if (!normalizedClientId) {
-        request.log.warn({ account, state }, 'Missing client_id parameter');
-        return reply.code(400).send({ error: 'Missing client_id parameter.' });
-      }
-      if (!/^acct_[A-Za-z0-9]+$/.test(normalizedAccount)) {
-        request.log.warn({ client_id: normalizedClientId, account: normalizedAccount }, 'Invalid account parameter format');
-        return reply.code(400).send({ error: 'Invalid account parameter.' });
-      }
-
-      // Retrieve the onboarding token record by both client_id and state to ensure validity
-      const [onboardingRecord] = await db
-        .select()
-        .from(onboardingTokens)
-        .where(and(
+    // Retrieve the onboarding token record by both client_id and state to ensure validity
+    const [onboardingRecord] = await db
+      .select()
+      .from(onboardingTokens)
+      .where(
+        and(
           eq(onboardingTokens.clientId, normalizedClientId),
           eq(onboardingTokens.state, normalizedState)
-        ))
-        .limit(1);
+        )
+      )
+      .limit(1);
 
-      if (!onboardingRecord) {
-        request.log.warn({
+    if (!onboardingRecord) {
+      request.log.warn(
+        {
           client_id: normalizedClientId,
           account: normalizedAccount,
-          state: normalizedState
-        }, 'Invalid or expired state parameter');
-        return reply.code(400).send({ error: 'Invalid or expired state parameter.' });
-      }
+          state: normalizedState,
+        },
+        "Invalid or expired state parameter"
+      );
+      return reply.code(400).send({ error: "Invalid or expired state parameter." });
+    }
 
-      // Check if state has expired
-      if (onboardingRecord.stateExpiresAt && new Date() > new Date(onboardingRecord.stateExpiresAt)) {
-        request.log.warn({
+    // Check if state has expired
+    if (onboardingRecord.stateExpiresAt && new Date() > new Date(onboardingRecord.stateExpiresAt)) {
+      request.log.warn(
+        {
           client_id: normalizedClientId,
           account: normalizedAccount,
-          state: normalizedState
-        }, 'Expired state parameter');
-        return reply.code(400).send({ error: 'Expired state parameter.' });
-      }
+          state: normalizedState,
+        },
+        "Expired state parameter"
+      );
+      return reply.code(400).send({ error: "Expired state parameter." });
+    }
 
-      // Verify that the account parameter matches what we expect for the client
-      // This prevents an attacker from providing a different account ID
-      const [clientRecord] = await db.select().from(clients).where(eq(clients.id, normalizedClientId));
+    // Verify that the account parameter matches what we expect for the client
+    // This prevents an attacker from providing a different account ID
+    const [clientRecord] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.id, normalizedClientId));
 
-      if (clientRecord) {
-        const existingStripeAccountId =
-          clientRecord.stripeAccountId ?? (clientRecord as { stripe_account_id?: string }).stripe_account_id ?? null;
+    if (clientRecord) {
+      const existingStripeAccountId =
+        clientRecord.stripeAccountId ??
+        (clientRecord as { stripe_account_id?: string }).stripe_account_id ??
+        null;
 
-        // If the client already has a stripeAccountId, verify it matches the one being set
-        if (existingStripeAccountId && existingStripeAccountId !== normalizedAccount) {
-          request.log.warn({
+      // If the client already has a stripeAccountId, verify it matches the one being set
+      if (existingStripeAccountId && existingStripeAccountId !== normalizedAccount) {
+        request.log.warn(
+          {
             client_id: normalizedClientId,
             account: normalizedAccount,
-            existingAccount: existingStripeAccountId
-          }, 'Attempt to overwrite existing stripeAccountId');
-          return reply.code(400).send({ error: 'Stripe account already linked to this client.' });
-        }
-      } else {
-        request.log.warn({ client_id: normalizedClientId, account: normalizedAccount }, 'Client record not found during callback, proceeding with redirect');
+            existingAccount: existingStripeAccountId,
+          },
+          "Attempt to overwrite existing stripeAccountId"
+        );
+        return reply.code(400).send({ error: "Stripe account already linked to this client." });
       }
+    } else {
+      request.log.warn(
+        { client_id: normalizedClientId, account: normalizedAccount },
+        "Client record not found during callback, proceeding with redirect"
+      );
+    }
 
-      // Update both the client's stripeAccountId and the token status atomically
-      request.log.info({
+    // Update both the client's stripeAccountId and the token status atomically
+    request.log.info(
+      {
         token_id: onboardingRecord.id,
         old_status: onboardingRecord.status,
-        new_status: 'completed',
-        timestamp: new Date().toISOString()
-      }, 'Updating onboarding token status to completed');
+        new_status: "completed",
+        timestamp: new Date().toISOString(),
+      },
+      "Updating onboarding token status to completed"
+    );
 
-      await db.transaction(async (tx) => {
-        await tx.update(clients).set({ stripeAccountId: normalizedAccount }).where(eq(clients.id, normalizedClientId));
-        await tx
-          .update(onboardingTokens)
-          .set({ status: 'completed' })
-          .where(eq(onboardingTokens.id, onboardingRecord.id));
-      });
+    await db.transaction(async (tx) => {
+      await tx
+        .update(clients)
+        .set({ stripeAccountId: normalizedAccount })
+        .where(eq(clients.id, normalizedClientId));
+      await tx
+        .update(onboardingTokens)
+        .set({ status: "completed" })
+        .where(eq(onboardingTokens.id, onboardingRecord.id));
+    });
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(',')[0].trim().replace(/\/$/, '');
-      if (!frontendOrigin) {
-        request.log.error('FRONTEND_ORIGIN is not configured');
-        return reply.code(500).send({ error: 'Server configuration error: FRONTEND_ORIGIN not set.' });
-      }
-      const redirectUrl = `${frontendOrigin}/onboarding-success`;
+    const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
+    if (!frontendOrigin) {
+      request.log.error("FRONTEND_ORIGIN is not configured");
+      return reply
+        .code(500)
+        .send({ error: "Server configuration error: FRONTEND_ORIGIN not set." });
+    }
+    const redirectUrl = `${frontendOrigin}/onboarding-success`;
 
-      reply.redirect(redirectUrl);
-    },
-  );
+    reply.redirect(redirectUrl);
+  });
 }

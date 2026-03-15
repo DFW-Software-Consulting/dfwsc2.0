@@ -1,4 +1,4 @@
-declare module 'nodemailer' {
+declare module "nodemailer" {
   export interface MailOptions {
     from?: string;
     to: string;

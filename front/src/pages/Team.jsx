@@ -1,61 +1,63 @@
-import { useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import Banner from '../components/Banner.jsx'
-import JcImage from '../assets/jc.jpg'
-import DiegoImage from '../assets/diego.jpg'
-import SpencerImage from '../assets/spencer.jpg'
-import HectorImage from '../assets/hector.webp'
+import { useEffect } from "react";
+import { Link } from "react-router-dom";
+import DiegoImage from "../assets/diego.jpg";
+import HectorImage from "../assets/hector.webp";
+import JcImage from "../assets/jc.jpg";
+import SpencerImage from "../assets/spencer.jpg";
+import Banner from "../components/Banner.jsx";
 
 const teamMembers = [
   {
-    name: 'Jeremy Ashley',
-    role: 'Founder & CTO',
-    bio: 'Drives technical strategy and architecture across the organization. Oversees full-stack product delivery, DevOps automation, and scalable cloud infrastructure design.',
+    name: "Jeremy Ashley",
+    role: "Founder & CTO",
+    bio: "Drives technical strategy and architecture across the organization. Oversees full-stack product delivery, DevOps automation, and scalable cloud infrastructure design.",
     image: JcImage,
   },
   {
-    name: 'Diego Espino',
-    role: 'Full Stack & DevOps Engineer',
-    bio: 'Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.',
+    name: "Diego Espino",
+    role: "Full Stack & DevOps Engineer",
+    bio: "Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.",
     image: DiegoImage,
   },
   {
-    name: 'Spencer Lillian',
-    role: 'Full Stack Engineer',
-    bio: 'Collaborates with clients to translate business needs into robust solutions. Supports backend systems, cloud deployments, and continuous delivery workflows.',
+    name: "Spencer Lillian",
+    role: "Full Stack Engineer",
+    bio: "Collaborates with clients to translate business needs into robust solutions. Supports backend systems, cloud deployments, and continuous delivery workflows.",
     image: SpencerImage,
   },
   {
-  name: 'Hector Oropesa',
-  role: 'Full Stack Developer • DevOps & Network Engineer',
-  bio: 'Combines full-stack development with deep IT and network engineering experience. Bridges software, systems, and networking by managing cloud environments, hardening systems, and supporting scalable, reliable deployments across DevOps workflows.',
-  image: HectorImage,
-},
-
-]
+    name: "Hector Oropesa",
+    role: "Full Stack Developer • DevOps & Network Engineer",
+    bio: "Combines full-stack development with deep IT and network engineering experience. Bridges software, systems, and networking by managing cloud environments, hardening systems, and supporting scalable, reliable deployments across DevOps workflows.",
+    image: HectorImage,
+  },
+];
 
 export default function Team() {
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }, [])
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
   return (
     <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
       {/* Header */}
       <div className="mb-12 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-300/80">Meet our team</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-300/80">
+            Meet our team
+          </p>
           <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
             Experts building reliable software outcomes
           </h1>
           <p className="mt-4 max-w-2xl text-base text-slate-400">
-            Every engagement is led by seasoned practitioners who have shipped critical systems for finance, logistics,
-            and high-growth startups. We stay close to business goals, turning strategy into running software.
+            Every engagement is led by seasoned practitioners who have shipped critical systems for
+            finance, logistics, and high-growth startups. We stay close to business goals, turning
+            strategy into running software.
           </p>
         </div>
         <Link
           to="/"
-          state={{ scrollTo: 'contact' }}
+          state={{ scrollTo: "contact" }}
           className="inline-flex items-center justify-center rounded-full border border-brand-500/60 px-5 py-2 text-sm font-semibold text-brand-200 transition hover:border-brand-400 hover:text-brand-100"
         >
           Start a project
@@ -68,7 +70,7 @@ export default function Team() {
           <div
             key={member.name}
             className={`flex flex-col items-center gap-8 rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_40px_80px_-50px_rgba(11,114,133,0.8)] transition hover:bg-white/10 md:flex-row ${
-              idx % 2 === 1 ? 'md:flex-row-reverse' : ''
+              idx % 2 === 1 ? "md:flex-row-reverse" : ""
             }`}
           >
             {/* Image */}
@@ -97,5 +99,5 @@ export default function Team() {
         message="🤝 Embedded software engineers and web developers partner with you from whiteboard to launch."
       />
     </section>
-  )
+  );
 }

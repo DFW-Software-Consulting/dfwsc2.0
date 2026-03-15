@@ -1,18 +1,27 @@
 const contactMethods = [
-  { label: 'Email', value: 'mail@dfwsc.com', href: 'mailto:mail@dfwsc.com' },
-  { label: 'Website', value: 'www.dfwsc.com', href: 'www.dfwsc.com' },
-  { label: 'LinkedIn', value: 'DFW Software Consulting', href: 'https://www.linkedin.com/company/dfw-software-consulting' },
-]
+  { label: "Email", value: "mail@dfwsc.com", href: "mailto:mail@dfwsc.com" },
+  { label: "Website", value: "www.dfwsc.com", href: "www.dfwsc.com" },
+  {
+    label: "LinkedIn",
+    value: "DFW Software Consulting",
+    href: "https://www.linkedin.com/company/dfw-software-consulting",
+  },
+];
 
 export default function Contact() {
   return (
     <section id="contact" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
       <div className="mx-auto max-w-5xl">
         <div className="mx-auto max-w-3xl text-center">
-          <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-100/80">Start a project</span>
-          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Tell us your goal, timeline, and must-haves</h2>
+          <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-100/80">
+            Start a project
+          </span>
+          <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            Tell us your goal, timeline, and must-haves
+          </h2>
           <p className="mt-4 text-base text-slate-300">
-            We&apos;ll respond within one business day with next steps and a lightweight plan you can approve quickly.
+            We&apos;ll respond within one business day with next steps and a lightweight plan you
+            can approve quickly.
           </p>
         </div>
 
@@ -64,26 +73,32 @@ export default function Contact() {
             <div>
               <h3 className="text-xl font-semibold text-white">Prefer a quick chat?</h3>
               <p className="mt-3 text-sm text-slate-300">
-                Share a Loom, forward requirements, or drop a quick note. We&apos;ll respond with next steps and a suggested plan.
+                Share a Loom, forward requirements, or drop a quick note. We&apos;ll respond with
+                next steps and a suggested plan.
               </p>
             </div>
             <ul className="space-y-4 text-sm text-slate-200">
               {contactMethods.map((method) => (
                 <li key={method.label} className="flex flex-col">
-                  <span className="text-xs uppercase tracking-wide text-slate-400">{method.label}</span>
-                  <a href={method.href} className="mt-1 font-medium text-white transition hover:text-brand-200">
+                  <span className="text-xs uppercase tracking-wide text-slate-400">
+                    {method.label}
+                  </span>
+                  <a
+                    href={method.href}
+                    className="mt-1 font-medium text-white transition hover:text-brand-200"
+                  >
                     {method.value}
                   </a>
                 </li>
               ))}
             </ul>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-slate-300">
-              Hosting retainers include uptime monitoring, SSL, and maintenance. Feature work is billed hourly at $100–$150/hr
-              with clear estimates before kickoff.
+              Hosting retainers include uptime monitoring, SSL, and maintenance. Feature work is
+              billed hourly at $100–$150/hr with clear estimates before kickoff.
             </div>
           </div>
         </div>
       </div>
     </section>
-  )
+  );
 }

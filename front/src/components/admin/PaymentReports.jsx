@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import logger from "../../utils/logger";
 
 function formatCurrency(amount, currency) {
@@ -32,7 +32,10 @@ export default function PaymentReports({ clients, groups, showToast, onSessionEx
   const fetchReport = useCallback(async () => {
     if (!selectedId) return;
     const token = sessionStorage.getItem("adminToken");
-    if (!token) { onSessionExpired?.(); return; }
+    if (!token) {
+      onSessionExpired?.();
+      return;
+    }
 
     const params = new URLSearchParams();
     if (reportType === "client") params.set("clientId", selectedId);
@@ -42,10 +45,9 @@ export default function PaymentReports({ clients, groups, showToast, onSessionEx
     setLoading(true);
     setResults(null);
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL}/reports/payments?${params}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/reports/payments?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
           sessionStorage.removeItem("adminToken");
@@ -119,13 +121,16 @@ export default function PaymentReports({ clients, groups, showToast, onSessionEx
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               {["10", "25", "50", "100"].map((v) => (
-                <option key={v} value={v}>{v} results</option>
+                <option key={v} value={v}>
+                  {v} results
+                </option>
               ))}
             </select>
           </div>
         </div>
 
         <button
+          type="button"
           onClick={fetchReport}
           disabled={loading || !selectedId}
           className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium
@@ -148,16 +153,21 @@ export default function PaymentReports({ clients, groups, showToast, onSessionEx
                 <table className="min-w-full divide-y divide-gray-700">
                   <thead>
                     <tr>
-                      {["Date", "Payment ID", "Amount", "Platform Fee", "Status", ...(reportType === "group" ? ["Client"] : [])].map(
-                        (h) => (
-                          <th
-                            key={h}
-                            className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
-                          >
-                            {h}
-                          </th>
-                        ),
-                      )}
+                      {[
+                        "Date",
+                        "Payment ID",
+                        "Amount",
+                        "Platform Fee",
+                        "Status",
+                        ...(reportType === "group" ? ["Client"] : []),
+                      ].map((h) => (
+                        <th
+                          key={h}
+                          className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
+                        >
+                          {h}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-800">
@@ -183,8 +193,8 @@ export default function PaymentReports({ clients, groups, showToast, onSessionEx
                               pi.status === "succeeded"
                                 ? "bg-green-800 text-green-200"
                                 : pi.status === "canceled"
-                                ? "bg-red-800 text-red-200"
-                                : "bg-yellow-800 text-yellow-200"
+                                  ? "bg-red-800 text-red-200"
+                                  : "bg-yellow-800 text-yellow-200"
                             }`}
                           >
                             {pi.status}

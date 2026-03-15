@@ -15,7 +15,7 @@ export default function Toast({ show, message, type = "info", onClose }) {
       const timer = setTimeout(onClose, TOAST_TIMEOUT_MS);
       return () => clearTimeout(timer);
     }
-  }, [show, message, type, onClose]);
+  }, [show, onClose]);
 
   if (!show) return null;
 
@@ -31,6 +31,7 @@ export default function Toast({ show, message, type = "info", onClose }) {
         <span>{message}</span>
         {onClose && (
           <button
+            type="button"
             onClick={onClose}
             className="ml-2 text-white/80 hover:text-white focus:outline-none"
             aria-label="Close notification"
@@ -40,6 +41,7 @@ export default function Toast({ show, message, type = "info", onClose }) {
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
+              aria-hidden="true"
             >
               <path
                 strokeLinecap="round"

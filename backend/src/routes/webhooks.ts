@@ -1,29 +1,33 @@
-import { FastifyInstance } from 'fastify';
-import Stripe from 'stripe';
-import { stripe } from '../lib/stripe';
-import { db } from '../db/client';
-import { webhookEvents, clients } from '../db/schema';
-import { eq } from 'drizzle-orm';
-import { v4 as uuidv4 } from 'uuid';
+import { eq } from "drizzle-orm";
+import type { FastifyInstance } from "fastify";
+import type Stripe from "stripe";
+import { v4 as uuidv4 } from "uuid";
+import { db } from "../db/client";
+import { clients, webhookEvents } from "../db/schema";
+import { stripe } from "../lib/stripe";
 
 export default async function webhooksRoute(fastify: FastifyInstance) {
   // Validate required environment variable at route registration time
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) {
-    throw new Error('STRIPE_WEBHOOK_SECRET environment variable is required.');
+    throw new Error("STRIPE_WEBHOOK_SECRET environment variable is required.");
   }
   const resolvedWebhookSecret = webhookSecret;
-  fastify.post('/webhooks/stripe', { config: { rawBody: true } }, async (request, reply) => {
-    const signature = request.headers['stripe-signature'];
-    if (typeof signature !== 'string') {
-      return reply.code(400).send({ error: 'Missing Stripe-Signature header.' });
+  fastify.post("/webhooks/stripe", { config: { rawBody: true } }, async (request, reply) => {
+    const signature = request.headers["stripe-signature"];
+    if (typeof signature !== "string") {
+      return reply.code(400).send({ error: "Missing Stripe-Signature header." });
     }
 
     let event: Stripe.Event;
     try {
-      event = stripe.webhooks.constructEvent(request.rawBody as string, signature, resolvedWebhookSecret);
+      event = stripe.webhooks.constructEvent(
+        request.rawBody as string,
+        signature,
+        resolvedWebhookSecret
+      );
     } catch (err: any) {
-      fastify.log.error({ err }, 'Failed to verify Stripe webhook signature.');
+      fastify.log.error({ err }, "Failed to verify Stripe webhook signature.");
       return reply.code(400).send({ error: `Webhook Error: ${err.message}` });
     }
 
@@ -39,10 +43,13 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
 
     await db.transaction(async (tx) => {
       switch (event.type) {
-        case 'account.updated': {
+        case "account.updated": {
           const account = event.data.object as Stripe.Account;
           if (account.details_submitted) {
-            fastify.log.info({ accountId: account.id }, 'Account details submitted, updating client record.');
+            fastify.log.info(
+              { accountId: account.id },
+              "Account details submitted, updating client record."
+            );
             await tx
               .update(clients)
               .set({
@@ -54,25 +61,34 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           }
           break;
         }
-        case 'payment_intent.succeeded':
-        case 'payment_intent.payment_failed': {
+        case "payment_intent.succeeded":
+        case "payment_intent.payment_failed": {
           const intent = event.data.object as Stripe.PaymentIntent;
-          fastify.log.info({ intentId: intent.id, status: intent.status }, 'PaymentIntent event received.');
+          fastify.log.info(
+            { intentId: intent.id, status: intent.status },
+            "PaymentIntent event received."
+          );
           break;
         }
-        case 'charge.refunded': {
+        case "charge.refunded": {
           const charge = event.data.object as Stripe.Charge;
-          fastify.log.info({ chargeId: charge.id, amountRefunded: charge.amount_refunded }, 'Charge refunded.');
+          fastify.log.info(
+            { chargeId: charge.id, amountRefunded: charge.amount_refunded },
+            "Charge refunded."
+          );
           break;
         }
-        case 'payout.paid':
-        case 'payout.failed': {
+        case "payout.paid":
+        case "payout.failed": {
           const payout = event.data.object as Stripe.Payout;
-          fastify.log.info({ payoutId: payout.id, status: payout.status }, 'Payout event received.');
+          fastify.log.info(
+            { payoutId: payout.id, status: payout.status },
+            "Payout event received."
+          );
           break;
         }
         default: {
-          fastify.log.debug({ eventType: event.type }, 'Unhandled Stripe event type.');
+          fastify.log.debug({ eventType: event.type }, "Unhandled Stripe event type.");
         }
       }
 

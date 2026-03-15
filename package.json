@@ -16,13 +16,25 @@
     "test:front": "npm run test --prefix front",
     "test:back": "npm run test --prefix backend",
     "db:generate": "npm run db:generate --prefix backend",
-    "db:migrate": "npm run db:migrate --prefix backend"
+    "db:migrate": "npm run db:migrate --prefix backend",
+    "lint": "biome check backend/src front/src",
+    "lint:fix": "biome check --write backend/src front/src",
+    "format": "biome format --write backend/src front/src"
   },
-  "keywords": ["stripe", "payment", "portal", "react", "fastify"],
+  "keywords": [
+    "stripe",
+    "payment",
+    "portal",
+    "react",
+    "fastify"
+  ],
   "author": "DFW Software Consulting",
   "license": "ISC",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/DFW-Software-Consulting/dfwsc2.0.git"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.7"
   }
 }

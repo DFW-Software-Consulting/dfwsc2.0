@@ -1,7 +1,7 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
+import logger from "../../utils/logger";
 import ConfirmModal from "./ConfirmModal";
 import EditClientModal from "./EditClientModal";
-import logger from "../../utils/logger";
 
 function formatFee(client, groups) {
   if (client.processingFeePercent != null) return `${client.processingFeePercent}%`;
@@ -51,17 +51,14 @@ export default function ClientList({
       onStatusChange?.(clientId, newStatus);
 
       try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL}/clients/${clientId}`,
-          {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ status: newStatus }),
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/clients/${clientId}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
-        );
+          body: JSON.stringify({ status: newStatus }),
+        });
 
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {
@@ -74,14 +71,12 @@ export default function ClientList({
           const errorData = await res
             .json()
             .catch(() => ({ error: "Failed to update client status" }));
-          throw new Error(
-            errorData.error || `HTTP ${res.status}: ${res.statusText}`,
-          );
+          throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
         }
 
         showToast?.(
           `Client ${newStatus === "active" ? "activated" : "deactivated"} successfully`,
-          "success",
+          "success"
         );
       } catch (err) {
         logger.error("Error updating client status:", err);
@@ -91,7 +86,7 @@ export default function ClientList({
         setLoadingClientId(null);
       }
     },
-    [onStatusChange, showToast, onSessionExpired],
+    [onStatusChange, showToast, onSessionExpired]
   );
 
   const handleStatusToggle = useCallback(
@@ -107,7 +102,7 @@ export default function ClientList({
         updateClientStatus(client.id, client.status);
       }
     },
-    [updateClientStatus],
+    [updateClientStatus]
   );
 
   const handleConfirmDeactivate = useCallback(() => {
@@ -131,17 +126,14 @@ export default function ClientList({
     setResendingClientId(client.id);
 
     try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL}/onboard-client/resend`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ clientId: client.id }),
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/onboard-client/resend`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
-      );
+        body: JSON.stringify({ clientId: client.id }),
+      });
 
       const data = await res.json();
 
@@ -178,6 +170,7 @@ export default function ClientList({
       <div className="text-center py-4">
         <p className="text-red-400">{error}</p>
         <button
+          type="button"
           onClick={onRefresh}
           className="mt-3 text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded-md transition-colors"
         >
@@ -201,7 +194,16 @@ export default function ClientList({
         <table className="min-w-full divide-y divide-gray-700">
           <thead>
             <tr>
-              {["Name", "Email", "Status", "Onboarding", "Group", "Fee", "Stripe Account", "Actions"].map((h) => (
+              {[
+                "Name",
+                "Email",
+                "Status",
+                "Onboarding",
+                "Group",
+                "Fee",
+                "Stripe Account",
+                "Actions",
+              ].map((h) => (
                 <th
                   key={h}
                   className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
@@ -214,9 +216,7 @@ export default function ClientList({
           <tbody className="divide-y divide-gray-800">
             {clients.map((client) => {
               const groupName = groups.find((g) => g.id === client.groupId)?.name;
-              const onboardingStatus = client.stripeAccountId 
-                ? "Completed" 
-                : "Pending";
+              const onboardingStatus = client.stripeAccountId ? "Completed" : "Pending";
               return (
                 <tr key={client.id} className="hover:bg-gray-700/50">
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-200">
@@ -259,9 +259,12 @@ export default function ClientList({
                   <td className="px-3 py-2 whitespace-nowrap text-sm">
                     <div className="flex gap-2">
                       <button
+                        type="button"
                         onClick={() => handleResendLink(client)}
                         disabled={resendingClientId === client.id || !!client.stripeAccountId}
-                        title={client.stripeAccountId ? "Already onboarded" : "Resend onboarding link"}
+                        title={
+                          client.stripeAccountId ? "Already onboarded" : "Resend onboarding link"
+                        }
                         className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                           resendingClientId === client.id
                             ? "bg-gray-500 text-white"
@@ -271,6 +274,7 @@ export default function ClientList({
                         {resendingClientId === client.id ? (
                           <span className="inline-flex items-center">
                             <svg
+                              aria-hidden="true"
                               className="animate-spin -ml-1 mr-1 h-3 w-3 text-white"
                               fill="none"
                               viewBox="0 0 24 24"
@@ -296,12 +300,14 @@ export default function ClientList({
                         )}
                       </button>
                       <button
+                        type="button"
                         onClick={() => setEditingClient(client)}
                         className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
                       >
                         Edit
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleStatusToggle(client)}
                         disabled={loadingClientId === client.id}
                         className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
@@ -313,6 +319,7 @@ export default function ClientList({
                         {loadingClientId === client.id ? (
                           <span className="inline-flex items-center">
                             <svg
+                              aria-hidden="true"
                               className="animate-spin -ml-1 mr-1 h-3 w-3 text-white"
                               fill="none"
                               viewBox="0 0 24 24"

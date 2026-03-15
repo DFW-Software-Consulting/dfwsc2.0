@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import logger from "../../utils/logger";
 import GroupMembersModal from "./GroupMembersModal";
 
@@ -35,7 +35,9 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
   }, [group]);
 
   useEffect(() => {
-    const handleEscape = (e) => { if (e.key === "Escape") onClose(); };
+    const handleEscape = (e) => {
+      if (e.key === "Escape") onClose();
+    };
     document.addEventListener("keydown", handleEscape);
     document.body.style.overflow = "hidden";
     return () => {
@@ -54,7 +56,10 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
 
     setError("");
     const trimmedName = name.trim();
-    if (!trimmedName) { setError("Name is required."); return; }
+    if (!trimmedName) {
+      setError("Name is required.");
+      return;
+    }
 
     const body = {
       name: trimmedName,
@@ -64,7 +69,7 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
 
     if (feeType === "percent") {
       const v = parseFloat(feeValue);
-      if (isNaN(v) || v <= 0 || v > 100) {
+      if (Number.isNaN(v) || v <= 0 || v > 100) {
         setError("Fee percent must be greater than 0 and at most 100.");
         return;
       }
@@ -72,7 +77,7 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
       body.processingFeeCents = null;
     } else if (feeType === "cents") {
       const v = parseInt(feeValue, 10);
-      if (isNaN(v) || v < 0 || !Number.isInteger(v)) {
+      if (Number.isNaN(v) || v < 0 || !Number.isInteger(v)) {
         setError("Fee must be a non-negative whole number of cents.");
         return;
       }
@@ -119,6 +124,7 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
   }, [group.id, name, feeType, feeValue, successUrl, cancelUrl, onClose, onSaved, showToast]);
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener
     <div
       ref={modalRef}
       onClick={handleBackdropClick}
@@ -133,6 +139,7 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
             Edit Group
           </h3>
           <button
+            type="button"
             onClick={onClose}
             className="text-gray-400 hover:text-white text-2xl leading-none"
             aria-label="Close"
@@ -143,8 +150,11 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
 
         {/* Name */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-300 mb-1">Name</label>
+          <label htmlFor="edit-group-name" className="block text-sm font-medium text-gray-300 mb-1">
+            Name
+          </label>
           <input
+            id="edit-group-name"
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -155,7 +165,10 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
 
         {/* Processing fee */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-300 mb-2">
+          <label
+            htmlFor="edit-group-fee-value"
+            className="block text-sm font-medium text-gray-300 mb-2"
+          >
             Processing Fee
           </label>
           <div className="flex flex-wrap gap-4 mb-2">
@@ -173,7 +186,11 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
                   name="groupFeeType"
                   value={value}
                   checked={feeType === value}
-                  onChange={() => { setFeeType(value); setFeeValue(""); setError(""); }}
+                  onChange={() => {
+                    setFeeType(value);
+                    setFeeValue("");
+                    setError("");
+                  }}
                   className="accent-blue-500"
                 />
                 {label}
@@ -182,6 +199,7 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
           </div>
           {feeType !== "none" && (
             <input
+              id="edit-group-fee-value"
               type="number"
               value={feeValue}
               onChange={(e) => setFeeValue(e.target.value)}
@@ -199,10 +217,14 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
 
         {/* Redirect URLs */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-300 mb-1">
+          <label
+            htmlFor="edit-group-success-url"
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
             Default Payment Success URL
           </label>
           <input
+            id="edit-group-success-url"
             type="url"
             value={successUrl}
             onChange={(e) => setSuccessUrl(e.target.value)}
@@ -212,10 +234,14 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
           />
         </div>
         <div className="mb-5">
-          <label className="block text-sm font-medium text-gray-300 mb-1">
+          <label
+            htmlFor="edit-group-cancel-url"
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
             Default Payment Cancel URL
           </label>
           <input
+            id="edit-group-cancel-url"
             type="url"
             value={cancelUrl}
             onChange={(e) => setCancelUrl(e.target.value)}
@@ -233,12 +259,14 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
 
         <div className="flex justify-end gap-3">
           <button
+            type="button"
             onClick={onClose}
             className="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-medium transition-colors"
           >
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleSave}
             disabled={loading}
             className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors
@@ -254,7 +282,12 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
 
 // ─── Group Panel ─────────────────────────────────────────────────────────────
 
-export default function GroupPanel({ showToast, onSessionExpired, onGroupsChanged, onClientUpdated }) {
+export default function GroupPanel({
+  showToast,
+  onSessionExpired,
+  onGroupsChanged,
+  onClientUpdated,
+}) {
   const [groups, setGroups] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -308,79 +341,91 @@ export default function GroupPanel({ showToast, onSessionExpired, onGroupsChange
     }
   }, []);
 
-  useEffect(() => { 
+  useEffect(() => {
     fetchGroups();
     fetchClients();
   }, [fetchGroups, fetchClients]);
 
-  const handleCreate = useCallback(async (e) => {
-    e.preventDefault();
-    const name = newGroupName.trim();
-    if (!name) return;
-    const token = sessionStorage.getItem("adminToken");
-    setCreating(true);
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/groups`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Failed to create group" }));
-        throw new Error(data.error || `HTTP ${res.status}`);
+  const handleCreate = useCallback(
+    async (e) => {
+      e.preventDefault();
+      const name = newGroupName.trim();
+      if (!name) return;
+      const token = sessionStorage.getItem("adminToken");
+      setCreating(true);
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/groups`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ name }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({ error: "Failed to create group" }));
+          throw new Error(data.error || `HTTP ${res.status}`);
+        }
+        const group = await res.json();
+        const updated = [...groups, group];
+        setGroups(updated);
+        onGroupsChanged?.(updated);
+        setNewGroupName("");
+        showToast?.(`Group "${group.name}" created`, "success");
+      } catch (err) {
+        logger.error("Error creating group:", err);
+        showToast?.(err.message, "error");
+      } finally {
+        setCreating(false);
       }
-      const group = await res.json();
-      const updated = [...groups, group];
-      setGroups(updated);
-      onGroupsChanged?.(updated);
-      setNewGroupName("");
-      showToast?.(`Group "${group.name}" created`, "success");
-    } catch (err) {
-      logger.error("Error creating group:", err);
-      showToast?.(err.message, "error");
-    } finally {
-      setCreating(false);
-    }
-  }, [newGroupName, groups, showToast, onGroupsChanged]);
+    },
+    [newGroupName, groups, showToast, onGroupsChanged]
+  );
 
-  const handleToggleStatus = useCallback(async (group) => {
-    const token = sessionStorage.getItem("adminToken");
-    const newStatus = group.status === "active" ? "inactive" : "active";
-    setTogglingId(group.id);
-    const optimistic = groups.map((g) => g.id === group.id ? { ...g, status: newStatus } : g);
-    setGroups(optimistic);
-    onGroupsChanged?.(optimistic);
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/groups/${group.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      showToast?.(`Group ${newStatus === "active" ? "activated" : "deactivated"}`, "success");
-    } catch (err) {
-      const rolled = groups.map((g) => g.id === group.id ? { ...g, status: group.status } : g);
-      setGroups(rolled);
-      onGroupsChanged?.(rolled);
-      showToast?.(err.message, "error");
-    } finally {
-      setTogglingId(null);
-    }
-  }, [groups, showToast, onGroupsChanged]);
+  const handleToggleStatus = useCallback(
+    async (group) => {
+      const token = sessionStorage.getItem("adminToken");
+      const newStatus = group.status === "active" ? "inactive" : "active";
+      setTogglingId(group.id);
+      const optimistic = groups.map((g) => (g.id === group.id ? { ...g, status: newStatus } : g));
+      setGroups(optimistic);
+      onGroupsChanged?.(optimistic);
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/groups/${group.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ status: newStatus }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        showToast?.(`Group ${newStatus === "active" ? "activated" : "deactivated"}`, "success");
+      } catch (err) {
+        const rolled = groups.map((g) => (g.id === group.id ? { ...g, status: group.status } : g));
+        setGroups(rolled);
+        onGroupsChanged?.(rolled);
+        showToast?.(err.message, "error");
+      } finally {
+        setTogglingId(null);
+      }
+    },
+    [groups, showToast, onGroupsChanged]
+  );
 
-  const handleGroupSaved = useCallback((updated) => {
-    const next = groups.map((g) => g.id === updated.id ? updated : g);
-    setGroups(next);
-    onGroupsChanged?.(next);
-  }, [groups, onGroupsChanged]);
+  const handleGroupSaved = useCallback(
+    (updated) => {
+      const next = groups.map((g) => (g.id === updated.id ? updated : g));
+      setGroups(next);
+      onGroupsChanged?.(next);
+    },
+    [groups, onGroupsChanged]
+  );
 
   const handleToggleExpand = useCallback((groupId) => {
-    setExpandedGroupId((prev) => prev === groupId ? null : groupId);
+    setExpandedGroupId((prev) => (prev === groupId ? null : groupId));
   }, []);
 
-  const getGroupMembers = useCallback((groupId) => {
-    return clients.filter((c) => c.groupId === groupId);
-  }, [clients]);
+  const getGroupMembers = useCallback(
+    (groupId) => {
+      return clients.filter((c) => c.groupId === groupId);
+    },
+    [clients]
+  );
 
   return (
     <div>
@@ -412,6 +457,7 @@ export default function GroupPanel({ showToast, onSessionExpired, onGroupsChange
       <div className="flex justify-between items-center mb-3">
         <h4 className="text-md font-semibold text-white">Groups</h4>
         <button
+          type="button"
           onClick={fetchGroups}
           className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
         >
@@ -454,17 +500,24 @@ export default function GroupPanel({ showToast, onSessionExpired, onGroupsChange
                     <tr key={g.id} className="hover:bg-gray-700/50">
                       <td className="px-3 py-2">
                         <button
+                          type="button"
                           onClick={() => handleToggleExpand(g.id)}
                           className="text-gray-400 hover:text-white transition-colors"
                           aria-label={isExpanded ? "Collapse" : "Expand"}
                         >
                           <svg
+                            aria-hidden="true"
                             className={`w-4 h-4 transform transition-transform ${isExpanded ? "rotate-90" : ""}`}
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
                           >
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M9 5l7 7-7 7"
+                            />
                           </svg>
                         </button>
                       </td>
@@ -489,18 +542,21 @@ export default function GroupPanel({ showToast, onSessionExpired, onGroupsChange
                       <td className="px-3 py-2 text-sm">
                         <div className="flex gap-2">
                           <button
+                            type="button"
                             onClick={() => setEditingGroup(g)}
                             className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
                           >
                             Edit
                           </button>
                           <button
+                            type="button"
                             onClick={() => setManagingGroup(g)}
                             className="px-3 py-1 rounded text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white transition-colors"
                           >
                             Manage
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleToggleStatus(g)}
                             disabled={togglingId === g.id}
                             className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
@@ -512,8 +568,8 @@ export default function GroupPanel({ showToast, onSessionExpired, onGroupsChange
                             {togglingId === g.id
                               ? "..."
                               : g.status === "active"
-                              ? "Deactivate"
-                              : "Activate"}
+                                ? "Deactivate"
+                                : "Activate"}
                           </button>
                         </div>
                       </td>
@@ -526,7 +582,9 @@ export default function GroupPanel({ showToast, onSessionExpired, onGroupsChange
                               Clients in {g.name} ({members.length})
                             </h4>
                             {members.length === 0 ? (
-                              <p className="text-gray-500 text-sm italic">No clients in this group yet.</p>
+                              <p className="text-gray-500 text-sm italic">
+                                No clients in this group yet.
+                              </p>
                             ) : (
                               <div className="grid gap-2">
                                 {members.map((m) => (
@@ -539,19 +597,27 @@ export default function GroupPanel({ showToast, onSessionExpired, onGroupsChange
                                       <p className="text-xs text-gray-400">{m.email}</p>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                      <span className={`text-xs px-2 py-1 rounded ${
-                                        m.status === "active"
-                                          ? "bg-green-900 text-green-300"
-                                          : "bg-red-900 text-red-300"
-                                      }`}>
+                                      <span
+                                        className={`text-xs px-2 py-1 rounded ${
+                                          m.status === "active"
+                                            ? "bg-green-900 text-green-300"
+                                            : "bg-red-900 text-red-300"
+                                        }`}
+                                      >
                                         {m.status}
                                       </span>
                                       {m.stripeAccountId ? (
-                                        <span className="text-xs text-blue-400" title="Stripe connected">
+                                        <span
+                                          className="text-xs text-blue-400"
+                                          title="Stripe connected"
+                                        >
                                           ✓ Connected
                                         </span>
                                       ) : (
-                                        <span className="text-xs text-yellow-400" title="Not onboarded">
+                                        <span
+                                          className="text-xs text-yellow-400"
+                                          title="Not onboarded"
+                                        >
                                           ⚠ Pending
                                         </span>
                                       )}

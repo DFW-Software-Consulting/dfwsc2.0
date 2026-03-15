@@ -25,7 +25,10 @@
     "stripe:listen": "stripe listen --forward-to localhost:4242/api/v1/webhooks/stripe",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:ui": "vitest --ui"
+    "test:ui": "vitest --ui",
+    "lint": "biome check src",
+    "lint:fix": "biome check --write src",
+    "format": "biome format --write src"
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",

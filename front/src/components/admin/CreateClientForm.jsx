@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import logger from "../../utils/logger";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -47,28 +47,21 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
 
       try {
         const token = sessionStorage.getItem("adminToken");
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL}/accounts`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              name: name.trim(),
-              email: email.trim(),
-            }),
-          }
-        );
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/accounts`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            name: name.trim(),
+            email: email.trim(),
+          }),
+        });
 
         if (!res.ok) {
-          const errorData = await res
-            .json()
-            .catch(() => ({ error: "Failed to create client" }));
-          throw new Error(
-            errorData.error || `HTTP ${res.status}: ${res.statusText}`
-          );
+          const errorData = await res.json().catch(() => ({ error: "Failed to create client" }));
+          throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
         }
 
         const data = await res.json();
@@ -109,10 +102,7 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
-            <label
-              htmlFor="newClientName"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
+            <label htmlFor="newClientName" className="block text-sm font-medium text-gray-300 mb-1">
               Client Name
             </label>
             <input
@@ -173,9 +163,7 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
 
       {createdClientInfo && (
         <div className="mt-4 p-4 bg-gray-800/50 rounded-lg border border-gray-600">
-          <h5 className="font-semibold text-green-400 mb-2">
-            Client Created Successfully!
-          </h5>
+          <h5 className="font-semibold text-green-400 mb-2">Client Created Successfully!</h5>
 
           <div className="mb-3">
             <p className="text-sm text-gray-300 mb-1">
@@ -186,9 +174,8 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
                 {createdClientInfo.onboardingToken}
               </code>
               <button
-                onClick={() =>
-                  copyToClipboard(createdClientInfo.onboardingToken, "Token")
-                }
+                type="button"
+                onClick={() => copyToClipboard(createdClientInfo.onboardingToken, "Token")}
                 className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded transition-colors"
               >
                 Copy
@@ -205,9 +192,8 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
                 {createdClientInfo.onboardingUrlHint}
               </code>
               <button
-                onClick={() =>
-                  copyToClipboard(createdClientInfo.onboardingUrlHint, "URL")
-                }
+                type="button"
+                onClick={() => copyToClipboard(createdClientInfo.onboardingUrlHint, "URL")}
                 className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded transition-colors"
               >
                 Copy
