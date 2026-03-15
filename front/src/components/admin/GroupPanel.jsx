@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useCreateGroup, useGroups, usePatchGroup } from "../../hooks/useGroups";
+import { validateFeeValue, validateUrl } from "../../utils/validation";
 import GroupMembersModal from "./GroupMembersModal";
+import BaseModal from "./shared/BaseModal";
+import Button from "./shared/Button";
 import ErrorMessage from "./shared/ErrorMessage";
+import FeeConfigSection from "./shared/FeeConfigSection";
+import FormInput from "./shared/FormInput";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import StatusBadge from "./shared/StatusBadge";
 
@@ -19,41 +24,25 @@ function EditGroupModal({ group, onClose, showToast }) {
   const patchGroupMutation = usePatchGroup();
 
   const [name, setName] = useState(group.name);
-  const [feeType, setFeeType] = useState("none");
-  const [feeValue, setFeeValue] = useState("");
+  const [feeType, setFeeType] = useState(() => {
+    if (group.processingFeePercent != null) return "percent";
+    if (group.processingFeeCents != null) return "cents";
+    return "none";
+  });
+  const [feeValue, setFeeValue] = useState(() => {
+    if (group.processingFeePercent != null) return String(group.processingFeePercent);
+    if (group.processingFeeCents != null) return String(group.processingFeeCents);
+    return "";
+  });
   const [successUrl, setSuccessUrl] = useState(group.paymentSuccessUrl ?? "");
   const [cancelUrl, setCancelUrl] = useState(group.paymentCancelUrl ?? "");
   const [error, setError] = useState("");
-  const modalRef = useRef(null);
 
-  useEffect(() => {
-    if (group.processingFeePercent != null) {
-      setFeeType("percent");
-      setFeeValue(String(group.processingFeePercent));
-    } else if (group.processingFeeCents != null) {
-      setFeeType("cents");
-      setFeeValue(String(group.processingFeeCents));
-    } else {
-      setFeeType("none");
-      setFeeValue("");
-    }
-  }, [group]);
-
-  useEffect(() => {
-    const handleEscape = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleEscape);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", handleEscape);
-      document.body.style.overflow = "";
-    };
-  }, [onClose]);
-
-  const handleBackdropClick = (e) => {
-    if (e.target === modalRef.current) onClose();
-  };
+  const handleFeeTypeChange = useCallback((type) => {
+    setFeeType(type);
+    setFeeValue("");
+    setError("");
+  }, []);
 
   const handleSave = useCallback(() => {
     setError("");
@@ -69,32 +58,29 @@ function EditGroupModal({ group, onClose, showToast }) {
       paymentCancelUrl: cancelUrl.trim() || null,
     };
 
-    if (feeType === "percent") {
-      const v = parseFloat(feeValue);
-      if (Number.isNaN(v) || v <= 0 || v > 100) {
-        setError("Fee percent must be greater than 0 and at most 100.");
+    if (feeType !== "none") {
+      const feeErr = validateFeeValue(feeValue, feeType);
+      if (feeErr) {
+        setError(feeErr);
         return;
       }
-      body.processingFeePercent = v;
-      body.processingFeeCents = null;
-    } else if (feeType === "cents") {
-      const v = parseInt(feeValue, 10);
-      if (Number.isNaN(v) || v < 0 || !Number.isInteger(v)) {
-        setError("Fee must be a non-negative whole number of cents.");
-        return;
+      if (feeType === "percent") {
+        body.processingFeePercent = parseFloat(feeValue);
+        body.processingFeeCents = null;
+      } else {
+        body.processingFeeCents = parseInt(feeValue, 10);
+        body.processingFeePercent = null;
       }
-      body.processingFeeCents = v;
-      body.processingFeePercent = null;
     } else {
       body.processingFeePercent = null;
       body.processingFeeCents = null;
     }
 
-    if (body.paymentSuccessUrl && !body.paymentSuccessUrl.startsWith("https://")) {
+    if (validateUrl(body.paymentSuccessUrl)) {
       setError("Success URL must be a valid HTTPS URL.");
       return;
     }
-    if (body.paymentCancelUrl && !body.paymentCancelUrl.startsWith("https://")) {
+    if (validateUrl(body.paymentCancelUrl)) {
       setError("Cancel URL must be a valid HTTPS URL.");
       return;
     }
@@ -106,9 +92,7 @@ function EditGroupModal({ group, onClose, showToast }) {
           showToast?.("Group updated successfully", "success");
           onClose();
         },
-        onError: (err) => {
-          setError(err.message);
-        },
+        onError: (err) => setError(err.message),
       }
     );
   }, [
@@ -124,155 +108,56 @@ function EditGroupModal({ group, onClose, showToast }) {
   ]);
 
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener
-    <div
-      ref={modalRef}
-      onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="edit-group-title"
-    >
-      <div className="bg-gray-800 rounded-xl shadow-xl border border-gray-700 p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-5">
-          <h3 id="edit-group-title" className="text-lg font-semibold text-white">
-            Edit Group
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl leading-none"
-            aria-label="Close"
-          >
-            &times;
-          </button>
-        </div>
+    <BaseModal isOpen onClose={onClose} title="Edit Group" titleId="edit-group-title">
+      <FormInput
+        id="edit-group-name"
+        label="Name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        wrapperClassName="mb-4"
+      />
 
-        {/* Name */}
-        <div className="mb-4">
-          <label htmlFor="edit-group-name" className="block text-sm font-medium text-gray-300 mb-1">
-            Name
-          </label>
-          <input
-            id="edit-group-name"
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                       placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
+      <FeeConfigSection
+        feeType={feeType}
+        feeValue={feeValue}
+        onFeeTypeChange={handleFeeTypeChange}
+        onFeeValueChange={setFeeValue}
+        hint="Clients in this group with no per-client fee set will inherit this fee."
+        hintColor="gray"
+        showHintAlways
+        radioName="groupFeeType"
+      />
 
-        {/* Processing fee */}
-        <div className="mb-4">
-          <label
-            htmlFor="edit-group-fee-value"
-            className="block text-sm font-medium text-gray-300 mb-2"
-          >
-            Processing Fee
-          </label>
-          <div className="flex flex-wrap gap-4 mb-2">
-            {[
-              { value: "none", label: "None" },
-              { value: "percent", label: "Percent (%)" },
-              { value: "cents", label: "Flat (cents)" },
-            ].map(({ value, label }) => (
-              <label
-                key={value}
-                className="flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer"
-              >
-                <input
-                  type="radio"
-                  name="groupFeeType"
-                  value={value}
-                  checked={feeType === value}
-                  onChange={() => {
-                    setFeeType(value);
-                    setFeeValue("");
-                    setError("");
-                  }}
-                  className="accent-blue-500"
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-          {feeType !== "none" && (
-            <input
-              id="edit-group-fee-value"
-              type="number"
-              value={feeValue}
-              onChange={(e) => setFeeValue(e.target.value)}
-              placeholder={feeType === "percent" ? "e.g. 2.5" : "e.g. 50  (= $0.50)"}
-              min="0"
-              step={feeType === "percent" ? "0.01" : "1"}
-              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                         placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          )}
-          <p className="mt-1.5 text-xs text-gray-400">
-            Clients in this group with no per-client fee set will inherit this fee.
-          </p>
-        </div>
+      <FormInput
+        id="edit-group-success-url"
+        label="Default Payment Success URL"
+        type="url"
+        value={successUrl}
+        onChange={(e) => setSuccessUrl(e.target.value)}
+        placeholder="https://yoursite.com/thank-you"
+        wrapperClassName="mb-4"
+      />
+      <FormInput
+        id="edit-group-cancel-url"
+        label="Default Payment Cancel URL"
+        type="url"
+        value={cancelUrl}
+        onChange={(e) => setCancelUrl(e.target.value)}
+        placeholder="https://yoursite.com/cancel"
+        wrapperClassName="mb-5"
+      />
 
-        {/* Redirect URLs */}
-        <div className="mb-4">
-          <label
-            htmlFor="edit-group-success-url"
-            className="block text-sm font-medium text-gray-300 mb-1"
-          >
-            Default Payment Success URL
-          </label>
-          <input
-            id="edit-group-success-url"
-            type="url"
-            value={successUrl}
-            onChange={(e) => setSuccessUrl(e.target.value)}
-            placeholder="https://yoursite.com/thank-you"
-            className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                       placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-        <div className="mb-5">
-          <label
-            htmlFor="edit-group-cancel-url"
-            className="block text-sm font-medium text-gray-300 mb-1"
-          >
-            Default Payment Cancel URL
-          </label>
-          <input
-            id="edit-group-cancel-url"
-            type="url"
-            value={cancelUrl}
-            onChange={(e) => setCancelUrl(e.target.value)}
-            placeholder="https://yoursite.com/cancel"
-            className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                       placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
+      <ErrorMessage message={error} className="mb-3" />
 
-        <ErrorMessage message={error} className="mb-3" />
-
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-medium transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={patchGroupMutation.isPending}
-            className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors
-                       disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {patchGroupMutation.isPending ? "Saving..." : "Save Changes"}
-          </button>
-        </div>
+      <div className="flex justify-end gap-3">
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="primary" isLoading={patchGroupMutation.isPending} onClick={handleSave}>
+          {patchGroupMutation.isPending ? "Saving..." : "Save Changes"}
+        </Button>
       </div>
-    </div>
+    </BaseModal>
   );
 }
 
@@ -347,14 +232,13 @@ export default function GroupPanel({ showToast }) {
                        placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             disabled={createGroupMutation.isPending}
           />
-          <button
+          <Button
             type="submit"
             disabled={createGroupMutation.isPending || !newGroupName.trim()}
-            className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium
-                       transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            isLoading={createGroupMutation.isPending}
           >
             {createGroupMutation.isPending ? "Creating..." : "Create"}
-          </button>
+          </Button>
         </form>
       </div>
 
@@ -435,32 +319,25 @@ export default function GroupPanel({ showToast }) {
                       </td>
                       <td className="px-3 py-2 text-sm">
                         <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setEditingGroup(g)}
-                            className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-                          >
+                          <Button size="sm" onClick={() => setEditingGroup(g)}>
                             Edit
-                          </button>
-                          <button
-                            type="button"
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="bg-purple-600 hover:bg-purple-700 text-white"
                             onClick={() => setManagingGroup(g)}
-                            className="px-3 py-1 rounded text-xs font-medium bg-purple-600 hover:bg-purple-700 text-white transition-colors"
                           >
                             Manage
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleStatus(g)}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={g.status === "active" ? "danger" : "success"}
                             disabled={isToggling}
-                            className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
-                              g.status === "active"
-                                ? "bg-red-600 hover:bg-red-700 text-white"
-                                : "bg-green-600 hover:bg-green-700 text-white"
-                            }`}
+                            onClick={() => handleToggleStatus(g)}
                           >
                             {isToggling ? "..." : g.status === "active" ? "Deactivate" : "Activate"}
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>

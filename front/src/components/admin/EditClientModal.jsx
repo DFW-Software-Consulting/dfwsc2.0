@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePatchClient } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
+import { validateFeeValue, validateUrl } from "../../utils/validation";
+import BaseModal from "./shared/BaseModal";
+import Button from "./shared/Button";
 import ErrorMessage from "./shared/ErrorMessage";
+import FeeConfigSection from "./shared/FeeConfigSection";
+import FormInput from "./shared/FormInput";
 
 export default function EditClientModal({ client, onClose, onSaved, showToast }) {
   const { data: groups = [] } = useGroups();
@@ -13,7 +18,6 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
   const [successUrl, setSuccessUrl] = useState("");
   const [cancelUrl, setCancelUrl] = useState("");
   const [error, setError] = useState("");
-  const modalRef = useRef(null);
 
   useEffect(() => {
     if (client.processingFeePercent != null) {
@@ -31,22 +35,6 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
     setCancelUrl(client.paymentCancelUrl ?? "");
   }, [client]);
 
-  useEffect(() => {
-    const handleEscape = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", handleEscape);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", handleEscape);
-      document.body.style.overflow = "";
-    };
-  }, [onClose]);
-
-  const handleBackdropClick = (e) => {
-    if (e.target === modalRef.current) onClose();
-  };
-
   const inheritedFee = (() => {
     if (feeType !== "none" || !groupId) return null;
     const group = groups.find((g) => g.id === groupId);
@@ -58,6 +46,21 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
     return null;
   })();
 
+  const feeHint =
+    feeType === "none"
+      ? inheritedFee
+        ? `Will inherit: ${inheritedFee}`
+        : groupId
+          ? "Group has no fee set — will fall back to platform default."
+          : "Will use platform default fee."
+      : null;
+
+  const handleFeeTypeChange = useCallback((type) => {
+    setFeeType(type);
+    setFeeValue("");
+    setError("");
+  }, []);
+
   const handleSave = useCallback(() => {
     setError("");
     const body = {
@@ -66,32 +69,29 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
       paymentCancelUrl: cancelUrl.trim() || null,
     };
 
-    if (feeType === "percent") {
-      const v = parseFloat(feeValue);
-      if (Number.isNaN(v) || v <= 0 || v > 100) {
-        setError("Fee percent must be greater than 0 and at most 100.");
+    if (feeType !== "none") {
+      const feeErr = validateFeeValue(feeValue, feeType);
+      if (feeErr) {
+        setError(feeErr);
         return;
       }
-      body.processingFeePercent = v;
-      body.processingFeeCents = null;
-    } else if (feeType === "cents") {
-      const v = parseInt(feeValue, 10);
-      if (Number.isNaN(v) || v < 0 || !Number.isInteger(v)) {
-        setError("Fee must be a non-negative whole number of cents.");
-        return;
+      if (feeType === "percent") {
+        body.processingFeePercent = parseFloat(feeValue);
+        body.processingFeeCents = null;
+      } else {
+        body.processingFeeCents = parseInt(feeValue, 10);
+        body.processingFeePercent = null;
       }
-      body.processingFeeCents = v;
-      body.processingFeePercent = null;
     } else {
       body.processingFeePercent = null;
       body.processingFeeCents = null;
     }
 
-    if (body.paymentSuccessUrl && !body.paymentSuccessUrl.startsWith("https://")) {
+    if (validateUrl(body.paymentSuccessUrl)) {
       setError("Success URL must be a valid HTTPS URL.");
       return;
     }
-    if (body.paymentCancelUrl && !body.paymentCancelUrl.startsWith("https://")) {
+    if (validateUrl(body.paymentCancelUrl)) {
       setError("Cancel URL must be a valid HTTPS URL.");
       return;
     }
@@ -104,9 +104,7 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
           onSaved?.(updated);
           onClose();
         },
-        onError: (err) => {
-          setError(err.message);
-        },
+        onError: (err) => setError(err.message),
       }
     );
   }, [
@@ -123,177 +121,74 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
   ]);
 
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener
-    <div
-      ref={modalRef}
-      onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="edit-client-title"
-    >
-      <div className="bg-gray-800 rounded-xl shadow-xl border border-gray-700 p-6 w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h3 id="edit-client-title" className="text-lg font-semibold text-white">
-            Edit Client
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl leading-none"
-            aria-label="Close"
-          >
-            &times;
-          </button>
-        </div>
+    <BaseModal isOpen onClose={onClose} title="Edit Client" titleId="edit-client-title">
+      <p className="text-sm text-gray-400 mb-5">
+        {client.name} &bull; {client.email}
+      </p>
 
-        <p className="text-sm text-gray-400 mb-5">
-          {client.name} &bull; {client.email}
-        </p>
-
-        {/* Group assignment */}
-        <div className="mb-4">
-          <label
-            htmlFor="edit-client-group"
-            className="block text-sm font-medium text-gray-300 mb-1"
-          >
-            Group
-          </label>
-          <select
-            id="edit-client-group"
-            value={groupId}
-            onChange={(e) => setGroupId(e.target.value)}
-            className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                       focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">— No group —</option>
-            {groups
-              .filter((g) => g.status === "active")
-              .map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-          </select>
-        </div>
-
-        {/* Processing fee */}
-        <div className="mb-4">
-          <label
-            htmlFor="edit-client-fee-value"
-            className="block text-sm font-medium text-gray-300 mb-2"
-          >
-            Processing Fee
-          </label>
-          <div className="flex flex-wrap gap-4 mb-2">
-            {[
-              { value: "none", label: "Inherit / None" },
-              { value: "percent", label: "Percent (%)" },
-              { value: "cents", label: "Flat (cents)" },
-            ].map(({ value, label }) => (
-              <label
-                key={value}
-                className="flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer"
-              >
-                <input
-                  type="radio"
-                  name="feeType"
-                  value={value}
-                  checked={feeType === value}
-                  onChange={() => {
-                    setFeeType(value);
-                    setFeeValue("");
-                    setError("");
-                  }}
-                  className="accent-blue-500"
-                />
-                {label}
-              </label>
+      {/* Group assignment */}
+      <div className="mb-4">
+        <label htmlFor="edit-client-group" className="block text-sm font-medium text-gray-300 mb-1">
+          Group
+        </label>
+        <select
+          id="edit-client-group"
+          value={groupId}
+          onChange={(e) => setGroupId(e.target.value)}
+          className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+                     focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="">— No group —</option>
+          {groups
+            .filter((g) => g.status === "active")
+            .map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
             ))}
-          </div>
-          {feeType !== "none" && (
-            <input
-              id="edit-client-fee-value"
-              type="number"
-              value={feeValue}
-              onChange={(e) => setFeeValue(e.target.value)}
-              placeholder={feeType === "percent" ? "e.g. 2.5" : "e.g. 50  (= $0.50)"}
-              min="0"
-              step={feeType === "percent" ? "0.01" : "1"}
-              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                         placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          )}
-          {inheritedFee && (
-            <p className="mt-1.5 text-xs text-blue-400">Will inherit: {inheritedFee}</p>
-          )}
-          {feeType === "none" && !inheritedFee && groupId && (
-            <p className="mt-1.5 text-xs text-gray-400">
-              Group has no fee set — will fall back to platform default.
-            </p>
-          )}
-          {feeType === "none" && !groupId && (
-            <p className="mt-1.5 text-xs text-gray-400">Will use platform default fee.</p>
-          )}
-        </div>
-
-        {/* Redirect URLs */}
-        <div className="mb-4">
-          <label
-            htmlFor="edit-client-success-url"
-            className="block text-sm font-medium text-gray-300 mb-1"
-          >
-            Payment Success URL
-          </label>
-          <input
-            id="edit-client-success-url"
-            type="url"
-            value={successUrl}
-            onChange={(e) => setSuccessUrl(e.target.value)}
-            placeholder="https://yoursite.com/thank-you"
-            className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                       placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-        <div className="mb-5">
-          <label
-            htmlFor="edit-client-cancel-url"
-            className="block text-sm font-medium text-gray-300 mb-1"
-          >
-            Payment Cancel URL
-          </label>
-          <input
-            id="edit-client-cancel-url"
-            type="url"
-            value={cancelUrl}
-            onChange={(e) => setCancelUrl(e.target.value)}
-            placeholder="https://yoursite.com/cancel"
-            className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                       placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-
-        <ErrorMessage message={error} className="mb-3" />
-
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-medium transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={patchClientMutation.isPending}
-            className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors
-                       disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {patchClientMutation.isPending ? "Saving..." : "Save Changes"}
-          </button>
-        </div>
+        </select>
       </div>
-    </div>
+
+      <FeeConfigSection
+        feeType={feeType}
+        feeValue={feeValue}
+        onFeeTypeChange={handleFeeTypeChange}
+        onFeeValueChange={setFeeValue}
+        hint={feeHint}
+        hintColor={inheritedFee ? "blue" : "gray"}
+        radioName="feeType"
+        showInheritOption
+      />
+
+      <FormInput
+        id="edit-client-success-url"
+        label="Payment Success URL"
+        type="url"
+        value={successUrl}
+        onChange={(e) => setSuccessUrl(e.target.value)}
+        placeholder="https://yoursite.com/thank-you"
+        wrapperClassName="mb-4"
+      />
+      <FormInput
+        id="edit-client-cancel-url"
+        label="Payment Cancel URL"
+        type="url"
+        value={cancelUrl}
+        onChange={(e) => setCancelUrl(e.target.value)}
+        placeholder="https://yoursite.com/cancel"
+        wrapperClassName="mb-5"
+      />
+
+      <ErrorMessage message={error} className="mb-3" />
+
+      <div className="flex justify-end gap-3">
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="primary" isLoading={patchClientMutation.isPending} onClick={handleSave}>
+          {patchClientMutation.isPending ? "Saving..." : "Save Changes"}
+        </Button>
+      </div>
+    </BaseModal>
   );
 }

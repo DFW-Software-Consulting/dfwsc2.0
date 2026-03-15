@@ -2,6 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { setup } from "../../api/auth";
 import logger from "../../utils/logger";
+import { validatePassword } from "../../utils/validation";
+import Button from "./shared/Button";
+import FormInput from "./shared/FormInput";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -29,9 +32,8 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
   const validateForm = useCallback(() => {
     if (!username.trim()) return "Username is required";
     if (username.trim().length < 3) return "Username must be at least 3 characters";
-    if (!password) return "Password is required";
-    if (password.length < MIN_PASSWORD_LENGTH)
-      return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
+    const pwErr = validatePassword(password, MIN_PASSWORD_LENGTH);
+    if (pwErr) return pwErr;
     if (password !== confirmPassword) return "Passwords do not match";
     return null;
   }, [username, password, confirmPassword]);
@@ -130,95 +132,62 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
       </div>
 
       <form onSubmit={handleSubmit}>
-        <div className="mb-4">
-          <label htmlFor="setupToken" className="block text-sm font-semibold text-gray-200 mb-2">
-            Setup Token (optional)
-          </label>
-          <input
-            id="setupToken"
-            type="text"
-            value={setupTokenValue}
-            onChange={(e) => setSetupTokenValue(e.target.value)}
-            placeholder="Enter setup token if required"
-            className="block w-full rounded-md border border-gray-600 bg-gray-900/50
-                       px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            disabled={setupMutation.isPending}
-            autoComplete="one-time-code"
-          />
-          <p className="mt-1 text-xs text-gray-400">
-            Required only when ADMIN_SETUP_TOKEN is enabled on the server.
-          </p>
-        </div>
+        <FormInput
+          id="setupToken"
+          label="Setup Token (optional)"
+          value={setupTokenValue}
+          onChange={(e) => setSetupTokenValue(e.target.value)}
+          placeholder="Enter setup token if required"
+          disabled={setupMutation.isPending}
+          autoComplete="one-time-code"
+          helper="Required only when ADMIN_SETUP_TOKEN is enabled on the server."
+          wrapperClassName="mb-4"
+        />
 
-        <div className="mb-4">
-          <label htmlFor="setupUsername" className="block text-sm font-semibold text-gray-200 mb-2">
-            Admin Username
-          </label>
-          <input
-            id="setupUsername"
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter admin username"
-            className="block w-full rounded-md border border-gray-600 bg-gray-900/50
-                       px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            disabled={setupMutation.isPending}
-            autoComplete="username"
-          />
-        </div>
+        <FormInput
+          id="setupUsername"
+          label="Admin Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="Enter admin username"
+          disabled={setupMutation.isPending}
+          autoComplete="username"
+          wrapperClassName="mb-4"
+        />
 
-        <div className="mb-4">
-          <label htmlFor="setupPassword" className="block text-sm font-semibold text-gray-200 mb-2">
-            Password
-          </label>
-          <input
-            id="setupPassword"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password"
-            className="block w-full rounded-md border border-gray-600 bg-gray-900/50
-                       px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            disabled={setupMutation.isPending}
-            autoComplete="new-password"
-          />
-          <p className="mt-1 text-xs text-gray-400">Minimum {MIN_PASSWORD_LENGTH} characters</p>
-        </div>
+        <FormInput
+          id="setupPassword"
+          label="Password"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Enter password"
+          disabled={setupMutation.isPending}
+          autoComplete="new-password"
+          helper={`Minimum ${MIN_PASSWORD_LENGTH} characters`}
+          wrapperClassName="mb-4"
+        />
 
-        <div className="mb-6">
-          <label
-            htmlFor="setupConfirmPassword"
-            className="block text-sm font-semibold text-gray-200 mb-2"
-          >
-            Confirm Password
-          </label>
-          <input
-            id="setupConfirmPassword"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            placeholder="Confirm password"
-            className="block w-full rounded-md border border-gray-600 bg-gray-900/50
-                       px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
-                       focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            disabled={setupMutation.isPending}
-            autoComplete="new-password"
-          />
-        </div>
+        <FormInput
+          id="setupConfirmPassword"
+          label="Confirm Password"
+          type="password"
+          value={confirmPassword}
+          onChange={(e) => setConfirmPassword(e.target.value)}
+          placeholder="Confirm password"
+          disabled={setupMutation.isPending}
+          autoComplete="new-password"
+          wrapperClassName="mb-6"
+        />
 
-        <button
+        <Button
           type="submit"
           disabled={setupMutation.isPending}
-          className="w-full rounded-md bg-blue-600 hover:bg-blue-700
-                     text-white font-semibold py-2 px-4 shadow-lg
-                     transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400
-                     disabled:opacity-50 disabled:cursor-not-allowed"
+          isLoading={setupMutation.isPending}
+          className="w-full shadow-lg focus:ring-2 focus:ring-blue-400"
         >
           {setupMutation.isPending ? "Creating Admin..." : "Create Admin Account"}
-        </button>
+        </Button>
 
         {error && (
           <p className="mt-4 text-center text-sm text-red-400" role="alert">

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import { usePaymentReport } from "../../hooks/usePaymentReports";
+import AdminTable from "./shared/AdminTable";
 import StatusBadge from "./shared/StatusBadge";
 
 function formatCurrency(amount, currency) {
@@ -19,7 +20,7 @@ function formatDate(ts) {
   });
 }
 
-export default function PaymentReports({ showToast }) {
+export default function PaymentReports() {
   const { data: clients = [] } = useClients();
   const { data: groups = [] } = useGroups();
 
@@ -56,6 +57,41 @@ export default function PaymentReports({ showToast }) {
   }, [selectedId, reportEnabled, refetch]);
 
   const items = reportType === "client" ? clients : groups;
+
+  const resultColumns = [
+    {
+      header: "Date",
+      render: (pi) => formatDate(pi.created),
+    },
+    {
+      header: "Payment ID",
+      tdClassName: "font-mono text-gray-400 text-xs",
+      render: (pi) => pi.id,
+    },
+    {
+      header: "Amount",
+      render: (pi) => formatCurrency(pi.amount, pi.currency),
+    },
+    {
+      header: "Platform Fee",
+      render: (pi) =>
+        pi.application_fee_amount != null
+          ? formatCurrency(pi.application_fee_amount, pi.currency)
+          : "—",
+    },
+    {
+      header: "Status",
+      render: (pi) => <StatusBadge status={pi.status} />,
+    },
+    ...(reportType === "group"
+      ? [
+          {
+            header: "Client",
+            render: (pi) => pi.clientId ?? "—",
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div>
@@ -141,57 +177,7 @@ export default function PaymentReports({ showToast }) {
             </p>
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-700">
-                  <thead>
-                    <tr>
-                      {[
-                        "Date",
-                        "Payment ID",
-                        "Amount",
-                        "Platform Fee",
-                        "Status",
-                        ...(reportType === "group" ? ["Client"] : []),
-                      ].map((h) => (
-                        <th
-                          key={h}
-                          className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-800">
-                    {results.data?.map((pi) => (
-                      <tr key={pi.id} className="hover:bg-gray-700/50">
-                        <td className="px-3 py-2 text-sm text-gray-200 whitespace-nowrap">
-                          {formatDate(pi.created)}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-gray-400 font-mono whitespace-nowrap">
-                          {pi.id}
-                        </td>
-                        <td className="px-3 py-2 text-sm text-gray-200 whitespace-nowrap">
-                          {formatCurrency(pi.amount, pi.currency)}
-                        </td>
-                        <td className="px-3 py-2 text-sm text-gray-200 whitespace-nowrap">
-                          {pi.application_fee_amount != null
-                            ? formatCurrency(pi.application_fee_amount, pi.currency)
-                            : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-sm whitespace-nowrap">
-                          <StatusBadge status={pi.status} />
-                        </td>
-                        {reportType === "group" && (
-                          <td className="px-3 py-2 text-sm text-gray-200 whitespace-nowrap">
-                            {pi.clientId ?? "—"}
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <AdminTable columns={resultColumns} rows={results.data ?? []} keyField="id" />
               {results.hasMore && (
                 <p className="text-xs text-gray-400 mt-3 text-center">
                   More results available — increase the limit to see them.
