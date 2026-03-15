@@ -515,29 +515,30 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       .from(clients)
       .where(eq(clients.id, normalizedClientId));
 
-    if (clientRecord) {
-      const existingStripeAccountId =
-        clientRecord.stripeAccountId ??
-        (clientRecord as { stripe_account_id?: string }).stripe_account_id ??
-        null;
-
-      // If the client already has a stripeAccountId, verify it matches the one being set
-      if (existingStripeAccountId && existingStripeAccountId !== normalizedAccount) {
-        request.log.warn(
-          {
-            client_id: normalizedClientId,
-            account: normalizedAccount,
-            existingAccount: existingStripeAccountId,
-          },
-          "Attempt to overwrite existing stripeAccountId"
-        );
-        return reply.code(400).send({ error: "Stripe account already linked to this client." });
-      }
-    } else {
+    if (!clientRecord) {
       request.log.warn(
         { client_id: normalizedClientId, account: normalizedAccount },
-        "Client record not found during callback, proceeding with redirect"
+        "Client record not found during callback"
       );
+      return reply.code(400).send({ error: "Client not found." });
+    }
+
+    const existingStripeAccountId =
+      clientRecord.stripeAccountId ??
+      (clientRecord as { stripe_account_id?: string }).stripe_account_id ??
+      null;
+
+    // If the client already has a stripeAccountId, verify it matches the one being set
+    if (existingStripeAccountId && existingStripeAccountId !== normalizedAccount) {
+      request.log.warn(
+        {
+          client_id: normalizedClientId,
+          account: normalizedAccount,
+          existingAccount: existingStripeAccountId,
+        },
+        "Attempt to overwrite existing stripeAccountId"
+      );
+      return reply.code(400).send({ error: "Stripe account already linked to this client." });
     }
 
     // Update both the client's stripeAccountId and the token status atomically
