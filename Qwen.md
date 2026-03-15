@@ -151,3 +151,4 @@ Rules: lowercase subject, no trailing period, 100-char header limit.
 - `db`: PostgreSQL, port 5432 (localhost only in prod)
 - `mailhog`: SMTP testing, UI port 8025
 - `stripe-cli`: webhook forwarding in dev
+
