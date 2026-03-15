@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useCreateGroup, useGroups, usePatchGroup } from "../../hooks/useGroups";
 import GroupMembersModal from "./GroupMembersModal";
+import ErrorMessage from "./shared/ErrorMessage";
+import LoadingSpinner from "./shared/LoadingSpinner";
+import StatusBadge from "./shared/StatusBadge";
 
 function formatFee(group) {
   if (group.processingFeePercent != null) return `${group.processingFeePercent}%`;
@@ -248,11 +251,7 @@ function EditGroupModal({ group, onClose, showToast }) {
           />
         </div>
 
-        {error && (
-          <p className="mb-3 text-sm text-red-400" role="alert">
-            {error}
-          </p>
-        )}
+        <ErrorMessage message={error} className="mb-3" />
 
         <div className="flex justify-end gap-3">
           <button
@@ -371,12 +370,7 @@ export default function GroupPanel({ showToast }) {
         </button>
       </div>
 
-      {isLoading && (
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
-          <p className="mt-3 text-gray-300">Loading groups...</p>
-        </div>
-      )}
+      {isLoading && <LoadingSpinner message="Loading groups..." />}
       {isError && <p className="text-red-400 text-sm py-4 text-center">{error?.message}</p>}
       {!isLoading && !isError && groups.length === 0 && (
         <p className="text-gray-400 text-sm py-4 text-center">No groups yet</p>
@@ -431,15 +425,7 @@ export default function GroupPanel({ showToast }) {
                       </td>
                       <td className="px-3 py-2 text-sm text-gray-200">{g.name}</td>
                       <td className="px-3 py-2 text-sm">
-                        <span
-                          className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            g.status === "active"
-                              ? "bg-green-800 text-green-200"
-                              : "bg-red-800 text-red-200"
-                          }`}
-                        >
-                          {g.status.charAt(0).toUpperCase() + g.status.slice(1)}
-                        </span>
+                        <StatusBadge status={g.status} />
                       </td>
                       <td className="px-3 py-2 text-sm text-gray-200">{formatFee(g)}</td>
                       <td className="px-3 py-2 text-sm text-gray-200">
@@ -501,15 +487,7 @@ export default function GroupPanel({ showToast }) {
                                       <p className="text-xs text-gray-400">{m.email}</p>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                      <span
-                                        className={`text-xs px-2 py-1 rounded ${
-                                          m.status === "active"
-                                            ? "bg-green-900 text-green-300"
-                                            : "bg-red-900 text-red-300"
-                                        }`}
-                                      >
-                                        {m.status}
-                                      </span>
+                                      <StatusBadge status={m.status} />
                                       {m.stripeAccountId ? (
                                         <span
                                           className="text-xs text-blue-400"

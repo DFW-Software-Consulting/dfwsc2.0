@@ -4,6 +4,8 @@ import { useGroups } from "../../hooks/useGroups";
 import logger from "../../utils/logger";
 import ConfirmModal from "./ConfirmModal";
 import EditClientModal from "./EditClientModal";
+import LoadingSpinner from "./shared/LoadingSpinner";
+import StatusBadge from "./shared/StatusBadge";
 
 function formatFee(client, groups) {
   if (client.processingFeePercent != null) return `${client.processingFeePercent}%`;
@@ -92,12 +94,7 @@ export default function ClientList({ showToast }) {
   );
 
   if (isLoading) {
-    return (
-      <div className="text-center py-8">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
-        <p className="mt-3 text-gray-300">Loading clients...</p>
-      </div>
-    );
+    return <LoadingSpinner message="Loading clients..." />;
   }
 
   if (isError) {
@@ -166,26 +163,10 @@ export default function ClientList({ showToast }) {
                     {client.email}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm">
-                    <span
-                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        client.status === "active"
-                          ? "bg-green-800 text-green-200"
-                          : "bg-red-800 text-red-200"
-                      }`}
-                    >
-                      {client.status.charAt(0).toUpperCase() + client.status.slice(1)}
-                    </span>
+                    <StatusBadge status={client.status} />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm">
-                    <span
-                      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                        onboardingStatus === "Completed"
-                          ? "bg-blue-800 text-blue-200"
-                          : "bg-yellow-800 text-yellow-200"
-                      }`}
-                    >
-                      {onboardingStatus}
-                    </span>
+                    <StatusBadge status={onboardingStatus.toLowerCase()} />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-200">
                     {groupName ?? <span className="text-gray-500">—</span>}

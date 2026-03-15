@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useCreateClient } from "../../hooks/useClients";
 import logger from "../../utils/logger";
+import ErrorMessage from "./shared/ErrorMessage";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const NAME_MIN_LENGTH = 1;
@@ -127,11 +128,7 @@ export default function CreateClientForm({ showToast }) {
           {createClientMutation.isPending ? "Creating..." : "Create Client"}
         </button>
 
-        {error && (
-          <p className="mt-2 text-sm text-red-400" role="alert">
-            {error}
-          </p>
-        )}
+        <ErrorMessage message={error} className="mt-2" />
       </form>
 
       {createdClientInfo && (

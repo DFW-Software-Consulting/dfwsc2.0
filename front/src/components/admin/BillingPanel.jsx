@@ -7,24 +7,9 @@ import {
   useSubscriptionDetail,
   useSubscriptions,
 } from "../../hooks/useSubscriptions";
-
-function StatusBadge({ status }) {
-  const styles = {
-    pending: "bg-yellow-800 text-yellow-200",
-    paid: "bg-green-800 text-green-200",
-    cancelled: "bg-red-800 text-red-200",
-    active: "bg-green-800 text-green-200",
-    paused: "bg-yellow-800 text-yellow-200",
-    completed: "bg-blue-800 text-blue-200",
-  };
-  return (
-    <span
-      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${styles[status] ?? "bg-gray-700 text-gray-200"}`}
-    >
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </span>
-  );
-}
+import ErrorMessage from "./shared/ErrorMessage";
+import LoadingSpinner from "./shared/LoadingSpinner";
+import StatusBadge from "./shared/StatusBadge";
 
 // ─── Invoices Sub-Tab ────────────────────────────────────────────────────────
 
@@ -160,11 +145,7 @@ function InvoicesTab({ showToast }) {
             />
           </div>
           <div className="flex items-end">
-            {formError && (
-              <p className="text-sm text-red-400 mr-3" role="alert">
-                {formError}
-              </p>
-            )}
+            <ErrorMessage message={formError} className="mr-3" />
             <button
               type="submit"
               disabled={createInvoiceMutation.isPending}
@@ -189,12 +170,7 @@ function InvoicesTab({ showToast }) {
         </button>
       </div>
 
-      {isLoading && (
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
-          <p className="mt-3 text-gray-300">Loading invoices...</p>
-        </div>
-      )}
+      {isLoading && <LoadingSpinner message="Loading invoices..." />}
       {isError && <p className="text-red-400 text-sm py-4 text-center">{error?.message}</p>}
       {!isLoading && !isError && invoices.length === 0 && (
         <p className="text-gray-400 text-sm py-4 text-center">No invoices yet</p>
@@ -429,11 +405,7 @@ function SubscriptionsTab({ showToast }) {
             />
           </div>
           <div className="sm:col-span-2 flex items-center gap-3">
-            {formError && (
-              <p className="text-sm text-red-400" role="alert">
-                {formError}
-              </p>
-            )}
+            <ErrorMessage message={formError} />
             <button
               type="submit"
               disabled={createSubMutation.isPending}
@@ -458,12 +430,7 @@ function SubscriptionsTab({ showToast }) {
         </button>
       </div>
 
-      {isLoading && (
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
-          <p className="mt-3 text-gray-300">Loading subscriptions...</p>
-        </div>
-      )}
+      {isLoading && <LoadingSpinner message="Loading subscriptions..." />}
       {isError && <p className="text-red-400 text-sm py-4 text-center">{error?.message}</p>}
       {!isLoading && !isError && subs.length === 0 && (
         <p className="text-gray-400 text-sm py-4 text-center">No subscriptions yet</p>

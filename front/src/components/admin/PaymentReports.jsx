@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import { usePaymentReport } from "../../hooks/usePaymentReports";
+import StatusBadge from "./shared/StatusBadge";
 
 function formatCurrency(amount, currency) {
   return new Intl.NumberFormat("en-US", {
@@ -179,17 +180,7 @@ export default function PaymentReports({ showToast }) {
                             : "—"}
                         </td>
                         <td className="px-3 py-2 text-sm whitespace-nowrap">
-                          <span
-                            className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                              pi.status === "succeeded"
-                                ? "bg-green-800 text-green-200"
-                                : pi.status === "canceled"
-                                  ? "bg-red-800 text-red-200"
-                                  : "bg-yellow-800 text-yellow-200"
-                            }`}
-                          >
-                            {pi.status}
-                          </span>
+                          <StatusBadge status={pi.status} />
                         </td>
                         {reportType === "group" && (
                           <td className="px-3 py-2 text-sm text-gray-200 whitespace-nowrap">

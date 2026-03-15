@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePatchClient } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
+import ErrorMessage from "./shared/ErrorMessage";
 
 export default function EditClientModal({ client, onClose, onSaved, showToast }) {
   const { data: groups = [] } = useGroups();
@@ -272,11 +273,7 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
           />
         </div>
 
-        {error && (
-          <p className="mb-3 text-sm text-red-400" role="alert">
-            {error}
-          </p>
-        )}
+        <ErrorMessage message={error} className="mb-3" />
 
         <div className="flex justify-end gap-3">
           <button
