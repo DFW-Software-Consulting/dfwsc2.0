@@ -9,12 +9,15 @@ npm run test:front
 # 3. Backend tests: run inside Docker container if the stack is up, otherwise warn and skip
 COMPOSE="docker compose -f docker-compose.base.yml -f docker-compose.dev.yml"
 
-if $COMPOSE ps --status running 2>/dev/null | grep -q "api"; then
+if [ "${SKIP_DOCKER_TESTS}" = "1" ]; then
+  echo "⚠️  SKIP_DOCKER_TESTS=1 — backend tests skipped."
+elif $COMPOSE ps --status running 2>/dev/null | grep -q "api"; then
   echo "Docker stack is running — running backend tests inside container..."
   $COMPOSE exec api npm test
 else
   echo ""
-  echo "⚠️  Docker stack not running — backend tests skipped."
-  echo "    Run 'make test' or 'make test-up' before pushing to verify."
+  echo "❌ Docker stack is not running. Start it with 'make up' before committing."
+  echo "   To skip backend tests: SKIP_DOCKER_TESTS=1 git commit"
   echo ""
+  exit 1
 fi

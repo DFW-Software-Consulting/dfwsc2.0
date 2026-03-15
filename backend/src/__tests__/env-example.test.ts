@@ -17,13 +17,14 @@ describe("Environment Template Documentation", () => {
   let envExampleContent: string;
 
   beforeAll(() => {
-    // Read the .env.example file from the backend directory
-    const envExamplePath = join(__dirname, "../../.env.example");
+    // ENV_EXAMPLE_PATH is set by docker-compose.dev.yml to /tmp/env-example (mounted from root .env.example).
+    // Falls back to ../../.env.example for local runs outside Docker.
+    const envExamplePath = process.env.ENV_EXAMPLE_PATH ?? join(__dirname, "../../.env.example");
     try {
       envExampleContent = readFileSync(envExamplePath, "utf-8");
     } catch (error) {
       throw new Error(
-        `Failed to read backend/.env.example file at ${envExamplePath}. ` +
+        `Failed to read .env.example file at ${envExamplePath}. ` +
           `Ensure the file exists and is readable. Error: ${error}`
       );
     }
