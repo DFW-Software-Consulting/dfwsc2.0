@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useCancelInvoice, useCreateInvoice, useInvoices } from "../../hooks/useInvoices";
+import { useCreateProduct, useProducts } from "../../hooks/useProducts";
 import {
   useCreateSubscription,
   usePatchSubscription,
@@ -16,14 +17,74 @@ import StatusBadge from "./shared/StatusBadge";
 function InvoicesTab({ showToast }) {
   const { data: clients = [] } = useClients();
   const { data: invoices = [], isLoading, isError, error, refetch } = useInvoices({});
+  const { data: products = [], isLoading: productsLoading } = useProducts();
   const createInvoiceMutation = useCreateInvoice();
   const cancelInvoiceMutation = useCancelInvoice();
+  const createProductMutation = useCreateProduct();
 
   const [clientId, setClientId] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [formError, setFormError] = useState("");
+
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [showNewProduct, setShowNewProduct] = useState(false);
+  const [newProductName, setNewProductName] = useState("");
+  const [newProductDesc, setNewProductDesc] = useState("");
+  const [newProductAmount, setNewProductAmount] = useState("");
+  const [productFormError, setProductFormError] = useState("");
+
+  const handleProductSelect = useCallback(
+    (e) => {
+      const id = e.target.value;
+      setSelectedProductId(id);
+      if (!id) return;
+      const product = products.find((p) => p.id === id);
+      if (product) {
+        setDescription(
+          product.description ? `${product.name} — ${product.description}` : product.name
+        );
+        if (product.defaultPrice) {
+          setAmount((product.defaultPrice.amountCents / 100).toFixed(2));
+        }
+      }
+    },
+    [products]
+  );
+
+  const handleCreateProduct = useCallback(() => {
+    setProductFormError("");
+    if (!newProductName.trim()) return setProductFormError("Product name is required.");
+    const amountCents = Math.round(parseFloat(newProductAmount) * 100);
+    if (Number.isNaN(amountCents) || amountCents <= 0)
+      return setProductFormError("Enter a valid price.");
+
+    createProductMutation.mutate(
+      {
+        name: newProductName.trim(),
+        description: newProductDesc.trim() || undefined,
+        amountCents,
+      },
+      {
+        onSuccess: (product) => {
+          setSelectedProductId(product.id);
+          setDescription(
+            product.description ? `${product.name} — ${product.description}` : product.name
+          );
+          if (product.defaultPrice) {
+            setAmount((product.defaultPrice.amountCents / 100).toFixed(2));
+          }
+          setNewProductName("");
+          setNewProductDesc("");
+          setNewProductAmount("");
+          setShowNewProduct(false);
+          showToast?.("Product created.", "success");
+        },
+        onError: (err) => setProductFormError(err.message),
+      }
+    );
+  }, [newProductName, newProductDesc, newProductAmount, createProductMutation, showToast]);
 
   const handleCreate = useCallback(
     (e) => {
@@ -43,6 +104,7 @@ function InvoicesTab({ showToast }) {
             setAmount("");
             setDescription("");
             setDueDate("");
+            setSelectedProductId("");
             showToast?.("Invoice created and email sent.", "success");
           },
           onError: (err) => setFormError(err.message),
@@ -78,6 +140,7 @@ function InvoicesTab({ showToast }) {
       <div className="mb-6 p-4 bg-gray-700/50 rounded-lg">
         <h4 className="text-md font-semibold text-white mb-3">New Invoice</h4>
         <form onSubmit={handleCreate} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/* Client */}
           <div>
             <label htmlFor="inv-client" className="block text-sm text-gray-300 mb-1">
               Client
@@ -98,6 +161,122 @@ function InvoicesTab({ showToast }) {
               ))}
             </select>
           </div>
+
+          {/* Product dropdown */}
+          <div>
+            <label htmlFor="inv-product" className="block text-sm text-gray-300 mb-1">
+              Product (optional)
+            </label>
+            <div className="flex gap-2">
+              <select
+                id="inv-product"
+                value={selectedProductId}
+                onChange={handleProductSelect}
+                className="flex-1 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+                           focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={createInvoiceMutation.isPending || productsLoading}
+              >
+                <option value="">{productsLoading ? "Loading…" : "Select product…"}</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.defaultPrice ? ` — $${(p.defaultPrice.amountCents / 100).toFixed(2)}` : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewProduct((v) => !v);
+                  setProductFormError("");
+                }}
+                title="Create new Stripe product"
+                className="px-3 py-2 rounded-md bg-gray-600 hover:bg-gray-500 text-white text-sm
+                           whitespace-nowrap transition-colors"
+              >
+                + New
+              </button>
+            </div>
+          </div>
+
+          {/* Inline new-product form */}
+          {showNewProduct && (
+            <div className="sm:col-span-2 p-3 bg-gray-800/70 rounded-lg border border-gray-600">
+              <h5 className="text-sm font-semibold text-gray-200 mb-2">Create Stripe Product</h5>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="np-name" className="block text-xs text-gray-400 mb-1">
+                    Name
+                  </label>
+                  <input
+                    id="np-name"
+                    type="text"
+                    value={newProductName}
+                    onChange={(e) => setNewProductName(e.target.value)}
+                    placeholder="e.g. Website Maintenance"
+                    className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-1.5 text-sm
+                               text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="np-price" className="block text-xs text-gray-400 mb-1">
+                    Default Price ($)
+                  </label>
+                  <input
+                    id="np-price"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={newProductAmount}
+                    onChange={(e) => setNewProductAmount(e.target.value)}
+                    placeholder="e.g. 99.00"
+                    className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-1.5 text-sm
+                               text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label htmlFor="np-desc" className="block text-xs text-gray-400 mb-1">
+                    Description (optional)
+                  </label>
+                  <input
+                    id="np-desc"
+                    type="text"
+                    value={newProductDesc}
+                    onChange={(e) => setNewProductDesc(e.target.value)}
+                    placeholder="e.g. Monthly site maintenance and updates"
+                    className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-1.5 text-sm
+                               text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div className="sm:col-span-2 flex items-center gap-2">
+                  {productFormError && (
+                    <p className="text-red-400 text-xs flex-1">{productFormError}</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleCreateProduct}
+                    disabled={createProductMutation.isPending}
+                    className="ml-auto px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm
+                               transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {createProductMutation.isPending ? "Creating…" : "Create & Select"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewProduct(false);
+                      setProductFormError("");
+                    }}
+                    className="px-3 py-1.5 rounded-md bg-gray-600 hover:bg-gray-500 text-white text-sm transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Amount */}
           <div>
             <label htmlFor="inv-amount" className="block text-sm text-gray-300 mb-1">
               Amount ($)
@@ -115,6 +294,8 @@ function InvoicesTab({ showToast }) {
               disabled={createInvoiceMutation.isPending}
             />
           </div>
+
+          {/* Description */}
           <div className="sm:col-span-2">
             <label htmlFor="inv-desc" className="block text-sm text-gray-300 mb-1">
               Description
@@ -130,6 +311,8 @@ function InvoicesTab({ showToast }) {
               disabled={createInvoiceMutation.isPending}
             />
           </div>
+
+          {/* Due date */}
           <div>
             <label htmlFor="inv-due" className="block text-sm text-gray-300 mb-1">
               Due Date (optional)
