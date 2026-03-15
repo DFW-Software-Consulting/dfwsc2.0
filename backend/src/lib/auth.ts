@@ -53,7 +53,7 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
 
     return reply.code(401).send({ error: "Invalid API key." });
   } catch (error) {
-    console.error("Error in requireApiKey:", error);
+    request.log.error({ error }, "Error in requireApiKey");
     return reply.code(500).send({ error: "Internal server error during API key validation." });
   }
 }
