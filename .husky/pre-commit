@@ -1,12 +1,53 @@
 #!/usr/bin/env sh
 
-# 1. Auto-fix staged files with Biome
+# 1. Guard: no direct commits to main
+branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$branch" = "main" ]; then
+  echo "❌ Direct commits to main are not allowed. Use a feature branch."
+  exit 1
+fi
+
+# 2. Guard: no .env files staged (excludes .env.example)
+staged_env=$(git diff --cached --name-only | grep -E '(^|/)\.env' | grep -v '\.env\.example' || true)
+if [ -n "$staged_env" ]; then
+  echo "❌ .env file(s) staged for commit:"
+  echo "$staged_env"
+  echo "   Remove them with: git restore --staged <file>"
+  exit 1
+fi
+
+# 3. Secret scanning on staged text files
+STAGED_TEXT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx|json|yaml|yml|sh|md)$' || true)
+if [ -n "$STAGED_TEXT" ]; then
+  echo "Scanning staged files for secrets..."
+  echo "$STAGED_TEXT" | xargs npx secretlint --no-color || exit 1
+fi
+
+# 4. Migration check: if schema.ts changed but no Drizzle migration staged
+schema_changed=$(git diff --cached --name-only | grep -E 'backend/src/db/schema\.ts' || true)
+migration_staged=$(git diff --cached --name-only | grep -E 'backend/drizzle/' || true)
+if [ -n "$schema_changed" ] && [ -z "$migration_staged" ]; then
+  echo ""
+  echo "⚠️  schema.ts was modified but no Drizzle migration is staged."
+  echo "   Run 'npm run db:generate' to generate a migration, then stage the output."
+  echo "   To skip this check: SKIP_MIGRATION_CHECK=1 git commit"
+  echo ""
+  if [ "${SKIP_MIGRATION_CHECK}" != "1" ]; then
+    exit 1
+  fi
+fi
+
+# 5. Auto-fix staged files with Biome
 npx lint-staged
 
-# 2. Frontend tests (no Docker required)
+# 6. TypeScript type-check (backend source only — excludes tests and node_modules types)
+echo "Running TypeScript type-check (backend)..."
+(cd backend && npx tsc --noEmit -p tsconfig.build.json) || exit 1
+
+# 7. Frontend tests (no Docker required)
 npm run test:front
 
-# 3. Backend tests: run inside Docker container if the stack is up, otherwise warn and skip
+# 8. Backend tests: run inside Docker container if the stack is up, otherwise warn and skip
 COMPOSE="docker compose -f docker-compose.base.yml -f docker-compose.dev.yml"
 
 if [ "${SKIP_DOCKER_TESTS}" = "1" ]; then
