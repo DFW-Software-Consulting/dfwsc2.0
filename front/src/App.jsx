@@ -1,17 +1,15 @@
-import React from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import Navbar from './components/Navbar.jsx'
-import Footer from './components/Footer.jsx'
-import Home from './pages/Home.jsx'
-import Pricing from './pages/Pricing.jsx'
-import Team from './pages/Team.jsx'
-import OnboardClient from "./pages/OnboardClient";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import Footer from "./components/Footer.jsx";
+import Navbar from "./components/Navbar.jsx";
 import AdminPage from "./pages/AdminPage";
-import PaymentSuccess from "./pages/PaymentSuccess";
-import PaymentCancel from "./pages/PaymentCancel";
+import Docs from "./pages/Docs.jsx";
+import Home from "./pages/Home.jsx";
+import OnboardClient from "./pages/OnboardClient";
 import OnboardingSuccess from "./pages/OnboardingSuccess";
-
-
+import PaymentCancel from "./pages/PaymentCancel";
+import PaymentSuccess from "./pages/PaymentSuccess";
+import Pricing from "./pages/Pricing.jsx";
+import Team from "./pages/Team.jsx";
 
 export default function App() {
   return (
@@ -23,6 +21,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/pricing" element={<Pricing />} />
             <Route path="/team" element={<Team />} />
+            <Route path="/docs" element={<Docs />} />
             <Route path="/onboard" element={<OnboardClient />} />
             <Route path="/admin" element={<AdminPage />} />
             <Route path="/payment-success" element={<PaymentSuccess />} />
@@ -33,5 +32,5 @@ export default function App() {
         <Footer />
       </div>
     </BrowserRouter>
-  )
+  );
 }
