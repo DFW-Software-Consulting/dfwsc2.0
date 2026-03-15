@@ -64,6 +64,20 @@
       "when": 1741996802000,
       "tag": "0008_add_invoices_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1742083202000,
+      "tag": "0009_add_stripe_customer_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1742083203000,
+      "tag": "0010_drop_invoices_subscriptions",
+      "breakpoints": true
     }
   ]
 }

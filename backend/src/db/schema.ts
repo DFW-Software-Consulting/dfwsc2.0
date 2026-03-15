@@ -23,6 +23,7 @@ export const clients = pgTable(
     apiKeyHash: text("api_key_hash").unique(),
     apiKeyLookup: text("api_key_lookup").unique(),
     stripeAccountId: text("stripe_account_id"),
+    stripeCustomerId: text("stripe_customer_id"),
     status: text("status", { enum: ["active", "inactive"] })
       .default("active")
       .notNull(),
@@ -59,45 +60,6 @@ export const onboardingTokens = pgTable("onboarding_tokens", {
   email: text("email").notNull(),
   state: text("state"),
   stateExpiresAt: timestamp("state_expires_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
-
-export const subscriptions = pgTable("subscriptions", {
-  id: text("id").primaryKey(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => clients.id, { onDelete: "cascade" }),
-  amountCents: integer("amount_cents").notNull(),
-  description: text("description").notNull(),
-  interval: text("interval", { enum: ["monthly", "quarterly", "yearly"] }).notNull(),
-  totalPayments: integer("total_payments"),
-  paymentsMade: integer("payments_made").default(0).notNull(),
-  status: text("status", { enum: ["active", "paused", "cancelled", "completed"] })
-    .default("active")
-    .notNull(),
-  nextBillingDate: timestamp("next_billing_date", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
-
-export const invoices = pgTable("invoices", {
-  id: text("id").primaryKey(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => clients.id, { onDelete: "cascade" }),
-  subscriptionId: text("subscription_id").references(() => subscriptions.id, {
-    onDelete: "set null",
-  }),
-  amountCents: integer("amount_cents").notNull(),
-  description: text("description").notNull(),
-  dueDate: timestamp("due_date", { withTimezone: true }),
-  status: text("status", { enum: ["pending", "paid", "cancelled"] })
-    .default("pending")
-    .notNull(),
-  paymentToken: text("payment_token").unique().notNull(),
-  paidAt: timestamp("paid_at", { withTimezone: true }),
-  mockPaymentId: text("mock_payment_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

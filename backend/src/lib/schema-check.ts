@@ -16,6 +16,7 @@ const REQUIRED_TABLES: TableColumns[] = [
       "api_key_hash",
       "api_key_lookup",
       "stripe_account_id",
+      "stripe_customer_id",
       "status",
       "created_at",
       "updated_at",
