@@ -9,15 +9,13 @@ type RateLimitOptions = {
 
 const hitBuckets = new Map<string, number[]>();
 
-// Sweep interval: how often the cleanup runs.
-// Bucket max age: must be >= the largest windowMs used by any rate limit (15 min for auth).
-// Using a shorter cutoff than the max window would allow rate limit bypass: an attacker
-// could exhaust the limit, wait for the sweep to clear their bucket, then bypass the
-// still-active window.
-const SWEEP_INTERVAL_MS = 10 * 60 * 1000; // run every 10 minutes
-const BUCKET_MAX_AGE_MS = 20 * 60 * 1000; // keep buckets for 20 minutes (> max 15-min window)
+// Sweep cutoff is derived at runtime from the largest registered windowMs + one sweep interval.
+const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+let maxRegisteredWindowMs = 0;
 setInterval(() => {
-  const cutoff = Date.now() - BUCKET_MAX_AGE_MS;
+  const bucketMaxAge =
+    maxRegisteredWindowMs > 0 ? maxRegisteredWindowMs + SWEEP_INTERVAL_MS : 20 * 60 * 1000; // fallback if no limits registered yet
+  const cutoff = Date.now() - bucketMaxAge;
   for (const [key, hits] of hitBuckets) {
     if (hits.every((t) => t < cutoff)) {
       hitBuckets.delete(key);
@@ -27,6 +25,7 @@ setInterval(() => {
 
 export function rateLimit(options: RateLimitOptions) {
   const { max, windowMs } = options;
+  maxRegisteredWindowMs = Math.max(maxRegisteredWindowMs, windowMs);
 
   return async function rateLimitGuard(request: FastifyRequest, reply: FastifyReply) {
     const key = options.keyGenerator ? options.keyGenerator(request) : request.ip || "unknown";

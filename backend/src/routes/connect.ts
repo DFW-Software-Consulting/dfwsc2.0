@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import he from "he";
 import { v4 as uuidv4 } from "uuid";
@@ -93,11 +93,8 @@ async function createAccountLinkForToken(
     await db.update(clients).set({ stripeAccountId }).where(eq(clients.id, clientRecord.id));
   }
 
-  // Generate a cryptographically secure state parameter
   const state = crypto.randomBytes(32).toString("hex");
-
-  // Set expiration time to 30 minutes from now
-  const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes in milliseconds
+  const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
 
   const baseUrl = resolveServerBaseUrl(request);
   const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
@@ -110,7 +107,6 @@ async function createAccountLinkForToken(
     type: "account_onboarding",
   });
 
-  // Only update the onboarding token status to in_progress after successful Stripe API call
   request.log.info(
     {
       token_id: onboardingRecord.id,
@@ -137,7 +133,6 @@ async function createClientWithOnboardingToken(
   name: string,
   email: string
 ): Promise<ClientWithToken> {
-  // Input validation
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     throw Object.assign(new Error("Name is required and must be a non-empty string"), {
       statusCode: 400,
@@ -167,16 +162,14 @@ async function createClientWithOnboardingToken(
       email: email,
     });
   } catch (error) {
-    // If inserting the onboarding token fails, try to clean up the client record
     try {
       await db.delete(clients).where(eq(clients.id, clientId));
     } catch (cleanupError) {
-      // If cleanup fails, log the error but don't throw to avoid masking the original error
       console.error(
         `Failed to clean up client record after onboarding token insertion failed: ${cleanupError}`
       );
     }
-    throw error; // Re-throw the original error
+    throw error;
   }
 
   return { clientId, apiKey, token };
@@ -282,28 +275,20 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.code(404).send({ error: "Client not found." });
       }
 
-      const [existingToken] = await db
-        .select()
-        .from(onboardingTokens)
-        .where(eq(onboardingTokens.clientId, clientRecord.id))
-        .orderBy(desc(onboardingTokens.createdAt))
-        .limit(1);
-
-      if (existingToken) {
-        if (existingToken.status === "pending" || existingToken.status === "in_progress") {
-          await db
-            .update(onboardingTokens)
-            .set({ status: "revoked", updatedAt: new Date() })
-            .where(eq(onboardingTokens.id, existingToken.id));
-          request.log.info(
-            {
-              token_id: existingToken.id,
-              old_status: existingToken.status,
-              new_status: "revoked",
-            },
-            "Revoked old onboarding token"
-          );
-        }
+      const { rowCount } = await db
+        .update(onboardingTokens)
+        .set({ status: "revoked", updatedAt: new Date() })
+        .where(
+          and(
+            eq(onboardingTokens.clientId, clientRecord.id),
+            inArray(onboardingTokens.status, ["pending", "in_progress"])
+          )
+        );
+      if (rowCount && rowCount > 0) {
+        request.log.info(
+          { client_id: clientRecord.id, revoked: rowCount },
+          "Revoked active onboarding tokens"
+        );
       }
 
       const newToken = crypto.randomBytes(32).toString("hex");
@@ -396,7 +381,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           return reply.code(404).send({ error: errorMessage });
         }
 
-        // Return 502 Bad Gateway error, token remains in pending or in_progress status for retry
         return reply.code(502).send({
           error: "Failed to create Stripe account link. Please try again.",
           code: "STRIPE_ACCOUNT_LINK_FAILED",
@@ -444,7 +428,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     const normalizedClientId = (client_id ?? "").trim();
     const normalizedState = (state ?? "").trim();
 
-    // Check if state parameter is missing - return 400 error if missing
     if (!normalizedState) {
       request.log.warn({ client_id, account }, "Missing state parameter");
       return reply.code(400).send({ error: "Missing state parameter." });
@@ -471,7 +454,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: "Invalid account parameter." });
     }
 
-    // Retrieve the onboarding token record by both client_id and state to ensure validity
     const [onboardingRecord] = await db
       .select()
       .from(onboardingTokens)
@@ -495,7 +477,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: "Invalid or expired state parameter." });
     }
 
-    // Check if state has expired
     if (onboardingRecord.stateExpiresAt && new Date() > new Date(onboardingRecord.stateExpiresAt)) {
       request.log.warn(
         {
@@ -508,8 +489,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: "Expired state parameter." });
     }
 
-    // Verify that the account parameter matches what we expect for the client
-    // This prevents an attacker from providing a different account ID
     const [clientRecord] = await db
       .select()
       .from(clients)
@@ -528,7 +507,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       (clientRecord as { stripe_account_id?: string }).stripe_account_id ??
       null;
 
-    // If the client already has a stripeAccountId, verify it matches the one being set
     if (existingStripeAccountId && existingStripeAccountId !== normalizedAccount) {
       request.log.warn(
         {
@@ -541,7 +519,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: "Stripe account already linked to this client." });
     }
 
-    // Update both the client's stripeAccountId and the token status atomically
     request.log.info(
       {
         token_id: onboardingRecord.id,
