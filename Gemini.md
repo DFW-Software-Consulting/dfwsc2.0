@@ -123,6 +123,28 @@ When a payment is created, the platform fee is resolved via this 5-level chain (
 4. **Group `processingFeeCents`** — if client belongs to a group
 5. **`DEFAULT_PROCESS_FEE_CENTS`** env var — global default (defaults to `0`)
 
+## Git Hooks & Commit Standards
+
+### Husky hooks
+- **pre-commit**: 14 guards — blocks commits to `main`, `.env` files, conflict markers, files >500KB, missing lockfile, secrets (`secretlint`), `console.log`/`debugger`, `.only`/`.skip` in tests, schema changes without migrations, out-of-sync doc files. Runs `lint-staged` (Biome auto-fix) + TypeScript type-check + frontend tests.
+- **commit-msg**: enforces conventional commits via `commitlint` (`commitlint.config.js`)
+- **pre-push**: blocks force-push to `main`; runs backend tests inside Docker (requires `make up`)
+
+### Commit message format (conventional commits)
+```
+type(scope): subject
+```
+Allowed types: `feat` `fix` `docs` `style` `refactor` `chore` `test` `perf` `ci` `build` `revert`
+
+Rules: lowercase subject, no trailing period, 100-char header limit.
+
+### Escape hatches
+| Situation | Flag |
+|-----------|------|
+| Skip migration check | `SKIP_MIGRATION_CHECK=1 git commit` |
+| Allow console.log | `ALLOW_CONSOLE=1 git commit` |
+| Skip backend tests on push | `SKIP_DOCKER_TESTS=1 git push` |
+
 ## Docker Environment
 - `api`: port 4242
 - `web`: port 8080
