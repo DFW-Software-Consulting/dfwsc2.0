@@ -441,7 +441,7 @@ describe("Subscriptions API", () => {
       expect(response.json().status).toBe("cancelled");
     });
 
-    it("returns 422 when attempting to set status to active", async () => {
+    it("returns 200 and resumes a paused subscription to active", async () => {
       const freshId = await seedPatchSub("paused");
       const token = makeAdminToken();
 
@@ -452,8 +452,38 @@ describe("Subscriptions API", () => {
         payload: { status: "active" },
       });
 
+      expect(response.statusCode).toBe(200);
+      expect(response.json().status).toBe("active");
+    });
+
+    it("returns 422 when attempting to resume a cancelled subscription", async () => {
+      const freshId = await seedPatchSub("cancelled");
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/subscriptions/${freshId}`,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { status: "active" },
+      });
+
       expect(response.statusCode).toBe(422);
-      expect(response.json().error).toMatch(/paused.*cancelled/i);
+      expect(response.json().error).toMatch(/cancelled/i);
+    });
+
+    it("returns 422 when attempting to set status to completed", async () => {
+      const freshId = await seedPatchSub("active");
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/subscriptions/${freshId}`,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { status: "completed" },
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json().error).toMatch(/paused.*cancelled.*active/i);
     });
 
     it("returns 422 when modifying a completed subscription", async () => {
@@ -494,6 +524,81 @@ describe("Subscriptions API", () => {
       });
 
       expect(response.statusCode).toBe(401);
+    });
+
+    it("returns 200 and updates totalPayments to 6", async () => {
+      const freshId = await seedPatchSub("active");
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/subscriptions/${freshId}`,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { totalPayments: 6 },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().totalPayments).toBe(6);
+    });
+
+    it("returns 200 and clears totalPayments to null (indefinite)", async () => {
+      const freshId = await seedPatchSub("active");
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/subscriptions/${freshId}`,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { totalPayments: null },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().totalPayments).toBeNull();
+    });
+
+    it("returns 422 when totalPayments is 0", async () => {
+      const freshId = await seedPatchSub("active");
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/subscriptions/${freshId}`,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { totalPayments: 0 },
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json().error).toMatch(/totalPayments/i);
+    });
+
+    it("returns 422 when totalPayments is a float", async () => {
+      const freshId = await seedPatchSub("active");
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/subscriptions/${freshId}`,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { totalPayments: 1.5 },
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json().error).toMatch(/totalPayments/i);
+    });
+
+    it("returns 422 when editing a completed subscription", async () => {
+      const freshId = await seedPatchSub("completed");
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/subscriptions/${freshId}`,
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { totalPayments: 6 },
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json().error).toMatch(/completed/i);
     });
   });
 });

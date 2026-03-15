@@ -19,7 +19,10 @@ interface SubscriptionParams {
 }
 
 interface SubscriptionPatchBody {
-  status: "paused" | "cancelled";
+  status?: "paused" | "cancelled" | "active";
+  totalPayments?: number | null;
+  amountCents?: number;
+  description?: string;
 }
 
 interface SubscriptionFilterQuery {
@@ -237,18 +240,39 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     }
   );
 
-  // PATCH /subscriptions/:id — pause or cancel only
+  // PATCH /subscriptions/:id — pause, cancel, resume, or edit fields
   app.patch<{ Params: SubscriptionParams; Body: SubscriptionPatchBody }>(
     "/subscriptions/:id",
     { preHandler: requireAdminJwt },
     async (req, res) => {
       const { id } = req.params;
-      const { status } = req.body;
+      const { status, totalPayments, amountCents, description } = req.body;
 
-      if (status !== "paused" && status !== "cancelled") {
-        return res
-          .status(422)
-          .send({ error: "Only 'paused' or 'cancelled' status transitions are allowed." });
+      if (status !== undefined) {
+        const ALLOWED_STATUSES = ["paused", "cancelled", "active"];
+        if (!ALLOWED_STATUSES.includes(status)) {
+          return res
+            .status(422)
+            .send({ error: "status must be one of: paused, cancelled, active." });
+        }
+      }
+
+      if (totalPayments !== undefined && totalPayments !== null) {
+        if (!Number.isInteger(totalPayments) || totalPayments < 1) {
+          return res.status(422).send({ error: "totalPayments must be a positive integer." });
+        }
+      }
+
+      if (amountCents !== undefined) {
+        if (!Number.isInteger(amountCents) || amountCents <= 0) {
+          return res.status(422).send({ error: "amountCents must be a positive integer." });
+        }
+      }
+
+      if (description !== undefined) {
+        if (!description || description.trim().length === 0) {
+          return res.status(422).send({ error: "description must not be blank." });
+        }
       }
 
       const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.id, id)).limit(1);
@@ -261,10 +285,17 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         return res.status(422).send({ error: "Cannot modify a completed subscription." });
       }
 
-      await db
-        .update(subscriptions)
-        .set({ status, updatedAt: new Date() })
-        .where(eq(subscriptions.id, id));
+      if (status === "active" && sub.status === "cancelled") {
+        return res.status(422).send({ error: "Cannot resume a cancelled subscription." });
+      }
+
+      const updates: Record<string, unknown> = { updatedAt: new Date() };
+      if (status !== undefined) updates.status = status;
+      if (totalPayments !== undefined) updates.totalPayments = totalPayments;
+      if (amountCents !== undefined) updates.amountCents = amountCents;
+      if (description !== undefined) updates.description = description.trim();
+
+      await db.update(subscriptions).set(updates).where(eq(subscriptions.id, id));
 
       const [updated] = await db
         .select()

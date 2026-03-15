@@ -444,6 +444,12 @@ function SubscriptionsTab({ showToast }) {
   const [totalPayments, setTotalPayments] = useState("");
   const [formError, setFormError] = useState("");
 
+  const [editingSub, setEditingSub] = useState(null);
+  const [editTotalPayments, setEditTotalPayments] = useState("");
+  const [editAmount, setEditAmount] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editError, setEditError] = useState("");
+
   const handleCreate = useCallback(
     (e) => {
       e.preventDefault();
@@ -492,6 +498,50 @@ function SubscriptionsTab({ showToast }) {
   const handleViewInvoices = useCallback((id) => {
     setExpandedId((prev) => (prev === id ? null : id));
   }, []);
+
+  const openEdit = useCallback((sub) => {
+    setEditingSub(sub);
+    setEditTotalPayments(sub.totalPayments != null ? String(sub.totalPayments) : "");
+    setEditAmount((sub.amountCents / 100).toFixed(2));
+    setEditDescription(sub.description);
+    setEditError("");
+  }, []);
+
+  const handleEditSubmit = useCallback(
+    (e) => {
+      e.preventDefault();
+      setEditError("");
+      const body = {};
+
+      const newAmount = Math.round(parseFloat(editAmount) * 100);
+      if (Number.isNaN(newAmount) || newAmount <= 0) return setEditError("Enter a valid amount.");
+      body.amountCents = newAmount;
+
+      if (!editDescription.trim()) return setEditError("Description is required.");
+      body.description = editDescription.trim();
+
+      if (editTotalPayments === "") {
+        body.totalPayments = null;
+      } else {
+        const tp = parseInt(editTotalPayments, 10);
+        if (Number.isNaN(tp) || tp < 1 || !Number.isInteger(tp))
+          return setEditError("Total payments must be a positive integer.");
+        body.totalPayments = tp;
+      }
+
+      patchSubMutation.mutate(
+        { id: editingSub.id, body },
+        {
+          onSuccess: () => {
+            setEditingSub(null);
+            showToast?.("Subscription updated.", "success");
+          },
+          onError: (err) => setEditError(err.message),
+        }
+      );
+    },
+    [editingSub, editAmount, editDescription, editTotalPayments, patchSubMutation, showToast]
+  );
 
   const expandedInvoices = subDetail?.invoices ?? [];
 
@@ -682,6 +732,15 @@ function SubscriptionsTab({ showToast }) {
                             Cancel
                           </button>
                         )}
+                        {(sub.status === "active" || sub.status === "paused") && (
+                          <button
+                            type="button"
+                            onClick={() => openEdit(sub)}
+                            className="px-2 py-1 rounded text-xs bg-indigo-700 hover:bg-indigo-600 text-white transition-colors"
+                          >
+                            Edit
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleViewInvoices(sub.id)}
@@ -725,6 +784,83 @@ function SubscriptionsTab({ showToast }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {editingSub && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-white mb-4">Edit Subscription</h3>
+            <form onSubmit={handleEditSubmit} className="grid gap-3">
+              <div>
+                <label htmlFor="edit-amount" className="block text-sm text-gray-300 mb-1">
+                  Amount ($)
+                </label>
+                <input
+                  id="edit-amount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  value={editAmount}
+                  onChange={(e) => setEditAmount(e.target.value)}
+                  className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+                             focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={patchSubMutation.isPending}
+                />
+              </div>
+              <div>
+                <label htmlFor="edit-desc" className="block text-sm text-gray-300 mb-1">
+                  Description
+                </label>
+                <input
+                  id="edit-desc"
+                  type="text"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+                             focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={patchSubMutation.isPending}
+                />
+              </div>
+              <div>
+                <label htmlFor="edit-total" className="block text-sm text-gray-300 mb-1">
+                  Total Payments (blank = indefinite)
+                </label>
+                <input
+                  id="edit-total"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={editTotalPayments}
+                  onChange={(e) => setEditTotalPayments(e.target.value)}
+                  placeholder="e.g. 12"
+                  className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+                             placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={patchSubMutation.isPending}
+                />
+              </div>
+              {editError && <p className="text-red-400 text-sm">{editError}</p>}
+              <div className="flex gap-3 justify-end mt-1">
+                <button
+                  type="button"
+                  onClick={() => setEditingSub(null)}
+                  className="px-4 py-2 rounded-md bg-gray-600 hover:bg-gray-500 text-white text-sm transition-colors"
+                  disabled={patchSubMutation.isPending}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium
+                             transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={patchSubMutation.isPending}
+                >
+                  {patchSubMutation.isPending ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
