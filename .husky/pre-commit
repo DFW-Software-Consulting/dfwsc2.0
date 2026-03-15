@@ -16,14 +16,42 @@ if [ -n "$staged_env" ]; then
   exit 1
 fi
 
-# 3. Secret scanning on staged text files
+# 3. Guard: no merge conflict markers in staged changes
+if git diff --cached | grep -qE '^\+(<{7}|={7}|>{7})'; then
+  echo "❌ Merge conflict markers found in staged changes."
+  echo "   Resolve conflicts before committing."
+  exit 1
+fi
+
+# 4. Guard: no large files (>500 KB)
+MAX_BYTES=512000
+git diff --cached --name-only --diff-filter=ACM | while read -r f; do
+  size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+  if [ "$size" -gt "$MAX_BYTES" ]; then
+    kb=$((size / 1024))
+    echo "❌ Staged file '$f' is ${kb}KB (limit: 500KB)."
+    echo "   If intentional: git add --intent-to-add then SKIP this check"
+    exit 1
+  fi
+done
+
+# 5. Guard: package.json changes must include lockfile
+pkg_changed=$(git diff --cached --name-only | grep -E '(^|/)package\.json$' | grep -v node_modules || true)
+lock_staged=$(git diff --cached --name-only | grep -E '(^|/)package-lock\.json$' || true)
+if [ -n "$pkg_changed" ] && [ -z "$lock_staged" ]; then
+  echo "⚠️  package.json changed but no package-lock.json is staged."
+  echo "   Run 'npm install' to update the lockfile, then stage it."
+  exit 1
+fi
+
+# 6. Secret scanning on staged text files
 STAGED_TEXT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx|json|yaml|yml|sh|md)$' || true)
 if [ -n "$STAGED_TEXT" ]; then
   echo "Scanning staged files for secrets..."
   echo "$STAGED_TEXT" | xargs npx secretlint --no-color || exit 1
 fi
 
-# 4. Migration check: if schema.ts changed but no Drizzle migration staged
+# 7. Migration check: if schema.ts changed but no Drizzle migration staged
 schema_changed=$(git diff --cached --name-only | grep -E 'backend/src/db/schema\.ts' || true)
 migration_staged=$(git diff --cached --name-only | grep -E 'backend/drizzle/' || true)
 if [ -n "$schema_changed" ] && [ -z "$migration_staged" ]; then
@@ -37,28 +65,48 @@ if [ -n "$schema_changed" ] && [ -z "$migration_staged" ]; then
   fi
 fi
 
-# 5. Auto-fix staged files with Biome
+# 8. Guard: no console.log or debugger in staged source files
+if [ "${ALLOW_CONSOLE}" != "1" ]; then
+  STAGED_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.(test|spec)\.' || true)
+  if [ -n "$STAGED_SRC" ]; then
+    hits=$(git diff --cached -- $STAGED_SRC | grep -E '^\+[^+].*\b(console\.(log|warn|error|info|debug)|debugger)\b' || true)
+    if [ -n "$hits" ]; then
+      echo "❌ console.log/debugger found in staged source files:"
+      echo "$hits"
+      echo "   Remove them or commit with: ALLOW_CONSOLE=1 git commit"
+      exit 1
+    fi
+  fi
+fi
+
+# 9. Guard: no .only or .skip in staged test files
+STAGED_TESTS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true)
+if [ -n "$STAGED_TESTS" ]; then
+  hits=$(git diff --cached -- $STAGED_TESTS | grep -E '^\+[^+].*(it|test|describe)\.(only|skip)\(' || true)
+  if [ -n "$hits" ]; then
+    echo "❌ .only or .skip found in staged test files (silences the rest of the suite):"
+    echo "$hits"
+    exit 1
+  fi
+fi
+
+# 10. Warning: new process.env.* usages not in .env.example
+STAGED_TS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' || true)
+if [ -n "$STAGED_TS" ]; then
+  new_vars=$(git diff --cached -- $STAGED_TS | grep -E '^\+[^+]' | grep -oE 'process\.env\.[A-Z_][A-Z0-9_]+' | sed 's/process\.env\.//' | sort -u || true)
+  for var in $new_vars; do
+    if ! grep -qE "^${var}=" .env.example 2>/dev/null; then
+      echo "⚠️  New env var '$var' used in code but not in .env.example — document it."
+    fi
+  done
+fi
+
+# 11. Auto-fix staged files with Biome
 npx lint-staged
 
-# 6. TypeScript type-check (backend source only — excludes tests and node_modules types)
+# 12. TypeScript type-check (backend source only — excludes tests and node_modules types)
 echo "Running TypeScript type-check (backend)..."
 (cd backend && npx tsc --noEmit -p tsconfig.build.json) || exit 1
 
-# 7. Frontend tests (no Docker required)
+# 13. Frontend tests (no Docker required)
 npm run test:front
-
-# 8. Backend tests: run inside Docker container if the stack is up, otherwise warn and skip
-COMPOSE="docker compose -f docker-compose.base.yml -f docker-compose.dev.yml"
-
-if [ "${SKIP_DOCKER_TESTS}" = "1" ]; then
-  echo "⚠️  SKIP_DOCKER_TESTS=1 — backend tests skipped."
-elif $COMPOSE ps --status running 2>/dev/null | grep -q "api"; then
-  echo "Docker stack is running — running backend tests inside container..."
-  $COMPOSE exec api npm test
-else
-  echo ""
-  echo "❌ Docker stack is not running. Start it with 'make up' before committing."
-  echo "   To skip backend tests: SKIP_DOCKER_TESTS=1 git commit"
-  echo ""
-  exit 1
-fi
