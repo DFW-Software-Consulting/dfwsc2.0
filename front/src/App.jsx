@@ -4,6 +4,7 @@ import Navbar from "./components/Navbar.jsx";
 import AdminPage from "./pages/AdminPage";
 import Docs from "./pages/Docs.jsx";
 import Home from "./pages/Home.jsx";
+import InvoicePayment from "./pages/InvoicePayment.jsx";
 import OnboardClient from "./pages/OnboardClient";
 import OnboardingSuccess from "./pages/OnboardingSuccess";
 import PaymentCancel from "./pages/PaymentCancel";
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/payment-success" element={<PaymentSuccess />} />
             <Route path="/payment-cancel" element={<PaymentCancel />} />
             <Route path="/onboarding-success" element={<OnboardingSuccess />} />
+            <Route path="/pay/:token" element={<InvoicePayment />} />
           </Routes>
         </main>
         <Footer />

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import logger from "../../utils/logger";
 import AdminLogin from "./AdminLogin";
 import AdminSetup from "./AdminSetup";
+import BillingPanel from "./BillingPanel";
 import ClientList from "./ClientList";
 import CreateClientForm from "./CreateClientForm";
 import GroupPanel from "./GroupPanel";
@@ -12,6 +13,7 @@ const TABS = [
   { id: "clients", label: "Clients" },
   { id: "groups", label: "Groups" },
   { id: "reports", label: "Reports" },
+  { id: "billing", label: "Billing" },
 ];
 
 export default function AdminDashboard() {
@@ -239,6 +241,11 @@ export default function AdminDashboard() {
           showToast={showToast}
           onSessionExpired={handleLogout}
         />
+      )}
+
+      {/* Billing tab */}
+      {activeTab === "billing" && (
+        <BillingPanel clients={clients} showToast={showToast} onSessionExpired={handleLogout} />
       )}
 
       <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
