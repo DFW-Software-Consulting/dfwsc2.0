@@ -57,6 +57,13 @@
       "when": 1742169601000,
       "tag": "0007_add_group_fee_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1741996802000,
+      "tag": "0008_add_invoices_subscriptions",
+      "breakpoints": true
     }
   ]
 }
