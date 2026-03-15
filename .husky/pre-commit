@@ -110,3 +110,18 @@ echo "Running TypeScript type-check (backend)..."
 
 # 13. Frontend tests (no Docker required)
 npm run test:front
+
+# 14. Guard: CLAUDE.md, AGENTS.md, Qwen.md, and Gemini.md must be identical
+doc_files_staged=$(git diff --cached --name-only | grep -E '^(CLAUDE|AGENTS|Qwen|Gemini)\.md$' || true)
+if [ -n "$doc_files_staged" ]; then
+  if [ -f "CLAUDE.md" ] && [ -f "AGENTS.md" ] && [ -f "Qwen.md" ] && [ -f "Gemini.md" ]; then
+    if ! diff -q CLAUDE.md AGENTS.md > /dev/null 2>&1 || \
+       ! diff -q CLAUDE.md Qwen.md > /dev/null 2>&1 || \
+       ! diff -q CLAUDE.md Gemini.md > /dev/null 2>&1; then
+      echo "❌ CLAUDE.md is out of sync with AGENTS.md / Qwen.md / Gemini.md."
+      echo "   Sync them: cp CLAUDE.md AGENTS.md && cp CLAUDE.md Qwen.md && cp CLAUDE.md Gemini.md"
+      echo "   Then re-stage: git add AGENTS.md Qwen.md Gemini.md"
+      exit 1
+    fi
+  fi
+fi
