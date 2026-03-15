@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client";
 import { clients, invoices, subscriptions } from "../db/schema";
@@ -79,7 +79,7 @@ async function triggerAutoAdvance(subscriptionId: string): Promise<void> {
   }
 
   const nextBillingDate = addBillingInterval(
-    new Date(),
+    sub.nextBillingDate ?? new Date(),
     sub.interval as "monthly" | "quarterly" | "yearly"
   );
 
@@ -276,27 +276,29 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
       return res.status(404).send({ error: "Invoice not found." });
     }
 
-    if (invoice.status === "paid") {
-      return res.status(409).send({ error: "Invoice has already been paid." });
-    }
-
     if (invoice.status === "cancelled") {
       return res.status(422).send({ error: "Invoice has been cancelled." });
+    }
+
+    if (invoice.status === "paid") {
+      return res.status(409).send({ error: "Invoice has already been paid." });
     }
 
     const now = new Date();
     const mockPaymentId = `mock_pi_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 
-    await db
+    // Atomic conditional update — only succeeds if status is still "pending".
+    // Guards against the race condition where two concurrent requests pass the
+    // status check above simultaneously.
+    const [updatedInvoice] = await db
       .update(invoices)
       .set({ status: "paid", paidAt: now, mockPaymentId, updatedAt: now })
-      .where(eq(invoices.id, invoice.id));
+      .where(and(eq(invoices.id, invoice.id), eq(invoices.status, "pending")))
+      .returning();
 
-    const [updatedInvoice] = await db
-      .select()
-      .from(invoices)
-      .where(eq(invoices.id, invoice.id))
-      .limit(1);
+    if (!updatedInvoice) {
+      return res.status(409).send({ error: "Invoice has already been paid." });
+    }
 
     const payment = {
       id: mockPaymentId,

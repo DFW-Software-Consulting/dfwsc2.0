@@ -65,6 +65,15 @@ export function clearTransporterCache() {
   cachedTransporter = null;
 }
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;");
+}
+
 export async function sendInvoiceEmail(opts: {
   to: string;
   clientName: string;
@@ -100,9 +109,9 @@ export async function sendInvoiceEmail(opts: {
 <body style="font-family:sans-serif;background:#f9fafb;padding:32px;">
   <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:8px;padding:32px;border:1px solid #e5e7eb;">
     <h2 style="color:#111827;margin-top:0;">Invoice from DFW Software Consulting</h2>
-    <p style="color:#374151;">Hi ${opts.clientName},</p>
+    <p style="color:#374151;">Hi ${escapeHtml(opts.clientName)},</p>
     <p style="color:#374151;">You have a new invoice for <strong>${formattedAmount}</strong>.</p>
-    <p style="color:#374151;"><strong>Description:</strong> ${opts.description}</p>
+    <p style="color:#374151;"><strong>Description:</strong> ${escapeHtml(opts.description)}</p>
     ${dueDateLine}
     <div style="text-align:center;margin:32px 0;">
       <a href="${opts.payUrl}"

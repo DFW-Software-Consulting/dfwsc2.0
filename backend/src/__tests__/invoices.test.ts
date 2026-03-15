@@ -138,7 +138,15 @@ const dbMock = {
         for (const row of targets) {
           Object.assign(row, values);
         }
-        return Promise.resolve();
+        const updatedRows = [...targets];
+        const result = Promise.resolve(updatedRows);
+        return {
+          // Support .returning() for atomic conditional updates
+          returning: () => result,
+          then: result.then.bind(result),
+          catch: result.catch.bind(result),
+          finally: result.finally.bind(result),
+        };
       },
     }),
   })),
