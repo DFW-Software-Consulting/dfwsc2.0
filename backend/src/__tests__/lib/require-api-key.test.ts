@@ -15,7 +15,7 @@ import { requireApiKey } from "../../lib/auth";
 // ---------------------------------------------------------------------------
 
 function makeRequest(apiKey?: string | string[]) {
-  return { headers: { "x-api-key": apiKey } };
+  return { headers: { "x-api-key": apiKey }, log: { error: vi.fn() } };
 }
 
 function makeReply() {

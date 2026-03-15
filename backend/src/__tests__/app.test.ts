@@ -753,7 +753,7 @@ describe("connect callback", () => {
     await server.close();
   });
 
-  it("redirects even when the client cannot be found", async () => {
+  it("returns 400 when the client cannot be found during callback", async () => {
     const clientId = "missing";
     const onboardingTokenId = "token_missing";
     const state = "state_missing";
@@ -773,8 +773,8 @@ describe("connect callback", () => {
       url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_missing&state=${state}`,
     });
 
-    expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toBe(`${process.env.FRONTEND_ORIGIN}/onboarding-success`);
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Client not found." });
 
     await server.close();
   });
