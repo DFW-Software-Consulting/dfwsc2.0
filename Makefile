@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 COMPOSE := docker compose -f docker-compose.base.yml -f docker-compose.dev.yml
 
-.PHONY: help up up-build down down-v logs ps sh dev-frontend dev-backend test test-front test-back test-up prod prod-build
+.PHONY: help up up-build down down-v logs ps sh dev-frontend dev-backend test test-front test-back test-up coverage prod prod-build
 
 help:
 	@echo "Common targets:"
@@ -18,6 +18,7 @@ help:
 	@echo "  make test-front   # Run frontend tests locally"
 	@echo "  make test-back    # Run backend tests inside dev container"
 	@echo "  make test-up      # Start dev stack and run all tests"
+	@echo "  make coverage     # Run backend tests with coverage report"
 	@echo "  make prod         # Start prod stack (api, web, db, mailhog, stripe-cli)"
 	@echo "  make prod-build   # Build + start prod stack"
 
@@ -57,6 +58,9 @@ test-front:
 # Run backend tests using DATABASE_URL the API service gets from Docker Compose
 test-back:
 	$(COMPOSE) exec api npm test
+
+coverage:
+	$(COMPOSE) exec api npm run test:coverage
 
 test-up:
 	$(COMPOSE) up -d
