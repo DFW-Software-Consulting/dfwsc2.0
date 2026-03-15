@@ -9,8 +9,3 @@ export const createInvoice = (token, body) =>
   apiFetch("/invoices", { token, method: "POST", body });
 
 export const cancelInvoice = (token, id) => apiFetch(`/invoices/${id}`, { token, method: "PATCH" });
-
-export const getPublicInvoice = (paymentToken) => apiFetch(`/invoices/pay/${paymentToken}`);
-
-export const payInvoice = (paymentToken) =>
-  apiFetch(`/invoices/pay/${paymentToken}`, { method: "POST" });

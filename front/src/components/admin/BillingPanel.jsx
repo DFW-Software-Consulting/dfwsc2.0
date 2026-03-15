@@ -124,15 +124,9 @@ function InvoicesTab({ showToast }) {
     [cancelInvoiceMutation, showToast]
   );
 
-  const handleCopyLink = useCallback(
-    (token) => {
-      const url = `${window.location.origin}/pay/${token}`;
-      navigator.clipboard.writeText(url).then(() => {
-        showToast?.("Payment link copied.", "success");
-      });
-    },
-    [showToast]
-  );
+  const handleOpenLink = useCallback((url) => {
+    window.open(url, "_blank");
+  }, []);
 
   return (
     <div>
@@ -398,14 +392,16 @@ function InvoicesTab({ showToast }) {
                   </td>
                   <td className="px-3 py-2 text-sm">
                     <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleCopyLink(inv.paymentToken)}
-                        className="px-2 py-1 rounded text-xs bg-gray-600 hover:bg-gray-500 text-white transition-colors"
-                      >
-                        Copy link
-                      </button>
-                      {inv.status === "pending" && (
+                      {inv.hostedUrl && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenLink(inv.hostedUrl)}
+                          className="px-2 py-1 rounded text-xs bg-gray-600 hover:bg-gray-500 text-white transition-colors"
+                        >
+                          Open
+                        </button>
+                      )}
+                      {inv.status === "open" && (
                         <button
                           type="button"
                           onClick={() => handleCancel(inv.id)}
@@ -446,8 +442,6 @@ function SubscriptionsTab({ showToast }) {
 
   const [editingSub, setEditingSub] = useState(null);
   const [editTotalPayments, setEditTotalPayments] = useState("");
-  const [editAmount, setEditAmount] = useState("");
-  const [editDescription, setEditDescription] = useState("");
   const [editError, setEditError] = useState("");
 
   const handleCreate = useCallback(
@@ -502,8 +496,6 @@ function SubscriptionsTab({ showToast }) {
   const openEdit = useCallback((sub) => {
     setEditingSub(sub);
     setEditTotalPayments(sub.totalPayments != null ? String(sub.totalPayments) : "");
-    setEditAmount((sub.amountCents / 100).toFixed(2));
-    setEditDescription(sub.description);
     setEditError("");
   }, []);
 
@@ -512,13 +504,6 @@ function SubscriptionsTab({ showToast }) {
       e.preventDefault();
       setEditError("");
       const body = {};
-
-      const newAmount = Math.round(parseFloat(editAmount) * 100);
-      if (Number.isNaN(newAmount) || newAmount <= 0) return setEditError("Enter a valid amount.");
-      body.amountCents = newAmount;
-
-      if (!editDescription.trim()) return setEditError("Description is required.");
-      body.description = editDescription.trim();
 
       if (editTotalPayments === "") {
         body.totalPayments = null;
@@ -540,7 +525,7 @@ function SubscriptionsTab({ showToast }) {
         }
       );
     },
-    [editingSub, editAmount, editDescription, editTotalPayments, patchSubMutation, showToast]
+    [editingSub, editTotalPayments, patchSubMutation, showToast]
   );
 
   const expandedInvoices = subDetail?.invoices ?? [];
@@ -674,7 +659,7 @@ function SubscriptionsTab({ showToast }) {
           <table className="min-w-full divide-y divide-gray-700">
             <thead>
               <tr>
-                {["Client", "Description", "Amount", "Progress", "Status", "Actions"].map((h) => (
+                {["Client", "Description", "Amount", "Status", "Actions"].map((h) => (
                   <th
                     key={h}
                     className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
@@ -694,11 +679,6 @@ function SubscriptionsTab({ showToast }) {
                     </td>
                     <td className="px-3 py-2 text-sm text-gray-200">
                       ${(sub.amountCents / 100).toFixed(2)} / {sub.interval}
-                    </td>
-                    <td className="px-3 py-2 text-sm text-gray-400">
-                      {sub.totalPayments != null
-                        ? `${sub.paymentsMade} / ${sub.totalPayments} payments`
-                        : `${sub.paymentsMade} payments made`}
                     </td>
                     <td className="px-3 py-2 text-sm">
                       <StatusBadge status={sub.status} />
@@ -753,7 +733,7 @@ function SubscriptionsTab({ showToast }) {
                   </tr>
                   {expandedId === sub.id && (
                     <tr className="bg-gray-800/50">
-                      <td colSpan={6} className="px-4 py-3">
+                      <td colSpan={5} className="px-4 py-3">
                         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
                           Invoices ({expandedInvoices.length})
                         </p>
@@ -793,36 +773,6 @@ function SubscriptionsTab({ showToast }) {
           <div className="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
             <h3 className="text-lg font-semibold text-white mb-4">Edit Subscription</h3>
             <form onSubmit={handleEditSubmit} className="grid gap-3">
-              <div>
-                <label htmlFor="edit-amount" className="block text-sm text-gray-300 mb-1">
-                  Amount ($)
-                </label>
-                <input
-                  id="edit-amount"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  value={editAmount}
-                  onChange={(e) => setEditAmount(e.target.value)}
-                  className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                             focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={patchSubMutation.isPending}
-                />
-              </div>
-              <div>
-                <label htmlFor="edit-desc" className="block text-sm text-gray-300 mb-1">
-                  Description
-                </label>
-                <input
-                  id="edit-desc"
-                  type="text"
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                             focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  disabled={patchSubMutation.isPending}
-                />
-              </div>
               <div>
                 <label htmlFor="edit-total" className="block text-sm text-gray-300 mb-1">
                   Total Payments (blank = indefinite)
