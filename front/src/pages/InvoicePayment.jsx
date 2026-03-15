@@ -1,16 +1,14 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useParams } from "react-router-dom";
-
-const API = import.meta.env.VITE_API_URL;
+import { usePayInvoice, usePublicInvoice } from "../hooks/usePublicInvoice";
 
 export default function InvoicePayment() {
   const { token } = useParams();
 
-  const [invoice, setInvoice] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { data: invoice, isLoading, error } = usePublicInvoice(token);
+  const payMutation = usePayInvoice(token);
+
   const [paymentRef, setPaymentRef] = useState("");
-  const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
 
   // Mock card form state
@@ -18,46 +16,20 @@ export default function InvoicePayment() {
   const [expiry, setExpiry] = useState("");
   const [cvc, setCvc] = useState("");
 
-  useEffect(() => {
-    async function fetchInvoice() {
-      try {
-        const res = await fetch(`${API}/invoices/pay/${token}`);
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          setError(data.error || "This payment link is invalid or expired.");
-          return;
-        }
-        setInvoice(await res.json());
-      } catch {
-        setError("Unable to load invoice. Please try again later.");
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchInvoice();
-  }, [token]);
-
-  async function handleSubmit(e) {
+  function handleSubmit(e) {
     e.preventDefault();
-    setSubmitting(true);
     setSubmitError("");
-    try {
-      const res = await fetch(`${API}/invoices/pay/${token}`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setSubmitError(data.error || "Payment failed. Please try again.");
-        return;
-      }
-      setInvoice(data.invoice);
-      setPaymentRef(data.payment.id);
-    } catch {
-      setSubmitError("Payment failed. Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
+    payMutation.mutate(undefined, {
+      onSuccess: (data) => {
+        setPaymentRef(data.payment?.id ?? "");
+      },
+      onError: (err) => {
+        setSubmitError(err.message || "Payment failed. Please try again.");
+      },
+    });
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex justify-center items-center min-h-64 py-16">
         <div className="text-gray-400">Loading invoice...</div>
@@ -70,7 +42,9 @@ export default function InvoicePayment() {
       <div className="flex justify-center items-center min-h-64 py-16">
         <div className="max-w-md w-full mx-4 text-center">
           <div className="bg-red-900/30 border border-red-700 rounded-xl p-8">
-            <p className="text-red-300 font-medium">{error}</p>
+            <p className="text-red-300 font-medium">
+              {error.message || "This payment link is invalid or expired."}
+            </p>
           </div>
         </div>
       </div>
@@ -199,11 +173,11 @@ export default function InvoicePayment() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={payMutation.isPending}
             className="w-full py-3 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-semibold
                        transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? "Processing..." : `Pay ${dollars}`}
+            {payMutation.isPending ? "Processing..." : `Pay ${dollars}`}
           </button>
 
           <p className="mt-3 text-center text-xs text-gray-500">

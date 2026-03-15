@@ -1,4 +1,6 @@
+import { useMutation } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
+import { setup } from "../../api/auth";
 import logger from "../../utils/logger";
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -9,84 +11,51 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [setupTokenValue, setSetupTokenValue] = useState(setupToken || "");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState(false);
 
+  const setupMutation = useMutation({
+    mutationFn: ({ body, token }) => setup(body, token),
+    onSuccess: (data) => {
+      setResult(data);
+      showToast?.("Admin credentials generated successfully!", "success");
+    },
+    onError: (err) => {
+      setError(err.message || "Setup failed");
+      showToast?.(err.message || "Setup failed", "error");
+    },
+  });
+
   const validateForm = useCallback(() => {
-    if (!username.trim()) {
-      return "Username is required";
-    }
-    if (username.trim().length < 3) {
-      return "Username must be at least 3 characters";
-    }
-    if (!password) {
-      return "Password is required";
-    }
-    if (password.length < MIN_PASSWORD_LENGTH) {
+    if (!username.trim()) return "Username is required";
+    if (username.trim().length < 3) return "Username must be at least 3 characters";
+    if (!password) return "Password is required";
+    if (password.length < MIN_PASSWORD_LENGTH)
       return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
-    }
-    if (password !== confirmPassword) {
-      return "Passwords do not match";
-    }
+    if (password !== confirmPassword) return "Passwords do not match";
     return null;
   }, [username, password, confirmPassword]);
 
   const handleSubmit = useCallback(
-    async (e) => {
+    (e) => {
       e.preventDefault();
-
       const validationError = validateForm();
       if (validationError) {
         setError(validationError);
         return;
       }
-
-      setLoading(true);
       setError("");
-
-      try {
-        const headers = {
-          "Content-Type": "application/json",
-        };
-
-        if (setupTokenValue.trim()) {
-          headers["X-Setup-Token"] = setupTokenValue.trim();
-        }
-
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/auth/setup`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            username: username.trim(),
-            password,
-          }),
-        });
-
-        if (!res.ok) {
-          const errorData = await res.json().catch(() => ({ error: "Setup failed" }));
-          throw new Error(errorData.error || "Setup failed");
-        }
-
-        const data = await res.json();
-        setResult(data);
-        showToast?.("Admin credentials generated successfully!", "success");
-      } catch (err) {
-        logger.error("Admin setup error:", err);
-        setError(err.message || "Setup failed");
-        showToast?.(err.message || "Setup failed", "error");
-      } finally {
-        setLoading(false);
-      }
+      setupMutation.mutate({
+        body: { username: username.trim(), password },
+        token: setupTokenValue.trim() || undefined,
+      });
     },
-    [username, password, setupTokenValue, validateForm, showToast]
+    [username, password, setupTokenValue, validateForm, setupMutation]
   );
 
   const handleCopyCredentials = useCallback(async () => {
     if (!result) return;
-
     const envConfig = `ADMIN_USERNAME=${result.username}\nADMIN_PASSWORD=${result.passwordHash}`;
-
     try {
       await navigator.clipboard.writeText(envConfig);
       setCopied(true);
@@ -174,7 +143,7 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
             className="block w-full rounded-md border border-gray-600 bg-gray-900/50
                        px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            disabled={loading}
+            disabled={setupMutation.isPending}
             autoComplete="one-time-code"
           />
           <p className="mt-1 text-xs text-gray-400">
@@ -195,7 +164,7 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
             className="block w-full rounded-md border border-gray-600 bg-gray-900/50
                        px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            disabled={loading}
+            disabled={setupMutation.isPending}
             autoComplete="username"
           />
         </div>
@@ -213,7 +182,7 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
             className="block w-full rounded-md border border-gray-600 bg-gray-900/50
                        px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            disabled={loading}
+            disabled={setupMutation.isPending}
             autoComplete="new-password"
           />
           <p className="mt-1 text-xs text-gray-400">Minimum {MIN_PASSWORD_LENGTH} characters</p>
@@ -235,20 +204,20 @@ export default function AdminSetup({ onSetupComplete, showToast, setupToken }) {
             className="block w-full rounded-md border border-gray-600 bg-gray-900/50
                        px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
                        focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            disabled={loading}
+            disabled={setupMutation.isPending}
             autoComplete="new-password"
           />
         </div>
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={setupMutation.isPending}
           className="w-full rounded-md bg-blue-600 hover:bg-blue-700
                      text-white font-semibold py-2 px-4 shadow-lg
                      transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400
                      disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {loading ? "Creating Admin..." : "Create Admin Account"}
+          {setupMutation.isPending ? "Creating Admin..." : "Create Admin Account"}
         </button>
 
         {error && (

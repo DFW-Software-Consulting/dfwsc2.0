@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { useInitiateOnboarding } from "../hooks/useOnboarding";
 import logger from "../utils/logger";
 
 export default function OnboardClient() {
   const [token, setToken] = useState("");
   const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+  const { mutate, isPending } = useInitiateOnboarding();
 
   useEffect(() => {
     document.title = "Client Stripe Onboarding";
@@ -13,56 +14,27 @@ export default function OnboardClient() {
     if (tokenFromUrl) setToken(tokenFromUrl);
   }, []);
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(() => {
     if (!token) {
       setMessage("Please enter your onboarding token.");
       return;
     }
-    setLoading(true);
     setMessage("Verifying token and redirecting...");
-
-    try {
-      const res = await fetch(
-        `${import.meta.env.VITE_API_URL}/onboard-client?token=${encodeURIComponent(token)}`,
-        {
-          headers: {
-            Accept: "application/json",
-            "ngrok-skip-browser-warning": "true",
-          },
+    mutate(token, {
+      onSuccess: (data) => {
+        if (!data?.url) {
+          setMessage("Error: API did not return a 'url' field.");
+          return;
         }
-      );
-
-      const contentType = res.headers.get("content-type") || "";
-      const isJson = contentType.includes("application/json");
-
-      if (!res.ok) {
-        const errPayload = isJson ? await res.json().catch(() => ({})) : await res.text();
-        const errText =
-          typeof errPayload === "string"
-            ? errPayload.slice(0, 200)
-            : errPayload.error || errPayload.message || `HTTP ${res.status}`;
-        throw new Error(errText);
-      }
-
-      if (!isJson) {
-        const text = await res.text();
-        throw new Error(`Expected JSON but got: ${text.slice(0, 200)}…`);
-      }
-
-      const data = await res.json();
-      if (!data?.url) {
-        throw new Error("API did not return a 'url' field.");
-      }
-
-      setMessage("Redirecting to Stripe...");
-      window.location.href = data.url;
-    } catch (err) {
-      logger.error("Onboarding error:", err);
-      setMessage(`Error: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
+        setMessage("Redirecting to Stripe...");
+        window.location.href = data.url;
+      },
+      onError: (err) => {
+        logger.error("Onboarding error:", err);
+        setMessage(`Error: ${err.message}`);
+      },
+    });
+  }, [token, mutate]);
 
   const isError = message.startsWith("Error");
 
@@ -104,13 +76,13 @@ export default function OnboardClient() {
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={loading}
+            disabled={isPending}
             className="mt-6 w-full rounded-md bg-blue-600 hover:bg-blue-700
                        text-white font-semibold py-2 px-4 shadow-lg
                        transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400
                        disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "Processing..." : "Continue to Stripe Setup"}
+            {isPending ? "Processing..." : "Continue to Stripe Setup"}
           </button>
 
           {message && (

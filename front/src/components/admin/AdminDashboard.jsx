@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import logger from "../../utils/logger";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
+import { useAuth } from "../../contexts/AuthContext";
+import { useSetupStatus } from "../../hooks/useSetupStatus";
 import AdminLogin from "./AdminLogin";
 import AdminSetup from "./AdminSetup";
 import BillingPanel from "./BillingPanel";
@@ -17,17 +19,10 @@ const TABS = [
 ];
 
 export default function AdminDashboard() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [setupAllowed, setSetupAllowed] = useState(false);
-  const [statusLoading, setStatusLoading] = useState(true);
+  const { isLoggedIn, logout } = useAuth();
+  const { setupAllowed, isLoading: statusLoading } = useSetupStatus();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("clients");
-
-  const [clients, setClients] = useState([]);
-  const [clientsLoading, setClientsLoading] = useState(false);
-  const [clientsError, setClientsError] = useState("");
-
-  const [groups, setGroups] = useState([]);
-
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
 
   const showToast = useCallback((message, type = "info") => {
@@ -38,104 +33,14 @@ export default function AdminDashboard() {
     setToast({ show: false, message: "", type: "" });
   }, []);
 
-  const fetchClients = useCallback(async () => {
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) {
-      showToast("Session expired. You have been logged out.", "warning");
-      setIsLoggedIn(false);
-      return;
-    }
-
-    setClientsLoading(true);
-    setClientsError("");
-
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/clients`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          sessionStorage.removeItem("adminToken");
-          showToast("Session expired. You have been logged out.", "warning");
-          setIsLoggedIn(false);
-          throw new Error("Session expired. Please log in again.");
-        }
-        const errorData = await res.json().catch(() => ({ error: "Failed to fetch clients" }));
-        throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
-      }
-
-      setClients(await res.json());
-    } catch (err) {
-      logger.error("Error fetching clients:", err);
-      setClientsError(err.message);
-    } finally {
-      setClientsLoading(false);
-    }
-  }, [showToast]);
-
-  const checkSetupStatus = useCallback(async () => {
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/auth/setup/status`);
-      if (res.ok) {
-        const data = await res.json();
-        setSetupAllowed(data.setupAllowed);
-      }
-    } catch (err) {
-      logger.error("Error checking setup status:", err);
-    } finally {
-      setStatusLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const storedToken = sessionStorage.getItem("adminToken");
-    if (storedToken) {
-      setIsLoggedIn(true);
-      setStatusLoading(false);
-      fetchClients();
-    } else {
-      checkSetupStatus();
-    }
-  }, [fetchClients, checkSetupStatus]);
-
   const handleSetupComplete = useCallback(() => {
-    setSetupAllowed(false);
-    checkSetupStatus();
-  }, [checkSetupStatus]);
-
-  const handleLoginSuccess = useCallback(() => {
-    setIsLoggedIn(true);
-    fetchClients();
-  }, [fetchClients]);
+    queryClient.invalidateQueries({ queryKey: ["setup-status"] });
+  }, [queryClient]);
 
   const handleLogout = useCallback(() => {
-    sessionStorage.removeItem("adminToken");
-    setIsLoggedIn(false);
-    setClients([]);
-    setClientsError("");
-    setGroups([]);
+    logout();
     setActiveTab("clients");
-  }, []);
-
-  const handleClientCreated = useCallback(() => {
-    fetchClients();
-  }, [fetchClients]);
-
-  const handleStatusChange = useCallback((clientId, newStatus) => {
-    setClients((prev) => prev.map((c) => (c.id === clientId ? { ...c, status: newStatus } : c)));
-  }, []);
-
-  const handleClientUpdated = useCallback((updated) => {
-    setClients((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-  }, []);
-
-  const handleGroupsChanged = useCallback((updatedGroups) => {
-    setGroups(updatedGroups);
-  }, []);
+  }, [logout]);
 
   // ─── Unauthenticated state ───────────────────────────────────────────────
 
@@ -152,7 +57,7 @@ export default function AdminDashboard() {
         {setupAllowed ? (
           <AdminSetup onSetupComplete={handleSetupComplete} showToast={showToast} />
         ) : (
-          <AdminLogin onLoginSuccess={handleLoginSuccess} showToast={showToast} />
+          <AdminLogin showToast={showToast} />
         )}
         <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
       </>
@@ -196,57 +101,22 @@ export default function AdminDashboard() {
       {/* Clients tab */}
       {activeTab === "clients" && (
         <>
-          <CreateClientForm onClientCreated={handleClientCreated} showToast={showToast} />
+          <CreateClientForm showToast={showToast} />
           <div className="mb-6">
-            <div className="flex justify-between items-center mb-3">
-              <h4 className="text-md font-semibold text-white">Client List</h4>
-              <button
-                type="button"
-                onClick={fetchClients}
-                className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
-              >
-                Refresh
-              </button>
-            </div>
-            <ClientList
-              clients={clients}
-              groups={groups}
-              onStatusChange={handleStatusChange}
-              onClientUpdated={handleClientUpdated}
-              showToast={showToast}
-              onSessionExpired={handleLogout}
-              loading={clientsLoading}
-              error={clientsError}
-              onRefresh={fetchClients}
-            />
+            <h4 className="text-md font-semibold text-white mb-3">Client List</h4>
+            <ClientList showToast={showToast} />
           </div>
         </>
       )}
 
       {/* Groups tab */}
-      {activeTab === "groups" && (
-        <GroupPanel
-          showToast={showToast}
-          onSessionExpired={handleLogout}
-          onGroupsChanged={handleGroupsChanged}
-          onClientUpdated={handleClientUpdated}
-        />
-      )}
+      {activeTab === "groups" && <GroupPanel showToast={showToast} />}
 
       {/* Reports tab */}
-      {activeTab === "reports" && (
-        <PaymentReports
-          clients={clients}
-          groups={groups}
-          showToast={showToast}
-          onSessionExpired={handleLogout}
-        />
-      )}
+      {activeTab === "reports" && <PaymentReports showToast={showToast} />}
 
       {/* Billing tab */}
-      {activeTab === "billing" && (
-        <BillingPanel clients={clients} showToast={showToast} onSessionExpired={handleLogout} />
-      )}
+      {activeTab === "billing" && <BillingPanel showToast={showToast} />}
 
       <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
     </div>

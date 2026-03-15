@@ -1,4 +1,6 @@
 import { useCallback, useState } from "react";
+import { useClients, usePatchClientStatus, useResendOnboarding } from "../../hooks/useClients";
+import { useGroups } from "../../hooks/useGroups";
 import logger from "../../utils/logger";
 import ConfirmModal from "./ConfirmModal";
 import EditClientModal from "./EditClientModal";
@@ -16,19 +18,12 @@ function formatFee(client, groups) {
   return "Default";
 }
 
-export default function ClientList({
-  clients,
-  groups,
-  onStatusChange,
-  onClientUpdated,
-  showToast,
-  onSessionExpired,
-  loading,
-  error,
-  onRefresh,
-}) {
-  const [loadingClientId, setLoadingClientId] = useState(null);
-  const [resendingClientId, setResendingClientId] = useState(null);
+export default function ClientList({ showToast }) {
+  const { data: clients = [], isLoading, isError, error, refetch } = useClients();
+  const { data: groups = [] } = useGroups();
+  const patchClientStatusMutation = usePatchClientStatus();
+  const resendMutation = useResendOnboarding();
+
   const [editingClient, setEditingClient] = useState(null);
   const [confirmModal, setConfirmModal] = useState({
     isOpen: false,
@@ -36,58 +31,6 @@ export default function ClientList({
     clientName: "",
     currentStatus: "",
   });
-
-  const updateClientStatus = useCallback(
-    async (clientId, currentStatus) => {
-      const token = sessionStorage.getItem("adminToken");
-      if (!token) {
-        showToast?.("Session expired. You have been logged out.", "warning");
-        onSessionExpired?.();
-        return;
-      }
-
-      const newStatus = currentStatus === "active" ? "inactive" : "active";
-      setLoadingClientId(clientId);
-      onStatusChange?.(clientId, newStatus);
-
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/clients/${clientId}`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ status: newStatus }),
-        });
-
-        if (!res.ok) {
-          if (res.status === 401 || res.status === 403) {
-            sessionStorage.removeItem("adminToken");
-            onSessionExpired?.();
-            throw new Error("Session expired. You have been logged out.");
-          } else if (res.status === 404) {
-            throw new Error("Client not found");
-          }
-          const errorData = await res
-            .json()
-            .catch(() => ({ error: "Failed to update client status" }));
-          throw new Error(errorData.error || `HTTP ${res.status}: ${res.statusText}`);
-        }
-
-        showToast?.(
-          `Client ${newStatus === "active" ? "activated" : "deactivated"} successfully`,
-          "success"
-        );
-      } catch (err) {
-        logger.error("Error updating client status:", err);
-        onStatusChange?.(clientId, currentStatus);
-        showToast?.(`Error updating client status: ${err.message}`, "error");
-      } finally {
-        setLoadingClientId(null);
-      }
-    },
-    [onStatusChange, showToast, onSessionExpired]
-  );
 
   const handleStatusToggle = useCallback(
     (client) => {
@@ -99,64 +42,56 @@ export default function ClientList({
           currentStatus: client.status,
         });
       } else {
-        updateClientStatus(client.id, client.status);
+        patchClientStatusMutation.mutate(
+          { id: client.id, status: "active" },
+          {
+            onSuccess: () => showToast?.("Client activated successfully", "success"),
+            onError: (err) => showToast?.(`Error updating client status: ${err.message}`, "error"),
+          }
+        );
       }
     },
-    [updateClientStatus]
+    [patchClientStatusMutation, showToast]
   );
 
   const handleConfirmDeactivate = useCallback(() => {
-    const { clientId, currentStatus } = confirmModal;
+    const { clientId } = confirmModal;
     setConfirmModal({ isOpen: false, clientId: null, clientName: "", currentStatus: "" });
-    if (clientId) updateClientStatus(clientId, currentStatus);
-  }, [confirmModal, updateClientStatus]);
+    if (clientId) {
+      patchClientStatusMutation.mutate(
+        { id: clientId, status: "inactive" },
+        {
+          onSuccess: () => showToast?.("Client deactivated successfully", "success"),
+          onError: (err) => showToast?.(`Error updating client status: ${err.message}`, "error"),
+        }
+      );
+    }
+  }, [confirmModal, patchClientStatusMutation, showToast]);
 
   const handleCancelDeactivate = () => {
     setConfirmModal({ isOpen: false, clientId: null, clientName: "", currentStatus: "" });
   };
 
-  const handleResendLink = async (client) => {
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) {
-      showToast?.("Session expired. You have been logged out.", "warning");
-      onSessionExpired?.();
-      return;
-    }
-
-    setResendingClientId(client.id);
-
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/onboard-client/resend`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ clientId: client.id }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          sessionStorage.removeItem("adminToken");
-          onSessionExpired?.();
-          throw new Error("Session expired. You have been logged out.");
+  const handleResendLink = useCallback(
+    (client) => {
+      resendMutation.mutate(
+        { clientId: client.id },
+        {
+          onSuccess: () => {
+            showToast?.("New onboarding link sent successfully!", "success");
+            logger.info(`Resent onboarding link for client: ${client.email}`);
+          },
+          onError: (err) => {
+            logger.error("Error resending onboarding link:", err);
+            showToast?.(`Error: ${err.message}`, "error");
+          },
         }
-        throw new Error(data.error || `HTTP ${res.status}: ${res.statusText}`);
-      }
+      );
+    },
+    [resendMutation, showToast]
+  );
 
-      showToast?.("New onboarding link sent successfully!", "success");
-      logger.info(`Resent onboarding link for client: ${client.email}`);
-    } catch (err) {
-      logger.error("Error resending onboarding link:", err);
-      showToast?.(`Error: ${err.message}`, "error");
-    } finally {
-      setResendingClientId(null);
-    }
-  };
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="text-center py-8">
         <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
@@ -165,13 +100,13 @@ export default function ClientList({
     );
   }
 
-  if (error) {
+  if (isError) {
     return (
       <div className="text-center py-4">
-        <p className="text-red-400">{error}</p>
+        <p className="text-red-400">{error?.message}</p>
         <button
           type="button"
-          onClick={onRefresh}
+          onClick={() => refetch()}
           className="mt-3 text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded-md transition-colors"
         >
           Retry
@@ -217,6 +152,11 @@ export default function ClientList({
             {clients.map((client) => {
               const groupName = groups.find((g) => g.id === client.groupId)?.name;
               const onboardingStatus = client.stripeAccountId ? "Completed" : "Pending";
+              const isTogglingStatus =
+                patchClientStatusMutation.isPending &&
+                patchClientStatusMutation.variables?.id === client.id;
+              const isResending =
+                resendMutation.isPending && resendMutation.variables?.clientId === client.id;
               return (
                 <tr key={client.id} className="hover:bg-gray-700/50">
                   <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-200">
@@ -261,17 +201,17 @@ export default function ClientList({
                       <button
                         type="button"
                         onClick={() => handleResendLink(client)}
-                        disabled={resendingClientId === client.id || !!client.stripeAccountId}
+                        disabled={isResending || !!client.stripeAccountId}
                         title={
                           client.stripeAccountId ? "Already onboarded" : "Resend onboarding link"
                         }
                         className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                          resendingClientId === client.id
+                          isResending
                             ? "bg-gray-500 text-white"
                             : "bg-purple-600 hover:bg-purple-700 text-white"
                         }`}
                       >
-                        {resendingClientId === client.id ? (
+                        {isResending ? (
                           <span className="inline-flex items-center">
                             <svg
                               aria-hidden="true"
@@ -309,14 +249,14 @@ export default function ClientList({
                       <button
                         type="button"
                         onClick={() => handleStatusToggle(client)}
-                        disabled={loadingClientId === client.id}
+                        disabled={isTogglingStatus}
                         className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                           client.status === "active"
                             ? "bg-red-600 hover:bg-red-700 text-white"
                             : "bg-green-600 hover:bg-green-700 text-white"
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                       >
-                        {loadingClientId === client.id ? (
+                        {isTogglingStatus ? (
                           <span className="inline-flex items-center">
                             <svg
                               aria-hidden="true"
@@ -369,12 +309,8 @@ export default function ClientList({
       {editingClient && (
         <EditClientModal
           client={editingClient}
-          groups={groups}
           onClose={() => setEditingClient(null)}
-          onSaved={(updated) => {
-            setEditingClient(null);
-            onClientUpdated?.(updated);
-          }}
+          onSaved={() => setEditingClient(null)}
           showToast={showToast}
         />
       )}

@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
-import logger from "../../utils/logger";
+import { useClients } from "../../hooks/useClients";
+import { useGroups } from "../../hooks/useGroups";
+import { usePaymentReport } from "../../hooks/usePaymentReports";
 
 function formatCurrency(amount, currency) {
   return new Intl.NumberFormat("en-US", {
@@ -16,55 +18,41 @@ function formatDate(ts) {
   });
 }
 
-export default function PaymentReports({ clients, groups, showToast, onSessionExpired }) {
+export default function PaymentReports({ showToast }) {
+  const { data: clients = [] } = useClients();
+  const { data: groups = [] } = useGroups();
+
   const [reportType, setReportType] = useState("client");
   const [selectedId, setSelectedId] = useState("");
   const [limit, setLimit] = useState("10");
-  const [results, setResults] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [reportEnabled, setReportEnabled] = useState(false);
+
+  const params = selectedId
+    ? { ...(reportType === "client" ? { clientId: selectedId } : { groupId: selectedId }), limit }
+    : {};
+
+  const {
+    data: results,
+    isFetching,
+    refetch,
+  } = usePaymentReport(params, {
+    enabled: reportEnabled && !!selectedId,
+  });
 
   const handleTypeChange = useCallback((type) => {
     setReportType(type);
     setSelectedId("");
-    setResults(null);
+    setReportEnabled(false);
   }, []);
 
-  const fetchReport = useCallback(async () => {
+  const handleRunReport = useCallback(() => {
     if (!selectedId) return;
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) {
-      onSessionExpired?.();
-      return;
+    if (reportEnabled) {
+      refetch();
+    } else {
+      setReportEnabled(true);
     }
-
-    const params = new URLSearchParams();
-    if (reportType === "client") params.set("clientId", selectedId);
-    else params.set("groupId", selectedId);
-    if (limit) params.set("limit", limit);
-
-    setLoading(true);
-    setResults(null);
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/reports/payments?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          sessionStorage.removeItem("adminToken");
-          onSessionExpired?.();
-          return;
-        }
-        const data = await res.json().catch(() => ({ error: "Failed to fetch report" }));
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      setResults(await res.json());
-    } catch (err) {
-      logger.error("Error fetching report:", err);
-      showToast?.(err.message, "error");
-    } finally {
-      setLoading(false);
-    }
-  }, [reportType, selectedId, limit, onSessionExpired, showToast]);
+  }, [selectedId, reportEnabled, refetch]);
 
   const items = reportType === "client" ? clients : groups;
 
@@ -101,7 +89,10 @@ export default function PaymentReports({ clients, groups, showToast, onSessionEx
           <div className="md:col-span-2">
             <select
               value={selectedId}
-              onChange={(e) => setSelectedId(e.target.value)}
+              onChange={(e) => {
+                setSelectedId(e.target.value);
+                setReportEnabled(false);
+              }}
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
@@ -131,12 +122,12 @@ export default function PaymentReports({ clients, groups, showToast, onSessionEx
 
         <button
           type="button"
-          onClick={fetchReport}
-          disabled={loading || !selectedId}
+          onClick={handleRunReport}
+          disabled={isFetching || !selectedId}
           className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium
                      transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {loading ? "Loading..." : "Run Report"}
+          {isFetching ? "Loading..." : "Run Report"}
         </button>
       </div>
 

@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
-import logger from "../../utils/logger";
-
-const API = import.meta.env.VITE_API_URL;
+import { useCallback, useState } from "react";
+import { useClients } from "../../hooks/useClients";
+import { useCancelInvoice, useCreateInvoice, useInvoices } from "../../hooks/useInvoices";
+import {
+  useCreateSubscription,
+  usePatchSubscription,
+  useSubscriptionDetail,
+  useSubscriptions,
+} from "../../hooks/useSubscriptions";
 
 function StatusBadge({ status }) {
   const styles = {
@@ -23,53 +28,20 @@ function StatusBadge({ status }) {
 
 // ─── Invoices Sub-Tab ────────────────────────────────────────────────────────
 
-function InvoicesTab({ clients, showToast, onSessionExpired }) {
-  const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+function InvoicesTab({ showToast }) {
+  const { data: clients = [] } = useClients();
+  const { data: invoices = [], isLoading, isError, error, refetch } = useInvoices({});
+  const createInvoiceMutation = useCreateInvoice();
+  const cancelInvoiceMutation = useCancelInvoice();
 
-  // Form state
   const [clientId, setClientId] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState("");
 
-  const authHeader = () => {
-    const token = sessionStorage.getItem("adminToken");
-    return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  };
-
-  const fetchInvoices = useCallback(async () => {
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) return;
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch(`${API}/invoices`, { headers: authHeader() });
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          onSessionExpired?.();
-          return;
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      setInvoices(await res.json());
-    } catch (err) {
-      logger.error("Error fetching invoices:", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [onSessionExpired]);
-
-  useEffect(() => {
-    fetchInvoices();
-  }, [fetchInvoices]);
-
   const handleCreate = useCallback(
-    async (e) => {
+    (e) => {
       e.preventDefault();
       setFormError("");
       const amountCents = Math.round(parseFloat(amount) * 100);
@@ -78,53 +50,31 @@ function InvoicesTab({ clients, showToast, onSessionExpired }) {
         return setFormError("Enter a valid amount.");
       if (!description.trim()) return setFormError("Description is required.");
 
-      setCreating(true);
-      try {
-        const res = await fetch(`${API}/invoices`, {
-          method: "POST",
-          headers: authHeader(),
-          body: JSON.stringify({
-            clientId,
-            amountCents,
-            description: description.trim(),
-            dueDate: dueDate || null,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        setInvoices((prev) => [data, ...prev]);
-        setClientId("");
-        setAmount("");
-        setDescription("");
-        setDueDate("");
-        showToast?.("Invoice created and email sent.", "success");
-      } catch (err) {
-        logger.error("Error creating invoice:", err);
-        setFormError(err.message);
-      } finally {
-        setCreating(false);
-      }
+      createInvoiceMutation.mutate(
+        { clientId, amountCents, description: description.trim(), dueDate: dueDate || null },
+        {
+          onSuccess: () => {
+            setClientId("");
+            setAmount("");
+            setDescription("");
+            setDueDate("");
+            showToast?.("Invoice created and email sent.", "success");
+          },
+          onError: (err) => setFormError(err.message),
+        }
+      );
     },
-    [clientId, amount, description, dueDate, showToast]
+    [clientId, amount, description, dueDate, createInvoiceMutation, showToast]
   );
 
   const handleCancel = useCallback(
-    async (id) => {
-      try {
-        const res = await fetch(`${API}/invoices/${id}`, {
-          method: "PATCH",
-          headers: authHeader(),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        setInvoices((prev) => prev.map((inv) => (inv.id === id ? data : inv)));
-        showToast?.("Invoice cancelled.", "success");
-      } catch (err) {
-        logger.error("Error cancelling invoice:", err);
-        showToast?.(err.message, "error");
-      }
+    (id) => {
+      cancelInvoiceMutation.mutate(id, {
+        onSuccess: () => showToast?.("Invoice cancelled.", "success"),
+        onError: (err) => showToast?.(err.message, "error"),
+      });
     },
-    [showToast]
+    [cancelInvoiceMutation, showToast]
   );
 
   const handleCopyLink = useCallback(
@@ -153,7 +103,7 @@ function InvoicesTab({ clients, showToast, onSessionExpired }) {
               onChange={(e) => setClientId(e.target.value)}
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creating}
+              disabled={createInvoiceMutation.isPending}
             >
               <option value="">Select client…</option>
               {clients.map((c) => (
@@ -177,7 +127,7 @@ function InvoicesTab({ clients, showToast, onSessionExpired }) {
               placeholder="e.g. 99.00"
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creating}
+              disabled={createInvoiceMutation.isPending}
             />
           </div>
           <div className="sm:col-span-2">
@@ -192,7 +142,7 @@ function InvoicesTab({ clients, showToast, onSessionExpired }) {
               placeholder="e.g. Website maintenance — March 2026"
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creating}
+              disabled={createInvoiceMutation.isPending}
             />
           </div>
           <div>
@@ -206,7 +156,7 @@ function InvoicesTab({ clients, showToast, onSessionExpired }) {
               onChange={(e) => setDueDate(e.target.value)}
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creating}
+              disabled={createInvoiceMutation.isPending}
             />
           </div>
           <div className="flex items-end">
@@ -217,11 +167,11 @@ function InvoicesTab({ clients, showToast, onSessionExpired }) {
             )}
             <button
               type="submit"
-              disabled={creating}
+              disabled={createInvoiceMutation.isPending}
               className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium
                          transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {creating ? "Creating..." : "Create Invoice"}
+              {createInvoiceMutation.isPending ? "Creating..." : "Create Invoice"}
             </button>
           </div>
         </form>
@@ -232,21 +182,21 @@ function InvoicesTab({ clients, showToast, onSessionExpired }) {
         <h4 className="text-md font-semibold text-white">Invoices</h4>
         <button
           type="button"
-          onClick={fetchInvoices}
+          onClick={() => refetch()}
           className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
         >
           Refresh
         </button>
       </div>
 
-      {loading && (
+      {isLoading && (
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
           <p className="mt-3 text-gray-300">Loading invoices...</p>
         </div>
       )}
-      {error && <p className="text-red-400 text-sm py-4 text-center">{error}</p>}
-      {!loading && !error && invoices.length === 0 && (
+      {isError && <p className="text-red-400 text-sm py-4 text-center">{error?.message}</p>}
+      {!isLoading && !isError && invoices.length === 0 && (
         <p className="text-gray-400 text-sm py-4 text-center">No invoices yet</p>
       )}
 
@@ -319,56 +269,24 @@ function InvoicesTab({ clients, showToast, onSessionExpired }) {
 
 // ─── Subscriptions Sub-Tab ───────────────────────────────────────────────────
 
-function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
-  const [subs, setSubs] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [expandedId, setExpandedId] = useState(null);
-  const [expandedInvoices, setExpandedInvoices] = useState({});
+function SubscriptionsTab({ showToast }) {
+  const { data: clients = [] } = useClients();
+  const { data: subs = [], isLoading, isError, error, refetch } = useSubscriptions({});
+  const createSubMutation = useCreateSubscription();
+  const patchSubMutation = usePatchSubscription();
 
-  // Form state
+  const [expandedId, setExpandedId] = useState(null);
+  const { data: subDetail } = useSubscriptionDetail(expandedId, { enabled: !!expandedId });
+
   const [clientId, setClientId] = useState("");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [interval, setInterval] = useState("monthly");
   const [totalPayments, setTotalPayments] = useState("");
-  const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState("");
 
-  const authHeader = () => {
-    const token = sessionStorage.getItem("adminToken");
-    return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  };
-
-  const fetchSubs = useCallback(async () => {
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) return;
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch(`${API}/subscriptions`, { headers: authHeader() });
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          onSessionExpired?.();
-          return;
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      setSubs(await res.json());
-    } catch (err) {
-      logger.error("Error fetching subscriptions:", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [onSessionExpired]);
-
-  useEffect(() => {
-    fetchSubs();
-  }, [fetchSubs]);
-
   const handleCreate = useCallback(
-    async (e) => {
+    (e) => {
       e.preventDefault();
       setFormError("");
       const amountCents = Math.round(parseFloat(amount) * 100);
@@ -381,77 +299,42 @@ function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
       if (totalPayments && (Number.isNaN(total) || total <= 0))
         return setFormError("Total payments must be a positive integer.");
 
-      setCreating(true);
-      try {
-        const res = await fetch(`${API}/subscriptions`, {
-          method: "POST",
-          headers: authHeader(),
-          body: JSON.stringify({
-            clientId,
-            amountCents,
-            description: description.trim(),
-            interval,
-            totalPayments: total,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        setSubs((prev) => [data.subscription, ...prev]);
-        setClientId("");
-        setAmount("");
-        setDescription("");
-        setInterval("monthly");
-        setTotalPayments("");
-        showToast?.("Subscription created and first invoice sent.", "success");
-      } catch (err) {
-        logger.error("Error creating subscription:", err);
-        setFormError(err.message);
-      } finally {
-        setCreating(false);
-      }
+      createSubMutation.mutate(
+        { clientId, amountCents, description: description.trim(), interval, totalPayments: total },
+        {
+          onSuccess: () => {
+            setClientId("");
+            setAmount("");
+            setDescription("");
+            setInterval("monthly");
+            setTotalPayments("");
+            showToast?.("Subscription created and first invoice sent.", "success");
+          },
+          onError: (err) => setFormError(err.message),
+        }
+      );
     },
-    [clientId, amount, description, interval, totalPayments, showToast]
+    [clientId, amount, description, interval, totalPayments, createSubMutation, showToast]
   );
 
   const handleStatusChange = useCallback(
-    async (id, status) => {
-      try {
-        const res = await fetch(`${API}/subscriptions/${id}`, {
-          method: "PATCH",
-          headers: authHeader(),
-          body: JSON.stringify({ status }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-        setSubs((prev) => prev.map((s) => (s.id === id ? data : s)));
-        showToast?.(`Subscription ${status}.`, "success");
-      } catch (err) {
-        logger.error("Error updating subscription:", err);
-        showToast?.(err.message, "error");
-      }
+    (id, status) => {
+      patchSubMutation.mutate(
+        { id, body: { status } },
+        {
+          onSuccess: () => showToast?.(`Subscription ${status}.`, "success"),
+          onError: (err) => showToast?.(err.message, "error"),
+        }
+      );
     },
-    [showToast]
+    [patchSubMutation, showToast]
   );
 
-  const handleViewInvoices = useCallback(
-    async (id) => {
-      if (expandedId === id) {
-        setExpandedId(null);
-        return;
-      }
-      try {
-        const res = await fetch(`${API}/subscriptions/${id}`, { headers: authHeader() });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setExpandedInvoices((prev) => ({ ...prev, [id]: data.invoices ?? [] }));
-        setExpandedId(id);
-      } catch (err) {
-        logger.error("Error fetching subscription invoices:", err);
-        showToast?.(err.message, "error");
-      }
-    },
-    [expandedId, showToast]
-  );
+  const handleViewInvoices = useCallback((id) => {
+    setExpandedId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const expandedInvoices = subDetail?.invoices ?? [];
 
   return (
     <div>
@@ -469,7 +352,7 @@ function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
               onChange={(e) => setClientId(e.target.value)}
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creating}
+              disabled={createSubMutation.isPending}
             >
               <option value="">Select client…</option>
               {clients.map((c) => (
@@ -493,7 +376,7 @@ function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
               placeholder="e.g. 150.00"
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creating}
+              disabled={createSubMutation.isPending}
             />
           </div>
           <div className="sm:col-span-2">
@@ -508,7 +391,7 @@ function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
               placeholder="e.g. Monthly hosting plan"
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creating}
+              disabled={createSubMutation.isPending}
             />
           </div>
           <div>
@@ -521,7 +404,7 @@ function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
               onChange={(e) => setInterval(e.target.value)}
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creating}
+              disabled={createSubMutation.isPending}
             >
               <option value="monthly">Monthly</option>
               <option value="quarterly">Quarterly</option>
@@ -542,7 +425,7 @@ function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
               placeholder="e.g. 12"
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                          placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={creating}
+              disabled={createSubMutation.isPending}
             />
           </div>
           <div className="sm:col-span-2 flex items-center gap-3">
@@ -553,11 +436,11 @@ function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
             )}
             <button
               type="submit"
-              disabled={creating}
+              disabled={createSubMutation.isPending}
               className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium
                          transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {creating ? "Creating..." : "Create Subscription"}
+              {createSubMutation.isPending ? "Creating..." : "Create Subscription"}
             </button>
           </div>
         </form>
@@ -568,21 +451,21 @@ function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
         <h4 className="text-md font-semibold text-white">Subscriptions</h4>
         <button
           type="button"
-          onClick={fetchSubs}
+          onClick={() => refetch()}
           className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
         >
           Refresh
         </button>
       </div>
 
-      {loading && (
+      {isLoading && (
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
           <p className="mt-3 text-gray-300">Loading subscriptions...</p>
         </div>
       )}
-      {error && <p className="text-red-400 text-sm py-4 text-center">{error}</p>}
-      {!loading && !error && subs.length === 0 && (
+      {isError && <p className="text-red-400 text-sm py-4 text-center">{error?.message}</p>}
+      {!isLoading && !isError && subs.length === 0 && (
         <p className="text-gray-400 text-sm py-4 text-center">No subscriptions yet</p>
       )}
 
@@ -663,13 +546,13 @@ function SubscriptionsTab({ clients, showToast, onSessionExpired }) {
                     <tr className="bg-gray-800/50">
                       <td colSpan={6} className="px-4 py-3">
                         <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
-                          Invoices ({(expandedInvoices[sub.id] ?? []).length})
+                          Invoices ({expandedInvoices.length})
                         </p>
-                        {(expandedInvoices[sub.id] ?? []).length === 0 ? (
+                        {expandedInvoices.length === 0 ? (
                           <p className="text-gray-500 text-sm italic">No invoices yet.</p>
                         ) : (
                           <div className="grid gap-1">
-                            {(expandedInvoices[sub.id] ?? []).map((inv) => (
+                            {expandedInvoices.map((inv) => (
                               <div
                                 key={inv.id}
                                 className="flex justify-between items-center bg-gray-700/50 rounded px-3 py-2 text-sm"
@@ -705,7 +588,7 @@ const BILLING_TABS = [
   { id: "subscriptions", label: "Subscriptions" },
 ];
 
-export default function BillingPanel({ clients, showToast, onSessionExpired }) {
+export default function BillingPanel({ showToast }) {
   const [activeTab, setActiveTab] = useState("invoices");
 
   return (
@@ -728,16 +611,8 @@ export default function BillingPanel({ clients, showToast, onSessionExpired }) {
         ))}
       </div>
 
-      {activeTab === "invoices" && (
-        <InvoicesTab clients={clients} showToast={showToast} onSessionExpired={onSessionExpired} />
-      )}
-      {activeTab === "subscriptions" && (
-        <SubscriptionsTab
-          clients={clients}
-          showToast={showToast}
-          onSessionExpired={onSessionExpired}
-        />
-      )}
+      {activeTab === "invoices" && <InvoicesTab showToast={showToast} />}
+      {activeTab === "subscriptions" && <SubscriptionsTab showToast={showToast} />}
     </div>
   );
 }

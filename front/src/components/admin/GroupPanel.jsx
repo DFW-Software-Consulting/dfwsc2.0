@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import logger from "../../utils/logger";
+import { useClients } from "../../hooks/useClients";
+import { useCreateGroup, useGroups, usePatchGroup } from "../../hooks/useGroups";
 import GroupMembersModal from "./GroupMembersModal";
 
 function formatFee(group) {
@@ -11,13 +12,14 @@ function formatFee(group) {
 
 // ─── Edit Group Modal ────────────────────────────────────────────────────────
 
-function EditGroupModal({ group, onClose, onSaved, showToast }) {
+function EditGroupModal({ group, onClose, showToast }) {
+  const patchGroupMutation = usePatchGroup();
+
   const [name, setName] = useState(group.name);
   const [feeType, setFeeType] = useState("none");
   const [feeValue, setFeeValue] = useState("");
   const [successUrl, setSuccessUrl] = useState(group.paymentSuccessUrl ?? "");
   const [cancelUrl, setCancelUrl] = useState(group.paymentCancelUrl ?? "");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const modalRef = useRef(null);
 
@@ -50,10 +52,7 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
     if (e.target === modalRef.current) onClose();
   };
 
-  const handleSave = useCallback(async () => {
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) return;
-
+  const handleSave = useCallback(() => {
     setError("");
     const trimmedName = name.trim();
     if (!trimmedName) {
@@ -97,31 +96,29 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
       return;
     }
 
-    setLoading(true);
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/groups/${group.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+    patchGroupMutation.mutate(
+      { id: group.id, body },
+      {
+        onSuccess: () => {
+          showToast?.("Group updated successfully", "success");
+          onClose();
         },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Failed to update group" }));
-        throw new Error(data.error || `HTTP ${res.status}`);
+        onError: (err) => {
+          setError(err.message);
+        },
       }
-      const updated = await res.json();
-      showToast?.("Group updated successfully", "success");
-      onSaved?.(updated);
-      onClose();
-    } catch (err) {
-      logger.error("Error updating group:", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [group.id, name, feeType, feeValue, successUrl, cancelUrl, onClose, onSaved, showToast]);
+    );
+  }, [
+    group.id,
+    name,
+    feeType,
+    feeValue,
+    successUrl,
+    cancelUrl,
+    onClose,
+    showToast,
+    patchGroupMutation,
+  ]);
 
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener
@@ -268,11 +265,11 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
           <button
             type="button"
             onClick={handleSave}
-            disabled={loading}
+            disabled={patchGroupMutation.isPending}
             className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors
                        disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "Saving..." : "Save Changes"}
+            {patchGroupMutation.isPending ? "Saving..." : "Save Changes"}
           </button>
         </div>
       </div>
@@ -282,138 +279,49 @@ function EditGroupModal({ group, onClose, onSaved, showToast }) {
 
 // ─── Group Panel ─────────────────────────────────────────────────────────────
 
-export default function GroupPanel({
-  showToast,
-  onSessionExpired,
-  onGroupsChanged,
-  onClientUpdated,
-}) {
-  const [groups, setGroups] = useState([]);
-  const [clients, setClients] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+export default function GroupPanel({ showToast }) {
+  const { data: groups = [], isLoading, isError, error, refetch } = useGroups();
+  const { data: clients = [] } = useClients();
+  const createGroupMutation = useCreateGroup();
+  const patchGroupMutation = usePatchGroup();
+
   const [newGroupName, setNewGroupName] = useState("");
-  const [creating, setCreating] = useState(false);
   const [editingGroup, setEditingGroup] = useState(null);
   const [managingGroup, setManagingGroup] = useState(null);
-  const [togglingId, setTogglingId] = useState(null);
   const [expandedGroupId, setExpandedGroupId] = useState(null);
 
-  const fetchGroups = useCallback(async () => {
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) return;
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/groups`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          sessionStorage.removeItem("adminToken");
-          onSessionExpired?.();
-          return;
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      setGroups(data);
-      onGroupsChanged?.(data);
-    } catch (err) {
-      logger.error("Error fetching groups:", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [onSessionExpired, onGroupsChanged]);
-
-  const fetchClients = useCallback(async () => {
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) return;
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/clients`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return;
-      setClients(await res.json());
-    } catch (err) {
-      logger.error("Error fetching clients:", err);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchGroups();
-    fetchClients();
-  }, [fetchGroups, fetchClients]);
-
   const handleCreate = useCallback(
-    async (e) => {
+    (e) => {
       e.preventDefault();
       const name = newGroupName.trim();
       if (!name) return;
-      const token = sessionStorage.getItem("adminToken");
-      setCreating(true);
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/groups`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ name }),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({ error: "Failed to create group" }));
-          throw new Error(data.error || `HTTP ${res.status}`);
+      createGroupMutation.mutate(
+        { name },
+        {
+          onSuccess: (group) => {
+            setNewGroupName("");
+            showToast?.(`Group "${group.name}" created`, "success");
+          },
+          onError: (err) => showToast?.(err.message, "error"),
         }
-        const group = await res.json();
-        const updated = [...groups, group];
-        setGroups(updated);
-        onGroupsChanged?.(updated);
-        setNewGroupName("");
-        showToast?.(`Group "${group.name}" created`, "success");
-      } catch (err) {
-        logger.error("Error creating group:", err);
-        showToast?.(err.message, "error");
-      } finally {
-        setCreating(false);
-      }
+      );
     },
-    [newGroupName, groups, showToast, onGroupsChanged]
+    [newGroupName, createGroupMutation, showToast]
   );
 
   const handleToggleStatus = useCallback(
-    async (group) => {
-      const token = sessionStorage.getItem("adminToken");
+    (group) => {
       const newStatus = group.status === "active" ? "inactive" : "active";
-      setTogglingId(group.id);
-      const optimistic = groups.map((g) => (g.id === group.id ? { ...g, status: newStatus } : g));
-      setGroups(optimistic);
-      onGroupsChanged?.(optimistic);
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/groups/${group.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ status: newStatus }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        showToast?.(`Group ${newStatus === "active" ? "activated" : "deactivated"}`, "success");
-      } catch (err) {
-        const rolled = groups.map((g) => (g.id === group.id ? { ...g, status: group.status } : g));
-        setGroups(rolled);
-        onGroupsChanged?.(rolled);
-        showToast?.(err.message, "error");
-      } finally {
-        setTogglingId(null);
-      }
+      patchGroupMutation.mutate(
+        { id: group.id, body: { status: newStatus } },
+        {
+          onSuccess: () =>
+            showToast?.(`Group ${newStatus === "active" ? "activated" : "deactivated"}`, "success"),
+          onError: (err) => showToast?.(err.message, "error"),
+        }
+      );
     },
-    [groups, showToast, onGroupsChanged]
-  );
-
-  const handleGroupSaved = useCallback(
-    (updated) => {
-      const next = groups.map((g) => (g.id === updated.id ? updated : g));
-      setGroups(next);
-      onGroupsChanged?.(next);
-    },
-    [groups, onGroupsChanged]
+    [patchGroupMutation, showToast]
   );
 
   const handleToggleExpand = useCallback((groupId) => {
@@ -421,9 +329,7 @@ export default function GroupPanel({
   }, []);
 
   const getGroupMembers = useCallback(
-    (groupId) => {
-      return clients.filter((c) => c.groupId === groupId);
-    },
+    (groupId) => clients.filter((c) => c.groupId === groupId),
     [clients]
   );
 
@@ -440,15 +346,15 @@ export default function GroupPanel({
             placeholder="Group name"
             className="flex-1 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                        placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={creating}
+            disabled={createGroupMutation.isPending}
           />
           <button
             type="submit"
-            disabled={creating || !newGroupName.trim()}
+            disabled={createGroupMutation.isPending || !newGroupName.trim()}
             className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium
                        transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {creating ? "Creating..." : "Create"}
+            {createGroupMutation.isPending ? "Creating..." : "Create"}
           </button>
         </form>
       </div>
@@ -458,21 +364,21 @@ export default function GroupPanel({
         <h4 className="text-md font-semibold text-white">Groups</h4>
         <button
           type="button"
-          onClick={fetchGroups}
+          onClick={() => refetch()}
           className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
         >
           Refresh
         </button>
       </div>
 
-      {loading && (
+      {isLoading && (
         <div className="text-center py-8">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500" />
           <p className="mt-3 text-gray-300">Loading groups...</p>
         </div>
       )}
-      {error && <p className="text-red-400 text-sm py-4 text-center">{error}</p>}
-      {!loading && !error && groups.length === 0 && (
+      {isError && <p className="text-red-400 text-sm py-4 text-center">{error?.message}</p>}
+      {!isLoading && !isError && groups.length === 0 && (
         <p className="text-gray-400 text-sm py-4 text-center">No groups yet</p>
       )}
 
@@ -495,6 +401,8 @@ export default function GroupPanel({
               {groups.map((g) => {
                 const members = getGroupMembers(g.id);
                 const isExpanded = expandedGroupId === g.id;
+                const isToggling =
+                  patchGroupMutation.isPending && patchGroupMutation.variables?.id === g.id;
                 return (
                   <>
                     <tr key={g.id} className="hover:bg-gray-700/50">
@@ -558,18 +466,14 @@ export default function GroupPanel({
                           <button
                             type="button"
                             onClick={() => handleToggleStatus(g)}
-                            disabled={togglingId === g.id}
+                            disabled={isToggling}
                             className={`px-3 py-1 rounded text-xs font-medium transition-colors disabled:opacity-50 ${
                               g.status === "active"
                                 ? "bg-red-600 hover:bg-red-700 text-white"
                                 : "bg-green-600 hover:bg-green-700 text-white"
                             }`}
                           >
-                            {togglingId === g.id
-                              ? "..."
-                              : g.status === "active"
-                                ? "Deactivate"
-                                : "Activate"}
+                            {isToggling ? "..." : g.status === "active" ? "Deactivate" : "Activate"}
                           </button>
                         </div>
                       </td>
@@ -642,7 +546,6 @@ export default function GroupPanel({
         <EditGroupModal
           group={editingGroup}
           onClose={() => setEditingGroup(null)}
-          onSaved={handleGroupSaved}
           showToast={showToast}
         />
       )}
@@ -651,8 +554,6 @@ export default function GroupPanel({
           group={managingGroup}
           onClose={() => setManagingGroup(null)}
           showToast={showToast}
-          onSessionExpired={onSessionExpired}
-          onClientUpdated={onClientUpdated}
         />
       )}
     </div>

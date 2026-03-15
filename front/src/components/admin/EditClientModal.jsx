@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import logger from "../../utils/logger";
+import { usePatchClient } from "../../hooks/useClients";
+import { useGroups } from "../../hooks/useGroups";
 
-export default function EditClientModal({ client, groups, onClose, onSaved, showToast }) {
+export default function EditClientModal({ client, onClose, onSaved, showToast }) {
+  const { data: groups = [] } = useGroups();
+  const patchClientMutation = usePatchClient();
+
   const [feeType, setFeeType] = useState("none");
   const [feeValue, setFeeValue] = useState("");
   const [groupId, setGroupId] = useState("");
   const [successUrl, setSuccessUrl] = useState("");
   const [cancelUrl, setCancelUrl] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const modalRef = useRef(null);
 
@@ -54,10 +57,7 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
     return null;
   })();
 
-  const handleSave = useCallback(async () => {
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) return;
-
+  const handleSave = useCallback(() => {
     setError("");
     const body = {
       groupId: groupId || null,
@@ -95,31 +95,31 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
       return;
     }
 
-    setLoading(true);
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/clients/${client.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+    patchClientMutation.mutate(
+      { id: client.id, body },
+      {
+        onSuccess: (updated) => {
+          showToast?.("Client updated successfully", "success");
+          onSaved?.(updated);
+          onClose();
         },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: "Failed to update client" }));
-        throw new Error(data.error || `HTTP ${res.status}`);
+        onError: (err) => {
+          setError(err.message);
+        },
       }
-      const updated = await res.json();
-      showToast?.("Client updated successfully", "success");
-      onSaved?.(updated);
-      onClose();
-    } catch (err) {
-      logger.error("Error updating client:", err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [client.id, feeType, feeValue, groupId, successUrl, cancelUrl, onClose, onSaved, showToast]);
+    );
+  }, [
+    client.id,
+    feeType,
+    feeValue,
+    groupId,
+    successUrl,
+    cancelUrl,
+    onClose,
+    onSaved,
+    showToast,
+    patchClientMutation,
+  ]);
 
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener
@@ -289,11 +289,11 @@ export default function EditClientModal({ client, groups, onClose, onSaved, show
           <button
             type="button"
             onClick={handleSave}
-            disabled={loading}
+            disabled={patchClientMutation.isPending}
             className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors
                        disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "Saving..." : "Save Changes"}
+            {patchClientMutation.isPending ? "Saving..." : "Save Changes"}
           </button>
         </div>
       </div>
