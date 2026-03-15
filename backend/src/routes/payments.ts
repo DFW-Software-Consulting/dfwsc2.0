@@ -257,7 +257,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       return reply.send({ groupId, data: merged, hasMore: false });
     }
 
-    // Single-client report (only reached when groupId is absent; clientId must be present per earlier guard)
     if (!clientId) {
       return reply.code(400).send({ error: "clientId query parameter is required." });
     }

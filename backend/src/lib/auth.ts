@@ -58,31 +58,15 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
   }
 }
 
-/**
- * Hashes an API key using bcrypt
- * @param apiKey - The plaintext API key to hash
- * @returns Promise resolving to the bcrypt hash
- */
 export async function hashApiKey(apiKey: string): Promise<string> {
   const saltRounds = 10;
   return bcrypt.hash(apiKey, saltRounds);
 }
 
-/**
- * Verifies a plaintext password against a bcrypt hash
- * @param plaintext - The plain password to verify
- * @param hashed - The bcrypt hash to compare against
- * @returns Promise resolving to true if passwords match, false otherwise
- */
 export async function verifyPassword(plaintext: string, hashed: string): Promise<boolean> {
   return bcrypt.compare(plaintext, hashed);
 }
 
-/**
- * Signs a JWT token with the given payload
- * @param payload - The payload to include in the token (must include role)
- * @returns Signed JWT token string
- */
 export function signJwt(payload: { role: string }): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
@@ -93,20 +77,13 @@ export function signJwt(payload: { role: string }): string {
   return jwt.sign(payload, secret, { expiresIn } as jwt.SignOptions);
 }
 
-/**
- * Middleware to require and verify JWT authentication for admin routes
- * Expects Authorization header in format: "Bearer <token>"
- * Validates token signature, expiry, and admin role claim
- */
 export async function requireAdminJwt(request: FastifyRequest, reply: FastifyReply) {
   const authHeader = request.headers.authorization;
 
-  // Check for Authorization header
   if (!authHeader) {
     return reply.code(401).send({ error: "Authorization header required" });
   }
 
-  // Validate Bearer token format
   const parts = authHeader.split(" ");
   if (parts.length !== 2 || parts[0] !== "Bearer") {
     return reply
@@ -116,7 +93,6 @@ export async function requireAdminJwt(request: FastifyRequest, reply: FastifyRep
 
   const token = parts[1];
 
-  // Verify JWT
   try {
     const secret = process.env.JWT_SECRET;
     if (!secret) {
@@ -125,13 +101,9 @@ export async function requireAdminJwt(request: FastifyRequest, reply: FastifyRep
 
     const decoded = jwt.verify(token, secret) as jwt.JwtPayload & { role: string };
 
-    // Verify role claim
     if (decoded.role !== "admin") {
       return reply.code(403).send({ error: "Forbidden: Admin role required" });
     }
-
-    // Optionally attach decoded payload to request for use in route handlers
-    // (request as any).user = decoded;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
       return reply.code(401).send({ error: "Token expired" });
@@ -139,7 +111,6 @@ export async function requireAdminJwt(request: FastifyRequest, reply: FastifyRep
     if (error instanceof jwt.JsonWebTokenError) {
       return reply.code(401).send({ error: "Invalid token" });
     }
-    // Unknown error
     return reply.code(401).send({ error: "Authentication failed" });
   }
 }
