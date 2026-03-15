@@ -26,9 +26,10 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         signature,
         resolvedWebhookSecret
       );
-    } catch (err: any) {
+    } catch (err: unknown) {
       fastify.log.error({ err }, "Failed to verify Stripe webhook signature.");
-      return reply.code(400).send({ error: `Webhook Error: ${err.message}` });
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send({ error: `Webhook Error: ${message}` });
     }
 
     await db

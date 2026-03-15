@@ -274,7 +274,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const [clientRecord] = clientId
         ? await db.select().from(clients).where(eq(clients.id, clientId))
-        : await db.select().from(clients).where(eq(clients.email, email!));
+        : email
+          ? await db.select().from(clients).where(eq(clients.email, email))
+          : [];
 
       if (!clientRecord) {
         return reply.code(404).send({ error: "Client not found." });

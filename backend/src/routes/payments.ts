@@ -237,7 +237,9 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       const groupClients = await db.select().from(clients).where(eq(clients.groupId, groupId));
 
-      const connected = groupClients.filter((c) => c.stripeAccountId);
+      const connected = groupClients.filter(
+        (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null
+      );
       if (connected.length === 0) {
         return reply.send({ groupId, data: [], hasMore: false });
       }
@@ -245,7 +247,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       const results = await Promise.all(
         connected.map(async (c) => {
           const pi = await stripe.paymentIntents.list(listParams, {
-            stripeAccount: c.stripeAccountId!,
+            stripeAccount: c.stripeAccountId,
           });
           return pi.data.map((p) => ({ ...p, clientId: c.id }));
         })
@@ -255,8 +257,11 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       return reply.send({ groupId, data: merged, hasMore: false });
     }
 
-    // Single-client report
-    const [client] = await db.select().from(clients).where(eq(clients.id, clientId!)).limit(1);
+    // Single-client report (only reached when groupId is absent; clientId must be present per earlier guard)
+    if (!clientId) {
+      return reply.code(400).send({ error: "clientId query parameter is required." });
+    }
+    const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
     if (!client || !client.stripeAccountId) {
       return reply.code(404).send({ error: "Client with connected account not found." });
     }

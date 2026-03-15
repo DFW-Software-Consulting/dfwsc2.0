@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const webhookHelper = new Stripe("sk_test_12345", { apiVersion: "2023-10-16" });
 
+const TEST_JWT_SECRET = "test_jwt_secret_minimum_32_characters_long";
+const TEST_WEBHOOK_SECRET = "whsec_test_secret";
+
 vi.mock("bcryptjs", () => ({
   default: {
     hash: async (plaintext: string) => `hashed:${plaintext}`,
@@ -125,7 +128,6 @@ function isColumn(column: any, name: string): boolean {
   return resolved === camelCased;
 }
 
-// biome-ignore lint/suspicious/noThenProperty: intentionally implements thenable for drizzle mock compatibility
 function createWhereResult(rowsPromise: Promise<any[]>) {
   return {
     limit: async () => (await rowsPromise).slice(0, 1),
@@ -183,7 +185,6 @@ const dbMock = {
           return [];
         })();
 
-        // biome-ignore lint/suspicious/noThenProperty: intentionally implements thenable for drizzle mock
         return {
           then: rowsPromise.then.bind(rowsPromise),
           catch: rowsPromise.catch.bind(rowsPromise),
@@ -363,7 +364,6 @@ const dbMock = {
         };
 
         const resultPromise = Promise.resolve(applyUpdate());
-        // biome-ignore lint/suspicious/noThenProperty: intentionally implements thenable for drizzle mock
         return {
           returning: async () => {
             const row = await resultPromise;
@@ -469,13 +469,13 @@ function seedClient({
 
 beforeEach(async () => {
   process.env.STRIPE_SECRET_KEY = "sk_test_12345";
-  process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_secret";
+  process.env.STRIPE_WEBHOOK_SECRET = TEST_WEBHOOK_SECRET;
   process.env.FRONTEND_ORIGIN = "http://localhost:5173";
   process.env.DATABASE_URL =
     process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/test";
   process.env.API_BASE_URL = "http://localhost:4242";
   process.env.USE_CHECKOUT = "false";
-  process.env.JWT_SECRET = "test_jwt_secret_minimum_32_characters_long";
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
 
   // MailHog config
   process.env.SMTP_HOST = "mailhog";
@@ -876,7 +876,7 @@ describe("payments", () => {
 describe("connect onboarding", () => {
   it("creates an onboarding token and client via /accounts", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "POST",
@@ -908,7 +908,7 @@ describe("connect onboarding", () => {
 
   it("sends onboarding email via /onboard-client/initiate", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "POST",
@@ -1214,7 +1214,7 @@ describe("connect callback", () => {
 describe("reports", () => {
   it("requires clientId or groupId query parameter", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "GET",
@@ -1231,7 +1231,7 @@ describe("reports", () => {
 
   it("returns 404 when the client does not exist", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "GET",
@@ -1250,7 +1250,7 @@ describe("reports", () => {
     seedClient({ id: "client_invalid_limit", stripeAccountId: "acct_123" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "GET",
@@ -1269,7 +1269,7 @@ describe("reports", () => {
     stripeMock.paymentIntents.list.mockResolvedValue({ data: [], has_more: false });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     seedClient({ id: "client_1", stripeAccountId: "acct_123" });
 
@@ -1334,7 +1334,7 @@ describe("webhooks", () => {
     });
     const signature = webhookHelper.webhooks.generateTestHeaderString({
       payload,
-      secret: process.env.STRIPE_WEBHOOK_SECRET!,
+      secret: TEST_WEBHOOK_SECRET,
     });
 
     const server = await createServer();
@@ -1377,7 +1377,7 @@ describe("app-config", () => {
 describe("email", () => {
   it("sends an onboarding email", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "POST",
@@ -1405,7 +1405,7 @@ describe("email", () => {
 describe("client groups", () => {
   it("creates a group", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "POST",
@@ -1424,7 +1424,7 @@ describe("client groups", () => {
 
   it("rejects group creation without a name", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "POST",
@@ -1448,7 +1448,7 @@ describe("client groups", () => {
     });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "GET",
@@ -1473,7 +1473,7 @@ describe("client groups", () => {
     });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "PATCH",
@@ -1491,7 +1491,7 @@ describe("client groups", () => {
 
   it("returns 404 when patching a non-existent group", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "PATCH",
@@ -1519,7 +1519,7 @@ describe("client groups", () => {
     seedClient({ id: "c_other", stripeAccountId: "acct_other" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "GET",
@@ -1545,7 +1545,7 @@ describe("client groups", () => {
     seedClient({ id: "c_patch", stripeAccountId: "acct_p" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "PATCH",
@@ -1563,7 +1563,7 @@ describe("client groups", () => {
     seedClient({ id: "c_bad_grp", stripeAccountId: "acct_bg" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "PATCH",
@@ -1595,7 +1595,7 @@ describe("client groups", () => {
       .mockResolvedValueOnce({ data: [{ id: "pi_gc2" }], has_more: false });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "GET",
@@ -1613,7 +1613,7 @@ describe("client groups", () => {
 
   it("returns 404 for reports with a non-existent groupId", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, process.env.JWT_SECRET!, { expiresIn: "1h" });
+    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
 
     const response = await server.inject({
       method: "GET",

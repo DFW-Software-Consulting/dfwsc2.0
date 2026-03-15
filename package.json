@@ -19,7 +19,8 @@
     "db:migrate": "npm run db:migrate --prefix backend",
     "lint": "biome check backend/src front/src",
     "lint:fix": "biome check --write backend/src front/src",
-    "format": "biome format --write backend/src front/src"
+    "format": "biome format --write backend/src front/src",
+    "prepare": "husky"
   },
   "keywords": [
     "stripe",
@@ -35,6 +36,16 @@
     "url": "git+https://github.com/DFW-Software-Consulting/dfwsc2.0.git"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.7"
+    "@biomejs/biome": "^2.4.7",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0"
+  },
+  "lint-staged": {
+    "backend/src/**/*.{ts,js}": [
+      "biome check --write --no-errors-on-unmatched"
+    ],
+    "front/src/**/*.{ts,tsx,js,jsx}": [
+      "biome check --write --no-errors-on-unmatched"
+    ]
   }
 }
