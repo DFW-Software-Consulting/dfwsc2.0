@@ -20,6 +20,8 @@ This is the internal API for the DFWSC payment portal. It handles client onboard
    - [Reports](#reports)
    - [Clients](#clients)
    - [Groups](#groups)
+   - [Invoices](#invoices)
+   - [Subscriptions](#subscriptions)
    - [Webhooks](#webhooks)
 7. [Flows](#flows)
    - [Onboarding a New Client](#onboarding-a-new-client)
@@ -624,6 +626,194 @@ All fields optional:
 ```
 
 Same validation rules as `PATCH /clients/:id`. Returns updated group object.
+
+---
+
+### Invoices
+
+Invoices represent one-time or subscription-generated billing records. Clients pay invoices via a public payment token URL.
+
+#### `GET /api/v1/invoices`
+
+**Auth: Admin JWT**
+
+List invoices. Supports optional filters.
+
+**Query params:**
+- `clientId` (optional) — filter to a specific client
+- `status` (optional) — `pending`, `paid`, or `cancelled`
+- `limit` (optional) — max results to return
+
+**Response `200`:** Array of invoice objects.
+
+---
+
+#### `POST /api/v1/invoices`
+
+**Auth: Admin JWT**
+
+Create a new invoice.
+
+**Request:**
+```json
+{
+  "clientId": "abc123",
+  "amountCents": 15000,
+  "description": "March retainer",
+  "dueDate": "2026-04-01",
+  "subscriptionId": null
+}
+```
+
+- `clientId` — required
+- `amountCents` — required, positive integer
+- `description` — required
+- `dueDate` — optional ISO date string
+- `subscriptionId` — optional, links invoice to a subscription
+
+**Response `201`:** Created invoice object including `paymentToken`.
+
+---
+
+#### `PATCH /api/v1/invoices/:id`
+
+**Auth: Admin JWT**
+
+Cancel a pending invoice.
+
+**Request:**
+```json
+{ "status": "cancelled" }
+```
+
+Only `pending` invoices can be cancelled.
+
+**Response `200`:** Updated invoice object.
+
+**Errors:**
+- `400` — Invoice is not in `pending` status
+- `404` — Invoice not found
+
+---
+
+#### `GET /api/v1/invoices/pay/:token`
+
+No auth. Public endpoint for clients to fetch their invoice via the payment token.
+
+**Response `200`:** Invoice details including amount and description.
+
+**Errors:**
+- `404` — Token not found or invoice already paid/cancelled
+
+---
+
+#### `POST /api/v1/invoices/pay/:token`
+
+No auth. Submit a mock payment for an invoice.
+
+**Request:** Card fields (not validated — mock only):
+```json
+{
+  "cardNumber": "4242424242424242",
+  "expiry": "12/27",
+  "cvc": "123"
+}
+```
+
+**Response `200`:** Confirmation that payment was recorded and invoice marked `paid`.
+
+**Errors:**
+- `404` — Token not found
+- `409` — Invoice already paid or cancelled
+
+---
+
+### Subscriptions
+
+Subscriptions define recurring billing schedules. Each billing cycle generates an invoice automatically.
+
+#### `GET /api/v1/subscriptions`
+
+**Auth: Admin JWT**
+
+List all subscriptions.
+
+**Response `200`:** Array of subscription objects.
+
+---
+
+#### `POST /api/v1/subscriptions`
+
+**Auth: Admin JWT**
+
+Create a new subscription.
+
+**Request:**
+```json
+{
+  "clientId": "abc123",
+  "amountCents": 15000,
+  "description": "Monthly retainer",
+  "interval": "monthly",
+  "totalPayments": 12
+}
+```
+
+- `clientId` — required
+- `amountCents` — required, positive integer
+- `description` — required
+- `interval` — required: `monthly`, `quarterly`, or `yearly`
+- `totalPayments` — optional; omit for indefinite billing
+
+**Response `201`:** Created subscription object with `nextBillingDate`.
+
+---
+
+#### `GET /api/v1/subscriptions/:id`
+
+**Auth: Admin JWT**
+
+Get a single subscription and its associated invoices.
+
+**Response `200`:**
+```json
+{
+  "id": "sub_abc",
+  "clientId": "abc123",
+  "amountCents": 15000,
+  "description": "Monthly retainer",
+  "interval": "monthly",
+  "totalPayments": 12,
+  "paymentsMade": 3,
+  "status": "active",
+  "nextBillingDate": "2026-04-01",
+  "invoices": [...]
+}
+```
+
+**Errors:**
+- `404` — Subscription not found
+
+---
+
+#### `PATCH /api/v1/subscriptions/:id`
+
+**Auth: Admin JWT**
+
+Update a subscription's status.
+
+**Request:**
+```json
+{ "status": "paused" }
+```
+
+Valid values: `active`, `paused`, `cancelled`.
+
+**Response `200`:** Updated subscription object.
+
+**Errors:**
+- `400` — Invalid status value
+- `404` — Subscription not found
 
 ---
 

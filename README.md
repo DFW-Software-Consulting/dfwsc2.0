@@ -34,6 +34,7 @@ dfwsc2.0/
 - **React 18** - UI framework
 - **Vite** - Build tool & dev server
 - **React Router 6** - Client-side routing
+- **TanStack Query v5** - Server state management & data fetching
 - **TailwindCSS v4** - Utility-first CSS
 
 ### Backend
@@ -139,14 +140,30 @@ All API routes are prefixed with `/api/v1`:
 |--------|------|-------------|------|
 | GET | `/api/v1/health` | Health check | Public |
 | POST | `/api/v1/auth/login` | Admin login (returns JWT token) | Public |
+| GET | `/api/v1/auth/setup/status` | Bootstrap setup status | Public |
+| POST | `/api/v1/auth/setup` | First-run admin setup | Optional token |
 | GET | `/api/v1/clients` | List all clients | Admin (JWT) |
-| PATCH | `/api/v1/clients/:id` | Update client status | Admin (JWT) |
-| POST | `/api/v1/accounts` | Create client account | Admin |
-| POST | `/api/v1/onboard-client/initiate` | Send onboarding email | Admin |
+| PATCH | `/api/v1/clients/:id` | Update client config | Admin (JWT) |
+| POST | `/api/v1/accounts` | Create client account | Admin (JWT) |
+| POST | `/api/v1/onboard-client/initiate` | Send onboarding email | Admin (JWT) |
+| POST | `/api/v1/onboard-client/resend` | Resend onboarding email | Admin (JWT) |
 | GET | `/api/v1/onboard-client` | Get Stripe onboarding link | Public |
 | GET | `/api/v1/connect/callback` | Stripe Connect callback | Public |
-| POST | `/api/v1/payments/create` | Create payment | Admin/Client |
-| GET | `/api/v1/reports/payments` | List payments | Admin |
+| GET | `/api/v1/connect/refresh` | Refresh Stripe account link | Public |
+| POST | `/api/v1/payments/create` | Create payment | Client (API key) |
+| GET | `/api/v1/reports/payments` | List payments | Admin (JWT) |
+| GET | `/api/v1/groups` | List client groups | Admin (JWT) |
+| POST | `/api/v1/groups` | Create client group | Admin (JWT) |
+| PATCH | `/api/v1/groups/:id` | Update group config | Admin (JWT) |
+| GET | `/api/v1/invoices` | List invoices | Admin (JWT) |
+| POST | `/api/v1/invoices` | Create invoice | Admin (JWT) |
+| PATCH | `/api/v1/invoices/:id` | Cancel invoice | Admin (JWT) |
+| GET | `/api/v1/invoices/pay/:token` | Fetch invoice by token | Public |
+| POST | `/api/v1/invoices/pay/:token` | Submit invoice payment | Public |
+| GET | `/api/v1/subscriptions` | List subscriptions | Admin (JWT) |
+| POST | `/api/v1/subscriptions` | Create subscription | Admin (JWT) |
+| GET | `/api/v1/subscriptions/:id` | Get subscription + invoices | Admin (JWT) |
+| PATCH | `/api/v1/subscriptions/:id` | Update subscription status | Admin (JWT) |
 | POST | `/api/v1/webhooks/stripe` | Stripe webhooks | Stripe |
 
 ## 🌐 Frontend Routes
