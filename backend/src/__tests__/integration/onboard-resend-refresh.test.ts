@@ -23,19 +23,14 @@ vi.mock("../../lib/rate-limit", () => ({
 
 import { randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import jwt from "jsonwebtoken";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, onboardingTokens } from "../../db/schema";
 import { sendMail } from "../../lib/mailer";
 import { stripe } from "../../lib/stripe";
-
-const TEST_JWT_SECRET = "test_jwt_secret_minimum_32_characters_long_random_string";
-
-function makeAdminToken() {
-  return jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
-}
+import { makeAdminToken } from "../helpers/auth";
+import { ensureBaseEnv } from "../helpers/env";
 
 describe("Onboard Resend + Connect Refresh", () => {
   let app: any;
@@ -49,12 +44,7 @@ describe("Onboard Resend + Connect Refresh", () => {
   const extraClientIds: string[] = [];
 
   beforeAll(async () => {
-    process.env.FRONTEND_ORIGIN ??= "http://localhost:5173";
-    process.env.USE_CHECKOUT ??= "false";
-    process.env.SMTP_HOST ??= "mailhog";
-    process.env.SMTP_PORT ??= "1025";
-    process.env.SMTP_USER ??= "test";
-    process.env.SMTP_PASS ??= "test";
+    ensureBaseEnv();
     process.env.API_BASE_URL = "http://localhost:4242";
 
     clientAId = randomUUID();

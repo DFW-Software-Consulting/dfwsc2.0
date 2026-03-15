@@ -12,17 +12,12 @@ vi.mock("../../lib/stripe", () => ({
 
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import jwt from "jsonwebtoken";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clientGroups } from "../../db/schema";
-
-const TEST_JWT_SECRET = "test_jwt_secret_minimum_32_characters_long_random_string";
-
-function makeAdminToken() {
-  return jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
-}
+import { makeAdminToken } from "../helpers/auth";
+import { ensureBaseEnv } from "../helpers/env";
 
 const createdGroupIds: string[] = [];
 
@@ -30,13 +25,7 @@ describe("Groups API", () => {
   let app: any;
 
   beforeAll(async () => {
-    process.env.FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
-    process.env.USE_CHECKOUT = process.env.USE_CHECKOUT ?? "false";
-    process.env.SMTP_HOST = process.env.SMTP_HOST ?? "mailhog";
-    process.env.SMTP_PORT = process.env.SMTP_PORT ?? "1025";
-    process.env.SMTP_USER = process.env.SMTP_USER ?? "test";
-    process.env.SMTP_PASS = process.env.SMTP_PASS ?? "test";
-
+    ensureBaseEnv();
     app = await buildServer();
   });
 

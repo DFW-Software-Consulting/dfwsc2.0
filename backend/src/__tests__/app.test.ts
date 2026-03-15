@@ -1,11 +1,9 @@
-import jwt from "jsonwebtoken";
-import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-const webhookHelper = new Stripe("sk_test_12345", { apiVersion: "2023-10-16" });
-
-const TEST_JWT_SECRET = "test_jwt_secret_minimum_32_characters_long";
-const TEST_WEBHOOK_SECRET = "whsec_test_secret";
+import { makeAdminToken } from "./helpers/auth";
+import { TEST_WEBHOOK_SECRET } from "./helpers/constants";
+import { setTestEnv } from "./helpers/env";
+import { createAppDbMock, createNodemailerMock, createStripeMock } from "./helpers/mock-factories";
+import { seedClient as _seedClient, seedClientGroup, seedOnboardingToken } from "./helpers/seed";
 
 vi.mock("bcryptjs", () => ({
   default: {
@@ -81,407 +79,40 @@ vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
   return realFetch(input as RequestInfo, init);
 });
 
-const DRIZZLE_NAME_SYMBOL = Symbol.for("drizzle:Name");
-
-function resolveTableName(table: any): string | undefined {
-  if (!table) {
-    return undefined;
-  }
-  if (typeof table.tableName === "string") {
-    return table.tableName;
-  }
-  const symbolValue = (table as Record<symbol, unknown>)[DRIZZLE_NAME_SYMBOL];
-  return typeof symbolValue === "string" ? symbolValue : undefined;
-}
-
-function isTable(table: any, name: string): boolean {
-  return resolveTableName(table) === name;
-}
-
-function resolveColumnName(column: any): string | undefined {
-  if (!column) {
-    return undefined;
-  }
-  if (typeof column === "string") {
-    return column;
-  }
-  if (typeof column.name === "string") {
-    return column.name;
-  }
-  const columnName = (column as { columnName?: unknown }).columnName;
-  if (typeof columnName === "string") {
-    return columnName;
-  }
-  const symbolValue = (column as Record<symbol, unknown>)[DRIZZLE_NAME_SYMBOL];
-  return typeof symbolValue === "string" ? symbolValue : undefined;
-}
-
-function isColumn(column: any, name: string): boolean {
-  const resolved = resolveColumnName(column);
-  if (!resolved) {
-    return false;
-  }
-  if (resolved === name) {
-    return true;
-  }
-  const camelCased = name.replace(/_([a-z])/g, (_match, char) => char.toUpperCase());
-  return resolved === camelCased;
-}
-
-function createWhereResult(rowsPromise: Promise<any[]>) {
-  return {
-    limit: async () => (await rowsPromise).slice(0, 1),
-    then: rowsPromise.then.bind(rowsPromise),
-    catch: rowsPromise.catch.bind(rowsPromise),
-    finally: rowsPromise.finally.bind(rowsPromise),
-  };
-}
-
-function findOnboardingTokenByToken(token?: string) {
-  if (!token) {
-    return undefined;
-  }
-  for (const record of dataStore.onboardingTokens.values()) {
-    if (record.token === token) {
-      return record;
-    }
-  }
-  return undefined;
-}
-
-function findClientByApiKey(apiKey?: string) {
-  if (!apiKey) {
-    return undefined;
-  }
-  const clientId = dataStore.clientsByApiKey.get(apiKey);
-  if (clientId) {
-    return dataStore.clients.get(clientId);
-  }
-  for (const client of dataStore.clients.values()) {
-    if (client.apiKey === apiKey) {
-      return client;
-    }
-  }
-  return undefined;
-}
-
-const dbMock = {
-  select: vi.fn(() => ({
-    from: (table: any) => ({
-      ...(() => {
-        const rowsPromise = (async () => {
-          if (isTable(table, "clients")) {
-            return Array.from(dataStore.clients.values());
-          }
-          if (isTable(table, "onboarding_tokens")) {
-            return Array.from(dataStore.onboardingTokens.values());
-          }
-          if (isTable(table, "webhook_events")) {
-            return Array.from(dataStore.webhookEvents.values());
-          }
-          if (isTable(table, "client_groups")) {
-            return Array.from(dataStore.clientGroups.values());
-          }
-          return [];
-        })();
-
-        return {
-          then: rowsPromise.then.bind(rowsPromise),
-          catch: rowsPromise.catch.bind(rowsPromise),
-          finally: rowsPromise.finally.bind(rowsPromise),
-        };
-      })(),
-      where: (expr: any) => {
-        const rowsPromise = (async () => {
-          if (isTable(table, "clients")) {
-            if (isColumn(expr?.field, "api_key")) {
-              const client = findClientByApiKey(expr?.value);
-              return client ? [client] : [];
-            }
-
-            if (expr?.isNull) {
-              return Array.from(dataStore.clients.values()).filter(
-                (client) => client.apiKeyLookup == null
-              );
-            }
-
-            if (isColumn(expr?.field, "group_id")) {
-              return Array.from(dataStore.clients.values()).filter(
-                (c) => c.groupId === expr?.value
-              );
-            }
-
-            const row = dataStore.clients.get(expr?.value);
-            return row ? [row] : [];
-          }
-
-          if (isTable(table, "client_groups")) {
-            const row = dataStore.clientGroups.get(expr?.value);
-            return row ? [row] : [];
-          }
-
-          if (isTable(table, "onboarding_tokens")) {
-            if (expr?.all?.length) {
-              const records = Array.from(dataStore.onboardingTokens.values());
-              const matches = records.filter((record) =>
-                expr.all.every((condition: any) => {
-                  if (!condition) {
-                    return false;
-                  }
-                  if (isColumn(condition.field, "token")) {
-                    return record.token === condition.value;
-                  }
-                  if (isColumn(condition.field, "status")) {
-                    return record.status === condition.value;
-                  }
-                  if (
-                    isColumn(condition.field, "client_id") ||
-                    isColumn(condition.field, "clientId")
-                  ) {
-                    return record.clientId === condition.value;
-                  }
-                  if (isColumn(condition.field, "state")) {
-                    return record.state === condition.value;
-                  }
-                  return false;
-                })
-              );
-              return matches;
-            }
-
-            if (isColumn(expr?.field, "token")) {
-              const record = findOnboardingTokenByToken(expr?.value);
-              return record ? [record] : [];
-            }
-
-            const record = dataStore.onboardingTokens.get(expr?.value);
-            return record ? [record] : [];
-          }
-
-          return [];
-        })();
-
-        return createWhereResult(rowsPromise);
-      },
-    }),
-  })),
-  insert: vi.fn((table: any) => ({
-    values: (payload: any) => {
-      if (isTable(table, "clients")) {
-        const existing = dataStore.clients.get(payload.id);
-        const apiKey = payload.apiKey ?? existing?.apiKey ?? null;
-        const apiKeyHash =
-          payload.apiKeyHash ?? existing?.apiKeyHash ?? (apiKey ? `hashed:${apiKey}` : null);
-        const next = {
-          id: payload.id,
-          name: payload.name ?? existing?.name,
-          email: payload.email ?? existing?.email,
-          apiKey,
-          apiKeyHash,
-          status: payload.status ?? existing?.status ?? "active",
-          stripeAccountId: payload.stripeAccountId ?? existing?.stripeAccountId ?? null,
-          createdAt: existing?.createdAt ?? new Date(),
-          updatedAt: new Date(),
-        };
-        dataStore.clients.set(payload.id, next);
-        if (apiKey) {
-          dataStore.clientsByApiKey.set(apiKey, payload.id);
-        }
-      }
-
-      if (isTable(table, "webhook_events")) {
-        if (!dataStore.webhookEvents.has(payload.stripeEventId)) {
-          dataStore.webhookEvents.set(payload.stripeEventId, { ...payload });
-        }
-      }
-
-      if (isTable(table, "onboarding_tokens")) {
-        const next = {
-          id: payload.id,
-          clientId: payload.clientId,
-          token: payload.token,
-          status: payload.status ?? "pending",
-          email: payload.email,
-          state: payload.state ?? null,
-          stateExpiresAt: payload.stateExpiresAt ?? null,
-          createdAt: payload.createdAt ?? new Date(),
-          updatedAt: new Date(),
-        };
-        dataStore.onboardingTokens.set(payload.id, next);
-      }
-
-      if (isTable(table, "client_groups")) {
-        const next = {
-          id: payload.id,
-          name: payload.name,
-          status: payload.status ?? "active",
-          createdAt: payload.createdAt ?? new Date(),
-          updatedAt: payload.updatedAt ?? new Date(),
-        };
-        dataStore.clientGroups.set(payload.id, next);
-      }
-
-      return {
-        onConflictDoNothing: async () => {},
-      };
-    },
-  })),
-  update: vi.fn((table: any) => ({
-    set: (values: any) => ({
-      where: (expr: any) => {
-        const applyUpdate = () => {
-          if (isTable(table, "clients")) {
-            const row = dataStore.clients.get(expr.value);
-            if (!row) return null;
-            Object.assign(row, values);
-            if (values.apiKey) {
-              dataStore.clientsByApiKey.set(values.apiKey, row.id);
-            }
-            if (Object.hasOwn(values, "apiKeyHash")) {
-              row.apiKeyHash = values.apiKeyHash;
-            }
-            return row;
-          }
-          if (isTable(table, "client_groups")) {
-            const row = dataStore.clientGroups.get(expr.value);
-            if (!row) return null;
-            Object.assign(row, values);
-            return row;
-          }
-          if (isTable(table, "onboarding_tokens")) {
-            const row = dataStore.onboardingTokens.get(expr.value);
-            if (!row) return null;
-            Object.assign(row, values);
-            return row;
-          }
-          if (isTable(table, "webhook_events")) {
-            const row = dataStore.webhookEvents.get(expr.value);
-            if (!row) return null;
-            Object.assign(row, values);
-            return row;
-          }
-          return null;
-        };
-
-        const resultPromise = Promise.resolve(applyUpdate());
-        return {
-          returning: async () => {
-            const row = await resultPromise;
-            return row ? [row] : [];
-          },
-          then: (resolve: any, reject: any) =>
-            resultPromise
-              .then((row) => (row ? { rowCount: 1 } : { rowCount: 0 }))
-              .then(resolve, reject),
-          catch: (reject: any) => resultPromise.catch(reject),
-          finally: (cb: any) => resultPromise.finally(cb),
-        };
-      },
-    }),
-  })),
-  transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(dbMock)),
-};
+const dbMock = createAppDbMock(dataStore);
 
 vi.mock("../db/client", () => ({
   db: dbMock,
   __dataStore: dataStore,
 }));
 
-const stripeMock = {
-  accounts: {
-    create: vi.fn(),
-  },
-  accountLinks: {
-    create: vi.fn(),
-  },
-  paymentIntents: {
-    create: vi.fn(),
-    list: vi.fn(),
-  },
-  checkout: {
-    sessions: {
-      create: vi.fn(),
-    },
-  },
-  webhooks: webhookHelper.webhooks,
-};
+const stripeMock = createStripeMock();
 
 vi.mock("../lib/stripe", () => ({
   stripe: stripeMock,
 }));
 
-vi.mock("nodemailer", () => {
-  const sendMail = vi.fn(async (options: any) => {
-    const to = options.to;
-    const recipients = Array.isArray(to) ? to.map(String) : [String(to ?? "")];
-
-    mailhogMessages.push({
-      Content: {
-        Headers: {
-          Subject: [options.subject ?? ""],
-          To: recipients,
-        },
-      },
-    });
-
-    return {};
-  });
-
-  const createTransport = () => ({ sendMail });
-
+const nodemailerMock = createNodemailerMock(mailhogMessages, (options: any) => {
+  const to = options.to;
+  const recipients = Array.isArray(to) ? to.map(String) : [String(to ?? "")];
   return {
-    __esModule: true,
-    default: { createTransport },
-    createTransport,
+    Content: {
+      Headers: {
+        Subject: [options.subject ?? ""],
+        To: recipients,
+      },
+    },
   };
 });
 
-function seedClient({
-  id,
-  stripeAccountId,
-  name = "Acme Corp",
-  email = "billing@acme.test",
-  apiKey = `api-key-${id}`,
-  apiKeyHash,
-  status = "active",
-}: {
-  id: string;
-  stripeAccountId?: string | null;
-  name?: string;
-  email?: string;
-  apiKey?: string;
-  apiKeyHash?: string | null;
-  status?: string;
-}) {
-  dataStore.clients.set(id, {
-    id,
-    name,
-    email,
-    apiKey,
-    apiKeyHash: apiKeyHash ?? `hashed:${apiKey}`,
-    status,
-    stripeAccountId: stripeAccountId ?? null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
-  dataStore.clientsByApiKey.set(apiKey, id);
+vi.mock("nodemailer", () => nodemailerMock);
+
+function seedClient(opts: Parameters<typeof _seedClient>[1]) {
+  return _seedClient(dataStore, opts);
 }
 
 beforeEach(async () => {
-  process.env.STRIPE_SECRET_KEY = "sk_test_12345";
-  process.env.STRIPE_WEBHOOK_SECRET = TEST_WEBHOOK_SECRET;
-  process.env.FRONTEND_ORIGIN = "http://localhost:5173";
-  process.env.DATABASE_URL =
-    process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/test";
-  process.env.API_BASE_URL = "http://localhost:4242";
-  process.env.USE_CHECKOUT = "false";
-  process.env.JWT_SECRET = TEST_JWT_SECRET;
-
-  // MailHog config
-  process.env.SMTP_HOST = "mailhog";
-  process.env.SMTP_PORT = "1025";
-  process.env.SMTP_USER = "test";
-  process.env.SMTP_PASS = "test";
+  setTestEnv();
 
   try {
     await fetch("http://localhost:1025/api/v1/messages", { method: "DELETE" });
@@ -876,7 +507,7 @@ describe("payments", () => {
 describe("connect onboarding", () => {
   it("creates an onboarding token and client via /accounts", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "POST",
@@ -908,7 +539,7 @@ describe("connect onboarding", () => {
 
   it("sends onboarding email via /onboard-client/initiate", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "POST",
@@ -958,14 +589,12 @@ describe("connect onboarding", () => {
 
     const onboardingTokenId = "token_1";
     const onboardingToken = "token_value_1";
-    dataStore.onboardingTokens.set(onboardingTokenId, {
+    seedOnboardingToken(dataStore, {
       id: onboardingTokenId,
       clientId,
       token: onboardingToken,
       status: "pending",
       email: "pending@example.com",
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
 
     const server = await createServer();
@@ -1027,14 +656,14 @@ describe("connect callback", () => {
   it("rejects callback with expired state", async () => {
     const clientId = "client_expired_state";
     const onboardingTokenId = "token_expired";
-    dataStore.onboardingTokens.set(onboardingTokenId, {
+    seedOnboardingToken(dataStore, {
       id: onboardingTokenId,
       clientId,
       token: "expired_token",
       status: "in_progress",
       email: "test@test.com",
       state: "expired_state_val",
-      stateExpiresAt: new Date(Date.now() - 1000), // Expired
+      stateExpiresAt: new Date(Date.now() - 1000),
     });
     const server = await createServer();
     const response = await server.inject({
@@ -1056,7 +685,7 @@ describe("connect callback", () => {
     });
     const onboardingTokenId = "token_existing";
     const state = "state_existing";
-    dataStore.onboardingTokens.set(onboardingTokenId, {
+    seedOnboardingToken(dataStore, {
       id: onboardingTokenId,
       clientId,
       token: "token_value_existing",
@@ -1064,8 +693,6 @@ describe("connect callback", () => {
       email: "existing@example.com",
       state,
       stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
 
     const server = await createServer();
@@ -1101,7 +728,7 @@ describe("connect callback", () => {
     });
     const onboardingTokenId = "token_json";
     const state = "state_json";
-    dataStore.onboardingTokens.set(onboardingTokenId, {
+    seedOnboardingToken(dataStore, {
       id: onboardingTokenId,
       clientId,
       token: "token_value_json",
@@ -1109,8 +736,6 @@ describe("connect callback", () => {
       email: "json@example.com",
       state,
       stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
 
     const server = await createServer({ skipEnvValidation: true });
@@ -1132,7 +757,7 @@ describe("connect callback", () => {
     const clientId = "missing";
     const onboardingTokenId = "token_missing";
     const state = "state_missing";
-    dataStore.onboardingTokens.set(onboardingTokenId, {
+    seedOnboardingToken(dataStore, {
       id: onboardingTokenId,
       clientId,
       token: "token_value_missing",
@@ -1140,8 +765,6 @@ describe("connect callback", () => {
       email: "missing@example.com",
       state,
       stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
     const server = await createServer();
 
@@ -1180,7 +803,7 @@ describe("connect callback", () => {
     });
     const onboardingTokenId = "token_missing_account";
     const state = "state_missing_account";
-    dataStore.onboardingTokens.set(onboardingTokenId, {
+    seedOnboardingToken(dataStore, {
       id: onboardingTokenId,
       clientId,
       token: "token_value_missing_account",
@@ -1188,8 +811,6 @@ describe("connect callback", () => {
       email: "missing-account@example.com",
       state,
       stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
 
     const server = await createServer();
@@ -1214,7 +835,7 @@ describe("connect callback", () => {
 describe("reports", () => {
   it("requires clientId or groupId query parameter", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "GET",
@@ -1231,7 +852,7 @@ describe("reports", () => {
 
   it("returns 404 when the client does not exist", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "GET",
@@ -1250,7 +871,7 @@ describe("reports", () => {
     seedClient({ id: "client_invalid_limit", stripeAccountId: "acct_123" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "GET",
@@ -1269,7 +890,7 @@ describe("reports", () => {
     stripeMock.paymentIntents.list.mockResolvedValue({ data: [], has_more: false });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     seedClient({ id: "client_1", stripeAccountId: "acct_123" });
 
@@ -1332,7 +953,7 @@ describe("webhooks", () => {
       type: "payment_intent.succeeded",
       data: { object: { id: "pi_123", status: "succeeded" } },
     });
-    const signature = webhookHelper.webhooks.generateTestHeaderString({
+    const signature = stripeMock.webhooks.generateTestHeaderString({
       payload,
       secret: TEST_WEBHOOK_SECRET,
     });
@@ -1377,7 +998,7 @@ describe("app-config", () => {
 describe("email", () => {
   it("sends an onboarding email", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "POST",
@@ -1405,7 +1026,7 @@ describe("email", () => {
 describe("client groups", () => {
   it("creates a group", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "POST",
@@ -1424,7 +1045,7 @@ describe("client groups", () => {
 
   it("rejects group creation without a name", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "POST",
@@ -1439,16 +1060,10 @@ describe("client groups", () => {
   });
 
   it("lists groups", async () => {
-    dataStore.clientGroups.set("grp_1", {
-      id: "grp_1",
-      name: "Group One",
-      status: "active",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    seedClientGroup(dataStore, { id: "grp_1", name: "Group One" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "GET",
@@ -1464,16 +1079,10 @@ describe("client groups", () => {
   });
 
   it("updates a group name and status", async () => {
-    dataStore.clientGroups.set("grp_2", {
-      id: "grp_2",
-      name: "Old Name",
-      status: "active",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    seedClientGroup(dataStore, { id: "grp_2", name: "Old Name" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "PATCH",
@@ -1491,7 +1100,7 @@ describe("client groups", () => {
 
   it("returns 404 when patching a non-existent group", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "PATCH",
@@ -1505,13 +1114,7 @@ describe("client groups", () => {
   });
 
   it("filters GET /clients by groupId", async () => {
-    dataStore.clientGroups.set("grp_3", {
-      id: "grp_3",
-      name: "PropCo",
-      status: "active",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    seedClientGroup(dataStore, { id: "grp_3", name: "PropCo" });
     seedClient({ id: "c_a", stripeAccountId: "acct_a" });
     seedClient({ id: "c_b", stripeAccountId: "acct_b" });
     dataStore.clients.get("c_a").groupId = "grp_3";
@@ -1519,7 +1122,7 @@ describe("client groups", () => {
     seedClient({ id: "c_other", stripeAccountId: "acct_other" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "GET",
@@ -1535,17 +1138,11 @@ describe("client groups", () => {
   });
 
   it("assigns a groupId to a client via PATCH /clients/:id", async () => {
-    dataStore.clientGroups.set("grp_4", {
-      id: "grp_4",
-      name: "MegaCo",
-      status: "active",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    seedClientGroup(dataStore, { id: "grp_4", name: "MegaCo" });
     seedClient({ id: "c_patch", stripeAccountId: "acct_p" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "PATCH",
@@ -1563,7 +1160,7 @@ describe("client groups", () => {
     seedClient({ id: "c_bad_grp", stripeAccountId: "acct_bg" });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "PATCH",
@@ -1578,13 +1175,7 @@ describe("client groups", () => {
   });
 
   it("aggregates payments for a group via GET /reports/payments?groupId=", async () => {
-    dataStore.clientGroups.set("grp_5", {
-      id: "grp_5",
-      name: "PropGroup",
-      status: "active",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    seedClientGroup(dataStore, { id: "grp_5", name: "PropGroup" });
     seedClient({ id: "gc_1", stripeAccountId: "acct_gc1" });
     seedClient({ id: "gc_2", stripeAccountId: "acct_gc2" });
     dataStore.clients.get("gc_1").groupId = "grp_5";
@@ -1595,7 +1186,7 @@ describe("client groups", () => {
       .mockResolvedValueOnce({ data: [{ id: "pi_gc2" }], has_more: false });
 
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "GET",
@@ -1613,7 +1204,7 @@ describe("client groups", () => {
 
   it("returns 404 for reports with a non-existent groupId", async () => {
     const server = await createServer();
-    const adminToken = jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
+    const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "GET",

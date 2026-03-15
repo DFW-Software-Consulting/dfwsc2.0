@@ -2,65 +2,28 @@ import { vi } from "vitest";
 
 // Use vi.hoisted so stripeMock is available when vi.mock factories are called
 const { stripeMock } = vi.hoisted(() => {
-  const makeStripeSub = (overrides: Record<string, any> = {}) => ({
-    id: "sub_test_001",
-    object: "subscription",
-    status: "active",
-    pause_collection: null,
-    items: { data: [{ price: { unit_amount: 4900 } }] },
-    metadata: { clientId: "", description: "Monthly hosting", interval: "monthly" },
-    current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30,
-    created: Math.floor(Date.now() / 1000),
-    latest_invoice: "in_test_001",
-    ...overrides,
-  });
-
-  const makeStripeInvoice = (overrides: Record<string, any> = {}) => ({
-    id: "in_test_001",
-    object: "invoice",
-    amount_due: 4900,
-    description: "Monthly hosting",
-    due_date: Math.floor(Date.now() / 1000) + 86400 * 30,
-    status: "open",
-    hosted_invoice_url: "https://invoice.stripe.com/i/test",
-    status_transitions: { paid_at: null },
-    created: Math.floor(Date.now() / 1000),
-    metadata: {},
-    ...overrides,
-  });
-
   const stripeMock = {
     accounts: { create: vi.fn() },
     accountLinks: { create: vi.fn() },
     webhooks: { constructEvent: vi.fn() },
     paymentIntents: { create: vi.fn(), list: vi.fn() },
     checkout: { sessions: { create: vi.fn() } },
-    customers: {
-      create: vi.fn().mockResolvedValue({ id: "cus_test_001" }),
-    },
-    prices: {
-      create: vi.fn().mockResolvedValue({ id: "price_test_001" }),
-    },
+    customers: { create: vi.fn() },
+    prices: { create: vi.fn() },
     subscriptions: {
-      create: vi.fn().mockResolvedValue(makeStripeSub()),
-      retrieve: vi.fn().mockResolvedValue(makeStripeSub()),
-      list: vi.fn().mockResolvedValue({ data: [] }),
-      update: vi
-        .fn()
-        .mockImplementation((_id: string, params: any) => Promise.resolve(makeStripeSub(params))),
+      create: vi.fn(),
+      retrieve: vi.fn(),
+      list: vi.fn(),
+      update: vi.fn(),
     },
     invoices: {
-      retrieve: vi.fn().mockResolvedValue(makeStripeInvoice()),
-      finalizeInvoice: vi.fn().mockResolvedValue(makeStripeInvoice()),
-      list: vi.fn().mockResolvedValue({ data: [] }),
-      create: vi.fn().mockResolvedValue(makeStripeInvoice({ status: "draft" })),
-      voidInvoice: vi.fn().mockResolvedValue(makeStripeInvoice({ status: "void" })),
+      retrieve: vi.fn(),
+      finalizeInvoice: vi.fn(),
+      list: vi.fn(),
+      create: vi.fn(),
+      voidInvoice: vi.fn(),
     },
-    invoiceItems: {
-      create: vi.fn().mockResolvedValue({ id: "ii_test_001" }),
-    },
-    _makeStripeSub: makeStripeSub,
-    _makeStripeInvoice: makeStripeInvoice,
+    invoiceItems: { create: vi.fn() },
   };
 
   return { stripeMock };
@@ -76,29 +39,20 @@ vi.mock("../../lib/mailer", () => ({
 
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import jwt from "jsonwebtoken";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients } from "../../db/schema";
-
-const TEST_JWT_SECRET = "test_jwt_secret_minimum_32_characters_long_random_string";
-
-function makeAdminToken() {
-  return jwt.sign({ role: "admin" }, TEST_JWT_SECRET, { expiresIn: "1h" });
-}
+import { makeAdminToken } from "../helpers/auth";
+import { ensureBaseEnv } from "../helpers/env";
+import { makeStripeInvoice, makeStripeSub } from "../helpers/stripe-factories";
 
 describe("Subscriptions API", () => {
   let app: any;
   let clientId: string;
 
   beforeAll(async () => {
-    process.env.FRONTEND_ORIGIN ??= "http://localhost:5173";
-    process.env.USE_CHECKOUT ??= "false";
-    process.env.SMTP_HOST ??= "mailhog";
-    process.env.SMTP_PORT ??= "1025";
-    process.env.SMTP_USER ??= "test";
-    process.env.SMTP_PASS ??= "test";
+    ensureBaseEnv();
 
     clientId = randomUUID();
 
@@ -123,18 +77,24 @@ describe("Subscriptions API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset default mock implementations
-    const makeStripeSub = stripeMock._makeStripeSub;
-    const makeStripeInvoice = stripeMock._makeStripeInvoice;
+    stripeMock.customers.create.mockResolvedValue({ id: "cus_test_001" });
+    stripeMock.prices.create.mockResolvedValue({ id: "price_test_001" });
+    stripeMock.invoiceItems.create.mockResolvedValue({ id: "ii_test_001" });
     stripeMock.subscriptions.create.mockResolvedValue(
       makeStripeSub({ metadata: { clientId, description: "Basic plan", interval: "monthly" } })
     );
     stripeMock.invoices.retrieve.mockResolvedValue(makeStripeInvoice());
     stripeMock.invoices.finalizeInvoice.mockResolvedValue(makeStripeInvoice());
+    stripeMock.invoices.create.mockResolvedValue(makeStripeInvoice({ status: "draft" }));
+    stripeMock.invoices.voidInvoice.mockResolvedValue(makeStripeInvoice({ status: "void" }));
     stripeMock.subscriptions.list.mockResolvedValue({ data: [] });
     stripeMock.subscriptions.retrieve.mockResolvedValue(
       makeStripeSub({ metadata: { clientId, description: "Basic plan", interval: "monthly" } })
     );
     stripeMock.invoices.list.mockResolvedValue({ data: [] });
+    stripeMock.subscriptions.update.mockImplementation((_id: string, params: any) =>
+      Promise.resolve(makeStripeSub(params))
+    );
   });
 
   afterEach(() => {
@@ -167,7 +127,7 @@ describe("Subscriptions API", () => {
     it("returns 201 with totalPayments in metadata when provided", async () => {
       const token = makeAdminToken();
       stripeMock.subscriptions.create.mockResolvedValueOnce(
-        stripeMock._makeStripeSub({
+        makeStripeSub({
           metadata: {
             clientId,
             description: "Limited plan",
@@ -321,7 +281,7 @@ describe("Subscriptions API", () => {
       const token = makeAdminToken();
       stripeMock.subscriptions.list.mockResolvedValueOnce({
         data: [
-          stripeMock._makeStripeSub({
+          makeStripeSub({
             metadata: { clientId, description: "Hosting", interval: "monthly" },
           }),
         ],
@@ -373,12 +333,12 @@ describe("Subscriptions API", () => {
     it("returns 200 with subscription and invoices array", async () => {
       const subId = "sub_test_001";
       stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
-        stripeMock._makeStripeSub({
+        makeStripeSub({
           id: subId,
           metadata: { clientId, description: "Hosting", interval: "monthly" },
         })
       );
-      stripeMock.invoices.list.mockResolvedValueOnce({ data: [stripeMock._makeStripeInvoice()] });
+      stripeMock.invoices.list.mockResolvedValueOnce({ data: [makeStripeInvoice()] });
 
       const response = await app.inject({
         method: "GET",
@@ -419,11 +379,9 @@ describe("Subscriptions API", () => {
 
   describe("PATCH /api/v1/subscriptions/:id", () => {
     it("returns 200 and pauses subscription", async () => {
-      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
-        stripeMock._makeStripeSub({ status: "active" })
-      );
+      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(makeStripeSub({ status: "active" }));
       stripeMock.subscriptions.update.mockResolvedValueOnce(
-        stripeMock._makeStripeSub({ pause_collection: { behavior: "void" } })
+        makeStripeSub({ pause_collection: { behavior: "void" } })
       );
 
       const response = await app.inject({
@@ -445,11 +403,9 @@ describe("Subscriptions API", () => {
     });
 
     it("returns 200 and cancels subscription", async () => {
-      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
-        stripeMock._makeStripeSub({ status: "active" })
-      );
+      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(makeStripeSub({ status: "active" }));
       stripeMock.subscriptions.update.mockResolvedValueOnce(
-        stripeMock._makeStripeSub({
+        makeStripeSub({
           cancel_at_period_end: true,
           metadata: { clientId, description: "", interval: "monthly" },
         })
@@ -474,7 +430,7 @@ describe("Subscriptions API", () => {
 
     it("returns 422 when attempting to modify a cancelled (Stripe 'canceled') subscription", async () => {
       stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
-        stripeMock._makeStripeSub({ status: "canceled" })
+        makeStripeSub({ status: "canceled" })
       );
 
       const response = await app.inject({
@@ -518,11 +474,9 @@ describe("Subscriptions API", () => {
     });
 
     it("returns 200 and updates totalPayments metadata", async () => {
-      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
-        stripeMock._makeStripeSub({ status: "active" })
-      );
+      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(makeStripeSub({ status: "active" }));
       stripeMock.subscriptions.update.mockResolvedValueOnce(
-        stripeMock._makeStripeSub({
+        makeStripeSub({
           metadata: { clientId, description: "Hosting", interval: "monthly", totalPayments: "6" },
         })
       );
