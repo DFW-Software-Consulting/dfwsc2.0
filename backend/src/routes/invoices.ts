@@ -129,13 +129,13 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { clientId, amountCents, description, dueDate } = req.body;
 
-      if (!clientId || typeof clientId !== "string") {
+      if (!clientId) {
         return res.status(400).send({ error: "clientId is required." });
       }
       if (!Number.isInteger(amountCents) || amountCents <= 0) {
         return res.status(400).send({ error: "amountCents must be a positive integer." });
       }
-      if (!description || typeof description !== "string" || description.trim().length === 0) {
+      if (!description || description.trim().length === 0) {
         return res.status(400).send({ error: "description is required." });
       }
 
@@ -287,9 +287,6 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
     const now = new Date();
     const mockPaymentId = `mock_pi_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 
-    // Atomic conditional update — only succeeds if status is still "pending".
-    // Guards against the race condition where two concurrent requests pass the
-    // status check above simultaneously.
     const [updatedInvoice] = await db
       .update(invoices)
       .set({ status: "paid", paidAt: now, mockPaymentId, updatedAt: now })

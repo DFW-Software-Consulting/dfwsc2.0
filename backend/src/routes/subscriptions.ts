@@ -82,13 +82,13 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { clientId, amountCents, description, interval, totalPayments } = req.body;
 
-      if (!clientId || typeof clientId !== "string") {
+      if (!clientId) {
         return res.status(400).send({ error: "clientId is required." });
       }
       if (!Number.isInteger(amountCents) || amountCents <= 0) {
         return res.status(400).send({ error: "amountCents must be a positive integer." });
       }
-      if (!description || typeof description !== "string" || description.trim().length === 0) {
+      if (!description || description.trim().length === 0) {
         return res.status(400).send({ error: "description is required." });
       }
       if (!["monthly", "quarterly", "yearly"].includes(interval)) {
