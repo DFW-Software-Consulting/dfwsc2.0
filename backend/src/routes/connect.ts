@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import he from "he";
 import { v4 as uuidv4 } from "uuid";
@@ -286,7 +286,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         .select()
         .from(onboardingTokens)
         .where(eq(onboardingTokens.clientId, clientRecord.id))
-        .orderBy(onboardingTokens.createdAt)
+        .orderBy(desc(onboardingTokens.createdAt))
         .limit(1);
 
       if (existingToken) {
