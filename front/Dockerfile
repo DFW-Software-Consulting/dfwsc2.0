@@ -11,16 +11,13 @@ ENV VITE_API_URL=$VITE_API_URL
 
 RUN npm run build
 
-FROM node:20-alpine AS production
-WORKDIR /app
+FROM nginx:alpine AS production
 
-# Copy built files from builder
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
+# Copy built files from builder (using new output directory)
+COPY --from=builder /app/build-dist /usr/share/nginx/html
 
-# Install serve package for static file serving
-RUN npm install -g serve
+# Expose standard HTTP/HTTPS ports
+EXPOSE 80 443
 
-# Serve static files on port 3000
-EXPOSE 3000
-CMD ["serve", "-s", "dist", "-l", "3000"]
+# Use nginx to serve static files
+CMD ["nginx", "-g", "daemon off;"]

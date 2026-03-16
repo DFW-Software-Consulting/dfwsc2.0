@@ -39,27 +39,23 @@ describe("Frontend Dockerfile", () => {
       expect(dockerfileContent).toContain("ENV VITE_API_URL");
     });
 
-    it("should copy dist folder to production image", () => {
+    it("should copy build output to nginx html directory", () => {
       expect(dockerfileContent).toContain("COPY --from=builder");
-      expect(dockerfileContent).toContain("/dist");
+      expect(dockerfileContent).toContain("/usr/share/nginx/html");
     });
 
-    it("should use serve for static file serving (Coolify-friendly)", () => {
-      expect(dockerfileContent).toContain("serve");
-      expect(dockerfileContent).toMatch(/CMD.*serve.*-s.*dist/);
+    it("should use nginx:alpine for production (Coolify-compatible)", () => {
+      expect(dockerfileContent).toMatch(/FROM nginx:alpine AS production/);
+      expect(dockerfileContent).toMatch(/CMD.*nginx/);
     });
 
-    it("should expose port 3000", () => {
-      expect(dockerfileContent).toContain("EXPOSE 3000");
+    it("should expose ports 80 and 443", () => {
+      expect(dockerfileContent).toContain("EXPOSE 80 443");
     });
 
-    it("should NOT use nginx (simplified for Coolify)", () => {
-      expect(dockerfileContent).not.toMatch(/FROM nginx/);
-      expect(dockerfileContent).not.toContain("/etc/nginx");
-    });
-
-    it("should NOT copy nginx.conf.template", () => {
-      expect(dockerfileContent).not.toContain("nginx.conf.template");
+    it("should use nginx to serve static files", () => {
+      expect(dockerfileContent).toContain("nginx");
+      expect(dockerfileContent).toContain("daemon off");
     });
   });
 
