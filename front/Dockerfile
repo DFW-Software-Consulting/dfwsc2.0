@@ -11,11 +11,16 @@ ENV VITE_API_URL=$VITE_API_URL
 
 RUN npm run build
 
-FROM nginx:1.27-alpine AS production
-COPY --from=builder /app/dist /usr/share/nginx/html
+FROM node:20-alpine AS production
+WORKDIR /app
 
-# Use envsubst template for environment variable substitution
-# Template is processed at container startup and written to /etc/nginx/conf.d/
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+# Copy built files from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
 
-EXPOSE 80
+# Install serve package for static file serving
+RUN npm install -g serve
+
+# Serve static files on port 3000
+EXPOSE 3000
+CMD ["serve", "-s", "dist", "-l", "3000"]
