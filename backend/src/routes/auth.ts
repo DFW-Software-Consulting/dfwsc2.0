@@ -1,7 +1,10 @@
-import { FastifyInstance } from 'fastify';
-import bcrypt from 'bcryptjs';
-import { signJwt } from '../lib/auth';
-import { rateLimit } from '../lib/rate-limit';
+import { existsSync, writeFileSync } from "node:fs";
+import bcrypt from "bcryptjs";
+import type { FastifyInstance } from "fastify";
+import { signJwt } from "../lib/auth";
+import { rateLimit } from "../lib/rate-limit";
+
+const SETUP_FLAG_FILE = process.env.SETUP_FLAG_PATH ?? "/tmp/admin-setup-used";
 
 interface LoginRequest {
   username: string;
@@ -13,35 +16,29 @@ interface SetupRequest {
   password: string;
 }
 
-/**
- * Validates that ADMIN_PASSWORD is bcrypt-hashed in production mode.
- * Throws an error if NODE_ENV=production and password is plaintext.
- * Returns true if validation passes, false if warning-only (dev mode).
- */
 export function validateAdminPasswordConfig(): boolean {
   const nodeEnv = process.env.NODE_ENV;
   const adminPassword = process.env.ADMIN_PASSWORD;
 
   if (!adminPassword) {
-    // No password set - this will be caught during login attempt
     return true;
   }
 
   const isBcryptHash = /^\$2[aby]\$/.test(adminPassword);
 
-  if (nodeEnv === 'production' && !isBcryptHash) {
+  if (nodeEnv === "production" && !isBcryptHash) {
     throw new Error(
-      'SECURITY ERROR: ADMIN_PASSWORD must be a bcrypt hash in production mode. ' +
-      'Plaintext passwords are not allowed. Generate a hash with: ' +
-      'node -e "console.log(require(\'bcryptjs\').hashSync(\'your-password\', 10))"'
+      "SECURITY ERROR: ADMIN_PASSWORD must be a bcrypt hash in production mode. " +
+        "Plaintext passwords are not allowed. Generate a hash with: " +
+        "node -e \"console.log(require('bcryptjs').hashSync('your-password', 10))\""
     );
   }
 
   return isBcryptHash;
 }
 
-// Runtime flag to track if setup has been used (resets on container restart)
-let setupUsed = false;
+// Persisted flag: survives restarts if SETUP_FLAG_PATH points to a mounted volume
+let setupUsed = existsSync(SETUP_FLAG_FILE);
 let setupInProgress = false;
 
 // For testing purposes only - reset the setup state
@@ -50,25 +47,18 @@ export function resetSetupState(): void {
 }
 
 export default async function authRoutes(fastify: FastifyInstance) {
-  // Validate admin password configuration on route registration
   const isHashed = validateAdminPasswordConfig();
   if (!isHashed && process.env.ADMIN_PASSWORD) {
     fastify.log.warn(
-      'DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. ' +
-      'This is insecure and will cause startup failure in production mode. ' +
-      'Please use a bcrypt hash instead.'
+      "DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. " +
+        "This is insecure and will cause startup failure in production mode. " +
+        "Please use a bcrypt hash instead."
     );
   }
 
-  // GET /auth/setup/status - Check if admin setup is allowed
-  fastify.get('/auth/setup/status', async (_request, reply) => {
-    const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === 'true';
+  fastify.get("/auth/setup/status", async (_request, reply) => {
+    const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
     const adminConfigured = !!process.env.ADMIN_PASSWORD;
-
-    // Setup is only allowed if:
-    // 1. ALLOW_ADMIN_SETUP=true
-    // 2. No ADMIN_PASSWORD is set
-    // 3. Setup hasn't been used this session
     const setupAllowed = allowAdminSetup && !adminConfigured && !setupUsed;
 
     return reply.code(200).send({
@@ -77,160 +67,146 @@ export default async function authRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // POST /auth/setup - One-time admin credential setup
   fastify.post(
-    '/auth/setup',
+    "/auth/setup",
     {
       preHandler: rateLimit({ max: 3, windowMs: 15 * 60 * 1000 }), // 3 requests per 15 minutes
     },
     async (request, reply) => {
-      const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === 'true';
+      const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
       const adminConfigured = !!process.env.ADMIN_PASSWORD;
 
-      // Check if setup is allowed
       if (!allowAdminSetup) {
-        return reply.code(403).send({ error: 'Admin setup is not enabled' });
+        return reply.code(403).send({ error: "Admin setup is not enabled" });
       }
 
       if (adminConfigured) {
-        return reply.code(403).send({ error: 'Admin is already configured' });
+        return reply.code(403).send({ error: "Admin is already configured" });
       }
 
       if (setupUsed) {
-        return reply.code(403).send({ error: 'Setup has already been used this session' });
+        return reply.code(403).send({ error: "Setup has already been used this session" });
       }
 
       if (setupInProgress) {
-        return reply.code(409).send({ error: 'Setup is already in progress' });
+        return reply.code(409).send({ error: "Setup is already in progress" });
       }
 
-      // Block concurrent setup attempts after passing the one-time guard.
       setupInProgress = true;
 
       try {
-        // Validate setup token if configured
         const setupToken = process.env.ADMIN_SETUP_TOKEN;
         if (setupToken) {
-          const providedToken = request.headers['x-setup-token'];
+          const providedToken = request.headers["x-setup-token"];
           if (providedToken !== setupToken) {
-            fastify.log.warn('Invalid setup token provided');
-            return reply.code(401).send({ error: 'Invalid setup token' });
+            fastify.log.warn("Invalid setup token provided");
+            return reply.code(401).send({ error: "Invalid setup token" });
           }
         }
 
         const body = (request.body ?? {}) as Partial<SetupRequest>;
         const { username, password } = body;
 
-        // Validate request body
         if (!username || !password) {
-          return reply.code(400).send({ error: 'Username and password are required' });
+          return reply.code(400).send({ error: "Username and password are required" });
         }
 
         if (password.length < 8) {
-          return reply.code(400).send({ error: 'Password must be at least 8 characters' });
+          return reply.code(400).send({ error: "Password must be at least 8 characters" });
         }
 
         let passwordHash: string;
         try {
-          // Generate bcrypt hash
           const saltRounds = 10;
           passwordHash = await bcrypt.hash(password, saltRounds);
 
-          // Mark setup as used for this session
+          // Persist flag so setup stays blocked across container restarts
+          try {
+            writeFileSync(SETUP_FLAG_FILE, "1");
+          } catch {
+            /* non-fatal */
+          }
           setupUsed = true;
         } catch (error) {
-          fastify.log.error({ error }, 'Error generating admin password hash during setup');
-          return reply.code(500).send({ error: 'Setup failed' });
+          fastify.log.error({ error }, "Error generating admin password hash during setup");
+          return reply.code(500).send({ error: "Setup failed" });
         }
 
-        fastify.log.info({ username }, 'Admin credentials generated via setup endpoint');
+        fastify.log.info({ username }, "Admin credentials generated via setup endpoint");
 
         return reply.code(200).send({
           username,
           passwordHash,
           instructions: [
-            '1. Copy the credentials above',
-            '2. Add to your environment configuration:',
+            "1. Copy the credentials above",
+            "2. Add to your environment configuration:",
             `   ADMIN_USERNAME=${username}`,
             `   ADMIN_PASSWORD=${passwordHash}`,
-            '3. Remove or set ALLOW_ADMIN_SETUP=false',
-            '4. Restart your application',
+            "3. Remove or set ALLOW_ADMIN_SETUP=false",
+            "4. Restart your application",
           ],
         });
       } finally {
-        // Release in-progress lock even if the request fails early.
         setupInProgress = false;
       }
-    },
+    }
   );
 
-  // POST /auth/login - Admin login endpoint
   fastify.post(
-    '/auth/login',
+    "/auth/login",
     {
       preHandler: rateLimit({ max: 5, windowMs: 15 * 60 * 1000 }), // 5 requests per 15 minutes
     },
     async (request, reply) => {
       const { username, password } = request.body as LoginRequest;
 
-      // Validate request body
       if (!username || !password) {
-        return reply.code(400).send({ error: 'Username and password are required' });
+        return reply.code(400).send({ error: "Username and password are required" });
       }
 
-      // Get admin credentials from environment
       const adminUsername = process.env.ADMIN_USERNAME;
       const adminPassword = process.env.ADMIN_PASSWORD;
 
       if (!adminUsername || !adminPassword) {
-        fastify.log.error('Admin credentials not configured in environment');
-        return reply.code(500).send({ error: 'Server configuration error' });
+        fastify.log.error("Admin credentials not configured in environment");
+        return reply.code(500).send({ error: "Server configuration error" });
       }
 
-      // Verify credentials
-      // Note: For production, ADMIN_PASSWORD should be a bcrypt hash
-      // For now, supporting both plaintext and hash comparison
       let isValid = false;
 
       if (username === adminUsername) {
-        // Check if password is already hashed (starts with $2a$, $2b$, or $2y$)
         if (adminPassword.match(/^\$2[aby]\$/)) {
-          // Compare against bcrypt hash
           isValid = await bcrypt.compare(password, adminPassword);
         } else {
-          // Direct comparison for plaintext (development only)
-          // SECURITY WARNING: Log deprecation notice for plaintext passwords
           fastify.log.warn(
-            'DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. ' +
-            'This is insecure and will be removed in a future version. ' +
-            'Please use a bcrypt hash instead. Generate one with: ' +
-            'node -e "console.log(require(\'bcryptjs\').hashSync(\'your-password\', 10))"'
+            "DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. " +
+              "This is insecure and will be removed in a future version. " +
+              "Please use a bcrypt hash instead. Generate one with: " +
+              "node -e \"console.log(require('bcryptjs').hashSync('your-password', 10))\""
           );
           isValid = password === adminPassword;
         }
       }
 
       if (!isValid) {
-        // Log failed login attempt
-        fastify.log.warn({ username }, 'Failed login attempt');
-        return reply.code(401).send({ error: 'Invalid credentials' });
+        fastify.log.warn({ username }, "Failed login attempt");
+        return reply.code(401).send({ error: "Invalid credentials" });
       }
 
-      // Generate JWT token
       try {
-        const token = signJwt({ role: 'admin' });
-        const expiresIn = process.env.JWT_EXPIRY || '1h';
+        const token = signJwt({ role: "admin" });
+        const expiresIn = process.env.JWT_EXPIRY || "1h";
 
-        fastify.log.info({ username }, 'Successful admin login');
+        fastify.log.info({ username }, "Successful admin login");
 
         return reply.code(200).send({
           token,
           expiresIn,
         });
       } catch (error) {
-        fastify.log.error({ error }, 'Error generating JWT token');
-        return reply.code(500).send({ error: 'Authentication error' });
+        fastify.log.error({ error }, "Error generating JWT token");
+        return reply.code(500).send({ error: "Authentication error" });
       }
-    },
+    }
   );
 }

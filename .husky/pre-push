@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+
+# 1. Guard: no force-push to main
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if echo "$remote_ref" | grep -q 'refs/heads/main'; then
+    echo "❌ Force-pushing to main is not allowed."
+    exit 1
+  fi
+done
+
+# 2. Backend tests inside Docker (moved from pre-commit — runs once per push, not per commit)
+COMPOSE="docker compose -f docker-compose.base.yml -f docker-compose.dev.yml"
+
+if [ "${SKIP_DOCKER_TESTS}" = "1" ]; then
+  echo "⚠️  SKIP_DOCKER_TESTS=1 — backend tests skipped."
+elif $COMPOSE ps --status running 2>/dev/null | grep -q "api"; then
+  echo "Docker stack is running — running backend tests before push..."
+  $COMPOSE exec api npm test
+else
+  echo ""
+  echo "❌ Docker stack is not running. Start it with 'make up' before pushing."
+  echo "   To skip backend tests: SKIP_DOCKER_TESTS=1 git push"
+  echo ""
+  exit 1
+fi

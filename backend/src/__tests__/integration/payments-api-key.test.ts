@@ -1,7 +1,7 @@
-import { randomUUID } from 'crypto';
-import { vi } from 'vitest';
+import { randomUUID } from "node:crypto";
+import { vi } from "vitest";
 
-describe('Payments API Key Authentication Integration', () => {
+describe("Payments API Key Authentication Integration", () => {
   let app: any;
   let db: any;
   let clients: any;
@@ -10,29 +10,29 @@ describe('Payments API Key Authentication Integration', () => {
 
   beforeAll(async () => {
     // Set up environment variables for testing
-    process.env.STRIPE_SECRET_KEY = 'sk_test_12345';
-    process.env.FRONTEND_ORIGIN = 'http://localhost:5173';
-    process.env.API_BASE_URL = 'http://localhost:4242';
-    process.env.USE_CHECKOUT = 'false';
-    process.env.JWT_SECRET = 'test_jwt_secret_minimum_32_characters_long';
+    process.env.STRIPE_SECRET_KEY = "sk_test_12345";
+    process.env.FRONTEND_ORIGIN = "http://localhost:5173";
+    process.env.API_BASE_URL = "http://localhost:4242";
+    process.env.USE_CHECKOUT = "false";
+    process.env.JWT_SECRET = "test_jwt_secret_minimum_32_characters_long";
 
     // MailHog config
-    process.env.SMTP_HOST = 'mailhog';
-    process.env.SMTP_PORT = '1025';
-    process.env.SMTP_USER = 'test';
-    process.env.SMTP_PASS = 'test';
+    process.env.SMTP_HOST = "mailhog";
+    process.env.SMTP_PORT = "1025";
+    process.env.SMTP_USER = "test";
+    process.env.SMTP_PASS = "test";
 
     // Ensure this suite uses real bcrypt/drizzle behavior even if other tests mock them.
-    vi.unmock('bcryptjs');
-    vi.unmock('drizzle-orm');
+    vi.unmock("bcryptjs");
+    vi.unmock("drizzle-orm");
     vi.resetModules();
 
     const [{ buildServer }, dbModule, schemaModule, authModule, drizzleModule] = await Promise.all([
-      import('../../app'),
-      import('../../db/client'),
-      import('../../db/schema'),
-      import('../../lib/auth'),
-      import('drizzle-orm'),
+      import("../../app"),
+      import("../../db/client"),
+      import("../../db/schema"),
+      import("../../lib/auth"),
+      import("drizzle-orm"),
     ]);
 
     db = dbModule.db;
@@ -49,32 +49,32 @@ describe('Payments API Key Authentication Integration', () => {
     }
   });
 
-  it('should create payment successfully with valid API key', async () => {
+  it("should create payment successfully with valid API key", async () => {
     // Create a client with a hashed API key
     const clientId = randomUUID();
-    const apiKey = 'test_api_key_' + randomUUID().replace(/-/g, '');
+    const apiKey = `test_api_key_${randomUUID().replace(/-/g, "")}`;
     const apiKeyHash = await hashApiKey(apiKey);
 
     await db.insert(clients).values({
       id: clientId,
-      name: 'Test Client',
-      email: 'test@example.com',
+      name: "Test Client",
+      email: "test@example.com",
       apiKeyHash: apiKeyHash,
-      status: 'active'
+      status: "active",
     });
 
     // Make a request to create a payment with the valid API key
     const response = await app.inject({
-      method: 'POST',
-      url: '/api/v1/payments/create',
+      method: "POST",
+      url: "/api/v1/payments/create",
       headers: {
-        'x-api-key': apiKey,
-        'idempotency-key': 'test-idempotency-key-' + randomUUID().replace(/-/g, ''),
+        "x-api-key": apiKey,
+        "idempotency-key": `test-idempotency-key-${randomUUID().replace(/-/g, "")}`,
       },
       payload: {
         amount: 1000,
-        currency: 'usd',
-        description: 'Test payment',
+        currency: "usd",
+        description: "Test payment",
       },
     });
 
@@ -86,81 +86,81 @@ describe('Payments API Key Authentication Integration', () => {
     await db.delete(clients).where(eq(clients.id, clientId));
   });
 
-  it('should return 401 for invalid API key', async () => {
+  it("should return 401 for invalid API key", async () => {
     // Make a request to create a payment with an invalid API key
     const response = await app.inject({
-      method: 'POST',
-      url: '/api/v1/payments/create',
+      method: "POST",
+      url: "/api/v1/payments/create",
       headers: {
-        'x-api-key': 'invalid-api-key',
-        'idempotency-key': 'test-idempotency-key-' + randomUUID().replace(/-/g, ''),
+        "x-api-key": "invalid-api-key",
+        "idempotency-key": `test-idempotency-key-${randomUUID().replace(/-/g, "")}`,
       },
       payload: {
         amount: 1000,
-        currency: 'usd',
-        description: 'Test payment',
+        currency: "usd",
+        description: "Test payment",
       },
     });
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({
-      error: 'Invalid API key.'
+      error: "Invalid API key.",
     });
   });
 
-  it('should return 401 for missing API key', async () => {
+  it("should return 401 for missing API key", async () => {
     // Make a request to create a payment without an API key
     const response = await app.inject({
-      method: 'POST',
-      url: '/api/v1/payments/create',
+      method: "POST",
+      url: "/api/v1/payments/create",
       headers: {
-        'idempotency-key': 'test-idempotency-key-' + randomUUID().replace(/-/g, ''),
+        "idempotency-key": `test-idempotency-key-${randomUUID().replace(/-/g, "")}`,
       },
       payload: {
         amount: 1000,
-        currency: 'usd',
-        description: 'Test payment',
+        currency: "usd",
+        description: "Test payment",
       },
     });
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({
-      error: 'API key is required.'
+      error: "API key is required.",
     });
   });
 
-  it('should return 401 for inactive client', async () => {
+  it("should return 401 for inactive client", async () => {
     // Create a client with a hashed API key but inactive status
     const clientId = randomUUID();
-    const apiKey = 'test_inactive_api_key_' + randomUUID().replace(/-/g, '');
+    const apiKey = `test_inactive_api_key_${randomUUID().replace(/-/g, "")}`;
     const apiKeyHash = await hashApiKey(apiKey);
 
     await db.insert(clients).values({
       id: clientId,
-      name: 'Inactive Client',
-      email: 'inactive@example.com',
+      name: "Inactive Client",
+      email: "inactive@example.com",
       apiKeyHash: apiKeyHash,
-      status: 'inactive' // This should cause auth to fail
+      status: "inactive", // This should cause auth to fail
     });
 
     // Make a request to create a payment with the API key from inactive client
     const response = await app.inject({
-      method: 'POST',
-      url: '/api/v1/payments/create',
+      method: "POST",
+      url: "/api/v1/payments/create",
       headers: {
-        'x-api-key': apiKey,
-        'idempotency-key': 'test-idempotency-key-' + randomUUID().replace(/-/g, ''),
+        "x-api-key": apiKey,
+        "idempotency-key": `test-idempotency-key-${randomUUID().replace(/-/g, "")}`,
       },
       payload: {
         amount: 1000,
-        currency: 'usd',
-        description: 'Test payment',
+        currency: "usd",
+        description: "Test payment",
       },
     });
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({
-      error: 'Invalid API key.'
+      error: "Invalid API key.",
     });
 
     // Clean up

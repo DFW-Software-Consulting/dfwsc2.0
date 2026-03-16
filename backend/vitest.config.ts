@@ -4,8 +4,16 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    testTimeout: 30000, // 30 seconds timeout
-    hookTimeout: 30000, // 30 seconds hook timeout
+    fileParallelism: false,
+    testTimeout: 30000,
+    hookTimeout: 30000,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov', 'html'],
+      include: ['src/**/*.ts'],
+      exclude: ['src/**/*.test.ts', 'src/**/__tests__/**', 'src/index.ts'],
+      reportOnFailure: true,
+    },
     env: {
       NODE_ENV: 'test',
       STRIPE_SECRET_KEY: 'sk_test_1234567890',

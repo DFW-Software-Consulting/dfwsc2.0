@@ -1,17 +1,30 @@
 services:
+  migrator:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: builder
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -lc "npx drizzle-kit push"
+
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: production
     env_file:
-      - backend/.env
+      - .env
     environment:
       NODE_ENV: production
     ports:
       - "4242:4242"
     depends_on:
-      db:
-        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     restart: unless-stopped
     command: npm run start
 
@@ -34,7 +47,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-stripe_portal}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

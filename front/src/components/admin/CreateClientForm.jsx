@@ -1,92 +1,57 @@
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
+import { useCreateClient } from "../../hooks/useClients";
 import logger from "../../utils/logger";
+import { validateEmail, validateName } from "../../utils/validation";
+import Button from "./shared/Button";
+import ErrorMessage from "./shared/ErrorMessage";
+import FormInput from "./shared/FormInput";
 
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const NAME_MIN_LENGTH = 1;
 const NAME_MAX_LENGTH = 100;
 
-export default function CreateClientForm({ onClientCreated, showToast }) {
+export default function CreateClientForm({ showToast }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [createdClientInfo, setCreatedClientInfo] = useState(null);
 
-  const validateForm = useCallback(() => {
-    const trimmedName = name.trim();
-    const trimmedEmail = email.trim();
+  const createClientMutation = useCreateClient();
 
-    if (!trimmedName) {
-      return "Client name is required";
-    }
-    if (trimmedName.length < NAME_MIN_LENGTH || trimmedName.length > NAME_MAX_LENGTH) {
-      return `Name must be between ${NAME_MIN_LENGTH} and ${NAME_MAX_LENGTH} characters`;
-    }
-    if (!trimmedEmail) {
-      return "Client email is required";
-    }
-    if (!EMAIL_REGEX.test(trimmedEmail)) {
-      return "Please enter a valid email address";
-    }
+  const validateForm = useCallback(() => {
+    const nameErr = validateName(name, 1, NAME_MAX_LENGTH, "Client name");
+    if (nameErr) return nameErr;
+    const emailErr = validateEmail(email);
+    if (emailErr) return emailErr;
     return null;
   }, [name, email]);
 
   const handleSubmit = useCallback(
-    async (e) => {
+    (e) => {
       e.preventDefault();
-
       const validationError = validateForm();
       if (validationError) {
         setError(validationError);
         return;
       }
-
-      setLoading(true);
       setError("");
       setCreatedClientInfo(null);
-
-      try {
-        const token = sessionStorage.getItem("adminToken");
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL}/accounts`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              name: name.trim(),
-              email: email.trim(),
-            }),
-          }
-        );
-
-        if (!res.ok) {
-          const errorData = await res
-            .json()
-            .catch(() => ({ error: "Failed to create client" }));
-          throw new Error(
-            errorData.error || `HTTP ${res.status}: ${res.statusText}`
-          );
+      createClientMutation.mutate(
+        { name: name.trim(), email: email.trim() },
+        {
+          onSuccess: (data) => {
+            setCreatedClientInfo(data);
+            setName("");
+            setEmail("");
+            showToast?.(`Client ${data.name} created successfully!`, "success");
+          },
+          onError: (err) => {
+            logger.error("Error creating client:", err);
+            setError(err.message);
+            showToast?.(`Error creating client: ${err.message}`, "error");
+          },
         }
-
-        const data = await res.json();
-        setCreatedClientInfo(data);
-        setName("");
-        setEmail("");
-
-        showToast?.(`Client ${data.name} created successfully!`, "success");
-        onClientCreated?.(data);
-      } catch (err) {
-        logger.error("Error creating client:", err);
-        setError(err.message);
-        showToast?.(`Error creating client: ${err.message}`, "error");
-      } finally {
-        setLoading(false);
-      }
+      );
     },
-    [name, email, validateForm, onClientCreated, showToast]
+    [name, email, validateForm, createClientMutation, showToast]
   );
 
   const copyToClipboard = useCallback(
@@ -108,74 +73,42 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
 
       <form onSubmit={handleSubmit}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label
-              htmlFor="newClientName"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
-              Client Name
-            </label>
-            <input
-              id="newClientName"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter client name"
-              maxLength={NAME_MAX_LENGTH}
-              className="w-full rounded-md border border-gray-600 bg-gray-900/50
-                         px-3 py-2 text-gray-100 placeholder-gray-500
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              disabled={loading}
-            />
-            <p className="mt-1 text-xs text-gray-400">
-              {name.length}/{NAME_MAX_LENGTH} characters
-            </p>
-          </div>
-
-          <div>
-            <label
-              htmlFor="newClientEmail"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
-              Client Email
-            </label>
-            <input
-              id="newClientEmail"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Enter client email"
-              className="w-full rounded-md border border-gray-600 bg-gray-900/50
-                         px-3 py-2 text-gray-100 placeholder-gray-500
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              disabled={loading}
-            />
-          </div>
+          <FormInput
+            id="newClientName"
+            label="Client Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Enter client name"
+            maxLength={NAME_MAX_LENGTH}
+            disabled={createClientMutation.isPending}
+            helper={`${name.length}/${NAME_MAX_LENGTH} characters`}
+          />
+          <FormInput
+            id="newClientEmail"
+            label="Client Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Enter client email"
+            disabled={createClientMutation.isPending}
+          />
         </div>
 
-        <button
+        <Button
           type="submit"
-          disabled={loading || !name.trim() || !email.trim()}
-          className="w-full md:w-auto rounded-md bg-blue-600 hover:bg-blue-700
-                     text-white font-semibold py-2 px-4 shadow-lg
-                     transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400
-                     disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={createClientMutation.isPending || !name.trim() || !email.trim()}
+          isLoading={createClientMutation.isPending}
+          className="w-full md:w-auto shadow-lg focus:ring-2 focus:ring-blue-400"
         >
-          {loading ? "Creating..." : "Create Client"}
-        </button>
+          {createClientMutation.isPending ? "Creating..." : "Create Client"}
+        </Button>
 
-        {error && (
-          <p className="mt-2 text-sm text-red-400" role="alert">
-            {error}
-          </p>
-        )}
+        <ErrorMessage message={error} className="mt-2" />
       </form>
 
       {createdClientInfo && (
         <div className="mt-4 p-4 bg-gray-800/50 rounded-lg border border-gray-600">
-          <h5 className="font-semibold text-green-400 mb-2">
-            Client Created Successfully!
-          </h5>
+          <h5 className="font-semibold text-green-400 mb-2">Client Created Successfully!</h5>
 
           <div className="mb-3">
             <p className="text-sm text-gray-300 mb-1">
@@ -186,9 +119,8 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
                 {createdClientInfo.onboardingToken}
               </code>
               <button
-                onClick={() =>
-                  copyToClipboard(createdClientInfo.onboardingToken, "Token")
-                }
+                type="button"
+                onClick={() => copyToClipboard(createdClientInfo.onboardingToken, "Token")}
                 className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded transition-colors"
               >
                 Copy
@@ -205,9 +137,8 @@ export default function CreateClientForm({ onClientCreated, showToast }) {
                 {createdClientInfo.onboardingUrlHint}
               </code>
               <button
-                onClick={() =>
-                  copyToClipboard(createdClientInfo.onboardingUrlHint, "URL")
-                }
+                type="button"
+                onClick={() => copyToClipboard(createdClientInfo.onboardingUrlHint, "URL")}
                 className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded transition-colors"
               >
                 Copy

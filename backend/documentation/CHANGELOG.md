@@ -1,5 +1,16 @@
 # Documentation Changelog
 
+## 2026-03-14
+- Updated `db/schema.md` with complete table documentation including all columns, constraints, and relationships for `clientGroups`, `clients`, `webhook_events`, and `onboarding_tokens`.
+- Added missing route documentation:
+  - `src/routes/auth.md` - Admin authentication (JWT login, one-time setup flow)
+  - `src/routes/clients.md` - Client management (list, update, soft-delete)
+  - `src/routes/connect.md` - Stripe Connect onboarding flow
+  - `src/routes/groups.md` - Client group management
+  - `src/routes/health.md` - Health check endpoint
+  - `src/routes/config.md` - Runtime configuration endpoint
+- Updated `documentation/README.md` structure to reflect actual file layout.
+
 ## 2026-01-18
 - Expanded top-level README troubleshooting and container healthcheck/logging guidance.
 - Added frontend architecture/build details and admin token lifecycle notes.

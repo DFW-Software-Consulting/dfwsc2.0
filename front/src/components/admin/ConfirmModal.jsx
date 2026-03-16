@@ -56,6 +56,7 @@ export default function ConfirmModal({
   };
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener in useEffect
     <div
       ref={modalRef}
       onClick={handleBackdropClick}
@@ -66,20 +67,15 @@ export default function ConfirmModal({
       aria-describedby="modal-description"
     >
       <div className="bg-gray-800 rounded-lg shadow-xl border border-gray-700 p-6 max-w-md w-full mx-4">
-        <h3
-          id="modal-title"
-          className="text-lg font-semibold text-white mb-2"
-        >
+        <h3 id="modal-title" className="text-lg font-semibold text-white mb-2">
           {title}
         </h3>
-        <p
-          id="modal-description"
-          className="text-gray-300 mb-6"
-        >
+        <p id="modal-description" className="text-gray-300 mb-6">
           {message}
         </p>
         <div className="flex justify-end gap-3">
           <button
+            type="button"
             onClick={onCancel}
             className="px-4 py-2 rounded-md bg-gray-700 hover:bg-gray-600 text-white font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400"
           >
@@ -87,6 +83,7 @@ export default function ConfirmModal({
           </button>
           <button
             ref={confirmButtonRef}
+            type="button"
             onClick={onConfirm}
             className={`px-4 py-2 rounded-md text-white font-medium transition-colors focus:outline-none focus:ring-2 ${confirmButtonStyles[confirmVariant]}`}
           >

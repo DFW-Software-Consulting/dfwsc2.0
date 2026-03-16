@@ -10,7 +10,7 @@ Minimal Stripe Connect API for onboarding Express accounts, creating payments wi
 
 ## Environment Variables
 
-Create a `.env` file based on `env.example`.
+Create a `.env` file based on `.env.example`.
 
 | Variable | Required | Description |
 | --- | --- | --- |
@@ -112,15 +112,11 @@ npm test
 Vitest runs the unit suite, including route guards, validation, and webhook signature verification. The suite now mocks
 MailHog’s HTTP API and Nodemailer transports, so it can run without Docker or external services.
 
-To replay Stripe’s core webhook events against a local server, run the helper script after authenticating with the Stripe
-CLI:
+To replay Stripe events, use the Stripe CLI directly:
 
 ```bash
-make test-stripe
+stripe trigger payment_intent.succeeded
 ```
-
-Update the `CONNECTED_ACCT` placeholder in `test-stripe-events.sh` with a real test-mode connected account ID before
-triggering the connected account event set.
 
 ## Admin Credential Recovery
 

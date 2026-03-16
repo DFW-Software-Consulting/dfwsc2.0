@@ -1,10 +1,10 @@
-import { Link } from 'react-router-dom'
+import { Link } from "react-router-dom";
 
 const stats = [
-  { value: '50+ launches', detail: 'Delivered across web, API, and automation projects' },
-  { value: '2–6 week MVPs', detail: 'Milestone plans with weekly previews' },
-  { value: '99.9% uptime', detail: 'Production monitoring and incident response' },
-]
+  { value: "50+ launches", detail: "Delivered across web, API, and automation projects" },
+  { value: "2–6 week MVPs", detail: "Milestone plans with weekly previews" },
+  { value: "99.9% uptime", detail: "Production monitoring and incident response" },
+];
 
 export default function Hero() {
   return (
@@ -21,20 +21,29 @@ export default function Hero() {
               Modern web apps &amp; software solutions for teams of any size
             </h1>
             <p className="mt-6 text-lg text-slate-300">
-              Scalable backends, intuitive frontends, and cloud-powered platforms. We scope clearly, ship fast, and leave you
-              with code you own.
+              Scalable backends, intuitive frontends, and cloud-powered platforms. We scope clearly,
+              ship fast, and leave you with code you own.
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-4 lg:justify-start">
-              <Link to="/pricing" className="inline-flex items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_20px_40px_-18px_rgba(11,114,133,0.6)] transition duration-200 hover:-translate-y-0.5 hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400">
+              <Link
+                to="/pricing"
+                className="inline-flex items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_20px_40px_-18px_rgba(11,114,133,0.6)] transition duration-200 hover:-translate-y-0.5 hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+              >
                 View hosting plans
               </Link>
-              <a href="#contact" className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 px-5 py-2.5 text-sm font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:text-white">
+              <a
+                href="#contact"
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-white/10 px-5 py-2.5 text-sm font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:border-white/30 hover:text-white"
+              >
                 Book a discovery call
               </a>
             </div>
             <div className="mt-12 grid grid-cols-1 gap-4 text-left sm:grid-cols-3">
               {stats.map((item) => (
-                <div key={item.value} className="rounded-3xl border border-white/10 bg-slate-900/50 p-6 shadow-lg shadow-black/20 backdrop-blur">
+                <div
+                  key={item.value}
+                  className="rounded-3xl border border-white/10 bg-slate-900/50 p-6 shadow-lg shadow-black/20 backdrop-blur"
+                >
                   <p className="text-base font-semibold text-brand-200">{item.value}</p>
                   <p className="mt-2 text-sm text-slate-300">{item.detail}</p>
                 </div>
@@ -42,7 +51,10 @@ export default function Hero() {
             </div>
           </div>
           <div className="relative">
-            <div className="absolute -inset-10 hidden rounded-full bg-brand-500/20 blur-3xl lg:block" aria-hidden="true" />
+            <div
+              className="absolute -inset-10 hidden rounded-full bg-brand-500/20 blur-3xl lg:block"
+              aria-hidden="true"
+            />
             <img
               src="https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1600&auto=format&fit=crop"
               alt="Developer configuring cloud infrastructure across multiple monitors"
@@ -53,5 +65,5 @@ export default function Hero() {
         </div>
       </div>
     </section>
-  )
+  );
 }

@@ -1,0 +1,127 @@
+#!/usr/bin/env sh
+
+# 1. Guard: no direct commits to main
+branch=$(git rev-parse --abbrev-ref HEAD)
+if [ "$branch" = "main" ]; then
+  echo "❌ Direct commits to main are not allowed. Use a feature branch."
+  exit 1
+fi
+
+# 2. Guard: no .env files staged (excludes .env.example)
+staged_env=$(git diff --cached --name-only | grep -E '(^|/)\.env' | grep -v '\.env\.example' || true)
+if [ -n "$staged_env" ]; then
+  echo "❌ .env file(s) staged for commit:"
+  echo "$staged_env"
+  echo "   Remove them with: git restore --staged <file>"
+  exit 1
+fi
+
+# 3. Guard: no merge conflict markers in staged changes
+if git diff --cached | grep -qE '^\+(<{7}|={7}|>{7})'; then
+  echo "❌ Merge conflict markers found in staged changes."
+  echo "   Resolve conflicts before committing."
+  exit 1
+fi
+
+# 4. Guard: no large files (>500 KB)
+MAX_BYTES=512000
+git diff --cached --name-only --diff-filter=ACM | while read -r f; do
+  size=$(git cat-file -s ":$f" 2>/dev/null || echo 0)
+  if [ "$size" -gt "$MAX_BYTES" ]; then
+    kb=$((size / 1024))
+    echo "❌ Staged file '$f' is ${kb}KB (limit: 500KB)."
+    echo "   If intentional: git add --intent-to-add then SKIP this check"
+    exit 1
+  fi
+done
+
+# 5. Guard: package.json changes must include lockfile
+pkg_changed=$(git diff --cached --name-only | grep -E '(^|/)package\.json$' | grep -v node_modules || true)
+lock_staged=$(git diff --cached --name-only | grep -E '(^|/)package-lock\.json$' || true)
+if [ -n "$pkg_changed" ] && [ -z "$lock_staged" ]; then
+  echo "⚠️  package.json changed but no package-lock.json is staged."
+  echo "   Run 'npm install' to update the lockfile, then stage it."
+  exit 1
+fi
+
+# 6. Secret scanning on staged text files
+STAGED_TEXT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx|json|yaml|yml|sh|md)$' || true)
+if [ -n "$STAGED_TEXT" ]; then
+  echo "Scanning staged files for secrets..."
+  echo "$STAGED_TEXT" | xargs npx secretlint --no-color || exit 1
+fi
+
+# 7. Migration check: if schema.ts changed but no Drizzle migration staged
+schema_changed=$(git diff --cached --name-only | grep -E 'backend/src/db/schema\.ts' || true)
+migration_staged=$(git diff --cached --name-only | grep -E 'backend/drizzle/' || true)
+if [ -n "$schema_changed" ] && [ -z "$migration_staged" ]; then
+  echo ""
+  echo "⚠️  schema.ts was modified but no Drizzle migration is staged."
+  echo "   Run 'npm run db:generate' to generate a migration, then stage the output."
+  echo "   To skip this check: SKIP_MIGRATION_CHECK=1 git commit"
+  echo ""
+  if [ "${SKIP_MIGRATION_CHECK}" != "1" ]; then
+    exit 1
+  fi
+fi
+
+# 8. Guard: no console.log or debugger in staged source files
+if [ "${ALLOW_CONSOLE}" != "1" ]; then
+  STAGED_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.(test|spec)\.' || true)
+  if [ -n "$STAGED_SRC" ]; then
+    hits=$(git diff --cached -- $STAGED_SRC | grep -E '^\+[^+].*\b(console\.(log|warn|error|info|debug)|debugger)\b' || true)
+    if [ -n "$hits" ]; then
+      echo "❌ console.log/debugger found in staged source files:"
+      echo "$hits"
+      echo "   Remove them or commit with: ALLOW_CONSOLE=1 git commit"
+      exit 1
+    fi
+  fi
+fi
+
+# 9. Guard: no .only or .skip in staged test files
+STAGED_TESTS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true)
+if [ -n "$STAGED_TESTS" ]; then
+  hits=$(git diff --cached -- $STAGED_TESTS | grep -E '^\+[^+].*(it|test|describe)\.(only|skip)\(' || true)
+  if [ -n "$hits" ]; then
+    echo "❌ .only or .skip found in staged test files (silences the rest of the suite):"
+    echo "$hits"
+    exit 1
+  fi
+fi
+
+# 10. Warning: new process.env.* usages not in .env.example
+STAGED_TS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' || true)
+if [ -n "$STAGED_TS" ]; then
+  new_vars=$(git diff --cached -- $STAGED_TS | grep -E '^\+[^+]' | grep -oE 'process\.env\.[A-Z_][A-Z0-9_]+' | sed 's/process\.env\.//' | sort -u || true)
+  for var in $new_vars; do
+    if ! grep -qE "^${var}=" .env.example 2>/dev/null; then
+      echo "⚠️  New env var '$var' used in code but not in .env.example — document it."
+    fi
+  done
+fi
+
+# 11. Auto-fix staged files with Biome
+npx lint-staged
+
+# 12. TypeScript type-check (backend source only — excludes tests and node_modules types)
+echo "Running TypeScript type-check (backend)..."
+(cd backend && npx tsc --noEmit -p tsconfig.build.json) || exit 1
+
+# 13. Frontend tests (no Docker required)
+npm run test:front
+
+# 14. Auto-sync AGENTS.md, Qwen.md, Gemini.md from CLAUDE.md (source of truth)
+if [ -f "CLAUDE.md" ]; then
+  synced=""
+  for target in AGENTS.md Qwen.md Gemini.md; do
+    if [ ! -f "$target" ] || ! diff -q CLAUDE.md "$target" > /dev/null 2>&1; then
+      cp CLAUDE.md "$target"
+      git add "$target"
+      synced="$synced $target"
+    fi
+  done
+  if [ -n "$synced" ]; then
+    echo "✅ Synced CLAUDE.md →$synced (auto-staged)"
+  fi
+fi
