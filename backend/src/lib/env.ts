@@ -29,7 +29,6 @@ const OPTIONAL_ENV_VARS = [
 ];
 
 export function validateEnv(): Record<string, string> {
-  // Load dotenv only when validation is called
   if (process.env.NODE_ENV !== "production") {
     dotenv.config();
   }
@@ -52,7 +51,6 @@ export function validateEnv(): Record<string, string> {
     }
   }
 
-  // Check conditionally required vars (required unless setup is allowed AND no admin creds exist)
   const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
   const adminUsername = process.env.ADMIN_USERNAME;
   const adminPassword = process.env.ADMIN_PASSWORD;
@@ -62,7 +60,6 @@ export function validateEnv(): Record<string, string> {
     if (value) {
       env[key] = value;
     } else if (mustRequireAdminCreds) {
-      // Require both creds when setup is off or either cred is present
       missing.push(key);
     }
   }
@@ -78,7 +75,6 @@ export function validateEnv(): Record<string, string> {
     throw new Error('USE_CHECKOUT must be either "true" or "false".');
   }
 
-  // Set default for optional env vars
   env.JWT_EXPIRY = process.env.JWT_EXPIRY ?? "1h";
 
   return env;

@@ -130,7 +130,6 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         metadata: subMetadata,
       });
 
-      // Finalize first invoice if it's a draft
       let firstInvoice: Stripe.Invoice | null = null;
       if (sub.latest_invoice) {
         const latestInvoiceId =

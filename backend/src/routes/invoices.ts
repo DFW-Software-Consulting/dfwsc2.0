@@ -134,7 +134,6 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
 
       const list = await stripe.invoices.list(listParams);
 
-      // Collect unique clientIds from metadata for bulk name lookup
       const clientIds = [
         ...new Set(list.data.map((inv) => inv.metadata?.clientId).filter(Boolean) as string[]),
       ];

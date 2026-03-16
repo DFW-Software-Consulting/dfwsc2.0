@@ -19,7 +19,6 @@ export async function buildServer() {
   const logger = process.env.NODE_ENV === "test" ? { level: "silent" } : true;
   const server = fastify({
     logger,
-    // Generate unique request IDs for tracing
     genReqId: () => crypto.randomUUID(),
     ajv: {
       customOptions: {
@@ -68,7 +67,6 @@ export async function buildServer() {
     runFirst: true,
   });
 
-  // Add request ID to response headers for debugging and tracing
   server.addHook("onSend", async (request, reply) => {
     reply.header("X-Request-Id", request.id);
   });
@@ -86,30 +84,6 @@ export async function buildServer() {
       .status(statusCode)
       .send({ error: error.message ?? "Internal Server Error", requestId: request.id });
   });
-
-  /**
-   * 🚀 Optional Swagger Setup
-   * ------------------------------------------------------------
-   * This section conditionally enables Fastify Swagger + Swagger UI.
-   *
-   * By default, Swagger is *enabled* for local/dev environments.
-   * For production, you can disable it by setting:
-   *
-   *    ENABLE_SWAGGER=false
-   *
-   * inside your `.env.prod` file.
-   *
-   * When disabled, Swagger modules aren't loaded at all — this keeps
-   * the production image lighter and avoids module-not-found errors
-   * (since dev-only dependencies like @fastify/swagger aren't installed
-   * in production builds).
-   *
-   * Example ENV config:
-   * ------------------------------------------------------------
-   * ENABLE_SWAGGER=true   # for local dev
-   * ENABLE_SWAGGER=false  # for prod builds
-   * ------------------------------------------------------------
-   */
 
   if (process.env.NODE_ENV !== "production" && process.env.ENABLE_SWAGGER !== "false") {
     const { default: fastifySwagger } = await import("@fastify/swagger");

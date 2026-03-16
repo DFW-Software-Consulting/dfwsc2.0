@@ -60,7 +60,6 @@ async function requireStripeAccountForPayments(request: RequestWithClient, reply
 }
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
-  // Compute useCheckout flag at route registration time
   const useCheckout = (process.env.USE_CHECKOUT ?? "false").toLowerCase() === "true";
   fastify.post(
     "/payments/create",

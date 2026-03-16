@@ -7,7 +7,6 @@ import { clients, webhookEvents } from "../db/schema";
 import { stripe } from "../lib/stripe";
 
 export default async function webhooksRoute(fastify: FastifyInstance) {
-  // Validate required environment variable at route registration time
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) {
     throw new Error("STRIPE_WEBHOOK_SECRET environment variable is required.");

@@ -16,17 +16,11 @@ interface SetupRequest {
   password: string;
 }
 
-/**
- * Validates that ADMIN_PASSWORD is bcrypt-hashed in production mode.
- * Throws an error if NODE_ENV=production and password is plaintext.
- * Returns true if validation passes, false if warning-only (dev mode).
- */
 export function validateAdminPasswordConfig(): boolean {
   const nodeEnv = process.env.NODE_ENV;
   const adminPassword = process.env.ADMIN_PASSWORD;
 
   if (!adminPassword) {
-    // No password set - this will be caught during login attempt
     return true;
   }
 
@@ -53,7 +47,6 @@ export function resetSetupState(): void {
 }
 
 export default async function authRoutes(fastify: FastifyInstance) {
-  // Validate admin password configuration on route registration
   const isHashed = validateAdminPasswordConfig();
   if (!isHashed && process.env.ADMIN_PASSWORD) {
     fastify.log.warn(
@@ -63,15 +56,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
     );
   }
 
-  // GET /auth/setup/status - Check if admin setup is allowed
   fastify.get("/auth/setup/status", async (_request, reply) => {
     const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
     const adminConfigured = !!process.env.ADMIN_PASSWORD;
-
-    // Setup is only allowed if:
-    // 1. ALLOW_ADMIN_SETUP=true
-    // 2. No ADMIN_PASSWORD is set
-    // 3. Setup hasn't been used this session
     const setupAllowed = allowAdminSetup && !adminConfigured && !setupUsed;
 
     return reply.code(200).send({
@@ -80,7 +67,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // POST /auth/setup - One-time admin credential setup
   fastify.post(
     "/auth/setup",
     {
@@ -90,7 +76,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
       const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
       const adminConfigured = !!process.env.ADMIN_PASSWORD;
 
-      // Check if setup is allowed
       if (!allowAdminSetup) {
         return reply.code(403).send({ error: "Admin setup is not enabled" });
       }
@@ -107,11 +92,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return reply.code(409).send({ error: "Setup is already in progress" });
       }
 
-      // Block concurrent setup attempts after passing the one-time guard.
       setupInProgress = true;
 
       try {
-        // Validate setup token if configured
         const setupToken = process.env.ADMIN_SETUP_TOKEN;
         if (setupToken) {
           const providedToken = request.headers["x-setup-token"];
@@ -124,7 +107,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
         const body = (request.body ?? {}) as Partial<SetupRequest>;
         const { username, password } = body;
 
-        // Validate request body
         if (!username || !password) {
           return reply.code(400).send({ error: "Username and password are required" });
         }
@@ -135,7 +117,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
         let passwordHash: string;
         try {
-          // Generate bcrypt hash
           const saltRounds = 10;
           passwordHash = await bcrypt.hash(password, saltRounds);
 
@@ -166,13 +147,11 @@ export default async function authRoutes(fastify: FastifyInstance) {
           ],
         });
       } finally {
-        // Release in-progress lock even if the request fails early.
         setupInProgress = false;
       }
     }
   );
 
-  // POST /auth/login - Admin login endpoint
   fastify.post(
     "/auth/login",
     {
@@ -181,12 +160,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const { username, password } = request.body as LoginRequest;
 
-      // Validate request body
       if (!username || !password) {
         return reply.code(400).send({ error: "Username and password are required" });
       }
 
-      // Get admin credentials from environment
       const adminUsername = process.env.ADMIN_USERNAME;
       const adminPassword = process.env.ADMIN_PASSWORD;
 
@@ -195,19 +172,12 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return reply.code(500).send({ error: "Server configuration error" });
       }
 
-      // Verify credentials
-      // Note: For production, ADMIN_PASSWORD should be a bcrypt hash
-      // For now, supporting both plaintext and hash comparison
       let isValid = false;
 
       if (username === adminUsername) {
-        // Check if password is already hashed (starts with $2a$, $2b$, or $2y$)
         if (adminPassword.match(/^\$2[aby]\$/)) {
-          // Compare against bcrypt hash
           isValid = await bcrypt.compare(password, adminPassword);
         } else {
-          // Direct comparison for plaintext (development only)
-          // SECURITY WARNING: Log deprecation notice for plaintext passwords
           fastify.log.warn(
             "DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. " +
               "This is insecure and will be removed in a future version. " +
@@ -219,12 +189,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
       }
 
       if (!isValid) {
-        // Log failed login attempt
         fastify.log.warn({ username }, "Failed login attempt");
         return reply.code(401).send({ error: "Invalid credentials" });
       }
 
-      // Generate JWT token
       try {
         const token = signJwt({ role: "admin" });
         const expiresIn = process.env.JWT_EXPIRY || "1h";

@@ -27,7 +27,6 @@ function isValidHttpsUrl(value: string): boolean {
 }
 
 const clientRoutes: FastifyPluginAsync = async (app) => {
-  // GET /clients - List all clients (admin only)
   app.get("/clients", { preHandler: requireAdminJwt }, async (req, res) => {
     try {
       const { groupId } = req.query as { groupId?: string };
@@ -60,7 +59,6 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
-  // PATCH /clients/:id - Update client (admin only)
   app.patch<{
     Params: ClientParams;
     Body: ClientPatchBody;
