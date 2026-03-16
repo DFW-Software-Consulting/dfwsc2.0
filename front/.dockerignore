@@ -1,0 +1,9 @@
+node_modules
+dist
+build-dist
+*.log
+.git
+.gitignore
+README.md
+.env*
+!public/

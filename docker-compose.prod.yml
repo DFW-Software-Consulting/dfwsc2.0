@@ -35,7 +35,8 @@ services:
       args:
         VITE_API_URL: /api/v1
     ports:
-      - "8080:80"
+      - "80:80"
+      - "443:443"
     depends_on:
       - api
     restart: unless-stopped
