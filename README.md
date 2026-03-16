@@ -23,7 +23,7 @@ dfwsc2.0/
 │   ├── package.json
 │   └── Dockerfile           # API-only Docker image
 │
-├── docker-compose.yml        # Runs api + web + db + tooling
+├── docker-compose.base.yml   # Base services config (extended by dev/prod)
 ├── package.json              # Root monorepo scripts
 └── .gitignore                # Ignore node_modules, build outputs, etc.
 ```
@@ -34,6 +34,7 @@ dfwsc2.0/
 - **React 18** - UI framework
 - **Vite** - Build tool & dev server
 - **React Router 6** - Client-side routing
+- **TanStack Query v5** - Server state management & data fetching
 - **TailwindCSS v4** - Utility-first CSS
 
 ### Backend
@@ -88,14 +89,14 @@ npm run dev:frontend
 - **Backend:** http://localhost:4242
 - Frontend makes API calls to backend at http://localhost:4242/api/v1/*
 
-If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:8080`.
+If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:1919`.
 
 #### Option 2: Docker Dev Stack (Full stack in containers)
 ```bash
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-- **Web UI:** http://localhost:8080
+- **Web UI:** http://localhost:1919
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
 - **Stripe CLI:** forwards webhooks to `/api/v1/webhooks/stripe`
@@ -123,9 +124,9 @@ Services (default):
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
 
-For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:5174`.
+For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:1919`.
 
-If you want the UI on port 80, change the `web` service port mapping in `docker-compose.yml`.
+If you want the UI on port 80, change the `web` service port mapping in `docker-compose.base.yml`.
 
 ### Container Healthchecks & Logs
 - **Healthchecks**: `GET /api/v1/health` for the API; verify container status with `docker compose ps`.
@@ -139,14 +140,30 @@ All API routes are prefixed with `/api/v1`:
 |--------|------|-------------|------|
 | GET | `/api/v1/health` | Health check | Public |
 | POST | `/api/v1/auth/login` | Admin login (returns JWT token) | Public |
+| GET | `/api/v1/auth/setup/status` | Bootstrap setup status | Public |
+| POST | `/api/v1/auth/setup` | First-run admin setup | Optional token |
 | GET | `/api/v1/clients` | List all clients | Admin (JWT) |
-| PATCH | `/api/v1/clients/:id` | Update client status | Admin (JWT) |
-| POST | `/api/v1/accounts` | Create client account | Admin |
-| POST | `/api/v1/onboard-client/initiate` | Send onboarding email | Admin |
+| PATCH | `/api/v1/clients/:id` | Update client config | Admin (JWT) |
+| POST | `/api/v1/accounts` | Create client account | Admin (JWT) |
+| POST | `/api/v1/onboard-client/initiate` | Send onboarding email | Admin (JWT) |
+| POST | `/api/v1/onboard-client/resend` | Resend onboarding email | Admin (JWT) |
 | GET | `/api/v1/onboard-client` | Get Stripe onboarding link | Public |
 | GET | `/api/v1/connect/callback` | Stripe Connect callback | Public |
-| POST | `/api/v1/payments/create` | Create payment | Admin/Client |
-| GET | `/api/v1/reports/payments` | List payments | Admin |
+| GET | `/api/v1/connect/refresh` | Refresh Stripe account link | Public |
+| POST | `/api/v1/payments/create` | Create payment | Client (API key) |
+| GET | `/api/v1/reports/payments` | List payments | Admin (JWT) |
+| GET | `/api/v1/groups` | List client groups | Admin (JWT) |
+| POST | `/api/v1/groups` | Create client group | Admin (JWT) |
+| PATCH | `/api/v1/groups/:id` | Update group config | Admin (JWT) |
+| GET | `/api/v1/invoices` | List invoices | Admin (JWT) |
+| POST | `/api/v1/invoices` | Create invoice | Admin (JWT) |
+| PATCH | `/api/v1/invoices/:id` | Cancel invoice | Admin (JWT) |
+| GET | `/api/v1/invoices/pay/:token` | Fetch invoice by token | Public |
+| POST | `/api/v1/invoices/pay/:token` | Submit invoice payment | Public |
+| GET | `/api/v1/subscriptions` | List subscriptions | Admin (JWT) |
+| POST | `/api/v1/subscriptions` | Create subscription | Admin (JWT) |
+| GET | `/api/v1/subscriptions/:id` | Get subscription + invoices | Admin (JWT) |
+| PATCH | `/api/v1/subscriptions/:id` | Update subscription status | Admin (JWT) |
 | POST | `/api/v1/webhooks/stripe` | Stripe webhooks | Stripe |
 
 ## 🌐 Frontend Routes
@@ -252,8 +269,6 @@ Additional documentation is available in `backend/documentation/`:
 - Stripe setup guide
 - Email configuration
 - Deployment guide
-- Contributor workflow in `CONTRIBUTING.md`
-- Release process in `RELEASE.md`
 
 ## 🧯 Troubleshooting
 

@@ -1,20 +1,45 @@
-import { pgTable, text, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
-export const clients = pgTable("clients", {
+export const clientGroups = pgTable("client_groups", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  email: text("email").notNull(),
-  apiKey: text("api_key").unique(),
-  apiKeyHash: text("api_key_hash").unique(),
-  stripeAccountId: text("stripe_account_id"),
   status: text("status", { enum: ["active", "inactive"] })
     .default("active")
     .notNull(),
+  processingFeePercent: numeric("processing_fee_percent", { precision: 5, scale: 2 }),
+  processingFeeCents: integer("processing_fee_cents"),
+  paymentSuccessUrl: text("payment_success_url"),
+  paymentCancelUrl: text("payment_cancel_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-}, (table) => ({
-  apiKeyHashIdx: index("clients_api_key_hash_idx").on(table.apiKeyHash),
-}));
+});
+
+export const clients = pgTable(
+  "clients",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    apiKeyHash: text("api_key_hash").unique(),
+    apiKeyLookup: text("api_key_lookup").unique(),
+    stripeAccountId: text("stripe_account_id"),
+    stripeCustomerId: text("stripe_customer_id"),
+    status: text("status", { enum: ["active", "inactive"] })
+      .default("active")
+      .notNull(),
+    groupId: text("group_id").references(() => clientGroups.id),
+    paymentSuccessUrl: text("payment_success_url"),
+    paymentCancelUrl: text("payment_cancel_url"),
+    processingFeePercent: numeric("processing_fee_percent", { precision: 5, scale: 2 }),
+    processingFeeCents: integer("processing_fee_cents"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    apiKeyHashIdx: index("clients_api_key_hash_idx").on(table.apiKeyHash),
+    apiKeyLookupIdx: index("clients_api_key_lookup_idx").on(table.apiKeyLookup),
+  })
+);
 
 export const webhookEvents = pgTable("webhook_events", {
   id: text("id").primaryKey(),
@@ -27,7 +52,9 @@ export const webhookEvents = pgTable("webhook_events", {
 
 export const onboardingTokens = pgTable("onboarding_tokens", {
   id: text("id").primaryKey(),
-  clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => clients.id, { onDelete: "cascade" }),
   token: text("token").notNull().unique(),
   status: text("status").notNull(),
   email: text("email").notNull(),

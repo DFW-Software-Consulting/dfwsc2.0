@@ -1,139 +1,88 @@
-import { useState, useCallback } from "react";
-import logger from "../../utils/logger";
+import { useMutation } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
+import { login } from "../../api/auth";
+import { useAuth } from "../../contexts/AuthContext";
+import { validatePassword } from "../../utils/validation";
+import Button from "./shared/Button";
+import FormInput from "./shared/FormInput";
 
 const MIN_PASSWORD_LENGTH = 8;
 
-export default function AdminLogin({ onLoginSuccess, showToast }) {
+export default function AdminLogin({ showToast }) {
+  const { login: authLogin } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+
+  const loginMutation = useMutation({
+    mutationFn: (vars) => login(vars),
+    onSuccess: (data) => {
+      authLogin(data.token);
+      setUsername("");
+      setPassword("");
+    },
+    onError: (err) => {
+      setError(err.message || "Login failed");
+      showToast?.(err.message || "Login failed", "error");
+    },
+  });
 
   const validateForm = useCallback(() => {
-    if (!username.trim()) {
-      return "Username is required";
-    }
-    if (!password) {
-      return "Password is required";
-    }
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      return `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
-    }
+    if (!username.trim()) return "Username is required";
+    const pwErr = validatePassword(password, MIN_PASSWORD_LENGTH);
+    if (pwErr) return pwErr;
     return null;
   }, [username, password]);
 
   const handleSubmit = useCallback(
-    async (e) => {
+    (e) => {
       e.preventDefault();
-
       const validationError = validateForm();
       if (validationError) {
         setError(validationError);
         return;
       }
-
-      setLoading(true);
       setError("");
-
-      try {
-        const res = await fetch(
-          `${import.meta.env.VITE_API_URL}/auth/login`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              username: username.trim(),
-              password,
-            }),
-          }
-        );
-
-        if (!res.ok) {
-          const errorData = await res
-            .json()
-            .catch(() => ({ error: "Invalid credentials" }));
-          throw new Error(errorData.error || "Login failed");
-        }
-
-        const data = await res.json();
-        if (data.token) {
-          sessionStorage.setItem("adminToken", data.token);
-          onLoginSuccess(data.token);
-          setUsername("");
-          setPassword("");
-        } else {
-          throw new Error("Login response did not contain token");
-        }
-      } catch (err) {
-        logger.error("Admin login error:", err);
-        setError(err.message || "Login failed");
-        showToast?.(err.message || "Login failed", "error");
-      } finally {
-        setLoading(false);
-      }
+      loginMutation.mutate({ username: username.trim(), password });
     },
-    [username, password, validateForm, onLoginSuccess, showToast]
+    [username, password, validateForm, loginMutation]
   );
 
   return (
     <form onSubmit={handleSubmit}>
-      <div className="mb-4">
-        <label
-          htmlFor="adminUsername"
-          className="block text-sm font-semibold text-gray-200 mb-2"
-        >
-          Username
-        </label>
-        <input
-          id="adminUsername"
-          type="text"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="Enter admin username"
-          className="block w-full rounded-md border border-gray-600 bg-gray-900/50
-                     px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
-                     focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          disabled={loading}
-          autoComplete="username"
-        />
-      </div>
+      <FormInput
+        id="adminUsername"
+        label="Username"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        placeholder="Enter admin username"
+        disabled={loginMutation.isPending}
+        autoComplete="username"
+        wrapperClassName="mb-4"
+      />
 
-      <div className="mb-6">
-        <label
-          htmlFor="adminPassword"
-          className="block text-sm font-semibold text-gray-200 mb-2"
-        >
-          Password
-        </label>
-        <input
-          id="adminPassword"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="Enter admin password"
-          className="block w-full rounded-md border border-gray-600 bg-gray-900/50
-                     px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
-                     focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          disabled={loading}
-          autoComplete="current-password"
-        />
-        <p className="mt-1 text-xs text-gray-400">
-          Minimum {MIN_PASSWORD_LENGTH} characters
-        </p>
-      </div>
+      <FormInput
+        id="adminPassword"
+        label="Password"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        placeholder="Enter admin password"
+        disabled={loginMutation.isPending}
+        autoComplete="current-password"
+        helper={`Minimum ${MIN_PASSWORD_LENGTH} characters`}
+        wrapperClassName="mb-6"
+      />
 
-      <button
+      <Button
         type="submit"
-        disabled={loading}
-        className="w-full rounded-md bg-green-600 hover:bg-green-700
-                   text-white font-semibold py-2 px-4 shadow-lg
-                   transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-green-400
-                   disabled:opacity-50 disabled:cursor-not-allowed"
+        variant="success"
+        disabled={loginMutation.isPending}
+        isLoading={loginMutation.isPending}
+        className="w-full shadow-lg focus:ring-2 focus:ring-green-400"
       >
-        {loading ? "Logging in..." : "Log In"}
-      </button>
+        {loginMutation.isPending ? "Logging in..." : "Log In"}
+      </Button>
 
       {error && (
         <p className="mt-4 text-center text-sm text-red-400" role="alert">

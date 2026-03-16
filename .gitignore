@@ -8,6 +8,9 @@ node_modules/
 /backend/dist
 /backend/public
 
+# Test coverage reports
+/backend/coverage/
+
 # Environment variables (but keep .env.example files)
 .env
 .env.local
@@ -43,3 +46,4 @@ Thumbs.db
 zzzzz.txt
 
 # Memory bank (planning/documentation)
+memory-bank/

@@ -1,28 +1,28 @@
-import { buildServer } from '../app';
+import { buildServer } from "../app";
 
-describe('Environment Loading Order Integration', () => {
+describe("Environment Loading Order Integration", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
     // Set up required environment variables for the test
-    process.env.STRIPE_SECRET_KEY = 'sk_test_12345';
-    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test12345';
-    process.env.FRONTEND_ORIGIN = 'http://localhost:5173';
-    process.env.USE_CHECKOUT = 'true';
-    process.env.DATABASE_URL = 'postgresql://user:password@localhost:5432/test_db';
-    process.env.SMTP_HOST = 'localhost';
-    process.env.SMTP_PORT = '587';
-    process.env.SMTP_USER = 'test_user';
-    process.env.SMTP_PASS = 'test_pass';
-    process.env.ADMIN_USERNAME = 'admin';
-    process.env.ADMIN_PASSWORD = 'testpass';
-    process.env.JWT_SECRET = 'test_jwt_secret';
-    process.env.API_BASE_URL = 'http://localhost:4242';
+    process.env.STRIPE_SECRET_KEY = "sk_test_12345";
+    process.env.STRIPE_WEBHOOK_SECRET = "whsec_test12345";
+    process.env.FRONTEND_ORIGIN = "http://localhost:5173";
+    process.env.USE_CHECKOUT = "true";
+    process.env.DATABASE_URL = "postgresql://user:password@localhost:5432/test_db";
+    process.env.SMTP_HOST = "localhost";
+    process.env.SMTP_PORT = "587";
+    process.env.SMTP_USER = "test_user";
+    process.env.SMTP_PASS = "test_pass";
+    process.env.ADMIN_USERNAME = "admin";
+    process.env.ADMIN_PASSWORD = "testpass";
+    process.env.JWT_SECRET = "test_jwt_secret";
+    process.env.API_BASE_URL = "http://localhost:4242";
   });
 
   afterEach(() => {
     // Restore original environment
-    Object.keys(process.env).forEach(key => {
+    Object.keys(process.env).forEach((key) => {
       if (!(key in originalEnv)) {
         delete process.env[key];
       }
@@ -30,9 +30,9 @@ describe('Environment Loading Order Integration', () => {
     Object.assign(process.env, originalEnv);
   });
 
-  it('should verify env vars are loaded before route registration reads them', async () => {
+  it("should verify env vars are loaded before route registration reads them", async () => {
     // Capture any errors during server build to ensure env vars are available when routes register
-    let server;
+    let server: Awaited<ReturnType<typeof buildServer>> | undefined;
     let errorDuringBuild = null;
 
     try {
@@ -57,14 +57,14 @@ describe('Environment Loading Order Integration', () => {
     }
   });
 
-  it('should verify validateEnv is called before routes access env vars', async () => {
+  it("should verify validateEnv is called before routes access env vars", async () => {
     // Verify that validateEnv can be called successfully before building server
-    const { validateEnv } = await import('../lib/env');
+    const { validateEnv } = await import("../lib/env");
     const validatedEnv = validateEnv();
 
     // Check that required env vars are present in the validated environment
-    expect(validatedEnv.USE_CHECKOUT).toBe('true');
-    expect(validatedEnv.STRIPE_WEBHOOK_SECRET).toBe('whsec_test12345');
+    expect(validatedEnv.USE_CHECKOUT).toBe("true");
+    expect(validatedEnv.STRIPE_WEBHOOK_SECRET).toBe("whsec_test12345");
 
     // Now build the server, which should also call validateEnv internally
     const server = await buildServer();

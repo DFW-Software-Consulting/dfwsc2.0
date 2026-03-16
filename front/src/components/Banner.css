@@ -1,41 +1,39 @@
-
-
 .banner {
-    background: linear-gradient(90deg, #0b7285, #2ca1b4);
-    color: white;
-    text-align: center;
-    padding: 1rem 2rem;
-    overflow: hidden;
-    position: relative;
-    min-height: 64px;
-    border-radius: 999px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: min(100%, 72rem);
-    margin-inline: auto;
-    box-shadow: 0 18px 40px -24px rgba(11, 114, 133, 0.65);
+  background: linear-gradient(90deg, #0b7285, #2ca1b4);
+  color: white;
+  text-align: center;
+  padding: 1rem 2rem;
+  overflow: hidden;
+  position: relative;
+  min-height: 64px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 72rem);
+  margin-inline: auto;
+  box-shadow: 0 18px 40px -24px rgba(11, 114, 133, 0.65);
 }
 
 .banner-track {
-    display: flex;
-    width: max-content;
-    animation: slide 30s linear infinite;
+  display: flex;
+  width: max-content;
+  animation: slide 30s linear infinite;
 }
 
 .banner-text {
-    white-space: nowrap;
-    font-weight: 800;
-    font-size: 1.2rem;
-    letter-spacing: .2em;
-    padding-right: 4rem;
+  white-space: nowrap;
+  font-weight: 800;
+  font-size: 1.2rem;
+  letter-spacing: 0.2em;
+  padding-right: 4rem;
 }
 
 @keyframes slide {
-    from {
-        transform: translateX(0);
-    }
-    to {
-        transform: translateX(-33.333%);
-    }
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-33.333%);
+  }
 }

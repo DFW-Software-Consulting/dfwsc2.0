@@ -1,4 +1,4 @@
-const isDev = import.meta.env.MODE === 'development';
+const isDev = import.meta.env.MODE === "development";
 
 export const logger = {
   error: (...args) => isDev && console.error(...args),

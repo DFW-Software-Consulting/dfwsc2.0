@@ -1,0 +1,194 @@
+import { useCallback, useEffect, useState } from "react";
+import { usePatchClient } from "../../hooks/useClients";
+import { useGroups } from "../../hooks/useGroups";
+import { validateFeeValue, validateUrl } from "../../utils/validation";
+import BaseModal from "./shared/BaseModal";
+import Button from "./shared/Button";
+import ErrorMessage from "./shared/ErrorMessage";
+import FeeConfigSection from "./shared/FeeConfigSection";
+import FormInput from "./shared/FormInput";
+
+export default function EditClientModal({ client, onClose, onSaved, showToast }) {
+  const { data: groups = [] } = useGroups();
+  const patchClientMutation = usePatchClient();
+
+  const [feeType, setFeeType] = useState("none");
+  const [feeValue, setFeeValue] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [successUrl, setSuccessUrl] = useState("");
+  const [cancelUrl, setCancelUrl] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (client.processingFeePercent != null) {
+      setFeeType("percent");
+      setFeeValue(String(client.processingFeePercent));
+    } else if (client.processingFeeCents != null) {
+      setFeeType("cents");
+      setFeeValue(String(client.processingFeeCents));
+    } else {
+      setFeeType("none");
+      setFeeValue("");
+    }
+    setGroupId(client.groupId ?? "");
+    setSuccessUrl(client.paymentSuccessUrl ?? "");
+    setCancelUrl(client.paymentCancelUrl ?? "");
+  }, [client]);
+
+  const inheritedFee = (() => {
+    if (feeType !== "none" || !groupId) return null;
+    const group = groups.find((g) => g.id === groupId);
+    if (!group) return null;
+    if (group.processingFeePercent != null)
+      return `${group.processingFeePercent}% (from group "${group.name}")`;
+    if (group.processingFeeCents != null)
+      return `$${(group.processingFeeCents / 100).toFixed(2)} flat (from group "${group.name}")`;
+    return null;
+  })();
+
+  const feeHint =
+    feeType === "none"
+      ? inheritedFee
+        ? `Will inherit: ${inheritedFee}`
+        : groupId
+          ? "Group has no fee set — will fall back to platform default."
+          : "Will use platform default fee."
+      : null;
+
+  const handleFeeTypeChange = useCallback((type) => {
+    setFeeType(type);
+    setFeeValue("");
+    setError("");
+  }, []);
+
+  const handleSave = useCallback(() => {
+    setError("");
+    const body = {
+      groupId: groupId || null,
+      paymentSuccessUrl: successUrl.trim() || null,
+      paymentCancelUrl: cancelUrl.trim() || null,
+    };
+
+    if (feeType !== "none") {
+      const feeErr = validateFeeValue(feeValue, feeType);
+      if (feeErr) {
+        setError(feeErr);
+        return;
+      }
+      if (feeType === "percent") {
+        body.processingFeePercent = parseFloat(feeValue);
+        body.processingFeeCents = null;
+      } else {
+        body.processingFeeCents = parseInt(feeValue, 10);
+        body.processingFeePercent = null;
+      }
+    } else {
+      body.processingFeePercent = null;
+      body.processingFeeCents = null;
+    }
+
+    if (validateUrl(body.paymentSuccessUrl)) {
+      setError("Success URL must be a valid HTTPS URL.");
+      return;
+    }
+    if (validateUrl(body.paymentCancelUrl)) {
+      setError("Cancel URL must be a valid HTTPS URL.");
+      return;
+    }
+
+    patchClientMutation.mutate(
+      { id: client.id, body },
+      {
+        onSuccess: (updated) => {
+          showToast?.("Client updated successfully", "success");
+          onSaved?.(updated);
+          onClose();
+        },
+        onError: (err) => setError(err.message),
+      }
+    );
+  }, [
+    client.id,
+    feeType,
+    feeValue,
+    groupId,
+    successUrl,
+    cancelUrl,
+    onClose,
+    onSaved,
+    showToast,
+    patchClientMutation,
+  ]);
+
+  return (
+    <BaseModal isOpen onClose={onClose} title="Edit Client" titleId="edit-client-title">
+      <p className="text-sm text-gray-400 mb-5">
+        {client.name} &bull; {client.email}
+      </p>
+
+      {/* Group assignment */}
+      <div className="mb-4">
+        <label htmlFor="edit-client-group" className="block text-sm font-medium text-gray-300 mb-1">
+          Group
+        </label>
+        <select
+          id="edit-client-group"
+          value={groupId}
+          onChange={(e) => setGroupId(e.target.value)}
+          className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+                     focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="">— No group —</option>
+          {groups
+            .filter((g) => g.status === "active")
+            .map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+        </select>
+      </div>
+
+      <FeeConfigSection
+        feeType={feeType}
+        feeValue={feeValue}
+        onFeeTypeChange={handleFeeTypeChange}
+        onFeeValueChange={setFeeValue}
+        hint={feeHint}
+        hintColor={inheritedFee ? "blue" : "gray"}
+        radioName="feeType"
+        showInheritOption
+      />
+
+      <FormInput
+        id="edit-client-success-url"
+        label="Payment Success URL"
+        type="url"
+        value={successUrl}
+        onChange={(e) => setSuccessUrl(e.target.value)}
+        placeholder="https://yoursite.com/thank-you"
+        wrapperClassName="mb-4"
+      />
+      <FormInput
+        id="edit-client-cancel-url"
+        label="Payment Cancel URL"
+        type="url"
+        value={cancelUrl}
+        onChange={(e) => setCancelUrl(e.target.value)}
+        placeholder="https://yoursite.com/cancel"
+        wrapperClassName="mb-5"
+      />
+
+      <ErrorMessage message={error} className="mb-3" />
+
+      <div className="flex justify-end gap-3">
+        <Button variant="secondary" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="primary" isLoading={patchClientMutation.isPending} onClick={handleSave}>
+          {patchClientMutation.isPending ? "Saving..." : "Save Changes"}
+        </Button>
+      </div>
+    </BaseModal>
+  );
+}

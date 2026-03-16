@@ -15,19 +15,26 @@ documentation/
 │   │   └── mailer.md
 │   └── routes/
 │       ├── accounts.md
+│       ├── auth.md           # Admin authentication (JWT login, setup)
+│       ├── clients.md        # Client management (list, update)
+│       ├── config.md         # Runtime config endpoint
+│       ├── connect.md        # Stripe Connect onboarding flow
+│       ├── groups.md         # Client group management
+│       ├── health.md         # Health check endpoint
 │       ├── payments.md
-│       ├── webhooks.md
-│       └── reports.md
+│       ├── reports.md
+│       └── webhooks.md
 ├── db/
 │   ├── schema.md
 │   └── migrations.md
 └── docs/
     ├── api.md
+    ├── deployment.md
+    ├── email_setup.md
     ├── env_setup.md
     ├── env_setup_nextcloud.md
-    ├── email_setup.md
+    ├── security.md
     ├── stripe_setup.md
-    ├── deployment.md
     └── testing.md
 ```
 
