@@ -5,7 +5,6 @@ import { scrollToSection } from "../utils/scrollToSection.js";
 const navItems = [
   { type: "scroll", id: "services", label: "Solutions" },
   { type: "scroll", id: "values", label: "Values" },
-  { type: "link", href: "/docs", label: "Docs" },
   { type: "link", href: "/pricing", label: "Pricing" },
   { type: "route", href: "/team", label: "Meet our team" },
 ];
@@ -40,11 +39,17 @@ export default function Navbar() {
     setMenuOpen(false);
   };
 
+  const handleLogoClick = (e) => {
+    e.preventDefault();
+    handleScroll("top");
+  };
+
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
       <div className="relative mx-auto flex h-20 w-full max-w-6xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
         <Link
           to="/"
+          onClick={handleLogoClick}
           className="group relative inline-flex items-center gap-3 cursor-pointer bg-sky-200 p-1 rounded-md hover:scale-105 transition-transform duration-200"
         >
           <span className="absolute -left-4 hidden h-12 w-12 rounded-2xl bg-brand-500/20 blur-xl transition group-hover:opacity-90 sm:block" />

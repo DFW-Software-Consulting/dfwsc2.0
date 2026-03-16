@@ -67,11 +67,13 @@ Both modes use `application_fee_amount` from `DEFAULT_PROCESS_FEE_CENTS` and req
 In-memory sliding-window rate limiter (`lib/rate-limit.ts`). Not Redis-backed — not suitable for multi-instance deployments. Admin/onboard routes: 10 req/min per IP. Payment routes: 20 req/min per Stripe account ID (falls back to IP).
 
 ### Database schema (Drizzle ORM, PostgreSQL 17)
-Four tables (subscriptions and invoices are managed entirely via Stripe Billing API, not stored in the local DB):
-- `clients` — `id`, `name`, `email`, `apiKeyHash`, `apiKeyLookup`, `stripeAccountId`, `stripeCustomerId`, `status` (active/inactive), `groupId` (FK→client_groups, nullable), `paymentSuccessUrl`, `paymentCancelUrl`, `processingFeePercent`, `processingFeeCents`
+Six tables:
+- `clients` — `id`, `name`, `email`, `apiKeyHash`, `apiKeyLookup`, `stripeAccountId`, `status` (active/inactive), `groupId` (FK→client_groups, nullable), `paymentSuccessUrl`, `paymentCancelUrl`, `processingFeePercent`, `processingFeeCents`
 - `client_groups` — `id`, `name`, `status` (active/inactive), `processingFeePercent`, `processingFeeCents`, `paymentSuccessUrl`, `paymentCancelUrl`
 - `onboarding_tokens` — `clientId` (FK→clients), `token`, `email`, `status`, `state`, `stateExpiresAt`
 - `webhook_events` — idempotency table for Stripe webhook deduplication
+- `subscriptions` — `id`, `clientId` (FK→clients), `amountCents`, `description`, `interval` (monthly/quarterly/yearly), `totalPayments`, `paymentsMade`, `status` (active/paused/cancelled), `nextBillingDate`
+- `invoices` — `id`, `clientId` (FK→clients), `subscriptionId` (nullable FK→subscriptions), `amountCents`, `description`, `dueDate`, `status` (pending/paid/cancelled), `paymentToken` (unique), `paidAt`
 
 ### Environment variables
 Required: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `FRONTEND_ORIGIN`, `USE_CHECKOUT`, `DATABASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`.
@@ -105,12 +107,12 @@ All routes prefixed `/api/v1` except `/docs`.
 | GET | `/api/v1/invoices` | admin JWT |
 | POST | `/api/v1/invoices` | admin JWT |
 | PATCH | `/api/v1/invoices/:id` | admin JWT |
+| GET | `/api/v1/invoices/pay/:token` | none (public) |
+| POST | `/api/v1/invoices/pay/:token` | none (public mock payment) |
 | GET | `/api/v1/subscriptions` | admin JWT |
 | POST | `/api/v1/subscriptions` | admin JWT |
 | GET | `/api/v1/subscriptions/:id` | admin JWT |
 | PATCH | `/api/v1/subscriptions/:id` | admin JWT |
-| GET | `/api/v1/products` | admin JWT |
-| POST | `/api/v1/products` | admin JWT |
 | POST | `/api/v1/webhooks/stripe` | Stripe signature |
 
 ### Fee calculation priority
