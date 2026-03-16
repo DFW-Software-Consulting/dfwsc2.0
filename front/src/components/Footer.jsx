@@ -117,7 +117,7 @@ export default function Footer() {
                 ))}
               </div>
               <a
-                href="linkedin.byjc.dev"
+                href="https://linkedin.byjc.dev"
                 target="_blank"
                 rel="noreferrer"
                 className="block text-sm font-semibold text-slate-200 transition hover:text-white"

@@ -1,6 +1,6 @@
 const contactMethods = [
   { label: "Email", value: "mail@dfwsc.com", href: "mailto:mail@dfwsc.com" },
-  { label: "Website", value: "www.dfwsc.com", href: "www.dfwsc.com" },
+  { label: "Website", value: "www.dfwsc.com", href: "https://www.dfwsc.com" },
   {
     label: "LinkedIn",
     value: "DFW Software Consulting",

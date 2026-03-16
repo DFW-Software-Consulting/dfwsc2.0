@@ -28,8 +28,10 @@ services:
     working_dir: /app
     command: sh -c "chown -R node:node /app /app/node_modules && exec su node -c 'npm install && npm run dev -- --host 0.0.0.0 --port 1919'"
     environment:
-      VITE_API_URL: http://localhost:4242/api/v1
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:4242/api/v1}
       CHOKIDAR_USEPOLLING: "true"
+      # Nginx proxy target for dev (not used in dev mode since we run Vite, not nginx)
+      API_URL: http://api:4242
     volumes:
       - ./front:/app
       - front_node_modules:/app/node_modules
