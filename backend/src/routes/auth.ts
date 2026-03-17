@@ -20,33 +20,6 @@ interface SetupRequest {
   password: string;
 }
 
-/**
- * Validates that ADMIN_PASSWORD is bcrypt-hashed in production mode.
- * Throws an error if NODE_ENV=production and password is plaintext.
- * Returns true if validation passes, false if warning-only (dev mode).
- */
-export function validateAdminPasswordConfig(): boolean {
-  const nodeEnv = process.env.NODE_ENV;
-  const adminPassword = process.env.ADMIN_PASSWORD;
-
-  if (!adminPassword) {
-    // No password set - this will be caught during login attempt
-    return true;
-  }
-
-  const isBcryptHash = /^\$2[aby]\$/.test(adminPassword);
-
-  if (nodeEnv === "production" && !isBcryptHash) {
-    throw new Error(
-      "SECURITY ERROR: ADMIN_PASSWORD must be a bcrypt hash in production mode. " +
-        "Plaintext passwords are not allowed. Generate a hash with: " +
-        "node -e \"console.log(require('bcryptjs').hashSync('your-password', 10))\""
-    );
-  }
-
-  return isBcryptHash;
-}
-
 // Persisted flag: survives restarts if SETUP_FLAG_PATH points to a mounted volume
 let setupUsed = existsSync(SETUP_FLAG_FILE);
 let setupInProgress = false;
@@ -57,18 +30,6 @@ export function resetSetupState(): void {
 }
 
 export default async function authRoutes(fastify: FastifyInstance) {
-  // Validate admin password configuration on route registration
-  if (process.env.ADMIN_PASSWORD) {
-    const isHashed = validateAdminPasswordConfig();
-    if (!isHashed) {
-      fastify.log.warn(
-        "DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. " +
-          "This is insecure and will cause startup failure in production mode. " +
-          "Please use a bcrypt hash instead."
-      );
-    }
-  }
-
   // GET /auth/setup/status - Returns DB-aware bootstrap/setup state
   fastify.get("/auth/setup/status", async (_request, reply) => {
     const allAdmins = await db.select().from(admins);
@@ -95,14 +56,13 @@ export default async function authRoutes(fastify: FastifyInstance) {
       const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
       const allAdmins = await db.select().from(admins);
       const adminConfiguredInDb = allAdmins.length > 0;
-      const adminConfiguredInEnv = !!process.env.ADMIN_PASSWORD;
 
       // Check if setup is allowed
       if (!allowAdminSetup) {
         return reply.code(403).send({ error: "Admin setup is not enabled" });
       }
 
-      if (adminConfiguredInDb || adminConfiguredInEnv) {
+      if (adminConfiguredInDb) {
         return reply.code(403).send({ error: "Admin is already configured" });
       }
 
@@ -165,12 +125,8 @@ export default async function authRoutes(fastify: FastifyInstance) {
           passwordHash,
           instructions: [
             "1. Copy the credentials above",
-            "2. (Recommended) Use these to login and follow the confirm-bootstrap flow",
-            "3. (Legacy) Add to your environment configuration:",
-            `   ADMIN_USERNAME=${username}`,
-            `   ADMIN_PASSWORD=${passwordHash}`,
-            "4. Remove or set ALLOW_ADMIN_SETUP=false",
-            "5. Restart your application",
+            "2. Use these to login and follow the confirm-bootstrap flow to finalize your setup.",
+            "3. (Recommended) Set ALLOW_ADMIN_SETUP=false in your environment.",
           ],
         });
       } finally {

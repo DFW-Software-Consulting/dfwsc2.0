@@ -31,28 +31,6 @@ describe("Environment Template Documentation", () => {
   });
 
   describe("Admin Authentication Variables", () => {
-    it("should document ADMIN_USERNAME variable (optional)", () => {
-      const hasAdminUsername = envExampleContent.includes("ADMIN_USERNAME=");
-
-      if (!hasAdminUsername) {
-        console.warn(
-          "Warning: ADMIN_USERNAME variable is missing from backend/.env.example. " +
-            "While optional, it can be used for initial bootstrap."
-        );
-      }
-    });
-
-    it("should document ADMIN_PASSWORD variable (optional)", () => {
-      const hasAdminPassword = envExampleContent.includes("ADMIN_PASSWORD=");
-
-      if (!hasAdminPassword) {
-        console.warn(
-          "Warning: ADMIN_PASSWORD variable is missing from backend/.env.example. " +
-            "While optional, it can be used for initial bootstrap."
-        );
-      }
-    });
-
     it("should document JWT_SECRET variable", () => {
       const hasJwtSecret = envExampleContent.includes("JWT_SECRET=");
 
@@ -85,22 +63,6 @@ describe("Environment Template Documentation", () => {
   });
 
   describe("Admin Authentication Documentation Quality", () => {
-    it("should include security guidance comments for ADMIN_PASSWORD", () => {
-      // Check for bcrypt-related comments near ADMIN_PASSWORD
-      const hasBcryptGuidance =
-        envExampleContent.includes("bcrypt") ||
-        (envExampleContent.includes("production") && envExampleContent.includes("ADMIN_PASSWORD"));
-
-      expect(hasBcryptGuidance).toBe(true);
-
-      if (!hasBcryptGuidance) {
-        console.warn(
-          "Warning: backend/.env.example should include security guidance about " +
-            "using bcrypt hashed passwords in production near the ADMIN_PASSWORD variable."
-        );
-      }
-    });
-
     it("should include minimum length requirement for JWT_SECRET", () => {
       // Check for minimum length guidance near JWT_SECRET
       const hasLengthGuidance =
@@ -150,43 +112,15 @@ describe("Environment Template Documentation", () => {
       }
     });
 
-    it("should group admin auth variables together", () => {
-      // Find positions of admin auth variables
-      const adminUsernameIndex = envExampleContent.indexOf("ADMIN_USERNAME=");
-      const adminPasswordIndex = envExampleContent.indexOf("ADMIN_PASSWORD=");
+    it("should group JWT_SECRET and JWT_EXPIRY together", () => {
       const jwtSecretIndex = envExampleContent.indexOf("JWT_SECRET=");
       const jwtExpiryIndex = envExampleContent.indexOf("JWT_EXPIRY=");
 
-      // All variables should be present
-      expect(adminUsernameIndex).toBeGreaterThan(-1);
-      expect(adminPasswordIndex).toBeGreaterThan(-1);
       expect(jwtSecretIndex).toBeGreaterThan(-1);
       expect(jwtExpiryIndex).toBeGreaterThan(-1);
 
-      // Variables should be within 500 characters of each other (grouped together)
-      const maxIndex = Math.max(
-        adminUsernameIndex,
-        adminPasswordIndex,
-        jwtSecretIndex,
-        jwtExpiryIndex
-      );
-      const minIndex = Math.min(
-        adminUsernameIndex,
-        adminPasswordIndex,
-        jwtSecretIndex,
-        jwtExpiryIndex
-      );
-      const groupingDistance = maxIndex - minIndex;
-
-      expect(groupingDistance).toBeLessThan(1000);
-
-      if (groupingDistance >= 1000) {
-        console.warn(
-          `Warning: Admin authentication variables are spread across ${groupingDistance} ` +
-            "characters in backend/.env.example. Consider grouping them together for better " +
-            "organization and discoverability."
-        );
-      }
+      const groupingDistance = Math.abs(jwtExpiryIndex - jwtSecretIndex);
+      expect(groupingDistance).toBeLessThan(500);
     });
   });
 });

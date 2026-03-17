@@ -69,15 +69,8 @@ async function createServer() {
   // Use a unique flag path so existsSync() always returns false for a fresh server
   process.env.SETUP_FLAG_PATH = `/tmp/test-setup-${Date.now()}-${Math.random()}`;
   vi.resetModules();
-  delete process.env.ADMIN_USERNAME;
-  delete process.env.ADMIN_PASSWORD;
   const { buildServer } = await import("../../app");
   const server = await buildServer();
-  // validateEnv() inside buildServer() calls dotenv.config() which reloads .env
-  // and may restore ADMIN_USERNAME/ADMIN_PASSWORD — delete them again so tests
-  // that want no admin configured see a clean environment at request time.
-  delete process.env.ADMIN_USERNAME;
-  delete process.env.ADMIN_PASSWORD;
   return server;
 }
 
@@ -120,27 +113,6 @@ describe("POST /api/v1/auth/setup", () => {
     await server.close();
   });
 
-  it("returns 403 when admin is already configured (ADMIN_PASSWORD already set)", async () => {
-    process.env.ALLOW_ADMIN_SETUP = "true";
-    const server = await createServer();
-    // createServer() scrubs ADMIN_PASSWORD after dotenv reloads; re-set it here
-    // to simulate a server that already has admin credentials configured in ENV.
-    process.env.ADMIN_PASSWORD = "testpassword";
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/auth/setup",
-      payload: { username: "admin", password: "securepass123" },
-      headers: { "content-type": "application/json" },
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.json().error).toBe("Admin is already configured");
-
-    await server.close();
-    delete process.env.ALLOW_ADMIN_SETUP;
-  });
-
   it("returns 403 when admin is already configured (Admin exists in DB)", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
     // Seed DB with an admin
@@ -173,9 +145,6 @@ describe("POST /api/v1/auth/setup", () => {
 
   it('returns 403 "Setup has already been used" when setupUsed flag is set', async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    // Clear admin credentials to allow setup
-    delete process.env.ADMIN_USERNAME;
-    delete process.env.ADMIN_PASSWORD;
 
     const server = await createServer();
 
@@ -201,17 +170,12 @@ describe("POST /api/v1/auth/setup", () => {
     expect(response.json().error).toBe("Setup has already been used this session");
 
     await server.close();
-    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
-    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 
   it("returns 401 when ADMIN_SETUP_TOKEN is set but wrong token is provided", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
     process.env.ADMIN_SETUP_TOKEN = "correct-secret-token";
-    // Clear admin credentials to allow setup
-    delete process.env.ADMIN_USERNAME;
-    delete process.env.ADMIN_PASSWORD;
 
     const server = await createServer();
 
@@ -229,17 +193,12 @@ describe("POST /api/v1/auth/setup", () => {
     expect(response.json().error).toBe("Invalid setup token");
 
     await server.close();
-    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
-    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
     delete process.env.ADMIN_SETUP_TOKEN;
   });
 
   it("returns 400 when username is missing from body", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    // Clear admin credentials to allow setup
-    delete process.env.ADMIN_USERNAME;
-    delete process.env.ADMIN_PASSWORD;
 
     const server = await createServer();
 
@@ -254,16 +213,11 @@ describe("POST /api/v1/auth/setup", () => {
     expect(response.json().error).toMatch(/username|password/i);
 
     await server.close();
-    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
-    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 
   it("returns 400 when password is shorter than 8 characters", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    // Clear admin credentials to allow setup
-    delete process.env.ADMIN_USERNAME;
-    delete process.env.ADMIN_PASSWORD;
 
     const server = await createServer();
 
@@ -278,16 +232,11 @@ describe("POST /api/v1/auth/setup", () => {
     expect(response.json().error).toMatch(/8 characters/i);
 
     await server.close();
-    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
-    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 
   it("returns 200 with username, passwordHash, and instructions on success", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    // Clear admin credentials to allow setup
-    delete process.env.ADMIN_USERNAME;
-    delete process.env.ADMIN_PASSWORD;
 
     const server = await createServer();
 
@@ -303,11 +252,9 @@ describe("POST /api/v1/auth/setup", () => {
     expect(body.username).toBe("newadmin");
     expect(body.passwordHash).toMatch(/^\$2[aby]\$/);
     expect(Array.isArray(body.instructions)).toBe(true);
-    expect(body.instructions.length).toBeGreaterThan(4);
+    expect(body.instructions.length).toBe(3);
 
     await server.close();
-    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
-    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 });
@@ -346,14 +293,7 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
   });
 
   it("returns 503 when no admin is configured in the database", async () => {
-    const originalUsername = process.env.ADMIN_USERNAME;
-    const originalPassword = process.env.ADMIN_PASSWORD;
-    delete process.env.ADMIN_USERNAME;
-    delete process.env.ADMIN_PASSWORD;
-    // ALLOW_ADMIN_SETUP=true so validateEnv doesn't throw on missing admin creds
-    process.env.ALLOW_ADMIN_SETUP = "true";
     // dbState.admins is empty — no admin in DB
-
     const server = await createServer();
 
     const response = await server.inject({
@@ -367,18 +307,12 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     expect(response.json().setupRequired).toBe(true);
 
     await server.close();
-    process.env.ADMIN_USERNAME = originalUsername;
-    process.env.ADMIN_PASSWORD = originalPassword;
-    delete process.env.ALLOW_ADMIN_SETUP;
   });
 
   it("returns 200 with token when credentials match a bcrypt-hashed password", async () => {
     // Generate a bcrypt hash and seed the mock DB with it
     const plainPassword = "securepassword99";
     const hashed = await bcrypt.hash(plainPassword, 10);
-
-    process.env.ADMIN_USERNAME = "hashedadmin";
-    process.env.ADMIN_PASSWORD = hashed;
 
     // Seed mock admin matching the credentials
     dbState.admins = [
@@ -388,7 +322,7 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
         passwordHash: hashed,
         role: "admin",
         active: true,
-        setupConfirmed: false,
+        setupConfirmed: true,
       },
     ];
 
@@ -414,9 +348,6 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     const plainPassword = "plaintextpass123";
     const hashed = await bcrypt.hash(plainPassword, 10);
 
-    process.env.ADMIN_USERNAME = "devadmin";
-    process.env.ADMIN_PASSWORD = plainPassword;
-
     dbState.admins = [
       {
         id: "admin-1",
@@ -424,7 +355,7 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
         passwordHash: hashed,
         role: "admin",
         active: true,
-        setupConfirmed: false,
+        setupConfirmed: true,
       },
     ];
 
@@ -448,9 +379,6 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     // before the request so signJwt throws — exercising the catch block.
     const plainPassword = "testpassword";
     const hashed = await bcrypt.hash(plainPassword, 10);
-
-    process.env.ADMIN_USERNAME = "admin";
-    process.env.ADMIN_PASSWORD = plainPassword;
 
     dbState.admins = [
       {

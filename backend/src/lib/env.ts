@@ -14,9 +14,6 @@ const REQUIRED_ENV_VARS = [
   "JWT_SECRET",
 ];
 
-// These vars are optional - used for initial bootstrap if no admin exists in DB
-const OPTIONAL_ADMIN_VARS = ["ADMIN_USERNAME", "ADMIN_PASSWORD"];
-
 const MASK_KEEP = 6;
 
 const OPTIONAL_ENV_VARS = [
@@ -26,7 +23,6 @@ const OPTIONAL_ENV_VARS = [
   "ADMIN_API_KEY",
   "ALLOW_ADMIN_SETUP",
   "ADMIN_SETUP_TOKEN",
-  ...OPTIONAL_ADMIN_VARS,
 ];
 
 export function validateEnv(): Record<string, string> {
