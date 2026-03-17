@@ -13,6 +13,7 @@ export default function AdminSetup({
   showToast,
   setupToken,
   isBootstrapPending = false,
+  isCreatingAdmin = false,
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -116,139 +117,140 @@ export default function AdminSetup({
         </p>
       </div>
 
-      {!isBootstrapPending && !result ? (
-        // Admin creation form
-        <form onSubmit={handleCreateSubmit}>
-          <FormInput
-            id="setupToken"
-            label="Setup Token (optional)"
-            value={setupTokenValue}
-            onChange={(e) => setSetupTokenValue(e.target.value)}
-            placeholder="Enter setup token if required"
-            disabled={createMutation.isPending}
-            autoComplete="one-time-code"
-            helper="Required only when ADMIN_SETUP_TOKEN is enabled on the server."
-            wrapperClassName="mb-4"
-          />
+      {!result &&
+        (!isBootstrapPending ? (
+          // Admin creation form
+          <form onSubmit={handleCreateSubmit}>
+            <FormInput
+              id="setupToken"
+              label="Setup Token (optional)"
+              value={setupTokenValue}
+              onChange={(e) => setSetupTokenValue(e.target.value)}
+              placeholder="Enter setup token if required"
+              disabled={createMutation.isPending}
+              autoComplete="one-time-code"
+              helper="Required only when ADMIN_SETUP_TOKEN is enabled on the server."
+              wrapperClassName="mb-4"
+            />
 
-          <FormInput
-            id="setupUsername"
-            label="Admin Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter admin username"
-            disabled={createMutation.isPending}
-            autoComplete="username"
-            wrapperClassName="mb-4"
-          />
+            <FormInput
+              id="setupUsername"
+              label="Admin Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Enter admin username"
+              disabled={createMutation.isPending}
+              autoComplete="username"
+              wrapperClassName="mb-4"
+            />
 
-          <FormInput
-            id="setupPassword"
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password"
-            disabled={createMutation.isPending}
-            autoComplete="new-password"
-            helper={`Minimum ${MIN_PASSWORD_LENGTH} characters`}
-            wrapperClassName="mb-4"
-          />
+            <FormInput
+              id="setupPassword"
+              label="Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
+              disabled={createMutation.isPending}
+              autoComplete="new-password"
+              helper={`Minimum ${MIN_PASSWORD_LENGTH} characters`}
+              wrapperClassName="mb-4"
+            />
 
-          <FormInput
-            id="setupConfirmPassword"
-            label="Confirm Password"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            placeholder="Confirm password"
-            disabled={createMutation.isPending}
-            autoComplete="new-password"
-            wrapperClassName="mb-6"
-          />
+            <FormInput
+              id="setupConfirmPassword"
+              label="Confirm Password"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Confirm password"
+              disabled={createMutation.isPending}
+              autoComplete="new-password"
+              wrapperClassName="mb-6"
+            />
 
-          <Button
-            type="submit"
-            disabled={createMutation.isPending}
-            isLoading={createMutation.isPending}
-            className="w-full shadow-lg focus:ring-2 focus:ring-blue-400"
-          >
-            {createMutation.isPending ? "Creating Admin..." : "Create Admin Account"}
-          </Button>
+            <Button
+              type="submit"
+              disabled={createMutation.isPending}
+              isLoading={createMutation.isPending}
+              className="w-full shadow-lg focus:ring-2 focus:ring-blue-400"
+            >
+              {createMutation.isPending ? "Creating Admin..." : "Create Admin Account"}
+            </Button>
 
-          {error && (
-            <p className="mt-4 text-center text-sm text-red-400" role="alert">
-              {error}
-            </p>
-          )}
-        </form>
-      ) : (
-        // Admin confirmation form
-        <form onSubmit={handleConfirmSubmit}>
-          <FormInput
-            id="setupToken"
-            label="Setup Token (optional)"
-            value={setupTokenValue}
-            onChange={(e) => setSetupTokenValue(e.target.value)}
-            placeholder="Enter setup token if required"
-            disabled={confirmMutation.isPending}
-            autoComplete="one-time-code"
-            helper="Required only when ADMIN_SETUP_TOKEN is enabled on the server."
-            wrapperClassName="mb-4"
-          />
+            {error && (
+              <p className="mt-4 text-center text-sm text-red-400" role="alert">
+                {error}
+              </p>
+            )}
+          </form>
+        ) : (
+          // Admin confirmation form
+          <form onSubmit={handleConfirmSubmit}>
+            <FormInput
+              id="setupToken"
+              label="Setup Token (optional)"
+              value={setupTokenValue}
+              onChange={(e) => setSetupTokenValue(e.target.value)}
+              placeholder="Enter setup token if required"
+              disabled={confirmMutation.isPending}
+              autoComplete="one-time-code"
+              helper="Required only when ADMIN_SETUP_TOKEN is enabled on the server."
+              wrapperClassName="mb-4"
+            />
 
-          <FormInput
-            id="setupUsername"
-            label="Admin Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter admin username"
-            disabled={confirmMutation.isPending}
-            autoComplete="username"
-            wrapperClassName="mb-4"
-          />
+            <FormInput
+              id="setupUsername"
+              label="Admin Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Enter admin username"
+              disabled={confirmMutation.isPending}
+              autoComplete="username"
+              wrapperClassName="mb-4"
+            />
 
-          <FormInput
-            id="setupPassword"
-            label="Password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter password"
-            disabled={confirmMutation.isPending}
-            autoComplete="new-password"
-            helper={`Minimum ${MIN_PASSWORD_LENGTH} characters`}
-            wrapperClassName="mb-4"
-          />
+            <FormInput
+              id="setupPassword"
+              label="Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
+              disabled={confirmMutation.isPending}
+              autoComplete="new-password"
+              helper={`Minimum ${MIN_PASSWORD_LENGTH} characters`}
+              wrapperClassName="mb-4"
+            />
 
-          <FormInput
-            id="setupConfirmPassword"
-            label="Confirm Password"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            placeholder="Confirm password"
-            disabled={confirmMutation.isPending}
-            autoComplete="new-password"
-            wrapperClassName="mb-6"
-          />
+            <FormInput
+              id="setupConfirmPassword"
+              label="Confirm Password"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="Confirm password"
+              disabled={confirmMutation.isPending}
+              autoComplete="new-password"
+              wrapperClassName="mb-6"
+            />
 
-          <Button
-            type="submit"
-            disabled={confirmMutation.isPending}
-            isLoading={confirmMutation.isPending}
-            className="w-full shadow-lg focus:ring-2 focus:ring-blue-400"
-          >
-            {confirmMutation.isPending ? "Confirming Admin..." : "Confirm Admin Account"}
-          </Button>
+            <Button
+              type="submit"
+              disabled={confirmMutation.isPending}
+              isLoading={confirmMutation.isPending}
+              className="w-full shadow-lg focus:ring-2 focus:ring-blue-400"
+            >
+              {confirmMutation.isPending ? "Confirming Admin..." : "Confirm Admin Account"}
+            </Button>
 
-          {error && (
-            <p className="mt-4 text-center text-sm text-red-400" role="alert">
-              {error}
-            </p>
-          )}
-        </form>
-      )}
+            {error && (
+              <p className="mt-4 text-center text-sm text-red-400" role="alert">
+                {error}
+              </p>
+            )}
+          </form>
+        ))}
 
       {result && (
         <div className="space-y-4">

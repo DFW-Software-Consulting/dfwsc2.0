@@ -69,6 +69,9 @@ async function createServer() {
   // Use a unique flag path so existsSync() always returns false for a fresh server
   process.env.SETUP_FLAG_PATH = `/tmp/test-setup-${Date.now()}-${Math.random()}`;
   vi.resetModules();
+  // Delete admin credentials AFTER resetModules to override vitest config
+  delete process.env.ADMIN_USERNAME;
+  delete process.env.ADMIN_PASSWORD;
   const { buildServer } = await import("../../app");
   return buildServer();
 }
@@ -133,20 +136,21 @@ describe("POST /api/v1/auth/setup", () => {
 
   it('returns 403 "Setup has already been used" when setupUsed flag is set', async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    const originalUsername = process.env.ADMIN_USERNAME;
-    const originalPassword = process.env.ADMIN_PASSWORD;
+    // Clear admin credentials to allow setup
     delete process.env.ADMIN_USERNAME;
     delete process.env.ADMIN_PASSWORD;
 
     const server = await createServer();
 
     // First call succeeds (sets setupUsed=true)
-    await server.inject({
+    const firstResponse = await server.inject({
       method: "POST",
       url: "/api/v1/auth/setup",
       payload: { username: "admin", password: "securepass123" },
       headers: { "content-type": "application/json" },
     });
+
+    expect(firstResponse.statusCode).toBe(200);
 
     // Second call should see setupUsed=true → 403
     const response = await server.inject({
@@ -160,16 +164,15 @@ describe("POST /api/v1/auth/setup", () => {
     expect(response.json().error).toBe("Setup has already been used this session");
 
     await server.close();
-    process.env.ADMIN_USERNAME = originalUsername;
-    process.env.ADMIN_PASSWORD = originalPassword;
+    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
+    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 
   it("returns 401 when ADMIN_SETUP_TOKEN is set but wrong token is provided", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
     process.env.ADMIN_SETUP_TOKEN = "correct-secret-token";
-    const originalUsername = process.env.ADMIN_USERNAME;
-    const originalPassword = process.env.ADMIN_PASSWORD;
+    // Clear admin credentials to allow setup
     delete process.env.ADMIN_USERNAME;
     delete process.env.ADMIN_PASSWORD;
 
@@ -189,16 +192,15 @@ describe("POST /api/v1/auth/setup", () => {
     expect(response.json().error).toBe("Invalid setup token");
 
     await server.close();
-    process.env.ADMIN_USERNAME = originalUsername;
-    process.env.ADMIN_PASSWORD = originalPassword;
+    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
+    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
     delete process.env.ADMIN_SETUP_TOKEN;
   });
 
   it("returns 400 when username is missing from body", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    const originalUsername = process.env.ADMIN_USERNAME;
-    const originalPassword = process.env.ADMIN_PASSWORD;
+    // Clear admin credentials to allow setup
     delete process.env.ADMIN_USERNAME;
     delete process.env.ADMIN_PASSWORD;
 
@@ -215,15 +217,14 @@ describe("POST /api/v1/auth/setup", () => {
     expect(response.json().error).toMatch(/username|password/i);
 
     await server.close();
-    process.env.ADMIN_USERNAME = originalUsername;
-    process.env.ADMIN_PASSWORD = originalPassword;
+    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
+    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 
   it("returns 400 when password is shorter than 8 characters", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    const originalUsername = process.env.ADMIN_USERNAME;
-    const originalPassword = process.env.ADMIN_PASSWORD;
+    // Clear admin credentials to allow setup
     delete process.env.ADMIN_USERNAME;
     delete process.env.ADMIN_PASSWORD;
 
@@ -240,15 +241,14 @@ describe("POST /api/v1/auth/setup", () => {
     expect(response.json().error).toMatch(/8 characters/i);
 
     await server.close();
-    process.env.ADMIN_USERNAME = originalUsername;
-    process.env.ADMIN_PASSWORD = originalPassword;
+    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
+    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 
   it("returns 200 with username, passwordHash, and instructions on success", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    const originalUsername = process.env.ADMIN_USERNAME;
-    const originalPassword = process.env.ADMIN_PASSWORD;
+    // Clear admin credentials to allow setup
     delete process.env.ADMIN_USERNAME;
     delete process.env.ADMIN_PASSWORD;
 
@@ -269,8 +269,8 @@ describe("POST /api/v1/auth/setup", () => {
     expect(body.instructions.length).toBeGreaterThan(0);
 
     await server.close();
-    process.env.ADMIN_USERNAME = originalUsername;
-    process.env.ADMIN_PASSWORD = originalPassword;
+    process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;
+    process.env.ADMIN_PASSWORD = savedEnv.ADMIN_PASSWORD;
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 });
