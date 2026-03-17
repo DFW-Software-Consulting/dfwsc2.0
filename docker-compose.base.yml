@@ -15,7 +15,7 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
-    command: npm run start
+    command: sh -c "npx drizzle-kit migrate && npm run start"
 
   web:
     build:
