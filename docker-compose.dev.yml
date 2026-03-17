@@ -3,7 +3,7 @@ services:
     image: node:20-alpine
     user: "0:0"
     working_dir: /app
-    command: sh -c "chown -R node:node /app /app/node_modules && exec su node -c 'until pg_isready -h db -p 5432 -U postgres; do echo "Waiting for database..."; sleep 2; done && npm install && npm run dev'"
+    command: sh -c "chown -R node:node /app /app/node_modules && exec su node -c 'until pg_isready -h db -p 5432 -U postgres; do echo \"Waiting for database...\"; sleep 2; done && npx drizzle-kit migrate && npm run dev'"
     env_file:
       - .env
     environment:
