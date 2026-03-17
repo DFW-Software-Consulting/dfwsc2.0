@@ -76,7 +76,7 @@ Six tables:
 - `invoices` — `id`, `clientId` (FK→clients), `subscriptionId` (nullable FK→subscriptions), `amountCents`, `description`, `dueDate`, `status` (pending/paid/cancelled), `paymentToken` (unique), `paidAt`
 
 ### Environment variables
-Required: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `FRONTEND_ORIGIN`, `USE_CHECKOUT`, `DATABASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`.
+Required: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `FRONTEND_ORIGIN`, `USE_CHECKOUT`, `DATABASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `JWT_SECRET`.
 
 Optional: `PORT` (default 4242), `API_BASE_URL`, `DEFAULT_PROCESS_FEE_CENTS`, `SMTP_FROM`, `ENABLE_SWAGGER`, `JWT_EXPIRY` (default `1h`), `SETUP_FLAG_PATH`.
 

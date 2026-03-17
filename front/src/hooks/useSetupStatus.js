@@ -10,5 +10,10 @@ export function useSetupStatus() {
     staleTime: Infinity,
     enabled: !isLoggedIn,
   });
-  return { setupAllowed: data?.setupAllowed ?? false, isLoading };
+
+  // Return the full status object from the backend
+  return {
+    ...(data ?? {}),
+    isLoading,
+  };
 }

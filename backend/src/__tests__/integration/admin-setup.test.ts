@@ -4,10 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * Admin Setup Integration Tests
  *
  * NOTE: These tests use the vitest environment defined in vitest.config.ts.
- * Full E2E testing of the setup flow should be done in the Docker environment
- * where environment variables can be properly controlled.
+ * Full E2E testing of the setup flow should be done in the Docker environment.
  *
- * The tests focus on guard conditions that don't require modifying ADMIN_PASSWORD.
+ * The tests focus on guard conditions and state transitions.
  */
 
 // Mutable in-memory admin store for DB mock
@@ -176,7 +175,17 @@ describe("Admin Setup Integration", () => {
     });
 
     it("should return 403 when admin is already configured", async () => {
-      // Enable admin setup but ADMIN_PASSWORD is already set (from vitest.config.ts)
+      // Seed a confirmed admin to trigger the guard
+      dbState.admins = [
+        {
+          id: "admin-1",
+          username: "admin",
+          passwordHash: "$2a$10$example",
+          role: "admin",
+          active: true,
+          setupConfirmed: true,
+        },
+      ];
       process.env.ALLOW_ADMIN_SETUP = "true";
       const server = await createServer();
 

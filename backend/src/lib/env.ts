@@ -14,9 +14,6 @@ const REQUIRED_ENV_VARS = [
   "JWT_SECRET",
 ];
 
-// These vars are required UNLESS ALLOW_ADMIN_SETUP=true (for initial setup flow)
-const CONDITIONALLY_REQUIRED_VARS = ["ADMIN_USERNAME", "ADMIN_PASSWORD"];
-
 const MASK_KEEP = 6;
 
 const OPTIONAL_ENV_VARS = [
@@ -49,21 +46,6 @@ export function validateEnv(): Record<string, string> {
     const value = process.env[key];
     if (value) {
       env[key] = value;
-    }
-  }
-
-  // Check conditionally required vars (required unless setup is allowed AND no admin creds exist)
-  const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
-  const adminUsername = process.env.ADMIN_USERNAME;
-  const adminPassword = process.env.ADMIN_PASSWORD;
-  const mustRequireAdminCreds = !allowAdminSetup || !!adminUsername || !!adminPassword;
-  for (const key of CONDITIONALLY_REQUIRED_VARS) {
-    const value = process.env[key];
-    if (value) {
-      env[key] = value;
-    } else if (mustRequireAdminCreds) {
-      // Require both creds when setup is off or either cred is present
-      missing.push(key);
     }
   }
 
