@@ -69,11 +69,16 @@ async function createServer() {
   // Use a unique flag path so existsSync() always returns false for a fresh server
   process.env.SETUP_FLAG_PATH = `/tmp/test-setup-${Date.now()}-${Math.random()}`;
   vi.resetModules();
-  // Delete admin credentials AFTER resetModules to override vitest config
   delete process.env.ADMIN_USERNAME;
   delete process.env.ADMIN_PASSWORD;
   const { buildServer } = await import("../../app");
-  return buildServer();
+  const server = await buildServer();
+  // validateEnv() inside buildServer() calls dotenv.config() which reloads .env
+  // and may restore ADMIN_USERNAME/ADMIN_PASSWORD — delete them again so tests
+  // that want no admin configured see a clean environment at request time.
+  delete process.env.ADMIN_USERNAME;
+  delete process.env.ADMIN_PASSWORD;
+  return server;
 }
 
 describe("POST /api/v1/auth/setup", () => {
@@ -117,8 +122,10 @@ describe("POST /api/v1/auth/setup", () => {
 
   it("returns 403 when admin is already configured (ADMIN_PASSWORD already set)", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    // vitest.config.ts already sets ADMIN_PASSWORD=testpassword so admin IS configured
     const server = await createServer();
+    // createServer() scrubs ADMIN_PASSWORD after dotenv reloads; re-set it here
+    // to simulate a server that already has admin credentials configured.
+    process.env.ADMIN_PASSWORD = "testpassword";
 
     const response = await server.inject({
       method: "POST",
@@ -442,6 +449,234 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
 
     expect(response.statusCode).toBe(500);
     expect(response.json().error).toMatch(/authentication error/i);
+
+    await server.close();
+  });
+});
+
+describe("GET /api/v1/auth/setup/status", () => {
+  let savedEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    savedEnv = { ...process.env };
+    dbState.admins = [];
+  });
+
+  afterEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in savedEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, savedEnv);
+    vi.resetModules();
+    dbState.admins = [];
+  });
+
+  it("returns requiresSetup=true when no admins exist in the database", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+    // dbState.admins is empty
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/auth/setup/status",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.requiresSetup).toBe(true);
+    expect(body.bootstrapPending).toBe(false);
+    expect(body.adminConfigured).toBe(false);
+
+    await server.close();
+  });
+
+  it("returns bootstrapPending=true when an admin exists with setupConfirmed=false", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "bootstrap-admin",
+        passwordHash: "$2b$10$placeholder",
+        role: "admin",
+        active: true,
+        setupConfirmed: false,
+      },
+    ];
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/auth/setup/status",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.bootstrapPending).toBe(true);
+    expect(body.requiresSetup).toBe(false);
+    expect(body.adminConfigured).toBe(false);
+
+    await server.close();
+  });
+
+  it("returns adminConfigured=true when an admin exists with setupConfirmed=true", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "confirmed-admin",
+        passwordHash: "$2b$10$placeholder",
+        role: "admin",
+        active: true,
+        setupConfirmed: true,
+      },
+    ];
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/auth/setup/status",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.adminConfigured).toBe(true);
+    expect(body.requiresSetup).toBe(false);
+    expect(body.bootstrapPending).toBe(false);
+
+    await server.close();
+  });
+});
+
+describe("POST /api/v1/auth/confirm-bootstrap", () => {
+  let savedEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    savedEnv = { ...process.env };
+    dbState.admins = [];
+  });
+
+  afterEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in savedEnv)) delete process.env[key];
+    }
+    Object.assign(process.env, savedEnv);
+    vi.resetModules();
+    dbState.admins = [];
+  });
+
+  it("returns 400 when username and password are missing from the body", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/confirm-bootstrap",
+      payload: {},
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatch(/username|password/i);
+
+    await server.close();
+  });
+
+  it("returns 400 when password is shorter than 8 characters", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/confirm-bootstrap",
+      payload: { username: "admin", password: "short" },
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatch(/8 characters/i);
+
+    await server.close();
+  });
+
+  it("returns 400 when no bootstrap admin exists in the database", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+    // dbState.admins is empty
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/confirm-bootstrap",
+      payload: { username: "admin", password: "newpassword123" },
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("No bootstrap admin found");
+
+    await server.close();
+  });
+
+  it("returns 400 when the bootstrap admin has already been confirmed", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "admin",
+        passwordHash: "$2b$10$placeholder",
+        role: "admin",
+        active: true,
+        setupConfirmed: true,
+      },
+    ];
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/confirm-bootstrap",
+      payload: { username: "admin", password: "newpassword123" },
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("Bootstrap already confirmed");
+
+    await server.close();
+  });
+
+  it("returns 200, marks admin confirmed, and updates credentials on success", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "bootstrap-admin",
+        passwordHash: "$2b$10$placeholder",
+        role: "admin",
+        active: true,
+        setupConfirmed: false,
+      },
+    ];
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/confirm-bootstrap",
+      payload: { username: "newadmin", password: "securepassword123" },
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().message).toBe("Admin credentials confirmed");
+    expect(dbState.admins[0].setupConfirmed).toBe(true);
+    expect(dbState.admins[0].username).toBe("newadmin");
+    expect(dbState.admins[0].passwordHash).toMatch(/^\$2[aby]\$/);
 
     await server.close();
   });

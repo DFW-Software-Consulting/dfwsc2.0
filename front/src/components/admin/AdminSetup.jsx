@@ -13,7 +13,6 @@ export default function AdminSetup({
   showToast,
   setupToken,
   isBootstrapPending = false,
-  isCreatingAdmin = false,
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -25,7 +24,7 @@ export default function AdminSetup({
 
   const confirmMutation = useMutation({
     mutationFn: ({ body, token }) => confirmBootstrap(body, token),
-    onSuccess: (data) => {
+    onSuccess: (_data) => {
       showToast?.("Admin credentials confirmed successfully!", "success");
       onSetupComplete?.();
     },
@@ -287,9 +286,8 @@ export default function AdminSetup({
           <div className="bg-gray-800 rounded-lg p-4">
             <h4 className="text-sm font-semibold text-gray-200 mb-2">Next Steps:</h4>
             <ol className="list-decimal list-inside text-sm text-gray-400 space-y-1">
-              {result.instructions.map((instruction, index) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: static list
-                <li key={index}>{instruction}</li>
+              {result.instructions.map((instruction) => (
+                <li key={instruction}>{instruction}</li>
               ))}
             </ol>
           </div>

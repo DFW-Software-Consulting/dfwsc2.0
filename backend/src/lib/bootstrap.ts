@@ -17,8 +17,8 @@ export async function bootstrapAdminIfNeeded(server: FastifyInstance): Promise<v
 
   if (!username || !password) {
     server.log.warn(
-      "Bootstrap warning: ADMIN_USERNAME/ADMIN_PASSWORD not set and no admins in DB. " +
-        "Server will start but login will return 503 until an admin is configured."
+      { username },
+      "Bootstrap warning: ADMIN_USERNAME/ADMIN_PASSWORD not set and no admins in DB. Server will start but login will return 503 until an admin is configured."
     );
     return;
   }
