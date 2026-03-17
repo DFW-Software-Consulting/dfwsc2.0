@@ -30,6 +30,19 @@ const REQUIRED_TABLES: TableColumns[] = [
     table: "onboarding_tokens",
     columns: ["id", "client_id", "token", "status", "email", "created_at", "updated_at"],
   },
+  {
+    table: "admins",
+    columns: [
+      "id",
+      "username",
+      "password_hash",
+      "role",
+      "active",
+      "setup_confirmed",
+      "created_at",
+      "updated_at",
+    ],
+  },
 ];
 
 export async function verifyDatabaseSchema(): Promise<void> {
