@@ -35,12 +35,6 @@ services:
       - "4242:4242"
     restart: unless-stopped
     command: npm run start
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4242/api/v1/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
 
   web:
     build:
