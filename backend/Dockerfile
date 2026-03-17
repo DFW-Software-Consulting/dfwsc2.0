@@ -27,4 +27,4 @@ COPY --from=builder /app/drizzle ./drizzle
 
 USER node
 
-CMD ["sh", "-c", "npx drizzle-kit migrate && npm run start"]
+CMD ["npm", "run", "start"]
