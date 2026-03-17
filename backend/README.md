@@ -96,12 +96,33 @@ The development server listens on `http://localhost:4242` by default.
 
 ### Database Migrations
 
-Use Drizzle CLI to manage schema changes.
+Use Drizzle Kit to generate and apply migrations.
 
+**Local development:**
 ```bash
+# Generate a new migration from schema changes
 npm run db:generate
+
+# Apply migrations to your local database
 npm run db:migrate
 ```
+
+**CI/CD Deployment:**
+```bash
+# In your deployment pipeline, run migrations before starting the server
+npm run db:migrate
+```
+
+**Database management:**
+```bash
+# Open Drizzle Studio to view and manage data
+npm run db:studio
+
+# Push schema directly without migrations (dev only)
+npm run db:push
+```
+
+Migration files are stored in the `./drizzle` directory and should be committed to version control.
 
 ### Tests
 

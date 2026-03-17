@@ -1,9 +1,159 @@
 {
-  "id": "e9deb1d6-6192-4564-910d-6078ee07a535",
+  "id": "f697e874-ae2a-4e13-b6dd-a4fc91a35a5c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.admins": {
+      "name": "admins",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "username": {
+          "name": "username",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "'admin'"
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": true
+        },
+        "setup_confirmed": {
+          "name": "setup_confirmed",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false,
+          "default": false
+        },
+        "last_login_at": {
+          "name": "last_login_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "admins_username_unique": {
+          "name": "admins_username_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "username"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.client_groups": {
+      "name": "client_groups",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "processing_fee_percent": {
+          "name": "processing_fee_percent",
+          "type": "numeric(5, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "processing_fee_cents": {
+          "name": "processing_fee_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_success_url": {
+          "name": "payment_success_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_cancel_url": {
+          "name": "payment_cancel_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.clients": {
       "name": "clients",
       "schema": "",
@@ -26,14 +176,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "api_key": {
-          "name": "api_key",
+        "api_key_hash": {
+          "name": "api_key_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "api_key_hash": {
-          "name": "api_key_hash",
+        "api_key_lookup": {
+          "name": "api_key_lookup",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -44,12 +194,48 @@
           "primaryKey": false,
           "notNull": false
         },
+        "stripe_customer_id": {
+          "name": "stripe_customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "status": {
           "name": "status",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "default": "'active'"
+        },
+        "group_id": {
+          "name": "group_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_success_url": {
+          "name": "payment_success_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payment_cancel_url": {
+          "name": "payment_cancel_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "processing_fee_percent": {
+          "name": "processing_fee_percent",
+          "type": "numeric(5, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "processing_fee_cents": {
+          "name": "processing_fee_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -66,22 +252,67 @@
           "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
+      "indexes": {
+        "clients_api_key_hash_idx": {
+          "name": "clients_api_key_hash_idx",
+          "columns": [
+            {
+              "expression": "api_key_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "clients_api_key_lookup_idx": {
+          "name": "clients_api_key_lookup_idx",
+          "columns": [
+            {
+              "expression": "api_key_lookup",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "clients_group_id_client_groups_id_fk": {
+          "name": "clients_group_id_client_groups_id_fk",
+          "tableFrom": "clients",
+          "tableTo": "client_groups",
+          "columnsFrom": [
+            "group_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "clients_api_key_unique": {
-          "name": "clients_api_key_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "api_key"
-          ]
-        },
         "clients_api_key_hash_unique": {
           "name": "clients_api_key_hash_unique",
           "nullsNotDistinct": false,
           "columns": [
             "api_key_hash"
+          ]
+        },
+        "clients_api_key_lookup_unique": {
+          "name": "clients_api_key_lookup_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "api_key_lookup"
           ]
         }
       },
@@ -151,7 +382,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "onboarding_tokens_client_id_clients_id_fk": {
+          "name": "onboarding_tokens_client_id_clients_id_fk",
+          "tableFrom": "onboarding_tokens",
+          "tableTo": "clients",
+          "columnsFrom": [
+            "client_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
         "onboarding_tokens_token_unique": {
