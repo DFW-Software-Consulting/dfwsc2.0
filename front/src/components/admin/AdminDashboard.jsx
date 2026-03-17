@@ -20,7 +20,12 @@ const TABS = [
 
 export default function AdminDashboard() {
   const { isLoggedIn, logout } = useAuth();
-  const { setupAllowed, isLoading: statusLoading } = useSetupStatus();
+  const {
+    bootstrapPending,
+    adminConfigured,
+    requiresSetup,
+    isLoading: statusLoading,
+  } = useSetupStatus();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("clients");
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
@@ -54,11 +59,17 @@ export default function AdminDashboard() {
     }
     return (
       <>
-        {setupAllowed ? (
-          <AdminSetup onSetupComplete={handleSetupComplete} showToast={showToast} />
-        ) : (
-          <AdminLogin showToast={showToast} />
+        {(bootstrapPending || requiresSetup) && (
+          <AdminSetup
+            onSetupComplete={handleSetupComplete}
+            showToast={showToast}
+            isBootstrapPending={bootstrapPending}
+            isCreatingAdmin={requiresSetup}
+          />
         )}
+        {!bootstrapPending && !requiresSetup && adminConfigured ? (
+          <AdminLogin showToast={showToast} />
+        ) : null}
         <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
       </>
     );
