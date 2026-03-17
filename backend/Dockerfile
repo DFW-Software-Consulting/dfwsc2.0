@@ -14,42 +14,20 @@ COPY src ./src
 
 RUN npm run build:server
 
-FROM node:20-alpine AS production
+FROM base AS production
 ENV NODE_ENV=production
 WORKDIR /app
 
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-
+# Install dependencies as root
 COPY package*.json ./
-RUN npm ci --omit=dev && chown -R appuser:appgroup /app
+RUN npm ci --omit=dev
 
-COPY --from=builder /app/dist ./dist
+# Copy built files (using new output directory)
+COPY --from=builder /app/build-dist ./dist
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder /app/drizzle ./drizzle
 
-RUN mkdir -p /app/public && chown -R appuser:appgroup /app/public
+# Run as non-root user (node is pre-created in node:alpine)
+USER node
 
-RUN apk add --no-cache curl
-
-USER appuser
-CMD ["npm", "run", "start"]
-
-FROM node:20-alpine AS development
-ENV NODE_ENV=development
-WORKDIR /app
-
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-
-COPY package*.json ./
-RUN npm ci && chown -R appuser:appgroup /app
-
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
-COPY --from=builder /app/drizzle ./drizzle
-
-RUN mkdir -p /app/public && chown -R appuser:appgroup /app/public
-
-RUN apk add --no-cache curl
-
-USER appuser
 CMD ["npm", "run", "start"]

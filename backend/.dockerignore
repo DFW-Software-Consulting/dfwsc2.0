@@ -1,22 +1,8 @@
-# Dependency directories
 node_modules
-
-# Build outputs
 dist
-
-# VCS and IDE
+build-dist
+*.log
 .git
 .gitignore
-.DS_Store
-.vscode
-
-# Env and logs
-.env
-*.log
-stripe_listen.log
-logs
-
-# Misc
-coverage
-tmp
-docker-cheat-sheet.md
+README.md
+.env*
