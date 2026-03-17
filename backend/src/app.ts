@@ -111,7 +111,7 @@ export async function buildServer() {
    * ------------------------------------------------------------
    */
 
-  if (process.env.NODE_ENV !== "production" && process.env.ENABLE_SWAGGER !== "false") {
+  if (process.env.ENABLE_SWAGGER === "true") {
     const { default: fastifySwagger } = await import("@fastify/swagger");
     const { default: fastifySwaggerUi } = await import("@fastify/swagger-ui");
     await server.register(fastifySwagger, {
@@ -120,7 +120,7 @@ export async function buildServer() {
     await server.register(fastifySwaggerUi, { routePrefix: "/docs" });
     server.log.info("✅ Swagger UI available at /docs");
   } else {
-    server.log.info("🚫 Swagger disabled for production");
+    server.log.info("🚫 Swagger disabled");
   }
 
   server.register(configRoutes);
