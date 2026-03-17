@@ -22,6 +22,8 @@
     "build:server": "tsc -p tsconfig.build.json",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
     "stripe:listen": "stripe listen --forward-to localhost:4242/api/v1/webhooks/stripe",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
