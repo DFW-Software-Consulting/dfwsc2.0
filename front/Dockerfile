@@ -13,11 +13,8 @@ RUN npm run build
 
 FROM nginx:alpine AS production
 
-# Copy built files from builder (using new output directory)
 COPY --from=builder /app/build-dist /usr/share/nginx/html
 
-# Expose standard HTTP/HTTPS ports
 EXPOSE 80 443
 
-# Use nginx to serve static files
 CMD ["nginx", "-g", "daemon off;"]

@@ -58,19 +58,14 @@ export function resetSetupState(): void {
 
 export default async function authRoutes(fastify: FastifyInstance) {
   // Validate admin password configuration on route registration
-  // Guard: env var may not be set post-bootstrap, so only log warning when present
   if (process.env.ADMIN_PASSWORD) {
-    try {
-      const isHashed = validateAdminPasswordConfig();
-      if (!isHashed) {
-        fastify.log.warn(
-          "DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. " +
-            "This is insecure and will cause startup failure in production mode. " +
-            "Please use a bcrypt hash instead."
-        );
-      }
-    } catch (err) {
-      throw err;
+    const isHashed = validateAdminPasswordConfig();
+    if (!isHashed) {
+      fastify.log.warn(
+        "DEPRECATION WARNING: ADMIN_PASSWORD is stored in plaintext. " +
+          "This is insecure and will cause startup failure in production mode. " +
+          "Please use a bcrypt hash instead."
+      );
     }
   }
 
@@ -238,12 +233,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const { username, password } = request.body as LoginRequest;
 
-      // Validate request body
       if (!username || !password) {
         return reply.code(400).send({ error: "Username and password are required" });
       }
 
-      // Query DB for admin
       const admin = await getAdminFromDb(username);
 
       if (!admin) {
@@ -251,7 +244,6 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return reply.code(503).send({ error: "Admin not configured", setupRequired: true });
       }
 
-      // Verify password against stored hash
       const isValid = await bcrypt.compare(password, admin.passwordHash);
 
       if (!isValid) {

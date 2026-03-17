@@ -18,16 +18,13 @@ FROM base AS production
 ENV NODE_ENV=production
 WORKDIR /app
 
-# Install dependencies as root
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Copy built files (using new output directory)
 COPY --from=builder /app/build-dist ./dist
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 COPY --from=builder /app/drizzle ./drizzle
 
-# Run as non-root user (node is pre-created in node:alpine)
 USER node
 
 CMD ["npm", "run", "start"]

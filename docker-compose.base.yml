@@ -24,7 +24,6 @@ services:
       args:
         VITE_API_URL: /api/v1
     environment:
-      # Nginx proxy target - override in dev/prod compose files
       API_URL: ${API_URL:-http://api:4242}
     ports:
       - "8080:80"
