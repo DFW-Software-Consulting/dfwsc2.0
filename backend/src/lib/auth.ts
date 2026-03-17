@@ -4,7 +4,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import jwt from "jsonwebtoken";
 import { db } from "../db/client";
-import { clients } from "../db/schema";
+import { admins, clients } from "../db/schema";
 
 export function sha256Lookup(apiKey: string): string {
   return crypto.createHash("sha256").update(apiKey).digest("hex");
@@ -65,6 +65,16 @@ export async function hashApiKey(apiKey: string): Promise<string> {
 
 export async function verifyPassword(plaintext: string, hashed: string): Promise<boolean> {
   return bcrypt.compare(plaintext, hashed);
+}
+
+export async function getAdminFromDb(username: string): Promise<{
+  id: string;
+  username: string;
+  passwordHash: string;
+  setupConfirmed: boolean | null;
+} | null> {
+  const [admin] = await db.select().from(admins).where(eq(admins.username, username)).limit(1);
+  return admin ?? null;
 }
 
 export function signJwt(payload: { role: string }): string {

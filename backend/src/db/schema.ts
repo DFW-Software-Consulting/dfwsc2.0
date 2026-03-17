@@ -1,4 +1,13 @@
-import { index, integer, jsonb, numeric, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  text,
+  timestamp,
+} from "drizzle-orm/pg-core";
 
 export const clientGroups = pgTable("client_groups", {
   id: text("id").primaryKey(),
@@ -60,6 +69,18 @@ export const onboardingTokens = pgTable("onboarding_tokens", {
   email: text("email").notNull(),
   state: text("state"),
   stateExpiresAt: timestamp("state_expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
+export const admins = pgTable("admins", {
+  id: text("id").primaryKey(),
+  username: text("username").unique().notNull(),
+  passwordHash: text("password_hash").notNull(),
+  role: text("role").default("admin"),
+  active: boolean("active").default(true),
+  setupConfirmed: boolean("setup_confirmed").default(false),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });

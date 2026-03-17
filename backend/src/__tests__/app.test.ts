@@ -24,6 +24,7 @@ const dataStore = {
   onboardingTokens: new Map<string, any>(),
   webhookEvents: new Map<string, any>(),
   clientGroups: new Map<string, any>(),
+  admins: new Map<string, any>(),
 };
 
 type MailhogMessage = {

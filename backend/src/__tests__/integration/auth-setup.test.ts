@@ -10,6 +10,49 @@ vi.mock("../../lib/stripe", () => ({
   },
 }));
 
+// Mutable in-memory admin store for DB mock
+const dbState: { admins: any[] } = { admins: [] };
+
+vi.mock("../../db/client", () => ({
+  db: {
+    select: vi.fn(() => ({
+      from: (_table: any) => {
+        const rows = [...dbState.admins];
+        const p = Promise.resolve(rows);
+        return {
+          where: (_expr: any) => {
+            const first = rows.slice(0, 1);
+            const lp = Promise.resolve(first);
+            return {
+              limit: (n: number) => Promise.resolve(rows.slice(0, n)),
+              then: lp.then.bind(lp),
+              catch: lp.catch.bind(lp),
+              finally: lp.finally.bind(lp),
+            };
+          },
+          then: p.then.bind(p),
+          catch: p.catch.bind(p),
+          finally: p.finally.bind(p),
+        };
+      },
+    })),
+    insert: vi.fn((_table: any) => ({
+      values: vi.fn((payload: any) => {
+        dbState.admins.push({ ...payload });
+        return Promise.resolve();
+      }),
+    })),
+    update: vi.fn((_table: any) => ({
+      set: vi.fn((values: any) => ({
+        where: vi.fn((_expr: any) => {
+          for (const a of dbState.admins) Object.assign(a, values);
+          return Promise.resolve();
+        }),
+      })),
+    })),
+  },
+}));
+
 // Ensure all env vars required by validateEnv are set for every test in this file
 function ensureBaseEnv() {
   process.env.FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
@@ -35,6 +78,7 @@ describe("POST /api/v1/auth/setup", () => {
 
   beforeEach(async () => {
     savedEnv = { ...process.env };
+    dbState.admins = [];
     // Reset setup state before every test
     vi.resetModules();
     const authRoutes = await import("../../routes/auth");
@@ -48,6 +92,7 @@ describe("POST /api/v1/auth/setup", () => {
     }
     Object.assign(process.env, savedEnv);
     vi.resetModules();
+    dbState.admins = [];
   });
 
   it("returns 403 when ALLOW_ADMIN_SETUP is not set", async () => {
@@ -235,6 +280,7 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
 
   beforeEach(() => {
     savedEnv = { ...process.env };
+    dbState.admins = [];
   });
 
   afterEach(() => {
@@ -243,6 +289,7 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     }
     Object.assign(process.env, savedEnv);
     vi.resetModules();
+    dbState.admins = [];
   });
 
   it("returns 400 when credentials are missing from the request body", async () => {
@@ -261,13 +308,14 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     await server.close();
   });
 
-  it("returns 500 when ADMIN_USERNAME or ADMIN_PASSWORD is not configured", async () => {
+  it("returns 503 when no admin is configured in the database", async () => {
     const originalUsername = process.env.ADMIN_USERNAME;
     const originalPassword = process.env.ADMIN_PASSWORD;
     delete process.env.ADMIN_USERNAME;
     delete process.env.ADMIN_PASSWORD;
     // ALLOW_ADMIN_SETUP=true so validateEnv doesn't throw on missing admin creds
     process.env.ALLOW_ADMIN_SETUP = "true";
+    // dbState.admins is empty — no admin in DB
 
     const server = await createServer();
 
@@ -278,8 +326,8 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
       headers: { "content-type": "application/json" },
     });
 
-    expect(response.statusCode).toBe(500);
-    expect(response.json().error).toMatch(/configuration/i);
+    expect(response.statusCode).toBe(503);
+    expect(response.json().setupRequired).toBe(true);
 
     await server.close();
     process.env.ADMIN_USERNAME = originalUsername;
@@ -288,12 +336,24 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
   });
 
   it("returns 200 with token when credentials match a bcrypt-hashed password", async () => {
-    // Generate a bcrypt hash and set it as ADMIN_PASSWORD
+    // Generate a bcrypt hash and seed the mock DB with it
     const plainPassword = "securepassword99";
     const hashed = await bcrypt.hash(plainPassword, 10);
 
     process.env.ADMIN_USERNAME = "hashedadmin";
     process.env.ADMIN_PASSWORD = hashed;
+
+    // Seed mock admin matching the credentials
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "hashedadmin",
+        passwordHash: hashed,
+        role: "admin",
+        active: true,
+        setupConfirmed: false,
+      },
+    ];
 
     const server = await createServer();
 
@@ -311,18 +371,32 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     await server.close();
   });
 
-  it("returns 200 when credentials match a plaintext password (dev/non-bcrypt path)", async () => {
-    // ADMIN_PASSWORD is a plain string — not a bcrypt hash — which exercises
-    // the direct string comparison branch (lines 207-214 of routes/auth.ts).
+  it("returns 200 when credentials match a password stored in the database", async () => {
+    // Passwords are always bcrypt-hashed when stored in the DB (bootstrap hashes them).
+    // This test verifies the DB-backed login flow end to end.
+    const plainPassword = "plaintextpass123";
+    const hashed = await bcrypt.hash(plainPassword, 10);
+
     process.env.ADMIN_USERNAME = "devadmin";
-    process.env.ADMIN_PASSWORD = "plaintextpass123"; // no $2a$/$2b$/$2y$ prefix
+    process.env.ADMIN_PASSWORD = plainPassword;
+
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "devadmin",
+        passwordHash: hashed,
+        role: "admin",
+        active: true,
+        setupConfirmed: false,
+      },
+    ];
 
     const server = await createServer();
 
     const response = await server.inject({
       method: "POST",
       url: "/api/v1/auth/login",
-      payload: { username: "devadmin", password: "plaintextpass123" },
+      payload: { username: "devadmin", password: plainPassword },
       headers: { "content-type": "application/json" },
     });
 
@@ -334,9 +408,23 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
 
   it("returns 500 when JWT signing fails because JWT_SECRET is absent at request time", async () => {
     // Build the server with a valid JWT_SECRET so validateEnv passes, then remove it
-    // before the request so signJwt throws — exercising the catch block (lines 235-237).
+    // before the request so signJwt throws — exercising the catch block.
+    const plainPassword = "testpassword";
+    const hashed = await bcrypt.hash(plainPassword, 10);
+
     process.env.ADMIN_USERNAME = "admin";
-    process.env.ADMIN_PASSWORD = "testpassword";
+    process.env.ADMIN_PASSWORD = plainPassword;
+
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "admin",
+        passwordHash: hashed,
+        role: "admin",
+        active: true,
+        setupConfirmed: false,
+      },
+    ];
 
     const server = await createServer();
 
@@ -346,7 +434,7 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     const response = await server.inject({
       method: "POST",
       url: "/api/v1/auth/login",
-      payload: { username: "admin", password: "testpassword" },
+      payload: { username: "admin", password: plainPassword },
       headers: { "content-type": "application/json" },
     });
 

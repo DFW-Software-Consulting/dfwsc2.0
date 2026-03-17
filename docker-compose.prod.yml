@@ -4,11 +4,9 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: builder
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
     command: sh -lc "npx drizzle-kit push"
 
   api:
@@ -16,15 +14,25 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: production
-    env_file:
-      - .env
     environment:
       NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRY: ${JWT_EXPIRY}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
+      USE_CHECKOUT: ${USE_CHECKOUT}
+      DEFAULT_PROCESS_FEE_CENTS: ${DEFAULT_PROCESS_FEE_CENTS}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
     ports:
       - "4242:4242"
-    depends_on:
-      migrator:
-        condition: service_completed_successfully
     restart: unless-stopped
     command: npm run start
 
@@ -40,22 +48,3 @@ services:
     depends_on:
       - api
     restart: unless-stopped
-
-  db:
-    image: postgres:17
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-stripe_portal}
-    ports:
-      - "127.0.0.1:5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-stripe_portal}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-volumes:
-  pgdata:

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = join(__dirname, "../../..");
@@ -60,12 +60,9 @@ describe("Frontend Dockerfile", () => {
   });
 
   describe("Environment variable configuration", () => {
-    it("should document VITE_API_URL in .env.example", () => {
+    it("should have a .env.example file", () => {
       const envExamplePath = join(ROOT_DIR, ".env.example");
       expect(existsSync(envExamplePath)).toBe(true);
-      const envExampleContent = readFileSync(envExamplePath, "utf-8");
-      // VITE_API_URL was removed since it's now only a build arg
-      // The runtime API routing is handled by Coolify
     });
   });
 });

@@ -59,6 +59,13 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "token" },
             { column_name: "state" },
             { column_name: "state_expires_at" },
+            // admins columns
+            { column_name: "username" },
+            { column_name: "password_hash" },
+            { column_name: "role" },
+            { column_name: "active" },
+            { column_name: "setup_confirmed" },
+            { column_name: "last_login_at" }, // now required by schema-check
           ],
         };
       }
@@ -67,7 +74,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(3);
+    expect(mockDb.execute).toHaveBeenCalledTimes(4);
   });
 
   it("throws when a table is missing required columns", async () => {

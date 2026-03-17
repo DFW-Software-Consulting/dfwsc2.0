@@ -10,6 +10,7 @@ if (process.env.NODE_ENV !== "production") {
 async function start() {
   const { buildServer } = await import("./app");
   const { runMigrations } = await import("./lib/migrate");
+  const { bootstrapAdminIfNeeded } = await import("./lib/bootstrap");
   const { verifyDatabaseSchema } = await import("./lib/schema-check");
 
   const server = await buildServer();
@@ -18,6 +19,7 @@ async function start() {
     if (process.env.NODE_ENV !== "production") {
       await runMigrations(server);
     }
+    await bootstrapAdminIfNeeded(server);
     await verifyDatabaseSchema();
     await server.listen({ port: Number(process.env.PORT) || 4242, host: "0.0.0.0" });
   } catch (err) {
