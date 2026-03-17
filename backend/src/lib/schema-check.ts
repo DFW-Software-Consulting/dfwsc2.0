@@ -39,6 +39,7 @@ const REQUIRED_TABLES: TableColumns[] = [
       "role",
       "active",
       "setup_confirmed",
+      "last_login_at",
       "created_at",
       "updated_at",
     ],

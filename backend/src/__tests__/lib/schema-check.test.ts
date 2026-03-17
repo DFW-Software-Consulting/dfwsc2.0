@@ -65,7 +65,7 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "role" },
             { column_name: "active" },
             { column_name: "setup_confirmed" },
-            { column_name: "last_login_at" },
+            { column_name: "last_login_at" }, // now required by schema-check
           ],
         };
       }

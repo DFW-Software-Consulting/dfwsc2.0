@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client";
 import { admins } from "../db/schema";
@@ -221,7 +221,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
           setupConfirmed: true,
           updatedAt: new Date(),
         })
-        .where(eq(admins.id, firstAdmin.id));
+        .where(and(eq(admins.id, firstAdmin.id), eq(admins.setupConfirmed, false)));
 
       fastify.log.info({ username }, "Admin bootstrap confirmed");
 
