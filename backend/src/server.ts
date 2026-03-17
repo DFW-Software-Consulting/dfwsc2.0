@@ -6,9 +6,7 @@ export async function start() {
   const server = await buildServer();
 
   try {
-    if (process.env.NODE_ENV !== "production") {
-      await runMigrations(server);
-    }
+    await runMigrations(server);
     await verifyDatabaseSchema();
     await server.listen({ port: Number(process.env.PORT) || 4242, host: "0.0.0.0" });
   } catch (err) {

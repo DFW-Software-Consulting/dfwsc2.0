@@ -15,7 +15,7 @@ if [ "${SKIP_DOCKER_TESTS}" = "1" ]; then
   echo "⚠️  SKIP_DOCKER_TESTS=1 — backend tests skipped."
 elif $COMPOSE ps --status running 2>/dev/null | grep -q "api"; then
   echo "Docker stack is running — running backend tests before push..."
-  $COMPOSE exec api npm test
+  $COMPOSE exec -T api npm test
 else
   echo ""
   echo "❌ Docker stack is not running. Start it with 'make up' before pushing."
