@@ -10,12 +10,57 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * The tests focus on guard conditions that don't require modifying ADMIN_PASSWORD.
  */
 
+// Mutable in-memory admin store for DB mock
+const dbState: { admins: any[] } = { admins: [] };
+
+vi.mock("../../db/client", () => ({
+  db: {
+    select: vi.fn(() => ({
+      from: (_table: any) => {
+        const rows = [...dbState.admins];
+        const p = Promise.resolve(rows);
+        return {
+          where: (_expr: any) => {
+            const first = rows.slice(0, 1);
+            const lp = Promise.resolve(first);
+            return {
+              limit: (n: number) => Promise.resolve(rows.slice(0, n)),
+              then: lp.then.bind(lp),
+              catch: lp.catch.bind(lp),
+              finally: lp.finally.bind(lp),
+            };
+          },
+          then: p.then.bind(p),
+          catch: p.catch.bind(p),
+          finally: p.finally.bind(p),
+        };
+      },
+    })),
+    insert: vi.fn((_table: any) => ({
+      values: vi.fn((payload: any) => {
+        dbState.admins.push({ ...payload });
+        return Promise.resolve();
+      }),
+    })),
+    update: vi.fn((_table: any) => ({
+      set: vi.fn((values: any) => ({
+        where: vi.fn((_expr: any) => {
+          for (const a of dbState.admins) Object.assign(a, values);
+          return Promise.resolve();
+        }),
+      })),
+    })),
+  },
+}));
+
 describe("Admin Setup Integration", () => {
   beforeEach(() => {
+    dbState.admins = [];
     vi.resetModules();
   });
 
   afterEach(async () => {
+    dbState.admins = [];
     vi.resetModules();
     // Reset the setupUsed flag after each test
     const authModule = await import("../../routes/auth");
@@ -37,8 +82,9 @@ describe("Admin Setup Integration", () => {
   }
 
   describe("GET /auth/setup/status", () => {
-    it("should return setupAllowed=false when ALLOW_ADMIN_SETUP is not set", async () => {
+    it("should return requiresSetup=true when no admin is in the database", async () => {
       delete process.env.ALLOW_ADMIN_SETUP;
+      // dbState.admins is empty
       const server = await createServer();
 
       const response = await server.inject({
@@ -48,14 +94,25 @@ describe("Admin Setup Integration", () => {
 
       expect(response.statusCode).toBe(200);
       const body = response.json();
-      expect(body.setupAllowed).toBe(false);
-      // adminConfigured=true because vitest.config.ts sets ADMIN_PASSWORD
-      expect(body.adminConfigured).toBe(true);
+      expect(body.requiresSetup).toBe(true);
+      expect(body.adminConfigured).toBe(false);
+      expect(body.bootstrapPending).toBe(false);
 
       await server.close();
     });
 
-    it("should return adminConfigured=true when ADMIN_PASSWORD is set", async () => {
+    it("should return adminConfigured=true when a setup-confirmed admin exists in DB", async () => {
+      // Seed a confirmed admin
+      dbState.admins = [
+        {
+          id: "admin-1",
+          username: "admin",
+          passwordHash: "$2a$10$example",
+          role: "admin",
+          active: true,
+          setupConfirmed: true,
+        },
+      ];
       const server = await createServer();
 
       const response = await server.inject({
@@ -66,6 +123,35 @@ describe("Admin Setup Integration", () => {
       expect(response.statusCode).toBe(200);
       const body = response.json();
       expect(body.adminConfigured).toBe(true);
+      expect(body.bootstrapPending).toBe(false);
+      expect(body.requiresSetup).toBe(false);
+
+      await server.close();
+    });
+
+    it("should return bootstrapPending=true when admin exists but not yet confirmed", async () => {
+      dbState.admins = [
+        {
+          id: "admin-1",
+          username: "admin",
+          passwordHash: "$2a$10$example",
+          role: "admin",
+          active: true,
+          setupConfirmed: false,
+        },
+      ];
+      const server = await createServer();
+
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/v1/auth/setup/status",
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.bootstrapPending).toBe(true);
+      expect(body.adminConfigured).toBe(false);
+      expect(body.requiresSetup).toBe(false);
 
       await server.close();
     });

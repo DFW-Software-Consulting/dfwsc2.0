@@ -81,6 +81,7 @@ export interface AppDataStore {
   onboardingTokens: Map<string, any>;
   webhookEvents: Map<string, any>;
   clientGroups: Map<string, any>;
+  admins: Map<string, any>;
 }
 
 export interface InvoicesDataStore {
@@ -119,6 +120,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
             if (isTable(table, "webhook_events"))
               return Array.from(dataStore.webhookEvents.values());
             if (isTable(table, "client_groups")) return Array.from(dataStore.clientGroups.values());
+            if (isTable(table, "admins")) return Array.from(dataStore.admins.values());
             return [];
           })();
           return {
@@ -149,6 +151,16 @@ export function createAppDbMock(dataStore: AppDataStore) {
             }
             if (isTable(table, "client_groups")) {
               const row = dataStore.clientGroups.get(expr?.value);
+              return row ? [row] : [];
+            }
+            if (isTable(table, "admins")) {
+              if (isColumn(expr?.field, "username")) {
+                const row = Array.from(dataStore.admins.values()).find(
+                  (a) => a.username === expr?.value
+                );
+                return row ? [row] : [];
+              }
+              const row = dataStore.admins.get(expr?.value);
               return row ? [row] : [];
             }
             if (isTable(table, "onboarding_tokens")) {
@@ -234,6 +246,19 @@ export function createAppDbMock(dataStore: AppDataStore) {
           };
           dataStore.clientGroups.set(payload.id, next);
         }
+        if (isTable(table, "admins")) {
+          const next = {
+            id: payload.id,
+            username: payload.username,
+            passwordHash: payload.passwordHash,
+            role: payload.role ?? "admin",
+            active: payload.active ?? true,
+            setupConfirmed: payload.setupConfirmed ?? false,
+            createdAt: payload.createdAt ?? new Date(),
+            updatedAt: payload.updatedAt ?? new Date(),
+          };
+          dataStore.admins.set(payload.id, next);
+        }
         return { onConflictDoNothing: async () => {} };
       },
     })),
@@ -263,6 +288,12 @@ export function createAppDbMock(dataStore: AppDataStore) {
             }
             if (isTable(table, "webhook_events")) {
               const row = dataStore.webhookEvents.get(expr.value);
+              if (!row) return null;
+              Object.assign(row, values);
+              return row;
+            }
+            if (isTable(table, "admins")) {
+              const row = dataStore.admins.get(expr.value);
               if (!row) return null;
               Object.assign(row, values);
               return row;

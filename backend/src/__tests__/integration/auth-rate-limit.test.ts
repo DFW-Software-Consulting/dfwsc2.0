@@ -1,5 +1,49 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Mutable in-memory admin store for DB mock
+// Rate limit tests don't need a real admin — empty store returns 503 (not 429).
+const dbState: { admins: any[] } = { admins: [] };
+
+vi.mock("../../db/client", () => ({
+  db: {
+    select: vi.fn(() => ({
+      from: (_table: any) => {
+        const rows = [...dbState.admins];
+        const p = Promise.resolve(rows);
+        return {
+          where: (_expr: any) => {
+            const first = rows.slice(0, 1);
+            const lp = Promise.resolve(first);
+            return {
+              limit: (n: number) => Promise.resolve(rows.slice(0, n)),
+              then: lp.then.bind(lp),
+              catch: lp.catch.bind(lp),
+              finally: lp.finally.bind(lp),
+            };
+          },
+          then: p.then.bind(p),
+          catch: p.catch.bind(p),
+          finally: p.finally.bind(p),
+        };
+      },
+    })),
+    insert: vi.fn((_table: any) => ({
+      values: vi.fn((payload: any) => {
+        dbState.admins.push({ ...payload });
+        return Promise.resolve();
+      }),
+    })),
+    update: vi.fn((_table: any) => ({
+      set: vi.fn((values: any) => ({
+        where: vi.fn((_expr: any) => {
+          for (const a of dbState.admins) Object.assign(a, values);
+          return Promise.resolve();
+        }),
+      })),
+    })),
+  },
+}));
+
 // Helper function to create a server instance for testing
 async function createServer() {
   // Reset modules to ensure clean state
@@ -11,6 +55,7 @@ async function createServer() {
 describe("Auth Rate Limit Integration", () => {
   // Clear rate limit buckets before each test to ensure isolation
   beforeEach(async () => {
+    dbState.admins = [];
     // Access the internal hitBuckets map to clear it for test isolation
     const rateLimitModule = await import("../../lib/rate-limit");
     if (rateLimitModule.hitBuckets) {
@@ -19,6 +64,7 @@ describe("Auth Rate Limit Integration", () => {
   });
 
   afterEach(async () => {
+    dbState.admins = [];
     // Clean up after each test
     const rateLimitModule = await import("../../lib/rate-limit");
     if (rateLimitModule.hitBuckets) {
@@ -29,7 +75,7 @@ describe("Auth Rate Limit Integration", () => {
   it("should allow requests up to the limit before blocking", async () => {
     const server = await createServer();
 
-    // Make 5 requests (the limit) - should all succeed (likely return 401 due to invalid credentials, but not 429)
+    // Make 5 requests (the limit) - should all succeed (not 429)
     for (let i = 0; i < 5; i++) {
       const response = await server.inject({
         method: "POST",
@@ -43,8 +89,9 @@ describe("Auth Rate Limit Integration", () => {
         },
       });
 
-      // Expect either 400 (missing fields) or 401 (invalid credentials), but NOT 429 (rate limited)
-      expect([400, 401]).toContain(response.statusCode);
+      // Expect 400 (missing fields), 401 (invalid creds), or 503 (no admin configured)
+      // but NOT 429 (rate limited)
+      expect([400, 401, 503]).toContain(response.statusCode);
     }
 
     // Now make the 6th request which should be blocked
@@ -84,8 +131,9 @@ describe("Auth Rate Limit Integration", () => {
         },
       });
 
-      // Expect either 400 (missing fields) or 401 (invalid credentials), but NOT 429 (rate limited)
-      expect([400, 401]).toContain(response.statusCode);
+      // Expect 400 (missing fields), 401 (invalid creds), or 503 (no admin configured)
+      // but NOT 429 (rate limited)
+      expect([400, 401, 503]).toContain(response.statusCode);
     }
 
     // The 6th request should be rate limited (429)
@@ -127,7 +175,7 @@ describe("Auth Rate Limit Integration", () => {
           },
         });
 
-        expect([400, 401]).toContain(response.statusCode);
+        expect([400, 401, 503]).toContain(response.statusCode);
       }
 
       const blockedResponse = await server.inject({
@@ -158,7 +206,7 @@ describe("Auth Rate Limit Integration", () => {
         },
       });
 
-      expect([400, 401]).toContain(resetResponse.statusCode);
+      expect([400, 401, 503]).toContain(resetResponse.statusCode);
     } finally {
       nowSpy.mockRestore();
       await server.close();
@@ -182,8 +230,9 @@ describe("Auth Rate Limit Integration", () => {
         },
       });
 
-      // Expect either 400 (missing fields) or 401 (invalid credentials), but NOT 429 (rate limited)
-      expect([400, 401]).toContain(response.statusCode);
+      // Expect 400 (missing fields), 401 (invalid creds), or 503 (no admin configured)
+      // but NOT 429 (rate limited)
+      expect([400, 401, 503]).toContain(response.statusCode);
     }
 
     // The 6th request from the same IP should be rate limited (429)
@@ -221,8 +270,8 @@ describe("Auth Rate Limit Integration", () => {
       },
     });
 
-    // Should not be blocked (expect 400 or 401, not 429)
-    expect([400, 401]).toContain(freshIpResponse.statusCode);
+    // Should not be blocked (expect 400, 401, or 503 — not 429)
+    expect([400, 401, 503]).toContain(freshIpResponse.statusCode);
 
     await server2.close();
   });
