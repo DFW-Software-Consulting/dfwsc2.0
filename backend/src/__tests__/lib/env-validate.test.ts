@@ -19,8 +19,6 @@ const BASE_ENV: Record<string, string> = {
   SMTP_USER: "user",
   SMTP_PASS: "pass",
   JWT_SECRET: "test_jwt_secret_minimum_32_characters_long_random_string",
-  ADMIN_USERNAME: "admin",
-  ADMIN_PASSWORD: "testpassword",
 };
 
 describe("validateEnv", () => {
@@ -42,16 +40,13 @@ describe("validateEnv", () => {
     Object.assign(process.env, savedEnv);
   });
 
-  it("does not throw when ALLOW_ADMIN_SETUP=true and no admin credentials are set", () => {
-    // Set all required vars except the conditional admin ones
+  it("does not throw when admin credentials are missing (always optional now)", () => {
+    // Set all required vars
     for (const [k, v] of Object.entries(BASE_ENV)) {
-      if (k !== "ADMIN_USERNAME" && k !== "ADMIN_PASSWORD") {
-        process.env[k] = v;
-      }
+      process.env[k] = v;
     }
-    process.env.ALLOW_ADMIN_SETUP = "true";
 
-    // Should not throw — admin creds are skipped in setup mode
+    // Should not throw — admin creds are optional
     expect(() => validateEnv()).not.toThrow();
   });
 

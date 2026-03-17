@@ -124,8 +124,38 @@ describe("POST /api/v1/auth/setup", () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
     const server = await createServer();
     // createServer() scrubs ADMIN_PASSWORD after dotenv reloads; re-set it here
-    // to simulate a server that already has admin credentials configured.
+    // to simulate a server that already has admin credentials configured in ENV.
     process.env.ADMIN_PASSWORD = "testpassword";
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/setup",
+      payload: { username: "admin", password: "securepass123" },
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toBe("Admin is already configured");
+
+    await server.close();
+    delete process.env.ALLOW_ADMIN_SETUP;
+  });
+
+  it("returns 403 when admin is already configured (Admin exists in DB)", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+    // Seed DB with an admin
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "admin",
+        passwordHash: "hash",
+        role: "admin",
+        active: true,
+        setupConfirmed: true,
+      },
+    ];
+
+    const server = await createServer();
 
     const response = await server.inject({
       method: "POST",
@@ -273,7 +303,7 @@ describe("POST /api/v1/auth/setup", () => {
     expect(body.username).toBe("newadmin");
     expect(body.passwordHash).toMatch(/^\$2[aby]\$/);
     expect(Array.isArray(body.instructions)).toBe(true);
-    expect(body.instructions.length).toBeGreaterThan(0);
+    expect(body.instructions.length).toBeGreaterThan(4);
 
     await server.close();
     process.env.ADMIN_USERNAME = savedEnv.ADMIN_USERNAME;

@@ -93,14 +93,16 @@ export default async function authRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
-      const adminConfigured = !!process.env.ADMIN_PASSWORD;
+      const allAdmins = await db.select().from(admins);
+      const adminConfiguredInDb = allAdmins.length > 0;
+      const adminConfiguredInEnv = !!process.env.ADMIN_PASSWORD;
 
       // Check if setup is allowed
       if (!allowAdminSetup) {
         return reply.code(403).send({ error: "Admin setup is not enabled" });
       }
 
-      if (adminConfigured) {
+      if (adminConfiguredInDb || adminConfiguredInEnv) {
         return reply.code(403).send({ error: "Admin is already configured" });
       }
 
@@ -163,11 +165,12 @@ export default async function authRoutes(fastify: FastifyInstance) {
           passwordHash,
           instructions: [
             "1. Copy the credentials above",
-            "2. Add to your environment configuration:",
+            "2. (Recommended) Use these to login and follow the confirm-bootstrap flow",
+            "3. (Legacy) Add to your environment configuration:",
             `   ADMIN_USERNAME=${username}`,
             `   ADMIN_PASSWORD=${passwordHash}`,
-            "3. Remove or set ALLOW_ADMIN_SETUP=false",
-            "4. Restart your application",
+            "4. Remove or set ALLOW_ADMIN_SETUP=false",
+            "5. Restart your application",
           ],
         });
       } finally {
