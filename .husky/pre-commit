@@ -7,8 +7,8 @@ if [ "$branch" = "main" ]; then
   exit 1
 fi
 
-# 2. Guard: no .env files staged (excludes .env.example)
-staged_env=$(git diff --cached --name-only | grep -E '(^|/)\.env' | grep -v '\.env\.example' || true)
+# 2. Guard: no .env files staged (excludes .env.example and .env.test)
+staged_env=$(git diff --cached --name-only | grep -E '(^|/)\.env' | grep -v '\.env\.example' | grep -v '\.env\.test' || true)
 if [ -n "$staged_env" ]; then
   echo "❌ .env file(s) staged for commit:"
   echo "$staged_env"
