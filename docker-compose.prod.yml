@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
       target: builder
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-production}
       DATABASE_URL: ${DATABASE_URL}
     # Use migrate instead of push for production for better safety and consistency
     command: sh -lc "npm run db:migrate"
@@ -16,8 +16,8 @@ services:
       dockerfile: Dockerfile
       target: production
     environment:
-      NODE_ENV: production
-      PORT: "4242"
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-4242}
       DATABASE_URL: ${DATABASE_URL}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
