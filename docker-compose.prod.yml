@@ -17,6 +17,7 @@ services:
       target: production
     environment:
       NODE_ENV: production
+      PORT: "4242"
       DATABASE_URL: ${DATABASE_URL}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
@@ -37,6 +38,12 @@ services:
       - "4242"
     restart: unless-stopped
     command: npm run start
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4242/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   web:
     build:
@@ -49,3 +56,9 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
