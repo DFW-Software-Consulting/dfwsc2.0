@@ -7,7 +7,8 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL}
-    command: sh -lc "npx drizzle-kit push"
+    # Use migrate instead of push for production for better safety and consistency
+    command: sh -lc "npm run db:migrate"
 
   api:
     build:
@@ -16,12 +17,15 @@ services:
       target: production
     environment:
       NODE_ENV: production
+      PORT: "4242"
       DATABASE_URL: ${DATABASE_URL}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRY: ${JWT_EXPIRY}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
+      API_BASE_URL: ${API_BASE_URL}
+      ALLOW_ADMIN_SETUP: ${ALLOW_ADMIN_SETUP}
       USE_CHECKOUT: ${USE_CHECKOUT}
       DEFAULT_PROCESS_FEE_CENTS: ${DEFAULT_PROCESS_FEE_CENTS}
       SMTP_HOST: ${SMTP_HOST}
@@ -29,10 +33,17 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
-    ports:
-      - "4242:4242"
+    # No public ports — only reachable via the "web" nginx proxy
+    expose:
+      - "4242"
     restart: unless-stopped
     command: npm run start
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4242/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   web:
     build:
@@ -42,7 +53,12 @@ services:
         VITE_API_URL: /api/v1
     ports:
       - "80:80"
-      - "443:443"
     depends_on:
       - api
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
