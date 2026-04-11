@@ -30,6 +30,25 @@ check_agent_docs_sync() {
   done
 }
 
+# Runs a command with quiet success output and full failure logs.
+run_step() {
+  label="$1"
+  shift
+
+  log_file=$(mktemp)
+  echo "${label} check..."
+
+  if "$@" >"$log_file" 2>&1; then
+    echo "${label} pass"
+    rm -f "$log_file"
+  else
+    echo "${label} failed"
+    cat "$log_file"
+    rm -f "$log_file"
+    exit 1
+  fi
+}
+
 # 1. Guard: no direct commits to main
 branch=$(git rev-parse --abbrev-ref HEAD)
 if [ "$branch" = "main" ]; then
@@ -77,8 +96,7 @@ fi
 # 6. Secret scanning on staged text files
 STAGED_TEXT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx|json|yaml|yml|sh|md)$' || true)
 if [ -n "$STAGED_TEXT" ]; then
-  echo "Scanning staged files for secrets..."
-  echo "$STAGED_TEXT" | xargs npx secretlint --no-color || exit 1
+  run_step "Secrets" sh -c "echo '$STAGED_TEXT' | xargs npx secretlint --no-color"
 fi
 
 # 7. Migration check: if schema.ts changed but no Drizzle migration staged
@@ -132,25 +150,13 @@ if [ -n "$STAGED_TS" ]; then
 fi
 
 # 11. Auto-fix staged files with Biome
-echo "Lint check..."
-if npx lint-staged --quiet; then
-  echo "Lint pass"
-else
-  echo "Lint failed"
-  exit 1
-fi
+run_step "Lint" npx lint-staged --quiet
 
 # 12. TypeScript type-check (backend source only — excludes tests and node_modules types)
-echo "Running TypeScript type-check (backend)..."
-(cd backend && npx tsc --noEmit -p tsconfig.build.json) || exit 1
+run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json"
 
 # 13. Frontend tests (no Docker required)
-npm run test:front
+run_step "Frontend tests" npm run test:front
 
 # 14. Guard: .claude/CLAUDE.md mirrors must exist and stay in sync
-echo "Agent docs check..."
-if check_agent_docs_sync; then
-  echo "Agent docs pass"
-else
-  exit 1
-fi
+run_step "Agent docs" check_agent_docs_sync

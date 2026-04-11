@@ -63,8 +63,7 @@ COMPOSE="docker compose -f docker-compose.base.yml -f docker-compose.dev.yml"
 if [ "${SKIP_DOCKER_TESTS}" = "1" ]; then
   echo "⚠️  SKIP_DOCKER_TESTS=1 — backend tests skipped."
 elif $COMPOSE ps --status running 2>/dev/null | grep -q "api"; then
-  echo "Docker stack is running — running backend tests before push..."
-  $COMPOSE exec -T api npm test
+  run_step "Backend tests" $COMPOSE exec -T api npm test
 else
   echo ""
   echo "❌ Docker stack is not running. Start it with 'make up' before pushing."
