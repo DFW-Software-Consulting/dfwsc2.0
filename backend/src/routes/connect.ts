@@ -172,6 +172,17 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     "/onboard-client/initiate",
     {
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
+      schema: {
+        body: {
+          type: "object",
+          required: ["name", "email"],
+          properties: {
+            name: { type: "string", minLength: 1 },
+            email: { type: "string", format: "email" },
+            groupId: { type: "string" },
+          },
+        },
+      },
     },
     async (request, reply) => {
       const { name, email, groupId } = request.body as {
