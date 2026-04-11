@@ -1,5 +1,35 @@
 #!/usr/bin/env sh
 
+check_agent_docs_sync() {
+  base="CLAUDE.md"
+  mirrors="AGENTS.md Qwen.md Gemini.md"
+
+  if [ ! -f "$base" ]; then
+    echo "❌ Missing required file: $base"
+    return 1
+  fi
+
+  missing=""
+  for file in $mirrors; do
+    if [ ! -f "$file" ]; then
+      missing="$missing $file"
+    fi
+  done
+
+  if [ -n "$missing" ]; then
+    echo "❌ Missing required mirror file(s):$missing"
+    return 1
+  fi
+
+  for file in $mirrors; do
+    if ! diff -q "$base" "$file" >/dev/null 2>&1; then
+      echo "❌ '$file' is out of sync with $base"
+      echo "   Sync them with: cp CLAUDE.md AGENTS.md && cp CLAUDE.md Qwen.md && cp CLAUDE.md Gemini.md"
+      return 1
+    fi
+  done
+}
+
 # 1. Guard: no direct commits to main
 branch=$(git rev-parse --abbrev-ref HEAD)
 if [ "$branch" = "main" ]; then
@@ -117,17 +147,10 @@ echo "Running TypeScript type-check (backend)..."
 # 13. Frontend tests (no Docker required)
 npm run test:front
 
-# 14. Auto-sync AGENTS.md, Qwen.md, Gemini.md from CLAUDE.md (source of truth)
-if [ -f "CLAUDE.md" ]; then
-  synced=""
-  for target in AGENTS.md Qwen.md Gemini.md; do
-    if [ ! -f "$target" ] || ! diff -q CLAUDE.md "$target" > /dev/null 2>&1; then
-      cp CLAUDE.md "$target"
-      git add "$target"
-      synced="$synced $target"
-    fi
-  done
-  if [ -n "$synced" ]; then
-    echo "✅ Synced CLAUDE.md →$synced (auto-staged)"
-  fi
+# 14. Guard: CLAUDE.md mirrors must exist and stay in sync
+echo "Agent docs check..."
+if check_agent_docs_sync; then
+  echo "Agent docs pass"
+else
+  exit 1
 fi

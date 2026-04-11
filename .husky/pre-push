@@ -1,5 +1,35 @@
 #!/usr/bin/env sh
 
+check_agent_docs_sync() {
+  base="CLAUDE.md"
+  mirrors="AGENTS.md Qwen.md Gemini.md"
+
+  if [ ! -f "$base" ]; then
+    echo "❌ Missing required file: $base"
+    return 1
+  fi
+
+  missing=""
+  for file in $mirrors; do
+    if [ ! -f "$file" ]; then
+      missing="$missing $file"
+    fi
+  done
+
+  if [ -n "$missing" ]; then
+    echo "❌ Missing required mirror file(s):$missing"
+    return 1
+  fi
+
+  for file in $mirrors; do
+    if ! diff -q "$base" "$file" >/dev/null 2>&1; then
+      echo "❌ '$file' is out of sync with $base"
+      echo "   Sync them with: cp CLAUDE.md AGENTS.md && cp CLAUDE.md Qwen.md && cp CLAUDE.md Gemini.md"
+      return 1
+    fi
+  done
+}
+
 # Runs a command with quiet success output and full failure logs.
 run_step() {
   label="$1"
@@ -46,8 +76,11 @@ fi
 # 3. Full lint (Biome check)
 run_step "Lint" npm run lint
 
-# 4. Backend TypeScript type-check
+# 4. Guard: CLAUDE.md mirrors must exist and stay in sync
+run_step "Agent docs" check_agent_docs_sync
+
+# 5. Backend TypeScript type-check
 run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json"
 
-# 5. Frontend tests
+# 6. Frontend tests
 run_step "Frontend tests" npm run test:front
