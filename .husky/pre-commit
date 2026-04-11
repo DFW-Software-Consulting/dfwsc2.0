@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
 check_agent_docs_sync() {
-  base="CLAUDE.md"
+  base=".claude/CLAUDE.md"
   mirrors="AGENTS.md Qwen.md Gemini.md"
 
   if [ ! -f "$base" ]; then
@@ -24,7 +24,7 @@ check_agent_docs_sync() {
   for file in $mirrors; do
     if ! diff -q "$base" "$file" >/dev/null 2>&1; then
       echo "❌ '$file' is out of sync with $base"
-      echo "   Sync them with: cp CLAUDE.md AGENTS.md && cp CLAUDE.md Qwen.md && cp CLAUDE.md Gemini.md"
+      echo "   Sync them with: cp .claude/CLAUDE.md AGENTS.md && cp .claude/CLAUDE.md Qwen.md && cp .claude/CLAUDE.md Gemini.md"
       return 1
     fi
   done
@@ -147,7 +147,7 @@ echo "Running TypeScript type-check (backend)..."
 # 13. Frontend tests (no Docker required)
 npm run test:front
 
-# 14. Guard: CLAUDE.md mirrors must exist and stay in sync
+# 14. Guard: .claude/CLAUDE.md mirrors must exist and stay in sync
 echo "Agent docs check..."
 if check_agent_docs_sync; then
   echo "Agent docs pass"
