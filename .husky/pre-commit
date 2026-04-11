@@ -102,7 +102,13 @@ if [ -n "$STAGED_TS" ]; then
 fi
 
 # 11. Auto-fix staged files with Biome
-npx lint-staged
+echo "Lint check..."
+if npx lint-staged --quiet; then
+  echo "Lint pass"
+else
+  echo "Lint failed"
+  exit 1
+fi
 
 # 12. TypeScript type-check (backend source only — excludes tests and node_modules types)
 echo "Running TypeScript type-check (backend)..."

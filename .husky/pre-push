@@ -1,5 +1,24 @@
 #!/usr/bin/env sh
 
+# Runs a command with quiet success output and full failure logs.
+run_step() {
+  label="$1"
+  shift
+
+  log_file=$(mktemp)
+  echo "${label} check..."
+
+  if "$@" >"$log_file" 2>&1; then
+    echo "${label} pass"
+    rm -f "$log_file"
+  else
+    echo "${label} failed"
+    cat "$log_file"
+    rm -f "$log_file"
+    exit 1
+  fi
+}
+
 # 1. Guard: no force-push to main
 while read -r local_ref local_sha remote_ref remote_sha; do
   if echo "$remote_ref" | grep -q 'refs/heads/main'; then
@@ -23,3 +42,12 @@ else
   echo ""
   exit 1
 fi
+
+# 3. Full lint (Biome check)
+run_step "Lint" npm run lint
+
+# 4. Backend TypeScript type-check
+run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json"
+
+# 5. Frontend tests
+run_step "Frontend tests" npm run test:front
