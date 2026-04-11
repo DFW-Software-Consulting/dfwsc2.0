@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
-# Syncs AGENTS.md and Qwen.md whenever CLAUDE.md is written.
-# Called as a PostToolUse hook; receives tool input JSON via CLAUDE_TOOL_INPUT.
+# Syncs root mirror docs whenever CLAUDE.md is written.
+# Supports both root and .claude/CLAUDE.md.
 
 file=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('file_path',''))" 2>/dev/null)
 
-[[ "$file" == *"/CLAUDE.md" ]] || exit 0
+[[ "$file" == *"CLAUDE.md" ]] || exit 0
 
-dir=$(dirname "$file")
-cp "$file" "$dir/AGENTS.md"
-cp "$file" "$dir/Qwen.md"
-cp "$file" "$dir/Gemini.md"
+# Determine the source file (prefers root CLAUDE.md if available)
+if [[ -f "CLAUDE.md" ]]; then
+    src="CLAUDE.md"
+else
+    src="$file"
+fi
+
+# Determine the root directory
+if [[ "$file" == *"/.claude/CLAUDE.md" ]]; then
+    repo_root=$(dirname "$(dirname "$file")")
+else
+    repo_root="."
+fi
+
+# Sync the mirrors
+cp "$src" "$repo_root/AGENTS.md"
+cp "$src" "$repo_root/Qwen.md"
+cp "$src" "$repo_root/Gemini.md"

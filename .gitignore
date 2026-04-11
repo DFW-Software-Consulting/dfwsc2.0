@@ -32,6 +32,11 @@ lerna-debug.log*
 .DS_Store
 Thumbs.db
 
+# Agent Mirrors (Generated from CLAUDE.md)
+AGENTS.md
+Qwen.md
+Gemini.md
+
 # IDE
 .vscode/
 .idea/
@@ -49,3 +54,4 @@ zzzzz.txt
 
 # Memory bank (planning/documentation)
 memory-bank/
+backend/tsconfig.tsbuildinfo

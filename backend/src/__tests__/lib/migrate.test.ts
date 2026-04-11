@@ -20,6 +20,7 @@ function makeFakeServer() {
     log: {
       info: vi.fn(),
       error: vi.fn(),
+      warn: vi.fn(),
     },
   };
 }
@@ -27,6 +28,8 @@ function makeFakeServer() {
 describe("runMigrations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.MIGRATION_STRICT;
+    delete process.env.NODE_ENV;
   });
 
   it("calls server.log.info and does not throw when migrate resolves", async () => {
@@ -41,6 +44,7 @@ describe("runMigrations", () => {
   });
 
   it("calls server.log.error and rethrows when migrate rejects", async () => {
+    process.env.NODE_ENV = "production";
     const migrationError = new Error("Migration failed: connection timeout");
     mockMigrate.mockRejectedValue(migrationError);
     const server = makeFakeServer();

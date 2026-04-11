@@ -12,6 +12,8 @@ import healthRoutes from "./routes/health";
 import invoiceRoutes from "./routes/invoices";
 import paymentsRoutes from "./routes/payments";
 import productRoutes from "./routes/products";
+import settingsRoutes from "./routes/settings";
+import stripeCustomerRoutes from "./routes/stripe-customers";
 import subscriptionRoutes from "./routes/subscriptions";
 import webhooksRoute from "./routes/webhooks";
 
@@ -134,6 +136,8 @@ export async function buildServer() {
   server.register(invoiceRoutes, { prefix: "/api/v1" });
   server.register(subscriptionRoutes, { prefix: "/api/v1" });
   server.register(productRoutes, { prefix: "/api/v1" });
+  server.register(stripeCustomerRoutes, { prefix: "/api/v1" });
+  server.register(settingsRoutes, { prefix: "/api/v1" });
 
   server.setNotFoundHandler((_request, reply) => {
     reply.code(404).send({ error: "Not Found" });

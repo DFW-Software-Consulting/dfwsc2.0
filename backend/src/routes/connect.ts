@@ -3,10 +3,10 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import he from "he";
 import { v4 as uuidv4 } from "uuid";
-import validator from "validator";
 import { db } from "../db/client";
-import { clients, onboardingTokens } from "../db/schema";
-import { hashApiKey, requireAdminJwt, sha256Lookup } from "../lib/auth";
+import { clientGroups, clients, onboardingTokens } from "../db/schema";
+import { requireAdminJwt } from "../lib/auth";
+import { createClientWithOnboardingToken } from "../lib/client-factory";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
@@ -24,16 +24,6 @@ function resolveServerBaseUrl(request: FastifyRequest): string {
   }
 
   return `${protocol}://${host}`.replace(/\/$/, "");
-}
-
-function generateApiKey(): string {
-  return crypto.randomBytes(32).toString("hex");
-}
-
-interface ClientWithToken {
-  clientId: string;
-  apiKey: string;
-  token: string;
 }
 
 interface AccountLinkContext {
@@ -129,52 +119,6 @@ async function createAccountLinkForToken(
   return { accountLinkUrl: accountLink.url };
 }
 
-async function createClientWithOnboardingToken(
-  name: string,
-  email: string
-): Promise<ClientWithToken> {
-  if (!name || typeof name !== "string" || name.trim().length === 0) {
-    throw Object.assign(new Error("Name is required and must be a non-empty string"), {
-      statusCode: 400,
-    });
-  }
-
-  if (!email || typeof email !== "string" || !validator.isEmail(email)) {
-    throw Object.assign(new Error("Valid email is required"), { statusCode: 400 });
-  }
-
-  const clientId = uuidv4();
-  const apiKey = generateApiKey();
-  const apiKeyHash = await hashApiKey(apiKey);
-  const apiKeyLookup = sha256Lookup(apiKey);
-
-  await db.insert(clients).values({ id: clientId, name, email, apiKeyHash, apiKeyLookup });
-
-  const token = crypto.randomBytes(32).toString("hex");
-  const onboardingTokenId = uuidv4();
-
-  try {
-    await db.insert(onboardingTokens).values({
-      id: onboardingTokenId,
-      clientId: clientId,
-      token: token,
-      status: "pending",
-      email: email,
-    });
-  } catch (error) {
-    try {
-      await db.delete(clients).where(eq(clients.id, clientId));
-    } catch (cleanupError) {
-      console.error(
-        `Failed to clean up client record after onboarding token insertion failed: ${cleanupError}`
-      );
-    }
-    throw error;
-  }
-
-  return { clientId, apiKey, token };
-}
-
 export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.post(
     "/accounts",
@@ -182,10 +126,29 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
     },
     async (request, reply) => {
-      const { name, email } = request.body as { name: string; email: string };
-      request.log.info({ name, email }, "Received request in /accounts handler");
+      const { name, email, groupId } = request.body as {
+        name: string;
+        email: string;
+        groupId?: string;
+      };
+      request.log.info({ name, email, groupId }, "Received request in /accounts handler");
 
-      const { clientId, apiKey, token } = await createClientWithOnboardingToken(name, email);
+      if (groupId) {
+        const [group] = await db
+          .select()
+          .from(clientGroups)
+          .where(eq(clientGroups.id, groupId))
+          .limit(1);
+        if (!group) {
+          return reply.code(400).send({ error: "Invalid groupId." });
+        }
+      }
+
+      const { clientId, apiKey, token } = await createClientWithOnboardingToken({
+        name,
+        email,
+        groupId,
+      });
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
       if (!frontendOrigin) {
@@ -200,6 +163,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         onboardingUrlHint,
         apiKey,
         clientId,
+        groupId: groupId ?? null,
       });
     }
   );
@@ -210,9 +174,28 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
     },
     async (request, reply) => {
-      const { name, email } = request.body as { name: string; email: string };
+      const { name, email, groupId } = request.body as {
+        name: string;
+        email: string;
+        groupId?: string;
+      };
 
-      const { clientId, apiKey, token } = await createClientWithOnboardingToken(name, email);
+      if (groupId) {
+        const [group] = await db
+          .select()
+          .from(clientGroups)
+          .where(eq(clientGroups.id, groupId))
+          .limit(1);
+        if (!group) {
+          return reply.code(400).send({ error: "Invalid groupId." });
+        }
+      }
+
+      const { clientId, apiKey, token } = await createClientWithOnboardingToken({
+        name,
+        email,
+        groupId,
+      });
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
       if (!frontendOrigin) {
@@ -249,6 +232,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         message: "Onboarding email sent successfully.",
         clientId,
         apiKey,
+        groupId: groupId ?? null,
       });
     }
   );

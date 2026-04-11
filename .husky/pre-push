@@ -1,5 +1,54 @@
 #!/usr/bin/env sh
 
+check_agent_docs_sync() {
+  base=".claude/CLAUDE.md"
+  mirrors="AGENTS.md Qwen.md Gemini.md"
+
+  if [ ! -f "$base" ]; then
+    echo "❌ Missing required file: $base"
+    return 1
+  fi
+
+  missing=""
+  for file in $mirrors; do
+    if [ ! -f "$file" ]; then
+      missing="$missing $file"
+    fi
+  done
+
+  if [ -n "$missing" ]; then
+    echo "❌ Missing required mirror file(s):$missing"
+    return 1
+  fi
+
+  for file in $mirrors; do
+    if ! diff -q "$base" "$file" >/dev/null 2>&1; then
+      echo "❌ '$file' is out of sync with $base"
+      echo "   Sync them with: cp .claude/CLAUDE.md AGENTS.md && cp .claude/CLAUDE.md Qwen.md && cp .claude/CLAUDE.md Gemini.md"
+      return 1
+    fi
+  done
+}
+
+# Runs a command with quiet success output and full failure logs.
+run_step() {
+  label="$1"
+  shift
+
+  log_file=$(mktemp)
+  echo "${label} check..."
+
+  if "$@" >"$log_file" 2>&1; then
+    echo "${label} pass"
+    rm -f "$log_file"
+  else
+    echo "${label} failed"
+    cat "$log_file"
+    rm -f "$log_file"
+    exit 1
+  fi
+}
+
 # 1. Guard: no force-push to main
 while read -r local_ref local_sha remote_ref remote_sha; do
   if echo "$remote_ref" | grep -q 'refs/heads/main'; then
@@ -14,8 +63,7 @@ COMPOSE="docker compose -f docker-compose.base.yml -f docker-compose.dev.yml"
 if [ "${SKIP_DOCKER_TESTS}" = "1" ]; then
   echo "⚠️  SKIP_DOCKER_TESTS=1 — backend tests skipped."
 elif $COMPOSE ps --status running 2>/dev/null | grep -q "api"; then
-  echo "Docker stack is running — running backend tests before push..."
-  $COMPOSE exec -T api npm test
+  run_step "Backend tests" $COMPOSE exec -T api npm test
 else
   echo ""
   echo "❌ Docker stack is not running. Start it with 'make up' before pushing."
@@ -23,3 +71,15 @@ else
   echo ""
   exit 1
 fi
+
+# 3. Full lint (Biome check)
+run_step "Lint" npm run lint
+
+# 4. Guard: .claude/CLAUDE.md mirrors must exist and stay in sync
+run_step "Agent docs" check_agent_docs_sync
+
+# 5. Backend TypeScript type-check
+run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json"
+
+# 6. Frontend tests
+run_step "Frontend tests" npm run test:front

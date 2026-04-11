@@ -9,6 +9,8 @@
     "includes": [
       "backend/src/**",
       "front/src/**",
+      "docs/**/*.md",
+      "*.md",
       "!**/node_modules/**",
       "!**/dist/**",
       "!**/coverage/**",

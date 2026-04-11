@@ -5,6 +5,11 @@ import CreateClientForm from "../components/admin/CreateClientForm";
 import OnboardClient from "../pages/OnboardClient";
 import { renderWithProviders } from "../test/renderWithProviders";
 
+// Mock the hooks
+vi.mock("../hooks/useGroups", () => ({
+  useGroups: () => ({ data: [], isLoading: false, isError: false }),
+}));
+
 // Mock the logger utility
 vi.mock("../utils/logger", () => ({
   default: {
@@ -125,10 +130,10 @@ describe("CreateClientForm", () => {
   it("validates required fields and shows error messages", async () => {
     renderWithProviders(<CreateClientForm showToast={mockShowToast} />);
 
-    const nameInput = screen.getByRole("textbox", { name: /client name/i });
+    const nameInput = screen.getByRole("textbox", { name: /account name/i });
     await userEvent.type(nameInput, "Test Client");
 
-    const emailInput = screen.getByRole("textbox", { name: /client email/i });
+    const emailInput = screen.getByRole("textbox", { name: /account email/i });
     await userEvent.type(emailInput, "test@example.com");
 
     await waitFor(() => {
@@ -151,10 +156,10 @@ describe("CreateClientForm", () => {
   it("validates email format", async () => {
     renderWithProviders(<CreateClientForm showToast={mockShowToast} />);
 
-    const nameInput = screen.getByRole("textbox", { name: /client name/i });
+    const nameInput = screen.getByRole("textbox", { name: /account name/i });
     await userEvent.type(nameInput, "Test Client");
 
-    const emailInput = screen.getByRole("textbox", { name: /client email/i });
+    const emailInput = screen.getByRole("textbox", { name: /account email/i });
     await userEvent.type(emailInput, "valid@email.com");
 
     await waitFor(() => {
@@ -192,10 +197,10 @@ describe("CreateClientForm", () => {
       token: "admin-token",
     });
 
-    const nameInput = screen.getByRole("textbox", { name: /client name/i });
+    const nameInput = screen.getByRole("textbox", { name: /account name/i });
     fireEvent.change(nameInput, { target: { value: "Test Client" } });
 
-    const emailInput = screen.getByRole("textbox", { name: /client email/i });
+    const emailInput = screen.getByRole("textbox", { name: /account email/i });
     fireEvent.change(emailInput, { target: { value: "test@example.com" } });
 
     const submitButton = screen.getByRole("button", { name: /create client/i });

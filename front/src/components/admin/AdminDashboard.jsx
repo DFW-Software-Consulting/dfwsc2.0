@@ -8,14 +8,17 @@ import BillingPanel from "./BillingPanel";
 import ClientList from "./ClientList";
 import CreateClientForm from "./CreateClientForm";
 import GroupPanel from "./GroupPanel";
+import ImportStripeCustomer from "./ImportStripeCustomer";
 import PaymentReports from "./PaymentReports";
+import SettingsPanel from "./SettingsPanel";
 import Toast from "./Toast";
 
 const TABS = [
-  { id: "clients", label: "Clients" },
-  { id: "groups", label: "Groups" },
+  { id: "clients", label: "Accounts" },
+  { id: "groups", label: "Companies" },
   { id: "reports", label: "Reports" },
   { id: "billing", label: "Billing" },
+  { id: "settings", label: "Settings" },
 ];
 
 export default function AdminDashboard() {
@@ -28,6 +31,7 @@ export default function AdminDashboard() {
   } = useSetupStatus();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("clients");
+  const [clientSubTab, setClientSubTab] = useState("create"); // 'create' or 'import'
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
 
   const showToast = useCallback((message, type = "info") => {
@@ -112,7 +116,37 @@ export default function AdminDashboard() {
       {/* Clients tab */}
       {activeTab === "clients" && (
         <>
-          <CreateClientForm showToast={showToast} />
+          <div className="flex gap-4 mb-4">
+            <button
+              type="button"
+              onClick={() => setClientSubTab("create")}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                clientSubTab === "create"
+                  ? "bg-blue-600 text-white shadow-lg"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white"
+              }`}
+            >
+              + New Client
+            </button>
+            <button
+              type="button"
+              onClick={() => setClientSubTab("import")}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                clientSubTab === "import"
+                  ? "bg-blue-600 text-white shadow-lg"
+                  : "bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white"
+              }`}
+            >
+              📥 Import from Stripe
+            </button>
+          </div>
+
+          {clientSubTab === "create" ? (
+            <CreateClientForm showToast={showToast} />
+          ) : (
+            <ImportStripeCustomer showToast={showToast} />
+          )}
+
           <div className="mb-6">
             <h4 className="text-md font-semibold text-white mb-3">Client List</h4>
             <ClientList showToast={showToast} />
@@ -128,6 +162,9 @@ export default function AdminDashboard() {
 
       {/* Billing tab */}
       {activeTab === "billing" && <BillingPanel showToast={showToast} />}
+
+      {/* Settings tab */}
+      {activeTab === "settings" && <SettingsPanel showToast={showToast} />}
 
       <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
     </div>

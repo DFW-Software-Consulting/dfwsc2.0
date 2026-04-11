@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Banner from "../components/Banner.jsx";
-import CaseStudies from "../components/CaseStudies.jsx";
 import Contact from "../components/Contact.jsx";
 import Hero from "../components/Hero.jsx";
 import Services from "../components/Services.jsx";
