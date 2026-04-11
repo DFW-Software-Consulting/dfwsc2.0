@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
 import { db } from "../db/client";
@@ -47,14 +47,22 @@ async function resolveClientFee(
     return group.processingFeeCents;
   }
 
-  // Check DB settings for default fee
-  const [dbFeeCents] = await db
-    .select()
+  const dbDefaults = await db
+    .select({ key: settings.key, value: settings.value })
     .from(settings)
-    .where(eq(settings.key, "default_fee_cents"))
-    .limit(1);
-  if (dbFeeCents) {
-    return parseInt(dbFeeCents.value, 10);
+    .where(inArray(settings.key, ["default_fee_percent", "default_fee_cents"]));
+  const dbDefaultsMap = new Map(dbDefaults.map((row) => [row.key, row.value]));
+
+  const dbPercent = dbDefaultsMap.get("default_fee_percent");
+  if (dbPercent && dbPercent.trim().length > 0) {
+    if (typeof amount === "number") {
+      return Math.round((amount * parseFloat(dbPercent)) / 100);
+    }
+  }
+
+  const dbCents = dbDefaultsMap.get("default_fee_cents");
+  if (dbCents) {
+    return parseInt(dbCents, 10);
   }
 
   return Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);

@@ -1,8 +1,15 @@
-import { eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
+import validator from "validator";
 import { db } from "../db/client";
 import { settings } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+
+const ALLOWED_SETTING_KEYS = new Set([
+  "default_fee_cents",
+  "default_fee_percent",
+  "company_name",
+  "contact_email",
+]);
 
 const settingsRoutes: FastifyPluginAsync = async (app) => {
   // GET /settings - Fetch all global settings (Admin only)
@@ -22,10 +29,10 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
       // Provide defaults if not set in DB
       const response = {
         defaultFeeCents:
-          settingsMap["default_fee_cents"] || process.env.DEFAULT_PROCESS_FEE_CENTS || "0",
-        defaultFeePercent: settingsMap["default_fee_percent"] || null,
-        companyName: settingsMap["company_name"] || "DFW Software Consulting",
-        contactEmail: settingsMap["contact_email"] || process.env.SMTP_FROM || "",
+          settingsMap.default_fee_cents || process.env.DEFAULT_PROCESS_FEE_CENTS || "0",
+        defaultFeePercent: settingsMap.default_fee_percent || null,
+        companyName: settingsMap.company_name || "DFW Software Consulting",
+        contactEmail: settingsMap.contact_email || process.env.SMTP_FROM || "",
       };
 
       return res.status(200).send(response);
@@ -44,6 +51,10 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
         const { key } = req.params;
         const { value } = req.body;
 
+        if (!ALLOWED_SETTING_KEYS.has(key)) {
+          return res.status(400).send({ error: "Invalid setting key." });
+        }
+
         if (value === undefined || value === null) {
           return res.status(400).send({ error: "Value is required." });
         }
@@ -51,33 +62,40 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
         // Validation for specific keys
         if (key === "default_fee_cents") {
           const cents = parseInt(value, 10);
-          if (isNaN(cents) || cents < 0) {
+          if (Number.isNaN(cents) || cents < 0) {
             return res.status(400).send({ error: "Fee in cents must be a non-negative integer." });
           }
         }
         if (key === "default_fee_percent") {
           if (value !== "") {
             const percent = parseFloat(value);
-            if (isNaN(percent) || percent < 0 || percent > 100) {
+            if (Number.isNaN(percent) || percent < 0 || percent > 100) {
               return res.status(400).send({ error: "Fee percent must be between 0 and 100." });
             }
           }
         }
-
-        // Upsert setting
-        const [existing] = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
-
-        if (existing) {
-          await db
-            .update(settings)
-            .set({ value: String(value), updatedAt: new Date() })
-            .where(eq(settings.key, key));
-        } else {
-          await db.insert(settings).values({
-            key,
-            value: String(value),
-          });
+        if (key === "company_name") {
+          const companyName = String(value).trim();
+          if (companyName.length === 0 || companyName.length > 120) {
+            return res
+              .status(400)
+              .send({ error: "Company name must be between 1 and 120 characters." });
+          }
         }
+        if (key === "contact_email") {
+          const contactEmail = String(value).trim();
+          if (!validator.isEmail(contactEmail)) {
+            return res.status(400).send({ error: "Contact email must be a valid email address." });
+          }
+        }
+
+        await db
+          .insert(settings)
+          .values({ key, value: String(value) })
+          .onConflictDoUpdate({
+            target: settings.key,
+            set: { value: String(value), updatedAt: new Date() },
+          });
 
         return res.status(200).send({ message: "Setting updated successfully." });
       } catch (error) {

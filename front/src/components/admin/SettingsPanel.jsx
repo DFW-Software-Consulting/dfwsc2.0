@@ -9,6 +9,8 @@ export default function SettingsPanel({ showToast }) {
 
   const [formValues, setFormValues] = useState({});
 
+  const getValueForSave = (key, fallback) => formValues[key] ?? fallback;
+
   const handleUpdate = async (key, value) => {
     try {
       await updateSettingMutation.mutateAsync({ key, value });
@@ -62,7 +64,12 @@ export default function SettingsPanel({ showToast }) {
               />
               <button
                 type="button"
-                onClick={() => handleUpdate("default_fee_cents", formValues.default_fee_cents)}
+                onClick={() =>
+                  handleUpdate(
+                    "default_fee_cents",
+                    getValueForSave("default_fee_cents", settings.defaultFeeCents)
+                  )
+                }
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
@@ -92,7 +99,12 @@ export default function SettingsPanel({ showToast }) {
               />
               <button
                 type="button"
-                onClick={() => handleUpdate("default_fee_percent", formValues.default_fee_percent)}
+                onClick={() =>
+                  handleUpdate(
+                    "default_fee_percent",
+                    getValueForSave("default_fee_percent", settings.defaultFeePercent ?? "")
+                  )
+                }
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
@@ -117,7 +129,12 @@ export default function SettingsPanel({ showToast }) {
               />
               <button
                 type="button"
-                onClick={() => handleUpdate("company_name", formValues.company_name)}
+                onClick={() =>
+                  handleUpdate(
+                    "company_name",
+                    getValueForSave("company_name", settings.companyName)
+                  )
+                }
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
@@ -140,7 +157,12 @@ export default function SettingsPanel({ showToast }) {
               />
               <button
                 type="button"
-                onClick={() => handleUpdate("contact_email", formValues.contact_email)}
+                onClick={() =>
+                  handleUpdate(
+                    "contact_email",
+                    getValueForSave("contact_email", settings.contactEmail)
+                  )
+                }
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save

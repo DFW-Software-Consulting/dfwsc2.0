@@ -8,6 +8,7 @@ import { admins } from "../db/schema";
 export async function bootstrapAdminIfNeeded(server: FastifyInstance): Promise<void> {
   const username = process.env.ADMIN_USERNAME;
   const password = process.env.ADMIN_PASSWORD;
+  const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
 
   if (username && password) {
     const existing = await db.select().from(admins).where(eq(admins.username, username)).limit(1);
@@ -23,10 +24,18 @@ export async function bootstrapAdminIfNeeded(server: FastifyInstance): Promise<v
       id: randomUUID(),
       username,
       passwordHash,
-      setupConfirmed: true,
+      setupConfirmed: !allowAdminSetup,
       updatedAt: new Date(),
     });
-    server.log.info({ username }, "Admin account bootstrapped successfully.");
+
+    if (allowAdminSetup) {
+      server.log.info(
+        { username },
+        "Admin account bootstrapped in unconfirmed mode because ALLOW_ADMIN_SETUP=true."
+      );
+    } else {
+      server.log.info({ username }, "Admin account bootstrapped successfully.");
+    }
     return;
   }
 

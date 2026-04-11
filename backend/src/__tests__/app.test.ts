@@ -14,6 +14,7 @@ vi.mock("bcryptjs", () => ({
 
 vi.mock("drizzle-orm", () => ({
   eq: (field: unknown, value: unknown) => ({ value, field }),
+  inArray: (field: unknown, values: unknown[]) => ({ inArray: true, field, values }),
   and: (...conditions: any[]) => ({ all: conditions }),
   isNull: (field: unknown) => ({ isNull: true, field }),
 }));
