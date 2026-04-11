@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createClient, getClients, patchClient } from "../api/clients";
+import {
+  createClient,
+  getClients,
+  getStripeCustomers,
+  importStripeCustomer,
+  patchClient,
+} from "../api/clients";
 import { resendOnboardingLink } from "../api/onboarding";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -12,11 +18,29 @@ export function useClients() {
   });
 }
 
+export function useStripeCustomers(starting_after) {
+  const { token } = useAuth();
+  return useQuery({
+    queryKey: ["stripe-customers", starting_after],
+    queryFn: () => getStripeCustomers(token, { starting_after }),
+    enabled: !!token,
+  });
+}
+
 export function useCreateClient() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body) => createClient(token, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
+  });
+}
+
+export function useImportStripeCustomer() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (stripeCustomerId) => importStripeCustomer(token, stripeCustomerId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }

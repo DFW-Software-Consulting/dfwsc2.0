@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useCreateGroup, useGroups, usePatchGroup } from "../../hooks/useGroups";
 import { validateFeeValue, validateUrl } from "../../utils/validation";
-import GroupMembersModal from "./GroupMembersModal";
+import ClientProfileView from "./ClientProfileView";
 import BaseModal from "./shared/BaseModal";
 import Button from "./shared/Button";
 import ErrorMessage from "./shared/ErrorMessage";
@@ -221,13 +221,13 @@ export default function GroupPanel({ showToast }) {
     <div>
       {/* Create form */}
       <div className="mb-6 p-4 bg-gray-700/50 rounded-lg">
-        <h4 className="text-md font-semibold text-white mb-3">Create New Group</h4>
+        <h4 className="text-md font-semibold text-white mb-3">Create New Company</h4>
         <form onSubmit={handleCreate} className="flex gap-3">
           <input
             type="text"
             value={newGroupName}
             onChange={(e) => setNewGroupName(e.target.value)}
-            placeholder="Group name"
+            placeholder="Company name"
             className="flex-1 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                        placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             disabled={createGroupMutation.isPending}
@@ -244,7 +244,7 @@ export default function GroupPanel({ showToast }) {
 
       {/* List header */}
       <div className="flex justify-between items-center mb-3">
-        <h4 className="text-md font-semibold text-white">Groups</h4>
+        <h4 className="text-md font-semibold text-white">Client Companies</h4>
         <button
           type="button"
           onClick={() => refetch()}
@@ -328,7 +328,7 @@ export default function GroupPanel({ showToast }) {
                             className="bg-purple-600 hover:bg-purple-700 text-white"
                             onClick={() => setManagingGroup(g)}
                           >
-                            Manage
+                            View Profile
                           </Button>
                           <Button
                             size="sm"
@@ -405,7 +405,7 @@ export default function GroupPanel({ showToast }) {
         />
       )}
       {managingGroup && (
-        <GroupMembersModal
+        <ClientProfileView
           group={managingGroup}
           onClose={() => setManagingGroup(null)}
           showToast={showToast}

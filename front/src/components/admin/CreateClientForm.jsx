@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { useCreateClient } from "../../hooks/useClients";
+import { useGroups } from "../../hooks/useGroups";
 import logger from "../../utils/logger";
 import { validateEmail, validateName } from "../../utils/validation";
 import Button from "./shared/Button";
@@ -9,8 +10,10 @@ import FormInput from "./shared/FormInput";
 const NAME_MAX_LENGTH = 100;
 
 export default function CreateClientForm({ showToast }) {
+  const { data: groups = [] } = useGroups();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [groupId, setGroupId] = useState("");
   const [error, setError] = useState("");
   const [createdClientInfo, setCreatedClientInfo] = useState(null);
 
@@ -35,12 +38,13 @@ export default function CreateClientForm({ showToast }) {
       setError("");
       setCreatedClientInfo(null);
       createClientMutation.mutate(
-        { name: name.trim(), email: email.trim() },
+        { name: name.trim(), email: email.trim(), groupId: groupId || undefined },
         {
           onSuccess: (data) => {
             setCreatedClientInfo(data);
             setName("");
             setEmail("");
+            setGroupId("");
             showToast?.(`Client ${data.name} created successfully!`, "success");
           },
           onError: (err) => {
@@ -51,7 +55,7 @@ export default function CreateClientForm({ showToast }) {
         }
       );
     },
-    [name, email, validateForm, createClientMutation, showToast]
+    [name, email, groupId, validateForm, createClientMutation, showToast]
   );
 
   const copyToClipboard = useCallback(
@@ -75,23 +79,49 @@ export default function CreateClientForm({ showToast }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <FormInput
             id="newClientName"
-            label="Client Name"
+            label="Account Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Enter client name"
+            placeholder="e.g. Acme Marketing"
             maxLength={NAME_MAX_LENGTH}
             disabled={createClientMutation.isPending}
             helper={`${name.length}/${NAME_MAX_LENGTH} characters`}
           />
           <FormInput
             id="newClientEmail"
-            label="Client Email"
+            label="Account Email"
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="Enter client email"
+            placeholder="e.g. payments@acme.com"
             disabled={createClientMutation.isPending}
           />
+        </div>
+
+        <div className="mb-4">
+          <label htmlFor="newClientGroup" className="block text-sm font-medium text-gray-300 mb-1">
+            Assign to Company (Optional)
+          </label>
+          <select
+            id="newClientGroup"
+            value={groupId}
+            onChange={(e) => setGroupId(e.target.value)}
+            className="w-full md:w-1/2 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+                       focus:outline-none focus:ring-2 focus:ring-blue-500"
+            disabled={createClientMutation.isPending}
+          >
+            <option value="">— No company (Independent Account) —</option>
+            {groups
+              .filter((g) => g.status === "active")
+              .map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            Grouping accounts allows you to manage them under a single client profile.
+          </p>
         </div>
 
         <Button

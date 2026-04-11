@@ -1,18 +1,39 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
+import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client";
 import { admins } from "../db/schema";
 
 export async function bootstrapAdminIfNeeded(server: FastifyInstance): Promise<void> {
-  const existing = await db.select().from(admins);
+  const username = process.env.ADMIN_USERNAME;
+  const password = process.env.ADMIN_PASSWORD;
 
-  if (existing.length > 0) {
-    server.log.info("Bootstrap skipped — admin already configured");
+  if (username && password) {
+    const existing = await db.select().from(admins).where(eq(admins.username, username)).limit(1);
+
+    if (existing.length > 0) {
+      server.log.info({ username }, "Bootstrap: admin account already exists.");
+      return;
+    }
+
+    server.log.info({ username }, "Bootstrapping admin account from environment...");
+    const passwordHash = await bcrypt.hash(password, 10);
+    await db.insert(admins).values({
+      id: randomUUID(),
+      username,
+      passwordHash,
+      setupConfirmed: true,
+      updatedAt: new Date(),
+    });
+    server.log.info({ username }, "Admin account bootstrapped successfully.");
     return;
   }
 
-  server.log.warn(
-    "Bootstrap warning: No admins in DB. Server will start but login will return 503 until an admin is configured via the setup endpoint or manually in the database."
-  );
+  const allAdmins = await db.select().from(admins);
+  if (allAdmins.length === 0) {
+    server.log.warn(
+      "Bootstrap warning: No admins in DB and no ADMIN_USERNAME/ADMIN_PASSWORD provided. Login will return 503."
+    );
+  }
 }

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
 import { db } from "../db/client";
-import { clientGroups, clients } from "../db/schema";
+import { clientGroups, clients, settings } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
@@ -23,11 +23,11 @@ function resolvePaymentRateLimitKey(request: RequestWithClient): string {
   return request.ip || "unknown";
 }
 
-function resolveClientFee(
+async function resolveClientFee(
   client: typeof clients.$inferSelect,
   group: typeof clientGroups.$inferSelect | null,
   amount?: number
-): number {
+): Promise<number> {
   if (client.processingFeePercent !== null && client.processingFeePercent !== undefined) {
     if (typeof amount !== "number") {
       throw new Error("amount is required when client uses a percentage-based fee.");
@@ -46,6 +46,17 @@ function resolveClientFee(
   if (group?.processingFeeCents !== null && group?.processingFeeCents !== undefined) {
     return group.processingFeeCents;
   }
+
+  // Check DB settings for default fee
+  const [dbFeeCents] = await db
+    .select()
+    .from(settings)
+    .where(eq(settings.key, "default_fee_cents"))
+    .limit(1);
+  if (dbFeeCents) {
+    return parseInt(dbFeeCents.value, 10);
+  }
+
   return Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
 }
 
@@ -111,7 +122,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
         let feeAmount: number;
         try {
-          feeAmount = resolveClientFee(client, group, amount);
+          feeAmount = await resolveClientFee(client, group, amount);
         } catch (e: unknown) {
           return reply.code(400).send({ error: (e as Error).message });
         }
@@ -148,7 +159,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       let feeAmount: number;
       try {
-        feeAmount = resolveClientFee(client, group, amount);
+        feeAmount = await resolveClientFee(client, group, amount);
       } catch (e: unknown) {
         return reply.code(400).send({ error: (e as Error).message });
       }
