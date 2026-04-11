@@ -59,42 +59,47 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
           return res.status(400).send({ error: "Value is required." });
         }
 
+        let finalValue = String(value);
+
         // Validation for specific keys
         if (key === "default_fee_cents") {
-          const cents = parseInt(value, 10);
+          if (!/^\d+$/.test(String(value).trim())) {
+            return res.status(400).send({ error: "Fee in cents must be a non-negative integer." });
+          }
+          const cents = parseInt(String(value), 10);
           if (Number.isNaN(cents) || cents < 0) {
             return res.status(400).send({ error: "Fee in cents must be a non-negative integer." });
           }
         }
         if (key === "default_fee_percent") {
           if (value !== "") {
-            const percent = parseFloat(value);
+            const percent = parseFloat(String(value));
             if (Number.isNaN(percent) || percent < 0 || percent > 100) {
               return res.status(400).send({ error: "Fee percent must be between 0 and 100." });
             }
           }
         }
         if (key === "company_name") {
-          const companyName = String(value).trim();
-          if (companyName.length === 0 || companyName.length > 120) {
+          finalValue = String(value).trim();
+          if (finalValue.length === 0 || finalValue.length > 120) {
             return res
               .status(400)
               .send({ error: "Company name must be between 1 and 120 characters." });
           }
         }
         if (key === "contact_email") {
-          const contactEmail = String(value).trim();
-          if (!validator.isEmail(contactEmail)) {
+          finalValue = String(value).trim();
+          if (finalValue !== "" && !validator.isEmail(finalValue)) {
             return res.status(400).send({ error: "Contact email must be a valid email address." });
           }
         }
 
         await db
           .insert(settings)
-          .values({ key, value: String(value) })
+          .values({ key, value: finalValue })
           .onConflictDoUpdate({
             target: settings.key,
-            set: { value: String(value), updatedAt: new Date() },
+            set: { value: finalValue, updatedAt: new Date() },
           });
 
         return res.status(200).send({ message: "Setting updated successfully." });

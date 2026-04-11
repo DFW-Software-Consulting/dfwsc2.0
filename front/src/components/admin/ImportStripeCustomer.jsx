@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useImportStripeCustomer, useStripeCustomers } from "../../hooks/useClients";
+import { useGroups } from "../../hooks/useGroups";
 import logger from "../../utils/logger";
 import AdminTable from "./shared/AdminTable";
 import Button from "./shared/Button";
@@ -15,25 +16,30 @@ export default function ImportStripeCustomer({ showToast }) {
     refetch,
   } = useStripeCustomers(startingAfter);
 
+  const { data: groups = [], isLoading: isLoadingGroups } = useGroups();
   const importMutation = useImportStripeCustomer();
   const [importedClientInfo, setImportedClientInfo] = useState(null);
   const [localError, setLocalError] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
 
   const handleImport = (customerId) => {
     setLocalError("");
     setImportedClientInfo(null);
-    importMutation.mutate(customerId, {
-      onSuccess: (data) => {
-        setImportedClientInfo(data);
-        showToast?.(`Client ${data.name} imported successfully!`, "success");
-        refetch(); // Refresh the list to remove the imported customer
-      },
-      onError: (err) => {
-        logger.error("Error importing Stripe customer:", err);
-        setLocalError(err.message);
-        showToast?.(`Error importing customer: ${err.message}`, "error");
-      },
-    });
+    importMutation.mutate(
+      { stripeCustomerId: customerId, groupId: selectedGroupId || undefined },
+      {
+        onSuccess: (data) => {
+          setImportedClientInfo(data);
+          showToast?.(`Client ${data.name} imported successfully!`, "success");
+          refetch(); // Refresh the list to remove the imported customer
+        },
+        onError: (err) => {
+          logger.error("Error importing Stripe customer:", err);
+          setLocalError(err.message);
+          showToast?.(`Error importing customer: ${err.message}`, "error");
+        },
+      }
+    );
   };
 
   const copyToClipboard = async (text, type) => {
@@ -60,7 +66,9 @@ export default function ImportStripeCustomer({ showToast }) {
         <Button
           size="sm"
           onClick={() => handleImport(c.id)}
-          isLoading={importMutation.isPending && importMutation.variables === c.id}
+          isLoading={
+            importMutation.isPending && importMutation.variables?.stripeCustomerId === c.id
+          }
           disabled={importMutation.isPending}
         >
           Import
@@ -95,6 +103,26 @@ export default function ImportStripeCustomer({ showToast }) {
       <p className="text-sm text-gray-400 mb-4">
         Select a customer from your main Stripe account to import them into the portal.
       </p>
+
+      <div className="mb-6 max-w-sm">
+        <label htmlFor="import-group-id" className="block text-xs font-medium text-gray-400 mb-1">
+          ASSIGN TO GROUP (OPTIONAL)
+        </label>
+        <select
+          id="import-group-id"
+          value={selectedGroupId}
+          onChange={(e) => setSelectedGroupId(e.target.value)}
+          disabled={isLoadingGroups}
+          className="w-full bg-gray-900/50 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
+        >
+          <option value="">No Group (Independent)</option>
+          {groups.map((group) => (
+            <option key={group.id} value={group.id}>
+              {group.name}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <AdminTable
         columns={columns}

@@ -40,7 +40,8 @@ export function useImportStripeCustomer() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (stripeCustomerId) => importStripeCustomer(token, stripeCustomerId),
+    mutationFn: ({ stripeCustomerId, groupId }) =>
+      importStripeCustomer(token, stripeCustomerId, groupId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }

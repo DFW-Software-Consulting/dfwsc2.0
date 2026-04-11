@@ -6,17 +6,11 @@ import { db } from "../db/client";
 const migrationsFolder = path.join(__dirname, "..", "..", "drizzle");
 
 export async function runMigrations(server: FastifyInstance): Promise<void> {
-  const strictMigrations = process.env.MIGRATION_STRICT === "true";
   try {
     await migrate(db, { migrationsFolder });
     server.log.info("Database migrations executed (noop if already up to date).");
   } catch (error) {
     server.log.error({ err: error }, "Failed to execute database migrations.");
-    // In non-production, continue unless strict mode is enabled.
-    if (process.env.NODE_ENV !== "production" && !strictMigrations) {
-      server.log.warn("Continuing despite migration failure (dev mode).");
-      return;
-    }
     throw error;
   }
 }

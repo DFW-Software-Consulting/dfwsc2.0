@@ -15,9 +15,9 @@ export const getStripeCustomers = (token, { starting_after } = {}) => {
   return apiFetch(`/stripe/customers${params}`, { token });
 };
 
-export const importStripeCustomer = (token, stripeCustomerId) =>
+export const importStripeCustomer = (token, stripeCustomerId, groupId) =>
   apiFetch("/stripe/import-customer", {
     token,
     method: "POST",
-    body: { stripeCustomerId },
+    body: { stripeCustomerId, groupId },
   });

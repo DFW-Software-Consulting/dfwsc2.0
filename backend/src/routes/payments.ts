@@ -55,9 +55,14 @@ async function resolveClientFee(
 
   const dbPercent = dbDefaultsMap.get("default_fee_percent");
   if (dbPercent && dbPercent.trim().length > 0) {
-    if (typeof amount === "number") {
-      return Math.round((amount * parseFloat(dbPercent)) / 100);
+    if (typeof amount !== "number") {
+      throw new Error("amount is required when using a percentage-based default fee.");
     }
+    const parsedPercent = parseFloat(dbPercent);
+    if (Number.isNaN(parsedPercent)) {
+      throw new Error("Invalid default_fee_percent in database (must be a valid number).");
+    }
+    return Math.round((amount * parsedPercent) / 100);
   }
 
   const dbCents = dbDefaultsMap.get("default_fee_cents");

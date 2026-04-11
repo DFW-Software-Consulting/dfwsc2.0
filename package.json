@@ -50,6 +50,9 @@
     ],
     "front/src/**/*.{ts,tsx,js,jsx}": [
       "biome check --write --no-errors-on-unmatched"
+    ],
+    "**/*.md": [
+      "biome check --write --no-errors-on-unmatched"
     ]
   }
 }

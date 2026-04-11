@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import bcrypt from "bcryptjs";
 import { and, eq } from "drizzle-orm";
