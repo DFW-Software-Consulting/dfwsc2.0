@@ -145,7 +145,7 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
     ]
   );
 
- = useCallback(
+  const copyToClipboard = useCallback(
     async (text, type) => {
       try {
         await navigator.clipboard.writeText(text);
