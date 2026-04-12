@@ -2,17 +2,18 @@ import { eq, inArray } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import type Stripe from "stripe";
 import { db } from "../db/client";
-import { clients } from "../db/schema";
+import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { sendInvoiceEmail } from "../lib/mailer";
 import { stripe } from "../lib/stripe";
-import { ensureStripeCustomer } from "../lib/stripe-billing";
+import { ensureStripeCustomer, resolveClientFee } from "../lib/stripe-billing";
 
 interface CreateInvoiceBody {
   clientId: string;
   amountCents: number;
   description: string;
   dueDate?: string | null;
+  waiveFee?: boolean;
 }
 
 interface InvoiceParams {
@@ -51,7 +52,7 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
     "/invoices",
     { preHandler: requireAdminJwt },
     async (req, res) => {
-      const { clientId, amountCents, description, dueDate } = req.body;
+      const { clientId, amountCents, description, dueDate, waiveFee = false } = req.body;
 
       if (!clientId) {
         return res.status(400).send({ error: "clientId is required." });
@@ -68,12 +69,26 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
         return res.status(404).send({ error: "Client not found." });
       }
 
+      const group = client.groupId
+        ? ((
+            await db.select().from(clientGroups).where(eq(clientGroups.id, client.groupId)).limit(1)
+          )[0] ?? null)
+        : null;
+
+      let feeAmount: number;
+      try {
+        feeAmount = await resolveClientFee(client, group, amountCents);
+      } catch (e: unknown) {
+        return res.status(400).send({ error: (e as Error).message });
+      }
+
       const customerId = await ensureStripeCustomer(client);
 
       const daysUntilDue = dueDate
         ? Math.max(1, Math.ceil((new Date(dueDate).getTime() - Date.now()) / 86_400_000))
         : 30;
 
+      // Base amount line item
       await stripe.invoiceItems.create({
         customer: customerId,
         amount: amountCents,
@@ -81,19 +96,36 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
         description: description.trim(),
       });
 
+      // Fee line item (Actual or Waived)
+      if (feeAmount > 0) {
+        await stripe.invoiceItems.create({
+          customer: customerId,
+          amount: waiveFee ? 0 : feeAmount,
+          currency: "usd",
+          description: waiveFee ? "Processing Fee (Waived)" : "Processing Fee",
+        });
+      }
+
       const invoice = await stripe.invoices.create({
         customer: customerId,
         collection_method: "send_invoice",
         days_until_due: daysUntilDue,
-        metadata: { clientId },
+        metadata: {
+          clientId,
+          baseAmount: amountCents.toString(),
+          feeAmount: waiveFee ? "0" : feeAmount.toString(),
+          waivedFeeAmount: waiveFee ? feeAmount.toString() : "0",
+        },
       });
 
       const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
 
+      const totalChargedCents = waiveFee ? amountCents : amountCents + feeAmount;
+
       await sendInvoiceEmail({
         to: client.email,
         clientName: client.name,
-        amountCents,
+        amountCents: totalChargedCents,
         description: description.trim(),
         dueDate: dueDate ? new Date(dueDate) : null,
         payUrl: finalized.hosted_invoice_url ?? "",

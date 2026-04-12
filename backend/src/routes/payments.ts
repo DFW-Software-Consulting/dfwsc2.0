@@ -73,16 +73,6 @@ async function resolveClientFee(
   return Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
 }
 
-async function requireStripeAccountForPayments(request: RequestWithClient, reply: FastifyReply) {
-  const client = request.client;
-  if (!client) {
-    return reply.code(401).send({ error: "API key is required." });
-  }
-  if (!client.stripeAccountId) {
-    return reply.code(400).send({ error: "Client does not have a connected Stripe account." });
-  }
-}
-
 export default async function paymentsRoutes(fastify: FastifyInstance) {
   // Compute useCheckout flag at route registration time
   const useCheckout = (process.env.USE_CHECKOUT ?? "false").toLowerCase() === "true";
@@ -91,7 +81,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     {
       preHandler: [
         requireApiKey,
-        requireStripeAccountForPayments,
         rateLimit({ max: 20, windowMs: 60_000, keyGenerator: resolvePaymentRateLimitKey }),
       ],
     },
@@ -101,12 +90,20 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: "Idempotency-Key header is required." });
       }
 
-      const { amount, currency, description, metadata, lineItems } = request.body as {
+      const {
+        amount,
+        currency,
+        description,
+        metadata,
+        lineItems,
+        waiveFee = false,
+      } = request.body as {
         amount?: number;
         currency?: string;
         description?: string;
         metadata?: Record<string, string>;
         lineItems?: Stripe.Checkout.SessionCreateParams.LineItem[];
+        waiveFee?: boolean;
       };
 
       const client = (request as RequestWithClient).client;
@@ -115,10 +112,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
 
       const clientId = client.id;
-
-      if (!client.stripeAccountId) {
-        return reply.code(400).send({ error: "Client does not have a connected Stripe account." });
-      }
+      const stripeAccountId = client.stripeAccountId;
 
       const group = client.groupId
         ? ((
@@ -139,27 +133,43 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         } catch (e: unknown) {
           return reply.code(400).send({ error: (e as Error).message });
         }
-        if (feeAmount < 0 || feeAmount > amount) {
-          return reply
-            .code(400)
-            .send({ error: "applicationFeeAmount must be between 0 and the payment amount." });
+
+        // FEE ON TOP: The customer pays base + fee.
+        // If waived, customer only pays base.
+        const totalAmount = waiveFee ? amount : amount + feeAmount;
+
+        const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
+          amount: totalAmount,
+          currency,
+          automatic_payment_methods: { enabled: true },
+          description,
+          metadata: {
+            ...(metadata ?? {}),
+            clientId,
+            baseAmount: amount.toString(),
+            feeAmount: waiveFee ? "0" : feeAmount.toString(),
+            waivedFeeAmount: waiveFee ? feeAmount.toString() : "0",
+          },
+        };
+
+        if (stripeAccountId) {
+          if (!waiveFee) {
+            paymentIntentParams.application_fee_amount = feeAmount;
+          }
+          const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams, {
+            stripeAccount: stripeAccountId,
+            idempotencyKey,
+          });
+          return reply.code(201).send({
+            clientSecret: paymentIntent.client_secret,
+            paymentIntentId: paymentIntent.id,
+          });
         }
 
-        const paymentIntent = await stripe.paymentIntents.create(
-          {
-            amount,
-            currency,
-            automatic_payment_methods: { enabled: true },
-            application_fee_amount: feeAmount,
-            description,
-            metadata: {
-              ...(metadata ?? {}),
-              clientId,
-            },
-          },
-          { stripeAccount: client.stripeAccountId, idempotencyKey }
-        );
-
+        // Direct payment to Platform account
+        const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams, {
+          idempotencyKey,
+        });
         return reply.code(201).send({
           clientSecret: paymentIntent.client_secret,
           paymentIntentId: paymentIntent.id,
@@ -170,20 +180,21 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: "lineItems are required when USE_CHECKOUT=true." });
       }
 
-      let feeAmount: number;
-      try {
-        feeAmount = await resolveClientFee(client, group, amount);
-      } catch (e: unknown) {
-        return reply.code(400).send({ error: (e as Error).message });
-      }
-      if (feeAmount < 0) {
-        return reply.code(400).send({ error: "applicationFeeAmount must be zero or positive." });
+      // For Checkout, we need to calculate total base amount from line items if 'amount' isn't provided
+      let baseAmount = amount;
+      if (typeof baseAmount !== "number") {
+        baseAmount = lineItems.reduce((acc, item) => {
+          const unitAmount = item.price_data?.unit_amount || 0;
+          const quantity = item.quantity || 1;
+          return acc + unitAmount * quantity;
+        }, 0);
       }
 
-      if (typeof amount === "number" && amount >= 0 && feeAmount > amount) {
-        return reply
-          .code(400)
-          .send({ error: "applicationFeeAmount cannot exceed the total amount." });
+      let feeAmount: number;
+      try {
+        feeAmount = await resolveClientFee(client, group, baseAmount);
+      } catch (e: unknown) {
+        return reply.code(400).send({ error: (e as Error).message });
       }
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
@@ -191,33 +202,60 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(500).send({ error: "FRONTEND_ORIGIN is not configured." });
       }
 
-      const session = await stripe.checkout.sessions.create(
-        {
-          mode: "payment",
-          line_items: lineItems,
-          success_url:
-            client.paymentSuccessUrl ??
-            group?.paymentSuccessUrl ??
-            `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url:
-            client.paymentCancelUrl ??
-            group?.paymentCancelUrl ??
-            `${frontendOrigin}/payment-cancel`,
-          payment_intent_data: {
-            application_fee_amount: feeAmount,
-            description,
-            metadata: {
-              ...(metadata ?? {}),
-              clientId,
+      // FEE ON TOP for Checkout: add a "Processing Fee" line item
+      const checkoutLineItems = [...lineItems];
+      if (feeAmount > 0) {
+        checkoutLineItems.push({
+          price_data: {
+            currency: lineItems[0].price_data?.currency || "usd",
+            product_data: {
+              name: waiveFee ? "Processing Fee (Waived)" : "Processing Fee",
             },
+            unit_amount: waiveFee ? 0 : feeAmount,
           },
+          quantity: 1,
+        });
+      }
+
+      const sessionParams: Stripe.Checkout.SessionCreateParams = {
+        mode: "payment",
+        line_items: checkoutLineItems,
+        success_url:
+          client.paymentSuccessUrl ??
+          group?.paymentSuccessUrl ??
+          `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url:
+          client.paymentCancelUrl ?? group?.paymentCancelUrl ?? `${frontendOrigin}/payment-cancel`,
+        payment_intent_data: {
+          description,
           metadata: {
+            ...(metadata ?? {}),
             clientId,
+            baseAmount: baseAmount.toString(),
+            feeAmount: waiveFee ? "0" : feeAmount.toString(),
+            waivedFeeAmount: waiveFee ? feeAmount.toString() : "0",
           },
         },
-        { stripeAccount: client.stripeAccountId, idempotencyKey }
-      );
+        metadata: {
+          clientId,
+        },
+      };
 
+      if (stripeAccountId) {
+        if (sessionParams.payment_intent_data && !waiveFee) {
+          sessionParams.payment_intent_data.application_fee_amount = feeAmount;
+        }
+        const session = await stripe.checkout.sessions.create(sessionParams, {
+          stripeAccount: stripeAccountId,
+          idempotencyKey,
+        });
+        return reply.code(201).send({ url: session.url });
+      }
+
+      // Direct payment
+      const session = await stripe.checkout.sessions.create(sessionParams, {
+        idempotencyKey,
+      });
       return reply.code(201).send({ url: session.url });
     }
   );
