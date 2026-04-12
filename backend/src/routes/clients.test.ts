@@ -10,6 +10,7 @@ describe("Client Management API", () => {
   let app: any;
   let mockAdminToken: string;
   let mockNonAdminToken: string;
+  const workspace = "client_portal";
   const mockClientId = "test-client-id-123";
   const mockSecondClientId = "test-client-id-456";
 
@@ -45,6 +46,7 @@ describe("Client Management API", () => {
         id: mockClientId,
         name: "Test Client",
         email: "test@example.com",
+        workspace,
         stripeAccountId: "acct_123456789",
         status: "active", // Default status
       },
@@ -52,6 +54,7 @@ describe("Client Management API", () => {
         id: mockSecondClientId,
         name: "Second Test Client",
         email: "second@example.com",
+        workspace,
         stripeAccountId: "acct_987654321",
         status: "inactive",
       },
@@ -68,7 +71,7 @@ describe("Client Management API", () => {
   describe("GET /api/v1/clients", () => {
     it("should successfully list all clients when called by admin", async () => {
       const response = await supertest(app.server)
-        .get("/api/v1/clients")
+        .get(`/api/v1/clients?workspace=${workspace}`)
         .set("Authorization", `Bearer ${mockAdminToken}`)
         .expect(200);
 
@@ -108,7 +111,7 @@ describe("Client Management API", () => {
       await db.delete(clients);
 
       const response = await supertest(app.server)
-        .get("/api/v1/clients")
+        .get(`/api/v1/clients?workspace=${workspace}`)
         .set("Authorization", `Bearer ${mockAdminToken}`)
         .expect(200);
 
@@ -123,7 +126,7 @@ describe("Client Management API", () => {
 
     it("should return 403 when called by non-admin user", async () => {
       const response = await supertest(app.server)
-        .get("/api/v1/clients")
+        .get(`/api/v1/clients?workspace=${workspace}`)
         .set("Authorization", `Bearer ${mockNonAdminToken}`)
         .expect(403);
 
@@ -131,7 +134,9 @@ describe("Client Management API", () => {
     });
 
     it("should return 401 when called without authorization token", async () => {
-      const response = await supertest(app.server).get("/api/v1/clients").expect(401);
+      const response = await supertest(app.server)
+        .get(`/api/v1/clients?workspace=${workspace}`)
+        .expect(401);
 
       expect(response.body).toHaveProperty("error");
     });

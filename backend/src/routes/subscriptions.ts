@@ -7,9 +7,11 @@ import { requireAdminJwt } from "../lib/auth";
 import { sendInvoiceEmail } from "../lib/mailer";
 import { stripe } from "../lib/stripe";
 import { ensureStripeCustomer, toStripeInterval } from "../lib/stripe-billing";
+import { isWorkspace, type Workspace } from "../lib/workspace";
 
 interface CreateSubscriptionBody {
   clientId: string;
+  workspace: Workspace;
   amountCents: number;
   description: string;
   interval: "monthly" | "quarterly" | "yearly";
@@ -28,6 +30,7 @@ interface SubscriptionPatchBody {
 }
 
 interface SubscriptionFilterQuery {
+  workspace?: string;
   clientId?: string;
 }
 
@@ -75,7 +78,13 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     "/subscriptions",
     { preHandler: requireAdminJwt },
     async (req, res) => {
-      const { clientId, amountCents, description, interval, totalPayments } = req.body;
+      const { clientId, workspace, amountCents, description, interval, totalPayments } = req.body;
+
+      if (!isWorkspace(workspace)) {
+        return res
+          .status(400)
+          .send({ error: "workspace is required (dfwsc_services|client_portal)." });
+      }
 
       if (!clientId) {
         return res.status(400).send({ error: "clientId is required." });
@@ -102,6 +111,11 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
       if (!client) {
         return res.status(404).send({ error: "Client not found." });
+      }
+      if (client.workspace !== workspace) {
+        return res
+          .status(400)
+          .send({ error: "clientId does not belong to the selected workspace." });
       }
 
       const customerId = await ensureStripeCustomer(client);
@@ -167,11 +181,17 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     "/subscriptions",
     { preHandler: requireAdminJwt },
     async (req, res) => {
-      const { clientId } = req.query;
+      const { workspace, clientId } = req.query;
+
+      if (!isWorkspace(workspace)) {
+        return res
+          .status(400)
+          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
+      }
 
       if (clientId) {
         const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
-        if (!client?.stripeCustomerId) {
+        if (!client?.stripeCustomerId || client.workspace !== workspace) {
           return res.status(200).send([]);
         }
 
@@ -195,13 +215,17 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           ? await db.select().from(clients).where(inArray(clients.id, clientIds))
           : [];
 
-      const clientMap = new Map(clientRows.map((c) => [c.id, c.name]));
+      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
+      const clientMap = new Map(scopedClients.map((c) => [c.id, c.name]));
 
       return res.status(200).send(
-        list.data.map((sub) => {
-          const cid = sub.metadata?.clientId ?? "";
-          return formatStripeSub(sub, cid, clientMap.get(cid) ?? null);
-        })
+        list.data
+          .map((sub) => {
+            const cid = sub.metadata?.clientId ?? "";
+            if (!cid || !clientMap.has(cid)) return null;
+            return formatStripeSub(sub, cid, clientMap.get(cid) ?? null);
+          })
+          .filter((entry): entry is ReturnType<typeof formatStripeSub> => entry !== null)
       );
     }
   );

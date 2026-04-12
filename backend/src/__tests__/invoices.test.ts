@@ -55,6 +55,8 @@ const stripeMock = {
 
 vi.mock("../lib/stripe", () => ({ stripe: stripeMock }));
 
+const workspace = "client_portal";
+
 describe("POST /invoices — input validation", () => {
   let app: Awaited<ReturnType<typeof import("../app").buildServer>>;
 
@@ -66,6 +68,7 @@ describe("POST /invoices — input validation", () => {
       id: "client-001",
       name: "Test Corp",
       email: "billing@testcorp.test",
+      workspace,
       apiKeyHash: null,
       stripeCustomerId: null,
     });
@@ -84,7 +87,7 @@ describe("POST /invoices — input validation", () => {
       method: "POST",
       url: "/api/v1/invoices",
       headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ amountCents: 5000, description: "Service fee" }),
+      body: JSON.stringify({ workspace, amountCents: 5000, description: "Service fee" }),
     });
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error).toMatch(/clientId/);
@@ -99,7 +102,12 @@ describe("POST /invoices — input validation", () => {
       method: "POST",
       url: "/api/v1/invoices",
       headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "client-001", amountCents: value, description: "fee" }),
+      body: JSON.stringify({
+        clientId: "client-001",
+        workspace,
+        amountCents: value,
+        description: "fee",
+      }),
     });
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error).toMatch(/amountCents/);
@@ -113,7 +121,12 @@ describe("POST /invoices — input validation", () => {
       method: "POST",
       url: "/api/v1/invoices",
       headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "client-001", amountCents: 5000, description: value }),
+      body: JSON.stringify({
+        clientId: "client-001",
+        workspace,
+        amountCents: 5000,
+        description: value,
+      }),
     });
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error).toMatch(/description/);
@@ -124,7 +137,7 @@ describe("POST /invoices — input validation", () => {
       method: "POST",
       url: "/api/v1/invoices",
       headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: "ghost", amountCents: 5000, description: "fee" }),
+      body: JSON.stringify({ clientId: "ghost", workspace, amountCents: 5000, description: "fee" }),
     });
     expect(res.statusCode).toBe(404);
     expect(JSON.parse(res.body).error).toMatch(/Client not found/);
@@ -158,6 +171,7 @@ describe("POST /invoices — Stripe customer creation", () => {
       id: "client-new",
       name: "Test Corp",
       email: "billing@testcorp.test",
+      workspace,
       stripeCustomerId: null,
     });
 
@@ -167,6 +181,7 @@ describe("POST /invoices — Stripe customer creation", () => {
       headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         clientId: "client-new",
+        workspace,
         amountCents: 9900,
         description: "March hosting",
       }),
@@ -178,7 +193,7 @@ describe("POST /invoices — Stripe customer creation", () => {
     expect(body.amountCents).toBe(9900);
     expect(body.hostedUrl).toBe("https://invoice.stripe.com/i/test");
     expect(stripeMock.customers.create).toHaveBeenCalledOnce();
-    expect(stripeMock.invoiceItems.create).toHaveBeenCalledOnce();
+    expect(stripeMock.invoiceItems.create).toHaveBeenCalledTimes(2);
     expect(stripeMock.invoices.finalizeInvoice).toHaveBeenCalledOnce();
   });
 
@@ -187,6 +202,7 @@ describe("POST /invoices — Stripe customer creation", () => {
       id: "client-existing",
       name: "Test Corp",
       email: "billing@testcorp.test",
+      workspace,
       stripeCustomerId: "cus_already_exists",
     });
 
@@ -196,6 +212,7 @@ describe("POST /invoices — Stripe customer creation", () => {
       headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         clientId: "client-existing",
+        workspace,
         amountCents: 5000,
         description: "Consulting",
       }),
@@ -213,6 +230,7 @@ describe("POST /invoices — Stripe customer creation", () => {
       id: "client-email",
       name: "Test Corp",
       email: "billing@testcorp.test",
+      workspace,
       stripeCustomerId: null,
     });
 
@@ -222,6 +240,7 @@ describe("POST /invoices — Stripe customer creation", () => {
       headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         clientId: "client-email",
+        workspace,
         amountCents: 7500,
         description: "Dev work",
       }),
@@ -244,6 +263,7 @@ describe("GET /invoices — list and filters", () => {
       id: "client-A",
       name: "Alpha Inc",
       email: "a@test.com",
+      workspace,
       status: "active",
       stripeCustomerId: "cus_alpha",
     });
@@ -251,6 +271,7 @@ describe("GET /invoices — list and filters", () => {
       id: "client-B",
       name: "Beta LLC",
       email: "b@test.com",
+      workspace,
       status: "active",
       stripeCustomerId: null,
     });
@@ -271,7 +292,7 @@ describe("GET /invoices — list and filters", () => {
   it("returns empty array when client has no stripeCustomerId", async () => {
     const res = await app.inject({
       method: "GET",
-      url: "/api/v1/invoices?clientId=client-B",
+      url: `/api/v1/invoices?workspace=${workspace}&clientId=client-B`,
       headers: { Authorization: `Bearer ${makeAdminToken()}` },
     });
     expect(res.statusCode).toBe(200);
@@ -286,7 +307,7 @@ describe("GET /invoices — list and filters", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/v1/invoices?clientId=client-A",
+      url: `/api/v1/invoices?workspace=${workspace}&clientId=client-A`,
       headers: { Authorization: `Bearer ${makeAdminToken()}` },
     });
 
@@ -309,7 +330,7 @@ describe("GET /invoices — list and filters", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: "/api/v1/invoices",
+      url: `/api/v1/invoices?workspace=${workspace}`,
       headers: { Authorization: `Bearer ${makeAdminToken()}` },
     });
 

@@ -28,11 +28,16 @@ export default function AdminDashboard() {
     adminConfigured,
     requiresSetup,
     isLoading: statusLoading,
+    error: statusError,
   } = useSetupStatus();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("clients");
   const [clientSubTab, setClientSubTab] = useState("create"); // 'create' or 'import'
+  const [workspace, setWorkspace] = useState("dfwsc_services");
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
+
+  const isDfwscMode = workspace === "dfwsc_services";
+  const visibleTabs = isDfwscMode ? TABS.filter((tab) => tab.id !== "groups") : TABS;
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
@@ -51,6 +56,13 @@ export default function AdminDashboard() {
     setActiveTab("clients");
   }, [logout]);
 
+  const handleWorkspaceChange = useCallback((nextWorkspace) => {
+    setWorkspace(nextWorkspace);
+    setActiveTab((prev) =>
+      prev === "groups" && nextWorkspace === "dfwsc_services" ? "clients" : prev
+    );
+  }, []);
+
   // ─── Unauthenticated state ───────────────────────────────────────────────
 
   if (!isLoggedIn) {
@@ -61,9 +73,26 @@ export default function AdminDashboard() {
         </div>
       );
     }
+
+    if (statusError) {
+      return (
+        <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 mb-6">
+          <p className="text-red-400 text-sm font-medium">
+            Error: Could not connect to the backend. Please check if the API server is running and
+            configured correctly.
+          </p>
+          <p className="text-red-300 text-xs mt-1">{statusError.message}</p>
+        </div>
+      );
+    }
+
+    // Default to Login if status is unknown/undetermined (e.g., API unreachable)
+    const showLogin = !bootstrapPending && !requiresSetup && adminConfigured;
+    const showSetup = bootstrapPending || requiresSetup;
+
     return (
       <>
-        {(bootstrapPending || requiresSetup) && (
+        {showSetup && (
           <AdminSetup
             onSetupComplete={handleSetupComplete}
             showToast={showToast}
@@ -71,9 +100,24 @@ export default function AdminDashboard() {
             isCreatingAdmin={requiresSetup}
           />
         )}
-        {!bootstrapPending && !requiresSetup && adminConfigured ? (
+        {showLogin ? (
           <AdminLogin showToast={showToast} />
-        ) : null}
+        ) : (
+          !showSetup && (
+            <div className="text-center py-8">
+              <p className="text-gray-400">
+                Unable to load admin state. Please check your configuration.
+              </p>
+              <button
+                type="button"
+                onClick={() => queryClient.invalidateQueries({ queryKey: ["setup-status"] })}
+                className="mt-4 text-blue-400 hover:text-blue-300 text-sm font-medium"
+              >
+                Retry
+              </button>
+            </div>
+          )
+        )}
         <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
       </>
     );
@@ -95,9 +139,34 @@ export default function AdminDashboard() {
         </button>
       </div>
 
+      <div className="bg-gray-800/80 p-1 rounded-xl border border-gray-700 flex max-w-sm mx-auto mb-6 shadow-inner">
+        <button
+          type="button"
+          onClick={() => handleWorkspaceChange("dfwsc_services")}
+          className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all duration-200 ${
+            isDfwscMode
+              ? "bg-blue-600 text-white shadow-lg scale-[1.02]"
+              : "text-gray-400 hover:text-gray-200"
+          }`}
+        >
+          DFWSC Services
+        </button>
+        <button
+          type="button"
+          onClick={() => handleWorkspaceChange("client_portal")}
+          className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all duration-200 ${
+            !isDfwscMode
+              ? "bg-indigo-600 text-white shadow-lg scale-[1.02]"
+              : "text-gray-400 hover:text-gray-200"
+          }`}
+        >
+          Client Portal
+        </button>
+      </div>
+
       {/* Tabs */}
       <div className="flex border-b border-gray-700 mb-6">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
@@ -142,26 +211,32 @@ export default function AdminDashboard() {
           </div>
 
           {clientSubTab === "create" ? (
-            <CreateClientForm showToast={showToast} />
+            <CreateClientForm showToast={showToast} workspace={workspace} />
           ) : (
-            <ImportStripeCustomer showToast={showToast} />
+            <ImportStripeCustomer showToast={showToast} workspace={workspace} />
           )}
 
           <div className="mb-6">
-            <h4 className="text-md font-semibold text-white mb-3">Client List</h4>
-            <ClientList showToast={showToast} />
+            <h4 className="text-md font-semibold text-white mb-3">
+              {isDfwscMode ? "DFWSC Client List" : "Portal Client List"}
+            </h4>
+            <ClientList showToast={showToast} workspace={workspace} />
           </div>
         </>
       )}
 
       {/* Groups tab */}
-      {activeTab === "groups" && <GroupPanel showToast={showToast} />}
+      {activeTab === "groups" && !isDfwscMode && (
+        <GroupPanel showToast={showToast} workspace={workspace} />
+      )}
 
       {/* Reports tab */}
-      {activeTab === "reports" && <PaymentReports showToast={showToast} />}
+      {activeTab === "reports" && <PaymentReports showToast={showToast} workspace={workspace} />}
 
       {/* Billing tab */}
-      {activeTab === "billing" && <BillingPanel showToast={showToast} />}
+      {activeTab === "billing" && (
+        <BillingPanel showToast={showToast} workspace={workspace} isDfwscMode={isDfwscMode} />
+      )}
 
       {/* Settings tab */}
       {activeTab === "settings" && <SettingsPanel showToast={showToast} />}

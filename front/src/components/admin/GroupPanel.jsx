@@ -163,9 +163,9 @@ function EditGroupModal({ group, onClose, showToast }) {
 
 // ─── Group Panel ─────────────────────────────────────────────────────────────
 
-export default function GroupPanel({ showToast }) {
-  const { data: groups = [], isLoading, isError, error, refetch } = useGroups();
-  const { data: clients = [] } = useClients();
+export default function GroupPanel({ showToast, workspace = "client_portal" }) {
+  const { data: groups = [], isLoading, isError, error, refetch } = useGroups(workspace);
+  const { data: clients = [] } = useClients({ workspace });
   const createGroupMutation = useCreateGroup();
   const patchGroupMutation = usePatchGroup();
 
@@ -180,7 +180,7 @@ export default function GroupPanel({ showToast }) {
       const name = newGroupName.trim();
       if (!name) return;
       createGroupMutation.mutate(
-        { name },
+        { name, workspace },
         {
           onSuccess: (group) => {
             setNewGroupName("");
@@ -190,7 +190,7 @@ export default function GroupPanel({ showToast }) {
         }
       );
     },
-    [newGroupName, createGroupMutation, showToast]
+    [newGroupName, createGroupMutation, showToast, workspace]
   );
 
   const handleToggleStatus = useCallback(
@@ -402,6 +402,7 @@ export default function GroupPanel({ showToast }) {
           group={editingGroup}
           onClose={() => setEditingGroup(null)}
           showToast={showToast}
+          workspace={workspace}
         />
       )}
       {managingGroup && (
@@ -409,6 +410,7 @@ export default function GroupPanel({ showToast }) {
           group={managingGroup}
           onClose={() => setManagingGroup(null)}
           showToast={showToast}
+          workspace={workspace}
         />
       )}
     </div>

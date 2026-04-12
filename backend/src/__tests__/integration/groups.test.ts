@@ -20,6 +20,7 @@ import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
 
 const createdGroupIds: string[] = [];
+const workspace = "client_portal";
 
 describe("Groups API", () => {
   let app: any;
@@ -50,12 +51,13 @@ describe("Groups API", () => {
         method: "POST",
         url: "/api/v1/groups",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "Test Group A" },
+        payload: { name: "Test Group A", workspace },
       });
 
       expect(response.statusCode).toBe(201);
       const body = response.json();
       expect(body.name).toBe("Test Group A");
+      expect(body.workspace).toBe(workspace);
       expect(body.status).toBe("active");
       expect(body.id).toBeTruthy();
       createdGroupIds.push(body.id);
@@ -68,7 +70,7 @@ describe("Groups API", () => {
         method: "POST",
         url: "/api/v1/groups",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: {},
+        payload: { workspace },
       });
 
       expect(response.statusCode).toBe(400);
@@ -82,7 +84,7 @@ describe("Groups API", () => {
         method: "POST",
         url: "/api/v1/groups",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "   " },
+        payload: { name: "   ", workspace },
       });
 
       expect(response.statusCode).toBe(400);
@@ -97,7 +99,7 @@ describe("Groups API", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/groups",
+        url: `/api/v1/groups?workspace=${workspace}`,
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -118,7 +120,7 @@ describe("Groups API", () => {
         method: "POST",
         url: "/api/v1/groups",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "Patch Test Group" },
+        payload: { name: "Patch Test Group", workspace },
       });
       groupId = res.json().id;
       createdGroupIds.push(groupId);

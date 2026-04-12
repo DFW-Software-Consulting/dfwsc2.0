@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useCancelInvoice, useCreateInvoice, useInvoices } from "../../hooks/useInvoices";
 import { useCreatePayment } from "../../hooks/usePayments";
@@ -8,13 +8,11 @@ import ErrorMessage from "./shared/ErrorMessage";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import StatusBadge from "./shared/StatusBadge";
 
-const DFWSC_CLIENT_ID = "dfwsc-services";
-
 // ─── Invoices Sub-Tab ────────────────────────────────────────────────────────
 
-function InvoicesTab({ showToast, isDfwscMode }) {
-  const { data: clients = [] } = useClients();
-  const { data: invoices = [], isLoading, isError, error, refetch } = useInvoices({});
+function InvoicesTab({ showToast, isDfwscMode, workspace }) {
+  const { data: clients = [] } = useClients({ workspace });
+  const { data: invoices = [], isLoading, isError, error, refetch } = useInvoices({ workspace });
   const { data: products = [], isLoading: productsLoading } = useProducts();
   const createInvoiceMutation = useCreateInvoice();
   const cancelInvoiceMutation = useCancelInvoice();
@@ -33,15 +31,6 @@ function InvoicesTab({ showToast, isDfwscMode }) {
   const [newProductDesc, setNewProductDesc] = useState("");
   const [newProductAmount, setNewProductAmount] = useState("");
   const [productFormError, setProductFormError] = useState("");
-
-  // Sync clientId when mode changes
-  useEffect(() => {
-    if (isDfwscMode) {
-      setClientId(DFWSC_CLIENT_ID);
-    } else {
-      setClientId("");
-    }
-  }, [isDfwscMode]);
 
   const handleProductSelect = useCallback(
     (e) => {
@@ -99,7 +88,7 @@ function InvoicesTab({ showToast, isDfwscMode }) {
       e.preventDefault();
       setFormError("");
       const amountCents = Math.round(parseFloat(amount) * 100);
-      const targetClientId = isDfwscMode ? DFWSC_CLIENT_ID : clientId;
+      const targetClientId = clientId;
 
       if (!targetClientId) return setFormError("Select a client.");
       if (Number.isNaN(amountCents) || amountCents <= 0)
@@ -109,6 +98,7 @@ function InvoicesTab({ showToast, isDfwscMode }) {
       createInvoiceMutation.mutate(
         {
           clientId: targetClientId,
+          workspace,
           amountCents,
           description: description.trim(),
           dueDate: dueDate || null,
@@ -116,7 +106,7 @@ function InvoicesTab({ showToast, isDfwscMode }) {
         },
         {
           onSuccess: () => {
-            if (!isDfwscMode) setClientId("");
+            setClientId("");
             setAmount("");
             setDescription("");
             setDueDate("");
@@ -128,16 +118,7 @@ function InvoicesTab({ showToast, isDfwscMode }) {
         }
       );
     },
-    [
-      clientId,
-      amount,
-      description,
-      dueDate,
-      waiveFee,
-      isDfwscMode,
-      createInvoiceMutation,
-      showToast,
-    ]
+    [clientId, amount, description, dueDate, waiveFee, workspace, createInvoiceMutation, showToast]
   );
 
   const handleCancel = useCallback(
@@ -169,32 +150,29 @@ function InvoicesTab({ showToast, isDfwscMode }) {
           )}
         </h4>
         <form onSubmit={handleCreate} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {/* Client Selection (only in Portal Mode) */}
-          {!isDfwscMode && (
-            <div>
-              <label htmlFor="inv-client" className="block text-sm text-gray-300 mb-1">
-                Client
-              </label>
-              <select
-                id="inv-client"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+          <div>
+            <label htmlFor="inv-client" className="block text-sm text-gray-300 mb-1">
+              Client
+            </label>
+            <select
+              id="inv-client"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                            focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={createInvoiceMutation.isPending}
-              >
-                <option value="">Select client…</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+              disabled={createInvoiceMutation.isPending}
+            >
+              <option value="">Select client…</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Product dropdown */}
-          <div className={isDfwscMode ? "sm:col-span-2" : ""}>
+          <div className="sm:col-span-2">
             <label htmlFor="inv-product" className="block text-sm text-gray-300 mb-1">
               Product (optional)
             </label>
@@ -414,53 +392,51 @@ function InvoicesTab({ showToast, isDfwscMode }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {invoices
-                .filter((inv) => !isDfwscMode || inv.clientId === DFWSC_CLIENT_ID)
-                .map((inv) => (
-                  <tr key={inv.id} className="hover:bg-gray-700/50">
-                    <td className="px-3 py-2 text-sm text-gray-200">{inv.clientName ?? "—"}</td>
-                    <td className="px-3 py-2 text-sm text-gray-200 max-w-xs truncate">
-                      {inv.description}
-                    </td>
-                    <td className="px-3 py-2 text-sm text-gray-200">
-                      ${(inv.amountCents / 100).toFixed(2)}
-                    </td>
-                    <td className="px-3 py-2 text-sm text-gray-400">
-                      {inv.dueDate
-                        ? new Date(inv.dueDate).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })
-                        : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-sm">
-                      <StatusBadge status={inv.status} />
-                    </td>
-                    <td className="px-3 py-2 text-sm">
-                      <div className="flex gap-2">
-                        {inv.hostedUrl && (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenLink(inv.hostedUrl)}
-                            className="px-2 py-1 rounded text-xs bg-gray-600 hover:bg-gray-500 text-white transition-colors"
-                          >
-                            Open
-                          </button>
-                        )}
-                        {inv.status === "open" && (
-                          <button
-                            type="button"
-                            onClick={() => handleCancel(inv.id)}
-                            className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+              {invoices.map((inv) => (
+                <tr key={inv.id} className="hover:bg-gray-700/50">
+                  <td className="px-3 py-2 text-sm text-gray-200">{inv.clientName ?? "—"}</td>
+                  <td className="px-3 py-2 text-sm text-gray-200 max-w-xs truncate">
+                    {inv.description}
+                  </td>
+                  <td className="px-3 py-2 text-sm text-gray-200">
+                    ${(inv.amountCents / 100).toFixed(2)}
+                  </td>
+                  <td className="px-3 py-2 text-sm text-gray-400">
+                    {inv.dueDate
+                      ? new Date(inv.dueDate).toLocaleDateString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-sm">
+                    <StatusBadge status={inv.status} />
+                  </td>
+                  <td className="px-3 py-2 text-sm">
+                    <div className="flex gap-2">
+                      {inv.hostedUrl && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenLink(inv.hostedUrl)}
+                          className="px-2 py-1 rounded text-xs bg-gray-600 hover:bg-gray-500 text-white transition-colors"
+                        >
+                          Open
+                        </button>
+                      )}
+                      {inv.status === "open" && (
+                        <button
+                          type="button"
+                          onClick={() => handleCancel(inv.id)}
+                          className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -471,8 +447,8 @@ function InvoicesTab({ showToast, isDfwscMode }) {
 
 // ─── Payments Sub-Tab ────────────────────────────────────────────────────────
 
-function PaymentsTab({ showToast, isDfwscMode }) {
-  const { data: clients = [] } = useClients();
+function PaymentsTab({ showToast, isDfwscMode, workspace }) {
+  const { data: clients = [] } = useClients({ workspace });
   const createPaymentMutation = useCreatePayment();
 
   const [clientId, setClientId] = useState("");
@@ -482,21 +458,13 @@ function PaymentsTab({ showToast, isDfwscMode }) {
   const [formError, setFormError] = useState("");
   const [lastLink, setLastLink] = useState("");
 
-  useEffect(() => {
-    if (isDfwscMode) {
-      setClientId(DFWSC_CLIENT_ID);
-    } else {
-      setClientId("");
-    }
-  }, [isDfwscMode]);
-
   const handleCreateLink = useCallback(
     (e) => {
       e.preventDefault();
       setFormError("");
       setLastLink("");
       const amountValue = parseFloat(amount);
-      const targetClientId = isDfwscMode ? DFWSC_CLIENT_ID : clientId;
+      const targetClientId = clientId;
 
       if (!targetClientId) return setFormError("Select a client.");
       if (Number.isNaN(amountValue) || amountValue <= 0)
@@ -511,6 +479,7 @@ function PaymentsTab({ showToast, isDfwscMode }) {
           currency: "usd",
           description: description.trim(),
           waiveFee,
+          workspace,
           metadata: { clientId: targetClientId },
           lineItems: [
             {
@@ -532,7 +501,7 @@ function PaymentsTab({ showToast, isDfwscMode }) {
         }
       );
     },
-    [clientId, amount, description, waiveFee, isDfwscMode, createPaymentMutation, showToast]
+    [clientId, amount, description, waiveFee, workspace, createPaymentMutation, showToast]
   );
 
   return (
@@ -549,31 +518,28 @@ function PaymentsTab({ showToast, isDfwscMode }) {
           )}
         </h4>
         <form onSubmit={handleCreateLink} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {/* Client Selection (only in Portal Mode) */}
-          {!isDfwscMode && (
-            <div>
-              <label htmlFor="pay-client" className="block text-sm text-gray-300 mb-1">
-                Client
-              </label>
-              <select
-                id="pay-client"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={createPaymentMutation.isPending}
-              >
-                <option value="">Select client…</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div>
+            <label htmlFor="pay-client" className="block text-sm text-gray-300 mb-1">
+              Client
+            </label>
+            <select
+              id="pay-client"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={createPaymentMutation.isPending}
+            >
+              <option value="">Select client…</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Amount */}
-          <div className={isDfwscMode ? "sm:col-span-2" : ""}>
+          <div className="sm:col-span-2">
             <label htmlFor="pay-amount" className="block text-sm text-gray-300 mb-1">
               Amount ($)
             </label>
@@ -663,9 +629,9 @@ function PaymentsTab({ showToast, isDfwscMode }) {
 
 // ─── Subscriptions Sub-Tab ───────────────────────────────────────────────────
 
-function SubscriptionsTab({ showToast, isDfwscMode }) {
-  const { data: clients = [] } = useClients();
-  const { data: subs = [], isLoading, isError, error, refetch } = useSubscriptions({});
+function SubscriptionsTab({ showToast, isDfwscMode, workspace }) {
+  const { data: clients = [] } = useClients({ workspace });
+  const { data: subs = [], isLoading, isError, error, refetch } = useSubscriptions({ workspace });
   const createSubMutation = useCreateSubscription();
 
   const [clientId, setClientId] = useState("");
@@ -675,20 +641,12 @@ function SubscriptionsTab({ showToast, isDfwscMode }) {
   const [totalPayments, setTotalPayments] = useState("");
   const [formError, setFormError] = useState("");
 
-  useEffect(() => {
-    if (isDfwscMode) {
-      setClientId(DFWSC_CLIENT_ID);
-    } else {
-      setClientId("");
-    }
-  }, [isDfwscMode]);
-
   const handleCreate = useCallback(
     (e) => {
       e.preventDefault();
       setFormError("");
       const amountCents = Math.round(parseFloat(amount) * 100);
-      const targetClientId = isDfwscMode ? DFWSC_CLIENT_ID : clientId;
+      const targetClientId = clientId;
 
       if (!targetClientId) return setFormError("Select a client.");
       if (Number.isNaN(amountCents) || amountCents <= 0)
@@ -699,6 +657,7 @@ function SubscriptionsTab({ showToast, isDfwscMode }) {
       createSubMutation.mutate(
         {
           clientId: targetClientId,
+          workspace,
           amountCents,
           description: description.trim(),
           interval,
@@ -706,7 +665,7 @@ function SubscriptionsTab({ showToast, isDfwscMode }) {
         },
         {
           onSuccess: () => {
-            if (!isDfwscMode) setClientId("");
+            setClientId("");
             setAmount("");
             setDescription("");
             setInterval("monthly");
@@ -723,7 +682,7 @@ function SubscriptionsTab({ showToast, isDfwscMode }) {
       description,
       interval,
       totalPayments,
-      isDfwscMode,
+      workspace,
       createSubMutation,
       showToast,
     ]
@@ -736,27 +695,25 @@ function SubscriptionsTab({ showToast, isDfwscMode }) {
           {isDfwscMode ? "New DFWSC Subscription" : "New Portal Subscription"}
         </h4>
         <form onSubmit={handleCreate} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {!isDfwscMode && (
-            <div>
-              <label htmlFor="sub-client" className="block text-sm text-gray-300 mb-1">
-                Client
-              </label>
-              <select
-                id="sub-client"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
-              >
-                <option value="">Select client…</option>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div className={isDfwscMode ? "sm:col-span-2" : ""}>
+          <div>
+            <label htmlFor="sub-client" className="block text-sm text-gray-300 mb-1">
+              Client
+            </label>
+            <select
+              id="sub-client"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
+            >
+              <option value="">Select client…</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="sm:col-span-2">
             <label htmlFor="sub-amount" className="block text-sm text-gray-300 mb-1">
               Amount ($)
             </label>
@@ -825,23 +782,21 @@ function SubscriptionsTab({ showToast, isDfwscMode }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {subs
-                .filter((s) => !isDfwscMode || s.clientId === DFWSC_CLIENT_ID)
-                .map((sub) => (
-                  <tr key={sub.id}>
-                    <td className="px-3 py-2 text-sm text-gray-200">{sub.clientName}</td>
-                    <td className="px-3 py-2 text-sm text-gray-200">{sub.description}</td>
-                    <td className="px-3 py-2 text-sm text-gray-200">
-                      ${(sub.amountCents / 100).toFixed(2)}
-                    </td>
-                    <td className="px-3 py-2 text-sm">
-                      <StatusBadge status={sub.status} />
-                    </td>
-                  </tr>
-                ))}
+              {subs.map((sub) => (
+                <tr key={sub.id}>
+                  <td className="px-3 py-2 text-sm text-gray-200">{sub.clientName}</td>
+                  <td className="px-3 py-2 text-sm text-gray-200">{sub.description}</td>
+                  <td className="px-3 py-2 text-sm text-gray-200">
+                    ${(sub.amountCents / 100).toFixed(2)}
+                  </td>
+                  <td className="px-3 py-2 text-sm">
+                    <StatusBadge status={sub.status} />
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
-          {subs.filter((s) => !isDfwscMode || s.clientId === DFWSC_CLIENT_ID).length === 0 && (
+          {subs.length === 0 && (
             <p className="text-gray-400 text-sm py-4 text-center">No subscriptions found</p>
           )}
         </div>
@@ -858,38 +813,15 @@ const BILLING_TABS = [
   { id: "subscriptions", label: "Subscriptions" },
 ];
 
-export default function BillingPanel({ showToast }) {
+export default function BillingPanel({
+  showToast,
+  workspace = "client_portal",
+  isDfwscMode = false,
+}) {
   const [activeTab, setActiveTab] = useState("invoices");
-  const [isDfwscMode, setIsDfwscMode] = useState(true);
 
   return (
     <div className="space-y-6">
-      {/* High-Level Mode Toggle */}
-      <div className="bg-gray-800/80 p-1 rounded-xl border border-gray-700 flex max-w-sm mx-auto shadow-inner">
-        <button
-          type="button"
-          onClick={() => setIsDfwscMode(true)}
-          className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all duration-200 ${
-            isDfwscMode
-              ? "bg-blue-600 text-white shadow-lg scale-[1.02]"
-              : "text-gray-400 hover:text-gray-200"
-          }`}
-        >
-          DFWSC Services
-        </button>
-        <button
-          type="button"
-          onClick={() => setIsDfwscMode(false)}
-          className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all duration-200 ${
-            !isDfwscMode
-              ? "bg-indigo-600 text-white shadow-lg scale-[1.02]"
-              : "text-gray-400 hover:text-gray-200"
-          }`}
-        >
-          Client Portal
-        </button>
-      </div>
-
       <div className="border-b border-gray-700/50 flex justify-center gap-8">
         {BILLING_TABS.map((tab) => (
           <button
@@ -909,13 +841,13 @@ export default function BillingPanel({ showToast }) {
 
       <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
         {activeTab === "invoices" && (
-          <InvoicesTab showToast={showToast} isDfwscMode={isDfwscMode} />
+          <InvoicesTab showToast={showToast} isDfwscMode={isDfwscMode} workspace={workspace} />
         )}
         {activeTab === "payments" && (
-          <PaymentsTab showToast={showToast} isDfwscMode={isDfwscMode} />
+          <PaymentsTab showToast={showToast} isDfwscMode={isDfwscMode} workspace={workspace} />
         )}
         {activeTab === "subscriptions" && (
-          <SubscriptionsTab showToast={showToast} isDfwscMode={isDfwscMode} />
+          <SubscriptionsTab showToast={showToast} isDfwscMode={isDfwscMode} workspace={workspace} />
         )}
       </div>
     </div>

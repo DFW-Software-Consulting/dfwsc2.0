@@ -9,9 +9,10 @@ import { useAuth } from "../contexts/AuthContext";
 
 export function useSubscriptions(params = {}) {
   const { token } = useAuth();
+  const effectiveParams = { workspace: "client_portal", ...params };
   return useQuery({
-    queryKey: ["subscriptions", params],
-    queryFn: () => getSubscriptions(token, params),
+    queryKey: ["subscriptions", effectiveParams],
+    queryFn: () => getSubscriptions(token, effectiveParams),
     enabled: !!token,
   });
 }

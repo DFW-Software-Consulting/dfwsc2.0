@@ -10,6 +10,7 @@ import { createClientWithOnboardingToken } from "../lib/client-factory";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
+import { isWorkspace, type Workspace } from "../lib/workspace";
 
 function resolveServerBaseUrl(request: FastifyRequest): string {
   if (process.env.API_BASE_URL) {
@@ -127,37 +128,52 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       schema: {
         body: {
           type: "object",
-          required: ["name", "email"],
+          required: ["name", "email", "workspace"],
           properties: {
             name: { type: "string", minLength: 1 },
             email: { type: "string", format: "email" },
             groupId: { type: "string" },
+            workspace: { type: "string", enum: ["dfwsc_services", "client_portal"] },
           },
         },
       },
     },
     async (request, reply) => {
-      const { name, email, groupId } = request.body as {
+      const { name, email, groupId, workspace } = request.body as {
         name: string;
         email: string;
         groupId?: string;
+        workspace: Workspace;
       };
-      request.log.info({ name, email, groupId }, "Received request in /accounts handler");
+      if (!isWorkspace(workspace)) {
+        return reply
+          .code(400)
+          .send({ error: "workspace must be dfwsc_services or client_portal." });
+      }
+
+      request.log.info(
+        { name, email, groupId, workspace },
+        "Received request in /accounts handler"
+      );
 
       if (groupId) {
         const [group] = await db
-          .select()
+          .select({ id: clientGroups.id, workspace: clientGroups.workspace })
           .from(clientGroups)
           .where(eq(clientGroups.id, groupId))
           .limit(1);
         if (!group) {
           return reply.code(400).send({ error: "Invalid groupId." });
         }
+        if (group.workspace !== workspace) {
+          return reply.code(400).send({ error: "groupId workspace does not match workspace." });
+        }
       }
 
       const { clientId, apiKey, token } = await createClientWithOnboardingToken({
         name,
         email,
+        workspace,
         groupId,
       });
 
@@ -174,6 +190,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         onboardingUrlHint,
         apiKey,
         clientId,
+        workspace,
         groupId: groupId ?? null,
       });
     }
@@ -204,18 +221,22 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       if (groupId) {
         const [group] = await db
-          .select()
+          .select({ id: clientGroups.id, workspace: clientGroups.workspace })
           .from(clientGroups)
           .where(eq(clientGroups.id, groupId))
           .limit(1);
         if (!group) {
           return reply.code(400).send({ error: "Invalid groupId." });
         }
+        if (group.workspace !== "client_portal") {
+          return reply.code(400).send({ error: "groupId must belong to client_portal workspace." });
+        }
       }
 
       const { clientId, apiKey, token } = await createClientWithOnboardingToken({
         name,
         email,
+        workspace: "client_portal",
         groupId,
       });
 

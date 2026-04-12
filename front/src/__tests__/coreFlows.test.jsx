@@ -220,6 +220,7 @@ describe("CreateClientForm", () => {
         body: JSON.stringify({
           name: "Test Client",
           email: "test@example.com",
+          workspace: "client_portal",
         }),
       })
     );

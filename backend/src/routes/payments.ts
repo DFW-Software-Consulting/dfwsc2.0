@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
 import { db } from "../db/client";
@@ -6,6 +6,7 @@ import { clientGroups, clients, settings } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
+import { isWorkspace } from "../lib/workspace";
 
 interface RequestWithClient extends FastifyRequest {
   client?: typeof clients.$inferSelect;
@@ -123,6 +124,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         metadata,
         lineItems,
         waiveFee = false,
+        workspace,
       } = request.body as {
         amount?: number;
         currency?: string;
@@ -130,13 +132,19 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         metadata?: Record<string, string>;
         lineItems?: Stripe.Checkout.SessionCreateParams.LineItem[];
         waiveFee?: boolean;
+        workspace?: string;
       };
 
       let client = (request as RequestWithClient).client;
 
       // If no client resolved from API key, but user is Admin, resolve from body.clientId or metadata.clientId
       if (!client) {
-        const bodyClientId = (request.body as any).clientId || metadata?.clientId;
+        if (!isWorkspace(workspace)) {
+          return reply
+            .code(400)
+            .send({ error: "workspace is required for admin payment creation." });
+        }
+        const bodyClientId = (request.body as { clientId?: string }).clientId || metadata?.clientId;
         if (!bodyClientId) {
           return reply
             .code(400)
@@ -147,6 +155,12 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       if (!client) {
         return reply.code(404).send({ error: "Client not found." });
+      }
+
+      if (!isApiCall && workspace && client.workspace !== workspace) {
+        return reply
+          .code(400)
+          .send({ error: "clientId does not belong to the selected workspace." });
       }
 
       const clientId = client.id;
@@ -299,13 +313,21 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
   );
 
   fastify.get("/reports/payments", { preHandler: requireAdminJwt }, async (request, reply) => {
-    const { clientId, groupId, limit, starting_after, ending_before } = request.query as {
-      clientId?: string;
-      groupId?: string;
-      limit?: string;
-      starting_after?: string;
-      ending_before?: string;
-    };
+    const { clientId, groupId, workspace, limit, starting_after, ending_before } =
+      request.query as {
+        clientId?: string;
+        groupId?: string;
+        workspace?: string;
+        limit?: string;
+        starting_after?: string;
+        ending_before?: string;
+      };
+
+    if (!isWorkspace(workspace)) {
+      return reply
+        .code(400)
+        .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
+    }
 
     if (!clientId && !groupId) {
       return reply.code(400).send({ error: "clientId or groupId query parameter is required." });
@@ -334,8 +356,16 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       if (!group) {
         return reply.code(404).send({ error: "Group not found." });
       }
+      if (group.workspace !== workspace) {
+        return reply
+          .code(400)
+          .send({ error: "groupId does not belong to the selected workspace." });
+      }
 
-      const groupClients = await db.select().from(clients).where(eq(clients.groupId, groupId));
+      const groupClients = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.groupId, groupId), eq(clients.workspace, workspace)));
 
       const connected = groupClients.filter(
         (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null
@@ -363,6 +393,9 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
     if (!client || !client.stripeAccountId) {
       return reply.code(404).send({ error: "Client with connected account not found." });
+    }
+    if (client.workspace !== workspace) {
+      return reply.code(400).send({ error: "clientId does not belong to the selected workspace." });
     }
 
     const paymentIntents = await stripe.paymentIntents.list(listParams, {

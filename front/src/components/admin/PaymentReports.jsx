@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import { usePaymentReport } from "../../hooks/usePaymentReports";
@@ -20,9 +20,10 @@ function formatDate(ts) {
   });
 }
 
-export default function PaymentReports() {
-  const { data: clients = [] } = useClients();
-  const { data: groups = [] } = useGroups();
+export default function PaymentReports({ workspace = "client_portal" }) {
+  const isDfwscMode = workspace === "dfwsc_services";
+  const { data: clients = [] } = useClients({ workspace });
+  const { data: groups = [] } = useGroups(workspace);
 
   const [reportType, setReportType] = useState("client");
   const [selectedId, setSelectedId] = useState("");
@@ -30,7 +31,11 @@ export default function PaymentReports() {
   const [reportEnabled, setReportEnabled] = useState(false);
 
   const params = selectedId
-    ? { ...(reportType === "client" ? { clientId: selectedId } : { groupId: selectedId }), limit }
+    ? {
+        ...(reportType === "client" ? { clientId: selectedId } : { groupId: selectedId }),
+        workspace,
+        limit,
+      }
     : {};
 
   const {
@@ -57,6 +62,20 @@ export default function PaymentReports() {
   }, [selectedId, reportEnabled, refetch]);
 
   const items = reportType === "client" ? clients : groups;
+  const reportTypes = isDfwscMode
+    ? [{ value: "client", label: "By Client" }]
+    : [
+        { value: "client", label: "By Client" },
+        { value: "group", label: "By Group" },
+      ];
+
+  useEffect(() => {
+    if (isDfwscMode && reportType !== "client") {
+      setReportType("client");
+      setSelectedId("");
+      setReportEnabled(false);
+    }
+  }, [isDfwscMode, reportType]);
 
   const resultColumns = [
     {
@@ -100,10 +119,7 @@ export default function PaymentReports() {
 
         {/* Report type toggle */}
         <div className="flex gap-6 mb-4">
-          {[
-            { value: "client", label: "By Client" },
-            { value: "group", label: "By Group" },
-          ].map(({ value, label }) => (
+          {reportTypes.map(({ value, label }) => (
             <label
               key={value}
               className="flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer"

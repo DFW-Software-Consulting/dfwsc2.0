@@ -2,11 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createGroup, getGroups, patchGroup } from "../api/groups";
 import { useAuth } from "../contexts/AuthContext";
 
-export function useGroups() {
+export function useGroups(workspace = "client_portal") {
   const { token } = useAuth();
   return useQuery({
-    queryKey: ["groups"],
-    queryFn: () => getGroups(token),
+    queryKey: ["groups", workspace],
+    queryFn: () => getGroups(token, workspace),
     enabled: !!token,
   });
 }

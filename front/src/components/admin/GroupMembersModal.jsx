@@ -3,8 +3,13 @@ import BaseModal from "./shared/BaseModal";
 import Button from "./shared/Button";
 import LoadingSpinner from "./shared/LoadingSpinner";
 
-export default function GroupMembersModal({ group, onClose, showToast }) {
-  const { data: clients = [], isLoading } = useClients();
+export default function GroupMembersModal({
+  group,
+  onClose,
+  showToast,
+  workspace = "client_portal",
+}) {
+  const { data: clients = [], isLoading } = useClients({ workspace });
   const patchClientMutation = usePatchClient();
 
   const handleAction = (client, newGroupId) => {

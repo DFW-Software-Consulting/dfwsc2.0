@@ -43,6 +43,16 @@ services:
     depends_on:
       - api
 
+  web:
+    build:
+      context: ./front
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    restart: unless-stopped
+
   mailhog:
     image: mailhog/mailhog:latest
     ports:

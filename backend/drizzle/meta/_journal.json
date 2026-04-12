@@ -15,6 +15,13 @@
       "when": 1775946103592,
       "tag": "0001_curly_joshua_kane",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775961000000,
+      "tag": "0002_curious_icarus",
+      "breakpoints": true
     }
   ]
 }
