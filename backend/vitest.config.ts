@@ -13,6 +13,12 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: ['src/**/*.test.ts', 'src/**/__tests__/**', 'src/index.ts'],
       reportOnFailure: true,
+      thresholds: {
+        statements: 90,
+        branches: 80,
+        functions: 90,
+        lines: 90,
+      },
     },
     env: {
        NODE_ENV: 'test',
