@@ -314,7 +314,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
     }
 
-    if (!clientId && !groupId) {
+    // For DFWSC services, allow fetching all payments across all clients in the workspace
+    const allowAllClients = workspace === "dfwsc_services";
+
+    if (!clientId && !groupId && !allowAllClients) {
       return reply.code(400).send({ error: "clientId or groupId query parameter is required." });
     }
 
@@ -376,6 +379,40 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       const merged = results.flat();
       return reply.send({ groupId, data: merged, hasMore: false });
+    }
+
+    // DFWSC: Fetch all payments across all clients in the workspace
+    if (!clientId && !groupId && allowAllClients) {
+      const allClients = await db
+        .select()
+        .from(clients)
+        .where(eq(clients.workspace, workspace));
+
+      const connected = allClients.filter(
+        (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null
+      );
+
+      if (connected.length === 0) {
+        return reply.send({ workspace, data: [], hasMore: false });
+      }
+
+      const maxConcurrency = 3;
+      const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
+      for (let i = 0; i < connected.length; i += maxConcurrency) {
+        const batch = connected.slice(i, i + maxConcurrency);
+        const batchResults = await Promise.all(
+          batch.map(async (c) => {
+            const pi = await stripe.paymentIntents.list(listParams, {
+              stripeAccount: c.stripeAccountId,
+            });
+            return pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name }));
+          })
+        );
+        results.push(...batchResults);
+      }
+
+      const merged = results.flat();
+      return reply.send({ workspace, data: merged, hasMore: false });
     }
 
     if (!clientId) {

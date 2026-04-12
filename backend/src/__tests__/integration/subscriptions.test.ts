@@ -16,6 +16,9 @@ const { stripeMock } = vi.hoisted(() => {
       list: vi.fn(),
       update: vi.fn(),
     },
+    taxRates: {
+      retrieve: vi.fn(),
+    },
     invoices: {
       retrieve: vi.fn(),
       finalizeInvoice: vi.fn(),
@@ -92,6 +95,7 @@ describe("Subscriptions API", () => {
     stripeMock.subscriptions.retrieve.mockResolvedValue(
       makeStripeSub({ metadata: { clientId, description: "Basic plan", interval: "monthly" } })
     );
+    stripeMock.taxRates.retrieve.mockResolvedValue({ id: "txr_default" });
     stripeMock.invoices.list.mockResolvedValue({ data: [] });
     stripeMock.subscriptions.update.mockImplementation((_id: string, params: any) =>
       Promise.resolve(makeStripeSub(params))
@@ -160,6 +164,85 @@ describe("Subscriptions API", () => {
 
       expect(response.statusCode).toBe(201);
       expect(response.json().subscription.totalPayments).toBe(4);
+    });
+
+    it("maps quarterly interval to Stripe month interval_count=3", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: {
+          clientId,
+          workspace,
+          amountCents: 3000,
+          description: "Quarterly plan",
+          interval: "quarterly",
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(stripeMock.prices.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recurring: { interval: "month", interval_count: 3 },
+        })
+      );
+    });
+
+    it("returns 400 when taxRateId is invalid", async () => {
+      stripeMock.taxRates.retrieve.mockRejectedValueOnce(new Error("No such tax rate"));
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions",
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: {
+          clientId,
+          workspace,
+          amountCents: 1000,
+          description: "Plan",
+          interval: "monthly",
+          taxRateId: "txr_bad",
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/Invalid taxRateId/i);
+      expect(stripeMock.subscriptions.create).not.toHaveBeenCalled();
+    });
+
+    it("applies tax settings to price and subscription when taxRateId is provided", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: {
+          clientId,
+          workspace,
+          amountCents: 2200,
+          description: "Taxed plan",
+          interval: "monthly",
+          taxRateId: "txr_123",
+        },
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(stripeMock.taxRates.retrieve).toHaveBeenCalledWith("txr_123");
+      expect(stripeMock.prices.create).toHaveBeenCalledWith(
+        expect.objectContaining({ tax_behavior: "exclusive" })
+      );
+      expect(stripeMock.subscriptions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          default_tax_rates: ["txr_123"],
+          metadata: expect.objectContaining({ taxRateId: "txr_123" }),
+        })
+      );
     });
 
     it("returns 400 when clientId is missing", async () => {

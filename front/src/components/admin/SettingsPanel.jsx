@@ -168,6 +168,48 @@ export default function SettingsPanel({ showToast }) {
                 Save
               </button>
             </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Contact email shown to customers for support inquiries.
+            </p>
+          </div>
+
+          <hr className="border-gray-700" />
+
+          {/* Email Configuration - Read Only */}
+          <div>
+            <h5 className="text-sm font-medium text-gray-200 mb-3 flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                className="h-4 w-4 text-gray-400"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
+              </svg>
+              Email Configuration
+            </h5>
+
+            <div className="bg-gray-800/50 rounded-md p-3 border border-gray-600/50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-0.5">Sender Email</label>
+                  <span className="text-sm text-gray-200 font-mono">
+                    {settings.smtpFrom || "Not configured"}
+                  </span>
+                </div>
+                <span className="text-xs text-gray-500 bg-gray-700/50 px-2 py-1 rounded">
+                  Read-only
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                Configured via environment variables. Contact your administrator to change SMTP settings.
+              </p>
+            </div>
           </div>
         </div>
       </div>

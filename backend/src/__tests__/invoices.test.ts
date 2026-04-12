@@ -51,6 +51,9 @@ const stripeMock = {
     voidInvoice: vi.fn().mockResolvedValue(makeStripeInvoice({ status: "void" })),
     del: vi.fn().mockResolvedValue({ id: "in_test_001", deleted: true }),
   },
+  taxRates: {
+    retrieve: vi.fn().mockResolvedValue({ id: "txr_default" }),
+  },
 };
 
 vi.mock("../lib/stripe", () => ({ stripe: stripeMock }));
@@ -141,6 +144,27 @@ describe("POST /invoices — input validation", () => {
     });
     expect(res.statusCode).toBe(404);
     expect(JSON.parse(res.body).error).toMatch(/Client not found/);
+  });
+
+  it("returns 400 when taxRateId is invalid", async () => {
+    stripeMock.taxRates.retrieve.mockRejectedValueOnce(new Error("No such tax rate"));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices",
+      headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: "client-001",
+        workspace,
+        amountCents: 5000,
+        description: "Service fee",
+        taxRateId: "txr_bad",
+      }),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/Invalid taxRateId/);
+    expect(stripeMock.invoices.create).not.toHaveBeenCalled();
   });
 
   it("returns 401 without admin JWT", async () => {
@@ -248,6 +272,38 @@ describe("POST /invoices — Stripe customer creation", () => {
 
     expect(sentEmails).toHaveLength(1);
     expect(sentEmails[0].to).toBe("billing@testcorp.test");
+  });
+
+  it("applies default tax rate to invoice when taxRateId is provided", async () => {
+    seedClient(dataStore, {
+      id: "client-taxed",
+      name: "Taxed Corp",
+      email: "taxed@testcorp.test",
+      workspace,
+      stripeCustomerId: "cus_taxed_001",
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices",
+      headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: "client-taxed",
+        workspace,
+        amountCents: 10000,
+        description: "Taxed service",
+        taxRateId: "txr_123",
+      }),
+    });
+
+    expect(res.statusCode).toBe(201);
+    expect(stripeMock.taxRates.retrieve).toHaveBeenCalledWith("txr_123");
+    expect(stripeMock.invoices.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        default_tax_rates: ["txr_123"],
+        metadata: expect.objectContaining({ taxRateId: "txr_123" }),
+      })
+    );
   });
 });
 
