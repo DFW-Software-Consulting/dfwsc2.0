@@ -112,6 +112,7 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
             setEmail("");
             setGroupId("");
             showToast?.(`Client ${data.name} created successfully!`, "success");
+            onSuccess?.(data);
           },
           onError: (err) => {
             logger.error("Error creating client:", err);

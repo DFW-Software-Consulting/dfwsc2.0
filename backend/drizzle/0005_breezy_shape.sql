@@ -1,0 +1,1 @@
+ALTER TABLE "clients" ADD CONSTRAINT "clients_email_workspace_unique" UNIQUE("email","workspace");

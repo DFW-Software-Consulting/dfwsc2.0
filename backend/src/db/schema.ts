@@ -7,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
 } from "drizzle-orm/pg-core";
 
 export const clientGroups = pgTable("client_groups", {
@@ -63,6 +64,7 @@ export const clients = pgTable(
   (table) => ({
     apiKeyHashIdx: index("clients_api_key_hash_idx").on(table.apiKeyHash),
     apiKeyLookupIdx: index("clients_api_key_lookup_idx").on(table.apiKeyLookup),
+    emailWorkspaceUnique: unique("clients_email_workspace_unique").on(table.email, table.workspace),
   })
 );
 

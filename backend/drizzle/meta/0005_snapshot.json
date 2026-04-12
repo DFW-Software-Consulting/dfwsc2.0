@@ -1,6 +1,6 @@
 {
-  "id": "445488e2-0854-412b-a6e1-092ed9663ea7",
-  "prevId": "b488f37c-0b18-4d94-a0cf-68a4dfcfb391",
+  "id": "41b7ef50-1e70-47a4-bebe-64daa7887f2a",
+  "prevId": "445488e2-0854-412b-a6e1-092ed9663ea7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -387,6 +387,14 @@
           "nullsNotDistinct": false,
           "columns": [
             "api_key_lookup"
+          ]
+        },
+        "clients_email_workspace_unique": {
+          "name": "clients_email_workspace_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email",
+            "workspace"
           ]
         }
       },

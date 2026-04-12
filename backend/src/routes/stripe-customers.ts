@@ -652,7 +652,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
           updateLocal.updatedAt = new Date();
           await db
             .update(clients)
-            .set(updateLocal as typeof updateLocal)
+            .set(updateLocal)
             .where(and(eq(clients.id, localClientId), eq(clients.workspace, workspace)));
         }
 
