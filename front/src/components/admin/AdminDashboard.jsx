@@ -38,7 +38,7 @@ export default function AdminDashboard() {
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
   const [billingSubTab, setBillingSubTab] = useState("invoices");
   const [preselectedClient, setPreselectedClient] = useState(null);
-  const [showDfwsClientSuccess, setShowDfwsClientSuccess] = useState(false);
+  const [showDfwscClientSuccess, setShowDfwscClientSuccess] = useState(false);
 
   const isDfwscMode = workspace === "dfwsc_services";
   const visibleTabs = isDfwscMode ? TABS.filter((tab) => tab.id !== "groups") : TABS;
@@ -62,12 +62,12 @@ export default function AdminDashboard() {
 
   const handleDfwscClientCreated = useCallback((client) => {
     setPreselectedClient(client);
-    setShowDfwsClientSuccess(true);
+    setShowDfwscClientSuccess(true);
     setActiveTab("billing");
   }, []);
 
   const handleBackToClients = useCallback(() => {
-    setShowDfwsClientSuccess(false);
+    setShowDfwscClientSuccess(false);
     setPreselectedClient(null);
     setActiveTab("clients");
   }, []);
@@ -84,7 +84,7 @@ export default function AdminDashboard() {
 
   const handleWorkspaceChange = useCallback((nextWorkspace) => {
     setWorkspace(nextWorkspace);
-    setShowDfwsClientSuccess(false);
+    setShowDfwscClientSuccess(false);
     setPreselectedClient(null);
     setActiveTab((prev) =>
       prev === "groups" && nextWorkspace === "dfwsc_services" ? "clients" : prev
@@ -279,7 +279,7 @@ export default function AdminDashboard() {
       )}
 
       {/* DFWSC Client Success - Post-Create Next Steps */}
-      {showDfwsClientSuccess && preselectedClient && activeTab !== "clients" && (
+      {showDfwscClientSuccess && preselectedClient && activeTab !== "clients" && (
         <div className="mb-6 p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
           <h4 className="text-lg font-semibold text-green-400 mb-4">
             Client Created: {preselectedClient.name}

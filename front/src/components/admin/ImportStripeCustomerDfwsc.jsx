@@ -184,7 +184,6 @@ export default function ImportStripeCustomerDfwsc({ showToast }) {
 
   const toImport = reconciliation?.toImport || [];
   const discrepancies = reconciliation?.discrepancies || [];
-  const allGood = reconciliation?.allGood || [];
 
   const importColumns = [
     { header: "Name", key: "name", render: (c) => c.name || "Unnamed" },

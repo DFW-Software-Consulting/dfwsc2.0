@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, or } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import validator from "validator";
 import { db } from "../db/client";
@@ -27,12 +27,6 @@ type StripeCustomer = {
   deleted?: boolean;
 };
 
-function isValidStripeCustomer(
-  c: StripeCustomer
-): c is StripeCustomer & { name: string | null; email: string | null } {
-  return c.id !== undefined;
-}
-
 const NATIVE_FIELDS = [
   "name",
   "email",
@@ -46,8 +40,6 @@ const NATIVE_FIELDS = [
 ] as const;
 
 const APP_FIELDS = ["billingContactName", "notes", "defaultPaymentTermsDays"] as const;
-
-type FieldName = (typeof NATIVE_FIELDS)[number] | (typeof APP_FIELDS)[number];
 
 function normalizeValue(value: unknown): string {
   if (value === null || value === undefined) return "";
@@ -239,20 +231,21 @@ async function reconcileDfwscCustomers(): Promise<ReconciliationResult> {
           localClient: localById,
         });
       }
-    } else if (stripeEmail && localByEmail.has(stripeEmail)) {
-      result.discrepancies.push({
-        stripeCustomer,
-        localClient: localByEmail.get(stripeEmail)!,
-        differences: [
-          {
-            fieldName: "stripeCustomerId",
-            localValue: "(none)",
-            stripeValue: stripeCustomer.id,
-          },
-        ],
-      });
-    } else {
-      if (stripeEmail) {
+    } else if (stripeEmail) {
+      const localByEmailMatch = localByEmail.get(stripeEmail);
+      if (localByEmailMatch) {
+        result.discrepancies.push({
+          stripeCustomer,
+          localClient: localByEmailMatch,
+          differences: [
+            {
+              fieldName: "stripeCustomerId",
+              localValue: "(none)",
+              stripeValue: stripeCustomer.id,
+            },
+          ],
+        });
+      } else {
         result.toImport.push({
           stripeCustomer,
           reason: "no-match",
@@ -429,9 +422,12 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
             country: customer.address?.country || null,
             billingContactName: customer.metadata?.billingContactName || null,
             notes: customer.metadata?.notes || null,
-            defaultPaymentTermsDays: customer.metadata?.defaultPaymentTermsDays
-              ? parseInt(customer.metadata.defaultPaymentTermsDays, 10)
-              : null,
+            defaultPaymentTermsDays: (() => {
+              const val = customer.metadata?.defaultPaymentTermsDays;
+              if (!val) return null;
+              const parsed = parseInt(val, 10);
+              return Number.isNaN(parsed) ? null : parsed;
+            })(),
           });
 
           return res.status(201).send({
@@ -546,7 +542,8 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
           deleted: stripeCustomerRaw.deleted ?? false,
         };
 
-        const updateStripe: Record<string, string> = {};
+        const updateStripeNative: Record<string, string> = {};
+        const updateStripeAddress: Record<string, string> = {};
         const updateLocal: Record<string, unknown> = {};
         const updateMetadata: Record<string, string> = {};
 
@@ -554,57 +551,48 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
           const { fieldName, source } = resolution;
 
           if (NATIVE_FIELDS.includes(fieldName as (typeof NATIVE_FIELDS)[number])) {
-            let value = "";
             if (source === "local") {
+              // Sync from local to Stripe
               switch (fieldName) {
                 case "name":
-                  value = normalizeValue(localClient.name);
+                  updateStripeNative.name = normalizeValue(localClient.name);
                   break;
                 case "email":
-                  value = normalizeValue(localClient.email);
+                  updateStripeNative.email = normalizeValue(localClient.email);
                   break;
                 case "phone":
-                  value = normalizeValue(localClient.phone);
+                  updateStripeNative.phone = normalizeValue(localClient.phone);
                   break;
                 case "addressLine1":
-                  value = normalizeValue(localClient.addressLine1);
+                  updateStripeAddress.line1 = normalizeValue(localClient.addressLine1);
                   break;
                 case "addressLine2":
-                  value = normalizeValue(localClient.addressLine2);
+                  updateStripeAddress.line2 = normalizeValue(localClient.addressLine2);
                   break;
                 case "city":
-                  value = normalizeValue(localClient.city);
+                  updateStripeAddress.city = normalizeValue(localClient.city);
                   break;
                 case "state":
-                  value = normalizeValue(localClient.state);
+                  updateStripeAddress.state = normalizeValue(localClient.state);
                   break;
                 case "postalCode":
-                  value = normalizeValue(localClient.postalCode);
+                  updateStripeAddress.postal_code = normalizeValue(localClient.postalCode);
                   break;
                 case "country":
-                  value = normalizeValue(localClient.country);
+                  updateStripeAddress.country = normalizeValue(localClient.country);
                   break;
               }
-              updateStripe[fieldName] = value;
             } else {
-              if (fieldName === "name") {
-                updateLocal.name = getStripeFieldValue(stripeCustomer, "name");
-              } else if (fieldName === "email") {
-                updateLocal.email = getStripeFieldValue(stripeCustomer, "email");
-              } else if (fieldName === "phone") {
-                updateLocal.phone = getStripeFieldValue(stripeCustomer, "phone");
-              } else if (fieldName === "addressLine1") {
-                updateLocal.addressLine1 = getStripeFieldValue(stripeCustomer, "addressLine1");
-              } else if (fieldName === "addressLine2") {
-                updateLocal.addressLine2 = getStripeFieldValue(stripeCustomer, "addressLine2");
-              } else if (fieldName === "city") {
-                updateLocal.city = getStripeFieldValue(stripeCustomer, "city");
-              } else if (fieldName === "state") {
-                updateLocal.state = getStripeFieldValue(stripeCustomer, "state");
-              } else if (fieldName === "postalCode") {
-                updateLocal.postalCode = getStripeFieldValue(stripeCustomer, "postalCode");
-              } else if (fieldName === "country") {
-                updateLocal.country = getStripeFieldValue(stripeCustomer, "country");
+              // Sync from Stripe to local - use getStripeFieldValue helper
+              const nativeFieldName = fieldName as (typeof NATIVE_FIELDS)[number];
+              if (nativeFieldName === "email") {
+                // Special handling for email - validate it's not empty
+                const emailVal = getStripeFieldValue(stripeCustomer, "email");
+                if (emailVal && validator.isEmail(emailVal)) {
+                  updateLocal.email = emailVal;
+                }
+              } else {
+                updateLocal[fieldName] = getStripeFieldValue(stripeCustomer, nativeFieldName);
               }
             }
           } else if (APP_FIELDS.includes(fieldName as (typeof APP_FIELDS)[number])) {
@@ -634,18 +622,26 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
                 updateLocal.notes = getStripeMetadataValue(stripeCustomer, "notes");
               } else if (fieldName === "defaultPaymentTermsDays") {
                 const val = getStripeMetadataValue(stripeCustomer, "defaultPaymentTermsDays");
-                updateLocal.defaultPaymentTermsDays = val ? parseInt(val, 10) : null;
+                const terms = val ? parseInt(val, 10) : NaN;
+                updateLocal.defaultPaymentTermsDays = Number.isNaN(terms) ? null : terms;
               }
             }
           }
         }
 
-        if (Object.keys(updateStripe).length > 0) {
-          await stripe.customers.update(stripeCustomerId, updateStripe);
+        // Build Stripe update payload with proper address nesting
+        const stripeUpdate: Record<string, unknown> = { ...updateStripeNative };
+        if (Object.keys(updateStripeAddress).length > 0) {
+          stripeUpdate.address = updateStripeAddress;
         }
 
-        if (Object.keys(updateMetadata).length > 0) {
-          await stripe.customers.update(stripeCustomerId, { metadata: updateMetadata });
+        // Perform all Stripe updates in a single call for atomicity
+        if (Object.keys(stripeUpdate).length > 0 || Object.keys(updateMetadata).length > 0) {
+          const finalStripeUpdate: Record<string, unknown> = { ...stripeUpdate };
+          if (Object.keys(updateMetadata).length > 0) {
+            finalStripeUpdate.metadata = updateMetadata;
+          }
+          await stripe.customers.update(stripeCustomerId, finalStripeUpdate);
         }
 
         if (Object.keys(updateLocal).length > 0) {

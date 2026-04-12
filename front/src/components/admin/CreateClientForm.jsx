@@ -159,7 +159,7 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
     [showToast]
   );
 
-  const canSubmit = isDfwscMode ? !!name.trim() && !!email.trim() : !!name.trim() && !!email.trim();
+  const canSubmit = !!name.trim() && !!email.trim();
 
   const mutation = isDfwscMode ? dfwscClientMutation : createClientMutation;
 
