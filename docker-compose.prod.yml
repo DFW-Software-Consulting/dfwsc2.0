@@ -36,8 +36,11 @@ services:
       SMTP_FROM: ${SMTP_FROM}
     ports:
       - "4242:4242"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
     restart: unless-stopped
-    command: npm run start
+    command: node dist/index.js
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4242/api/v1/health"]
       interval: 10s
