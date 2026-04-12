@@ -79,39 +79,45 @@ describe("app.ts extra coverage", () => {
 
   it("handles server initialization when NOT in test mode (for coverage)", async () => {
     const originalNodeEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = "production";
+    try {
+      process.env.NODE_ENV = "production";
 
-    const server = await buildServer();
-    expect(server).toBeDefined();
+      const server = await buildServer();
+      expect(server).toBeDefined();
 
-    // Check that genReqId works
-    const response = await server.inject({
-      method: "GET",
-      url: "/api/v1/health",
-    });
-    expect(response.headers["x-request-id"]).toBeDefined();
+      // Check that genReqId works
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/v1/health",
+      });
+      expect(response.headers["x-request-id"]).toBeDefined();
 
-    await server.close();
-    process.env.NODE_ENV = originalNodeEnv;
+      await server.close();
+    } finally {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
   });
 
   it("initializes Swagger when ENABLE_SWAGGER is true", async () => {
     const originalEnableSwagger = process.env.ENABLE_SWAGGER;
-    process.env.ENABLE_SWAGGER = "true";
+    try {
+      process.env.ENABLE_SWAGGER = "true";
 
-    const server = await buildServer();
-    expect(server).toBeDefined();
+      const server = await buildServer();
+      expect(server).toBeDefined();
 
-    // Check if the /docs route exists (Fastify Swagger UI)
-    const response = await server.inject({
-      method: "GET",
-      url: "/docs",
-    });
+      // Check if the /docs route exists (Fastify Swagger UI)
+      const response = await server.inject({
+        method: "GET",
+        url: "/docs",
+      });
 
-    // It might be a redirect (302) to /docs/ or 200 depending on config
-    expect([200, 302]).toContain(response.statusCode);
+      // It might be a redirect (302) to /docs/ or 200 depending on config
+      expect([200, 302]).toContain(response.statusCode);
 
-    await server.close();
-    process.env.ENABLE_SWAGGER = originalEnableSwagger;
+      await server.close();
+    } finally {
+      process.env.ENABLE_SWAGGER = originalEnableSwagger;
+    }
   });
 });

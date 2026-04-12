@@ -13,7 +13,7 @@ vi.mock("../../lib/stripe", () => ({
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { sign } from "jsonwebtoken";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, onboardingTokens } from "../../db/schema";
@@ -26,6 +26,7 @@ const mockRetrieveCustomer = stripe.customers.retrieve as ReturnType<typeof vi.f
 describe("Stripe Customers API Integration", () => {
   let app: any;
   let adminToken: string;
+  let cleanupIds: string[] = [];
 
   beforeAll(async () => {
     app = await buildServer();
@@ -38,6 +39,14 @@ describe("Stripe Customers API Integration", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(async () => {
+    for (const id of cleanupIds) {
+      await db.delete(onboardingTokens).where(eq(onboardingTokens.clientId, id));
+      await db.delete(clients).where(eq(clients.id, id));
+    }
+    cleanupIds = [];
   });
 
   describe("GET /api/v1/stripe/customers", () => {
@@ -55,6 +64,7 @@ describe("Stripe Customers API Integration", () => {
 
       // Insert an existing client
       const clientId = randomUUID();
+      cleanupIds.push(clientId);
       await db.insert(clients).values({
         id: clientId,
         name: "Existing Client",
@@ -83,9 +93,6 @@ describe("Stripe Customers API Integration", () => {
       const body = response.json();
       expect(body.data).toHaveLength(1);
       expect(body.data[0].id).toBe(newStripeId);
-
-      // Clean up
-      await db.delete(clients).where(eq(clients.id, clientId));
     });
   });
 
@@ -125,18 +132,17 @@ describe("Stripe Customers API Integration", () => {
       expect(body).toHaveProperty("clientId");
       expect(body).toHaveProperty("apiKey");
 
+      cleanupIds.push(body.clientId);
+
       // Verify DB
       const [client] = await db.select().from(clients).where(eq(clients.id, body.clientId));
       expect(client.stripeCustomerId).toBe(stripeCustomerId);
-
-      // Clean up
-      await db.delete(onboardingTokens).where(eq(onboardingTokens.clientId, body.clientId));
-      await db.delete(clients).where(eq(clients.id, body.clientId));
     });
 
     it("should return 409 if client already exists", async () => {
       const stripeCustomerId = "cus_exists409";
       const clientId = randomUUID();
+      cleanupIds.push(clientId);
       await db.insert(clients).values({
         id: clientId,
         name: "Already Here",
@@ -156,9 +162,6 @@ describe("Stripe Customers API Integration", () => {
 
       expect(response.statusCode).toBe(409);
       expect(response.json().error).toBe("Client already exists in the portal.");
-
-      // Clean up
-      await db.delete(clients).where(eq(clients.id, clientId));
     });
 
     it("should return 400 if stripeCustomerId is missing", async () => {
@@ -231,6 +234,7 @@ describe("Stripe Customers API Integration", () => {
       const stripeCustomerId = "cus_new_email_collision";
       const email = "collision@example.com";
       const existingClientId = randomUUID();
+      cleanupIds.push(existingClientId);
 
       await db.insert(clients).values({
         id: existingClientId,
@@ -257,9 +261,6 @@ describe("Stripe Customers API Integration", () => {
 
       expect(response.statusCode).toBe(409);
       expect(response.json().error).toBe("A client with this email already exists.");
-
-      // Clean up
-      await db.delete(clients).where(eq(clients.id, existingClientId));
     });
   });
 });

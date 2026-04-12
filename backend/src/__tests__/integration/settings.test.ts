@@ -61,7 +61,7 @@ describe("Settings API Integration", () => {
     });
 
     it("should update company_name", async () => {
-      const newValue = "Test Corp " + Math.random().toString(36).substring(7);
+      const newValue = `Test Corp ${Math.random().toString(36).substring(7)}`;
       const response = await app.inject({
         method: "PATCH",
         url: "/api/v1/settings/company_name",

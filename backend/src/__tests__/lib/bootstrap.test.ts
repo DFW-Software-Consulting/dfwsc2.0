@@ -1,7 +1,5 @@
-import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../db/client";
-import { admins } from "../../db/schema";
 import { bootstrapAdminIfNeeded } from "../../lib/bootstrap";
 
 // Mock DB

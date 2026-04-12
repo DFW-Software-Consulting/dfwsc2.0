@@ -1,4 +1,3 @@
-import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
@@ -31,20 +30,22 @@ describe("Health API Integration", () => {
     it("should return 503 and error status when DB execution fails", async () => {
       // Mock db.execute to throw an error
       const originalExecute = db.execute;
-      db.execute = vi.fn().mockRejectedValueOnce(new Error("DB Down"));
+      try {
+        db.execute = vi.fn().mockRejectedValueOnce(new Error("DB Down"));
 
-      const response = await app.inject({
-        method: "GET",
-        url: "/api/v1/health",
-      });
+        const response = await app.inject({
+          method: "GET",
+          url: "/api/v1/health",
+        });
 
-      expect(response.statusCode).toBe(503);
-      const body = response.json();
-      expect(body.status).toBe("error");
-      expect(body.database).toBe("disconnected");
-
-      // Restore original execute
-      db.execute = originalExecute;
+        expect(response.statusCode).toBe(503);
+        const body = response.json();
+        expect(body.status).toBe("error");
+        expect(body.database).toBe("disconnected");
+      } finally {
+        // Restore original execute
+        db.execute = originalExecute;
+      }
     });
   });
 });
