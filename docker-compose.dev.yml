@@ -22,24 +22,6 @@ services:
       mailhog:
         condition: service_started
 
-  web:
-    image: node:20-alpine
-    user: "0:0"
-    working_dir: /app
-    command: sh -c "chown -R node:node /app /app/node_modules && exec su node -c 'npm install && npm run dev -- --host 0.0.0.0 --port 1919'"
-    environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:4242/api/v1}
-      CHOKIDAR_USEPOLLING: "true"
-      API_URL: http://api:4242
-    volumes:
-      - ./front:/app
-      - front_node_modules:/app/node_modules
-    ports:
-      - "1919:1919"
-    depends_on:
-      - api
-      - stripe-cli
-
   db:
     image: postgres:17
     environment:
@@ -74,5 +56,4 @@ services:
 
 volumes:
   backend_node_modules:
-  front_node_modules:
   pgdata:

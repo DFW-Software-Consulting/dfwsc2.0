@@ -17,20 +17,6 @@ services:
     restart: unless-stopped
     command: sh -c "npx drizzle-kit migrate && npm run start"
 
-  web:
-    build:
-      context: ./front
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: /api/v1
-    environment:
-      API_URL: ${API_URL:-http://api:4242}
-    ports:
-      - "8080:80"
-    depends_on:
-      - api
-    restart: unless-stopped
-
   db:
     image: postgres:17
     environment:
