@@ -7,7 +7,12 @@ import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
-import { isWorkspace } from "../lib/workspace";
+import {
+  STRIPE_LIST_LIMIT,
+  validateLimit,
+  validateWorkspace,
+  validateWorkspaceQuery,
+} from "../lib/validation";
 
 interface RequestWithClient extends FastifyRequest {
   client?: typeof clients.$inferSelect;
@@ -111,11 +116,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       // If no client resolved from API key, but user is Admin, resolve from body.clientId or metadata.clientId
       if (!client) {
-        if (!isWorkspace(workspace)) {
-          return reply
-            .code(400)
-            .send({ error: "workspace is required for admin payment creation." });
-        }
+        const validWorkspace = validateWorkspace(workspace, reply);
+        if (!validWorkspace) return;
         const bodyClientId = (request.body as { clientId?: string }).clientId || metadata?.clientId;
         if (!bodyClientId) {
           return reply
@@ -308,11 +310,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         ending_before?: string;
       };
 
-    if (!isWorkspace(workspace)) {
-      return reply
-        .code(400)
-        .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-    }
+    const validWorkspace = validateWorkspaceQuery(workspace, reply);
+    if (!validWorkspace) return;
 
     // For DFWSC services, allow fetching all payments across all clients in the workspace
     const allowAllClients = workspace === "dfwsc_services";
@@ -383,10 +382,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
     // DFWSC: Fetch all payments across all clients in the workspace
     if (!clientId && !groupId && allowAllClients) {
-      const allClients = await db
-        .select()
-        .from(clients)
-        .where(eq(clients.workspace, workspace));
+      const allClients = await db.select().from(clients).where(eq(clients.workspace, workspace));
 
       const connected = allClients.filter(
         (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null

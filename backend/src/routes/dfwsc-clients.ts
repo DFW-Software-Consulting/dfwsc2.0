@@ -135,6 +135,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
         }
       } catch (error) {
         req.log.error(error, "Error creating DFWSC client");
+        // Check for unique constraint violation (race condition where another request created the client)
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes("unique constraint") || errorMessage.includes("duplicate key")) {
+          return res.status(400).send({ error: "A client with this email already exists." });
+        }
         return res.status(500).send({ error: "Internal server error" });
       }
     }

@@ -12,7 +12,17 @@ import {
   ensureStripeCustomer,
   toStripeInterval,
 } from "../lib/stripe-billing";
-import { isWorkspace, type Workspace } from "../lib/workspace";
+import {
+  STRIPE_LIST_LIMIT,
+  validateDateFormat,
+  validateDateRange,
+  validateInterval,
+  validateRequiredString,
+  validateTaxRate,
+  validateWorkspace,
+  validateWorkspaceQuery,
+  type Workspace,
+} from "../lib/validation";
 
 // Legacy interface for backward compatibility during transition
 interface CreateSubscriptionBodyLegacy {
@@ -238,11 +248,8 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Validation
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspace(workspace, res);
+      if (!validWorkspace) return;
 
       if (!clientId) {
         return res.status(400).send({ error: "clientId is required." });
@@ -250,41 +257,20 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       if (!Number.isInteger(amountPerPaymentCents) || amountPerPaymentCents <= 0) {
         return res.status(400).send({ error: "amountPerPaymentCents must be a positive integer." });
       }
-      if (!description || description.trim().length === 0) {
-        return res.status(400).send({ error: "description is required." });
-      }
-      if (!["week", "bi_weekly", "month", "quarter", "year"].includes(interval)) {
-        return res.status(400).send({
-          error: "interval must be one of: week, bi_weekly, month, quarter, year.",
-        });
-      }
-      if (!startDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
-        return res.status(400).send({ error: "startDate must be in YYYY-MM-DD format." });
-      }
-      const startDateObj = new Date(startDate);
-      if (Number.isNaN(startDateObj.getTime())) {
-        return res.status(400).send({ error: "startDate is invalid." });
-      }
+      if (!validateRequiredString(description, "description", res)) return;
+      if (!validateInterval(interval, ["week", "bi_weekly", "month", "quarter", "year"], res))
+        return;
+
+      const startDateObj = validateDateFormat(startDate, "startDate", res);
+      if (!startDateObj) return;
+
       if (endDate !== null) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
-          return res.status(400).send({ error: "endDate must be in YYYY-MM-DD format." });
-        }
-        const endDateObj = new Date(endDate);
-        if (Number.isNaN(endDateObj.getTime())) {
-          return res.status(400).send({ error: "endDate is invalid." });
-        }
-        if (endDateObj <= startDateObj) {
-          return res.status(400).send({ error: "endDate must be after startDate." });
-        }
+        const endDateObj = validateDateFormat(endDate, "endDate", res);
+        if (!endDateObj) return;
+        if (!validateDateRange(startDateObj, endDateObj, res)) return;
       }
 
-      if (taxRateId) {
-        try {
-          await stripe.taxRates.retrieve(taxRateId);
-        } catch {
-          return res.status(400).send({ error: "Invalid taxRateId." });
-        }
-      }
+      if (taxRateId && !(await validateTaxRate(taxRateId, res))) return;
 
       const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
       if (!client) {
@@ -438,16 +424,13 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { workspace, clientId } = req.query;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
 
       // Fetch both regular subscriptions and subscription schedules
       const [subList, scheduleList] = await Promise.all([
-        stripe.subscriptions.list({ limit: 100 }),
-        stripe.subscriptionSchedules.list({ limit: 100 }),
+        stripe.subscriptions.list({ limit: STRIPE_LIST_LIMIT }),
+        stripe.subscriptionSchedules.list({ limit: STRIPE_LIST_LIMIT }),
       ]);
 
       // Get all client IDs from both subscriptions and schedules
@@ -549,7 +532,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       // Get invoices for this subscription/schedule
       const invoiceList = await stripe.invoices.list({
         subscription: sub?.id ?? undefined,
-        limit: 100,
+        limit: STRIPE_LIST_LIMIT,
       });
 
       if (schedule) {
@@ -685,15 +668,12 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { workspace } = req.query;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
 
       const [subList, scheduleList] = await Promise.all([
-        stripe.subscriptions.list({ limit: 100, status: "all" }),
-        stripe.subscriptionSchedules.list({ limit: 100 }),
+        stripe.subscriptions.list({ limit: STRIPE_LIST_LIMIT, status: "all" }),
+        stripe.subscriptionSchedules.list({ limit: STRIPE_LIST_LIMIT }),
       ]);
 
       // Filter by workspace
@@ -763,15 +743,12 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { workspace } = req.query;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
 
       const [subList, scheduleList] = await Promise.all([
-        stripe.subscriptions.list({ limit: 100, status: "active" }),
-        stripe.subscriptionSchedules.list({ limit: 100 }),
+        stripe.subscriptions.list({ limit: STRIPE_LIST_LIMIT, status: "active" }),
+        stripe.subscriptionSchedules.list({ limit: STRIPE_LIST_LIMIT }),
       ]);
 
       // Get active subscriptions (not paused)
@@ -850,14 +827,11 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { workspace } = req.query;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
 
       const subList = await stripe.subscriptions.list({
-        limit: 100,
+        limit: STRIPE_LIST_LIMIT,
         status: "past_due",
       });
 
@@ -907,18 +881,15 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const { workspace, days = "30" } = req.query;
       const daysNum = parseInt(days, 10) || 30;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
 
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() + daysNum);
       const cutoffTimestamp = Math.floor(cutoffDate.getTime() / 1000);
 
       const scheduleList = await stripe.subscriptionSchedules.list({
-        limit: 100,
+        limit: STRIPE_LIST_LIMIT,
         status: "active",
       });
 
@@ -979,11 +950,8 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const { workspace, days = "30" } = req.query;
       const daysNum = parseInt(days, 10) || 30;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
 
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysNum);
@@ -991,11 +959,11 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
 
       const [subList, scheduleList] = await Promise.all([
         stripe.subscriptions.list({
-          limit: 100,
+          limit: STRIPE_LIST_LIMIT,
           status: "canceled",
         }),
         stripe.subscriptionSchedules.list({
-          limit: 100,
+          limit: STRIPE_LIST_LIMIT,
           status: "canceled",
         }),
       ]);
@@ -1073,11 +1041,8 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const { clientId } = req.params;
       const { workspace } = req.query;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
 
       const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
 
@@ -1105,15 +1070,15 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const [subList, scheduleList, invoiceList] = await Promise.all([
         stripe.subscriptions.list({
           customer: client.stripeCustomerId,
-          limit: 100,
+          limit: STRIPE_LIST_LIMIT,
           expand: ["data.latest_invoice"],
         }),
         stripe.subscriptionSchedules.list({
-          limit: 100,
+          limit: STRIPE_LIST_LIMIT,
         }),
         stripe.invoices.list({
           customer: client.stripeCustomerId,
-          limit: 100,
+          limit: STRIPE_LIST_LIMIT,
         }),
       ]);
 

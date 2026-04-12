@@ -1326,8 +1326,10 @@ describe("DFWSC client creation", () => {
       },
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json().error).toBe("A client with this email already exists.");
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toBe(
+      "A client with this email already exists in this workspace."
+    );
     await server.close();
   });
 

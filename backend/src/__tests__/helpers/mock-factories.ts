@@ -175,6 +175,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
                   return conditions.every((cond: any) => {
                     if (isColumn(cond?.field, "group_id")) return c.groupId === cond?.value;
                     if (isColumn(cond?.field, "workspace")) return c.workspace === cond?.value;
+                    if (isColumn(cond?.field, "email")) return c.email === cond?.value;
                     return false;
                   });
                 });

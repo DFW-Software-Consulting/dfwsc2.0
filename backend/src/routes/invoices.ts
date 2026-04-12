@@ -7,7 +7,15 @@ import { requireAdminJwt } from "../lib/auth";
 import { sendInvoiceEmail } from "../lib/mailer";
 import { stripe } from "../lib/stripe";
 import { ensureStripeCustomer, resolveClientFee } from "../lib/stripe-billing";
-import { isWorkspace, type Workspace } from "../lib/workspace";
+import {
+  calculateDaysUntilDue,
+  STRIPE_LIST_LIMIT,
+  validateAmountCents,
+  validateRequiredString,
+  validateTaxRate,
+  validateWorkspace,
+  type Workspace,
+} from "../lib/validation";
 
 interface CreateInvoiceBody {
   clientId: string;
@@ -66,29 +74,16 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
         taxRateId,
       } = req.body;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspace(workspace, res);
+      if (!validWorkspace) return;
 
       if (!clientId) {
         return res.status(400).send({ error: "clientId is required." });
       }
-      if (!Number.isInteger(amountCents) || amountCents <= 0) {
-        return res.status(400).send({ error: "amountCents must be a positive integer." });
-      }
-      if (!description || description.trim().length === 0) {
-        return res.status(400).send({ error: "description is required." });
-      }
+      if (!validateAmountCents(amountCents, res)) return;
+      if (!validateRequiredString(description, "description", res)) return;
 
-      if (taxRateId) {
-        try {
-          await stripe.taxRates.retrieve(taxRateId);
-        } catch {
-          return res.status(400).send({ error: "Invalid taxRateId." });
-        }
-      }
+      if (taxRateId && !(await validateTaxRate(taxRateId, res))) return;
 
       const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
       if (!client) {
@@ -115,9 +110,7 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
 
       const customerId = await ensureStripeCustomer(client);
 
-      const daysUntilDue = dueDate
-        ? Math.max(1, Math.ceil((new Date(dueDate).getTime() - Date.now()) / 86_400_000))
-        : 30;
+      const daysUntilDue = calculateDaysUntilDue(dueDate);
 
       // Base amount line item
       await stripe.invoiceItems.create({
@@ -167,7 +160,9 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
         dueDate: dueDate ? new Date(dueDate) : null,
         payUrl: finalized.hosted_invoice_url ?? "",
         isSubscription: false,
-      }).catch(() => {});
+      }).catch((err) => {
+        req.log.warn({ err, clientId, invoiceId: finalized.id }, "Failed to send invoice email");
+      });
 
       return res.status(201).send(formatStripeInvoice(finalized, clientId, client.name));
     }
@@ -180,11 +175,8 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { workspace, clientId, status } = req.query;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspace(workspace, res);
+      if (!validWorkspace) return;
 
       if (clientId) {
         const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
@@ -194,7 +186,7 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
 
         const listParams: Stripe.InvoiceListParams = {
           customer: client.stripeCustomerId,
-          limit: 100,
+          limit: STRIPE_LIST_LIMIT,
         };
         if (status) listParams.status = status as Stripe.Invoice.Status;
 
@@ -204,7 +196,7 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
           .send(list.data.map((inv) => formatStripeInvoice(inv, clientId, client.name)));
       }
 
-      const listParams: Stripe.InvoiceListParams = { limit: 100 };
+      const listParams: Stripe.InvoiceListParams = { limit: STRIPE_LIST_LIMIT };
       if (status) listParams.status = status as Stripe.Invoice.Status;
 
       const list = await stripe.invoices.list(listParams);
