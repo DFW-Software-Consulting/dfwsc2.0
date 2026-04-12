@@ -1272,7 +1272,6 @@ describe("DFWSC client creation", () => {
       email: "test@example.com",
       name: "Test Client",
       phone: "+1234567890",
-      metadata: { clientId: expect.any(String) },
     });
     await server.close();
   });

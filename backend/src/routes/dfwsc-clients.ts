@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
-import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
@@ -56,19 +55,16 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
           return res.status(400).send({ error: "A client with this email already exists." });
         }
 
-        const clientId = uuidv4();
-
         const stripeCustomer = await stripe.customers.create({
           email,
           name,
           phone,
-          metadata: { clientId },
         });
 
         const [createdClient] = await db
           .insert(clients)
           .values({
-            id: clientId,
+            id: stripeCustomer.id,
             workspace: "dfwsc_services",
             name,
             email,
