@@ -149,6 +149,11 @@ export function createAppDbMock(dataStore: AppDataStore) {
                 const client = findClientByApiKey(expr?.value);
                 return client ? [client] : [];
               }
+              if (isColumn(expr?.field, "email")) {
+                return Array.from(dataStore.clients.values()).filter(
+                  (c) => c.email === expr?.value
+                );
+              }
               if (expr?.isNull) {
                 return Array.from(dataStore.clients.values()).filter(
                   (client) => client.apiKeyLookup == null
@@ -245,11 +250,26 @@ export function createAppDbMock(dataStore: AppDataStore) {
             status: payload.status ?? existing?.status ?? "active",
             stripeAccountId: payload.stripeAccountId ?? existing?.stripeAccountId ?? null,
             workspace: payload.workspace ?? existing?.workspace ?? "dfwsc_services",
+            phone: payload.phone ?? existing?.phone ?? null,
+            billingContactName: payload.billingContactName ?? existing?.billingContactName ?? null,
+            addressLine1: payload.addressLine1 ?? existing?.addressLine1 ?? null,
+            addressLine2: payload.addressLine2 ?? existing?.addressLine2 ?? null,
+            city: payload.city ?? existing?.city ?? null,
+            state: payload.state ?? existing?.state ?? null,
+            postalCode: payload.postalCode ?? existing?.postalCode ?? null,
+            country: payload.country ?? existing?.country ?? null,
+            notes: payload.notes ?? existing?.notes ?? null,
+            defaultPaymentTermsDays:
+              payload.defaultPaymentTermsDays ?? existing?.defaultPaymentTermsDays ?? null,
+            stripeCustomerId: payload.stripeCustomerId ?? existing?.stripeCustomerId ?? null,
             createdAt: existing?.createdAt ?? new Date(),
             updatedAt: new Date(),
           };
           dataStore.clients.set(payload.id, next);
           if (apiKey) dataStore.clientsByApiKey.set(apiKey, payload.id);
+          return {
+            returning: async () => [next],
+          };
         }
         if (isTable(table, "webhook_events")) {
           if (!dataStore.webhookEvents.has(payload.stripeEventId)) {
@@ -396,6 +416,7 @@ export function createStripeMock() {
   return {
     accounts: { create: vi.fn() },
     accountLinks: { create: vi.fn() },
+    customers: { create: vi.fn() },
     paymentIntents: { create: vi.fn(), list: vi.fn() },
     checkout: { sessions: { create: vi.fn() } },
     webhooks: webhookHelper.webhooks,

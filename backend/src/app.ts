@@ -7,6 +7,7 @@ import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
 import connectRoutes from "./routes/connect";
+import dfwscClientRoutes from "./routes/dfwsc-clients";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
 import invoiceRoutes from "./routes/invoices";
@@ -132,6 +133,7 @@ export async function buildServer() {
   server.register(paymentsRoutes, { prefix: "/api/v1" });
   server.register(webhooksRoute, { prefix: "/api/v1" });
   server.register(clientRoutes, { prefix: "/api/v1" });
+  server.register(dfwscClientRoutes, { prefix: "/api/v1" });
   server.register(groupRoutes, { prefix: "/api/v1" });
   server.register(invoiceRoutes, { prefix: "/api/v1" });
   server.register(subscriptionRoutes, { prefix: "/api/v1" });

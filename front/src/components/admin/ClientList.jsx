@@ -98,14 +98,28 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
   const columns = [
     { header: "Name", key: "name" },
     { header: "Email", key: "email" },
-    {
-      header: "Status",
-      render: (client) => <StatusBadge status={client.status} />,
-    },
-    {
-      header: "Onboarding",
-      render: (client) => <StatusBadge status={client.stripeAccountId ? "completed" : "pending"} />,
-    },
+    ...(!isDfwscMode
+      ? [
+          {
+            header: "Status",
+            render: (client) => <StatusBadge status={client.status} />,
+          },
+          {
+            header: "Onboarding",
+            render: (client) => (
+              <StatusBadge status={client.stripeAccountId ? "completed" : "pending"} />
+            ),
+          },
+        ]
+      : []),
+    ...(isDfwscMode
+      ? [
+          {
+            header: "Status",
+            render: (client) => <StatusBadge status={client.status} />,
+          },
+        ]
+      : []),
     ...(!isDfwscMode
       ? [
           {
@@ -121,31 +135,39 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
       header: "Fee",
       render: (client) => formatFee(client, groups),
     },
-    {
-      header: "Stripe Account",
-      render: (client) => client.stripeAccountId || "N/A",
-    },
+    ...(isDfwscMode
+      ? [
+          {
+            header: "Stripe Customer",
+            render: (client) => client.stripeCustomerId || "N/A",
+          },
+        ]
+      : [
+          {
+            header: "Stripe Account",
+            render: (client) => client.stripeAccountId || "N/A",
+          },
+        ]),
     {
       header: "Actions",
       render: (client) => {
         const isTogglingStatus =
           patchClientStatusMutation.isPending &&
           patchClientStatusMutation.variables?.id === client.id;
-        const isResending =
-          resendMutation.isPending && resendMutation.variables?.clientId === client.id;
         return (
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="bg-purple-600 hover:bg-purple-700 text-white"
-              disabled={isResending || !!client.stripeAccountId}
-              isLoading={isResending}
-              title={client.stripeAccountId ? "Already onboarded" : "Resend onboarding link"}
-              onClick={() => handleResendLink(client)}
-            >
-              {isResending ? "Sending..." : "Resend Link"}
-            </Button>
+            {!isDfwscMode && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="bg-purple-600 hover:bg-purple-700 text-white"
+                disabled={!!client.stripeAccountId}
+                title={client.stripeAccountId ? "Already onboarded" : "Resend onboarding link"}
+                onClick={() => handleResendLink(client)}
+              >
+                Resend Link
+              </Button>
+            )}
             <Button size="sm" onClick={() => setEditingClient(client)}>
               Edit
             </Button>

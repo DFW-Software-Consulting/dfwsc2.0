@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createClient,
+  createDfwscClient,
   getClients,
   getStripeCustomers,
   importStripeCustomer,
@@ -82,5 +83,14 @@ export function useResendOnboarding() {
   const { token } = useAuth();
   return useMutation({
     mutationFn: (body) => resendOnboardingLink(token, body),
+  });
+}
+
+export function useDfwscClient() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => createDfwscClient(token, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }

@@ -94,6 +94,10 @@ vi.mock("../lib/stripe", () => ({
   stripe: stripeMock,
 }));
 
+vi.mock("../lib/stripe-billing", () => ({
+  stripe: stripeMock,
+}));
+
 const nodemailerMock = createNodemailerMock(mailhogMessages, (options: any) => {
   const to = options.to;
   const recipients = Array.isArray(to) ? to.map(String) : [String(to ?? "")];
@@ -1219,6 +1223,164 @@ describe("client groups", () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json()).toEqual({ error: "Group not found." });
+    await server.close();
+  });
+});
+
+describe("DFWSC client creation", () => {
+  it("creates a client with Stripe Customer and returns stripeCustomerId", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    stripeMock.customers.create.mockResolvedValueOnce({
+      id: "cus_dfwsc123",
+      email: "test@example.com",
+      name: "Test Client",
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: "Test Client",
+        email: "test@example.com",
+        phone: "+1234567890",
+        billingContactName: "John Doe",
+        addressLine1: "123 Main St",
+        city: "Austin",
+        state: "TX",
+        postalCode: "78701",
+        country: "US",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.name).toBe("Test Client");
+    expect(body.email).toBe("test@example.com");
+    expect(body.stripeCustomerId).toBe("cus_dfwsc123");
+    expect(body.status).toBe("active");
+    expect(body.phone).toBe("+1234567890");
+    expect(body.billingContactName).toBe("John Doe");
+    expect(body.addressLine1).toBe("123 Main St");
+    expect(body.city).toBe("Austin");
+    expect(body.state).toBe("TX");
+    expect(body.postalCode).toBe("78701");
+    expect(body.country).toBe("US");
+    expect(stripeMock.customers.create).toHaveBeenCalledWith({
+      email: "test@example.com",
+      name: "Test Client",
+      phone: "+1234567890",
+      metadata: { clientId: expect.any(String) },
+    });
+    await server.close();
+  });
+
+  it("creates a client with only required fields (name, email)", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    stripeMock.customers.create.mockResolvedValueOnce({
+      id: "cus_minimal",
+      email: "minimal@example.com",
+      name: "Minimal Client",
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: "Minimal Client",
+        email: "minimal@example.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.name).toBe("Minimal Client");
+    expect(body.email).toBe("minimal@example.com");
+    expect(body.stripeCustomerId).toBe("cus_minimal");
+    expect(body.phone).toBeNull();
+    expect(body.addressLine1).toBeNull();
+    await server.close();
+  });
+
+  it("rejects duplicate email", async () => {
+    seedClient({
+      id: "existing_client",
+      email: "existing@example.com",
+      workspace: "dfwsc_services",
+    });
+
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: "Duplicate Client",
+        email: "existing@example.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("A client with this email already exists.");
+    await server.close();
+  });
+
+  it("rejects missing name", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        email: "test@example.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("name and email are required.");
+    await server.close();
+  });
+
+  it("rejects missing email", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: "Test Client",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("name and email are required.");
+    await server.close();
+  });
+
+  it("rejects unauthenticated request", async () => {
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      payload: {
+        name: "Test Client",
+        email: "test@example.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
     await server.close();
   });
 });

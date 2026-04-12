@@ -35,6 +35,9 @@ export default function AdminDashboard() {
   const [clientSubTab, setClientSubTab] = useState("create"); // 'create' or 'import'
   const [workspace, setWorkspace] = useState("dfwsc_services");
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
+  const [billingSubTab, setBillingSubTab] = useState("invoices");
+  const [preselectedClient, setPreselectedClient] = useState(null);
+  const [showDfwsClientSuccess, setShowDfwsClientSuccess] = useState(false);
 
   const isDfwscMode = workspace === "dfwsc_services";
   const visibleTabs = isDfwscMode ? TABS.filter((tab) => tab.id !== "groups") : TABS;
@@ -56,8 +59,32 @@ export default function AdminDashboard() {
     setActiveTab("clients");
   }, [logout]);
 
+  const handleDfwscClientCreated = useCallback((client) => {
+    setPreselectedClient(client);
+    setShowDfwsClientSuccess(true);
+    setActiveTab("billing");
+  }, []);
+
+  const handleBackToClients = useCallback(() => {
+    setShowDfwsClientSuccess(false);
+    setPreselectedClient(null);
+    setActiveTab("clients");
+  }, []);
+
+  const handleCreateInvoice = useCallback(() => {
+    setBillingSubTab("invoices");
+    setActiveTab("billing");
+  }, []);
+
+  const handleCreateSubscription = useCallback(() => {
+    setBillingSubTab("subscriptions");
+    setActiveTab("billing");
+  }, []);
+
   const handleWorkspaceChange = useCallback((nextWorkspace) => {
     setWorkspace(nextWorkspace);
+    setShowDfwsClientSuccess(false);
+    setPreselectedClient(null);
     setActiveTab((prev) =>
       prev === "groups" && nextWorkspace === "dfwsc_services" ? "clients" : prev
     );
@@ -211,7 +238,11 @@ export default function AdminDashboard() {
           </div>
 
           {clientSubTab === "create" ? (
-            <CreateClientForm showToast={showToast} workspace={workspace} />
+            <CreateClientForm
+              showToast={showToast}
+              workspace={workspace}
+              onSuccess={isDfwscMode ? handleDfwscClientCreated : undefined}
+            />
           ) : (
             <ImportStripeCustomer showToast={showToast} workspace={workspace} />
           )}
@@ -235,7 +266,48 @@ export default function AdminDashboard() {
 
       {/* Billing tab */}
       {activeTab === "billing" && (
-        <BillingPanel showToast={showToast} workspace={workspace} isDfwscMode={isDfwscMode} />
+        <BillingPanel
+          showToast={showToast}
+          workspace={workspace}
+          isDfwscMode={isDfwscMode}
+          initialSubTab={billingSubTab}
+          preselectedClient={preselectedClient}
+        />
+      )}
+
+      {/* DFWSC Client Success - Post-Create Next Steps */}
+      {showDfwsClientSuccess && preselectedClient && activeTab !== "clients" && (
+        <div className="mb-6 p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
+          <h4 className="text-lg font-semibold text-green-400 mb-4">
+            Client Created: {preselectedClient.name}
+          </h4>
+          <p className="text-gray-300 mb-4">
+            Would you like to create a billing record for this client?
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={handleCreateInvoice}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors font-medium"
+            >
+              Create One-Time Invoice
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateSubscription}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors font-medium"
+            >
+              Create Subscription
+            </button>
+            <button
+              type="button"
+              onClick={handleBackToClients}
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-md transition-colors font-medium"
+            >
+              Back to Clients
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Settings tab */}

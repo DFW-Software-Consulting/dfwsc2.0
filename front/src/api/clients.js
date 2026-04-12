@@ -14,6 +14,9 @@ export const patchClient = (token, id, body) =>
 
 export const createClient = (token, body) => apiFetch("/accounts", { token, method: "POST", body });
 
+export const createDfwscClient = (token, body) =>
+  apiFetch("/dfwsc/clients", { token, method: "POST", body });
+
 export const getStripeCustomers = (token, { starting_after, workspace } = {}) => {
   const qs = new URLSearchParams();
   if (starting_after) qs.set("starting_after", starting_after);

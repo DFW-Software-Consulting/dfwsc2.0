@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useCancelInvoice, useCreateInvoice, useInvoices } from "../../hooks/useInvoices";
 import { useCreatePayment } from "../../hooks/usePayments";
@@ -10,7 +10,7 @@ import StatusBadge from "./shared/StatusBadge";
 
 // ─── Invoices Sub-Tab ────────────────────────────────────────────────────────
 
-function InvoicesTab({ showToast, isDfwscMode, workspace }) {
+function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
   const { data: clients = [] } = useClients({ workspace });
   const { data: invoices = [], isLoading, isError, error, refetch } = useInvoices({ workspace });
   const { data: products = [], isLoading: productsLoading } = useProducts();
@@ -19,6 +19,13 @@ function InvoicesTab({ showToast, isDfwscMode, workspace }) {
   const createProductMutation = useCreateProduct();
 
   const [clientId, setClientId] = useState("");
+
+  useEffect(() => {
+    if (preselectedClient?.id) {
+      setClientId(preselectedClient.id);
+    }
+  }, [preselectedClient]);
+
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -629,12 +636,19 @@ function PaymentsTab({ showToast, isDfwscMode, workspace }) {
 
 // ─── Subscriptions Sub-Tab ───────────────────────────────────────────────────
 
-function SubscriptionsTab({ showToast, isDfwscMode, workspace }) {
+function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
   const { data: clients = [] } = useClients({ workspace });
   const { data: subs = [], isLoading, isError, error, refetch } = useSubscriptions({ workspace });
   const createSubMutation = useCreateSubscription();
 
   const [clientId, setClientId] = useState("");
+
+  useEffect(() => {
+    if (preselectedClient?.id) {
+      setClientId(preselectedClient.id);
+    }
+  }, [preselectedClient]);
+
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [interval, setInterval] = useState("monthly");
@@ -833,8 +847,10 @@ export default function BillingPanel({
   showToast,
   workspace = "client_portal",
   isDfwscMode = false,
+  initialSubTab,
+  preselectedClient,
 }) {
-  const [activeTab, setActiveTab] = useState("invoices");
+  const [activeTab, setActiveTab] = useState(initialSubTab || "invoices");
 
   return (
     <div className="space-y-6">
@@ -857,13 +873,23 @@ export default function BillingPanel({
 
       <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
         {activeTab === "invoices" && (
-          <InvoicesTab showToast={showToast} isDfwscMode={isDfwscMode} workspace={workspace} />
+          <InvoicesTab
+            showToast={showToast}
+            isDfwscMode={isDfwscMode}
+            workspace={workspace}
+            preselectedClient={preselectedClient}
+          />
         )}
         {activeTab === "payments" && (
           <PaymentsTab showToast={showToast} isDfwscMode={isDfwscMode} workspace={workspace} />
         )}
         {activeTab === "subscriptions" && (
-          <SubscriptionsTab showToast={showToast} isDfwscMode={isDfwscMode} workspace={workspace} />
+          <SubscriptionsTab
+            showToast={showToast}
+            isDfwscMode={isDfwscMode}
+            workspace={workspace}
+            preselectedClient={preselectedClient}
+          />
         )}
       </div>
     </div>
