@@ -61,7 +61,7 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
         }
       );
     },
-    [name, email, groupId, validateForm, createClientMutation, showToast]
+    [name, email, groupId, workspace, isDfwscMode, validateForm, createClientMutation, showToast]
   );
 
   const copyToClipboard = useCallback(

@@ -1,11 +1,12 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
 import { db } from "../db/client";
-import { clientGroups, clients, settings } from "../db/schema";
+import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
+import { resolveClientFee } from "../lib/stripe-billing";
 import { isWorkspace } from "../lib/workspace";
 
 interface RequestWithClient extends FastifyRequest {
@@ -14,25 +15,46 @@ interface RequestWithClient extends FastifyRequest {
 
 /**
  * Flexible auth: Try API key first, then try Admin JWT.
+ * Distinguishes auth failures (returned 401) from system errors (thrown).
  */
 async function requireClientOrAdmin(request: FastifyRequest, reply: FastifyReply) {
+  const apiKeyHeader = request.headers["x-api-key"];
+  let authError = false;
+
   // 1. Try API Key if header exists
-  if (request.headers["x-api-key"]) {
+  if (apiKeyHeader) {
     try {
       await requireApiKey(request, reply);
-      if ((request as RequestWithClient).client) return;
     } catch {
-      // Continue to check JWT
+      throw new Error("System error during API key validation");
+    }
+    if ((request as RequestWithClient).client) return;
+
+    // API key auth failed (returned 401 but didn't throw) - try JWT
+    const initialSent = reply.sent;
+    if (initialSent && reply.statusCode === 401) {
+      authError = true;
+      // Reset reply for next attempt
+      reply.sent = false;
     }
   }
 
   // 2. Try Admin JWT
-  try {
-    await requireAdminJwt(request, reply);
-    return;
-  } catch {
+  if (!(request as RequestWithClient).client) {
+    try {
+      await requireAdminJwt(request, reply);
+    } catch {
+      throw new Error("System error during JWT validation");
+    }
+    if ((request as RequestWithClient).client) return;
+
     // Both failed
-    return reply.code(401).send({ error: "Authentication required (API Key or Admin JWT)." });
+    if (reply.sent && reply.statusCode === 401) {
+      authError = true;
+    }
+    if (!authError) {
+      return reply.code(401).send({ error: "Authentication required (API Key or Admin JWT)." });
+    }
   }
 }
 
@@ -47,56 +69,6 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
     return `stripe:${req.client.stripeAccountId}`;
   }
   return request.ip || "unknown";
-}
-
-async function resolveClientFee(
-  client: typeof clients.$inferSelect,
-  group: typeof clientGroups.$inferSelect | null,
-  amount?: number
-): Promise<number> {
-  if (client.processingFeePercent !== null && client.processingFeePercent !== undefined) {
-    if (typeof amount !== "number") {
-      throw new Error("amount is required when client uses a percentage-based fee.");
-    }
-    return Math.round((amount * parseFloat(client.processingFeePercent)) / 100);
-  }
-  if (client.processingFeeCents !== null && client.processingFeeCents !== undefined) {
-    return client.processingFeeCents;
-  }
-  if (group?.processingFeePercent !== null && group?.processingFeePercent !== undefined) {
-    if (typeof amount !== "number") {
-      throw new Error("amount is required when group uses a percentage-based fee.");
-    }
-    return Math.round((amount * parseFloat(group.processingFeePercent)) / 100);
-  }
-  if (group?.processingFeeCents !== null && group?.processingFeeCents !== undefined) {
-    return group.processingFeeCents;
-  }
-
-  const dbDefaults = await db
-    .select({ key: settings.key, value: settings.value })
-    .from(settings)
-    .where(inArray(settings.key, ["default_fee_percent", "default_fee_cents"]));
-  const dbDefaultsMap = new Map(dbDefaults.map((row) => [row.key, row.value]));
-
-  const dbPercent = dbDefaultsMap.get("default_fee_percent");
-  if (dbPercent && dbPercent.trim().length > 0) {
-    if (typeof amount !== "number") {
-      throw new Error("amount is required when using a percentage-based default fee.");
-    }
-    const parsedPercent = parseFloat(dbPercent);
-    if (Number.isNaN(parsedPercent)) {
-      throw new Error("Invalid default_fee_percent in database (must be a valid number).");
-    }
-    return Math.round((amount * parsedPercent) / 100);
-  }
-
-  const dbCents = dbDefaultsMap.get("default_fee_cents");
-  if (dbCents) {
-    return parseInt(dbCents, 10);
-  }
-
-  return Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
 }
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
@@ -233,13 +205,26 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
 
       // For Checkout, we need to calculate total base amount from line items if 'amount' isn't provided
-      let baseAmount = amount;
-      if (typeof baseAmount !== "number") {
+      let baseAmount = amount ?? 0;
+      const hasExplicitAmount = typeof amount === "number" && amount > 0;
+      if (!hasExplicitAmount) {
         baseAmount = lineItems.reduce((acc, item) => {
-          const unitAmount = item.price_data?.unit_amount || 0;
-          const quantity = item.quantity || 1;
-          return acc + unitAmount * quantity;
+          const unitAmount = item.price_data?.unit_amount;
+          if (typeof unitAmount !== "number" || unitAmount <= 0) {
+            request.log.warn(
+              { item: { price_data: item.price_data, price: item.price } },
+              "Line item missing unit_amount - using price ID requires explicit amount"
+            );
+          }
+          return acc + (typeof unitAmount === "number" ? unitAmount : 0) * (item.quantity || 1);
         }, 0);
+      }
+
+      if (baseAmount <= 0) {
+        return reply.code(400).send({
+          error:
+            "amount must be provided when line items use price IDs, or line items must have unit_amount.",
+        });
       }
 
       let feeAmount: number;
@@ -374,14 +359,20 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.send({ groupId, data: [], hasMore: false });
       }
 
-      const results = await Promise.all(
-        connected.map(async (c) => {
-          const pi = await stripe.paymentIntents.list(listParams, {
-            stripeAccount: c.stripeAccountId,
-          });
-          return pi.data.map((p) => ({ ...p, clientId: c.id }));
-        })
-      );
+      const maxConcurrency = 3;
+      const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
+      for (let i = 0; i < connected.length; i += maxConcurrency) {
+        const batch = connected.slice(i, i + maxConcurrency);
+        const batchResults = await Promise.all(
+          batch.map(async (c) => {
+            const pi = await stripe.paymentIntents.list(listParams, {
+              stripeAccount: c.stripeAccountId,
+            });
+            return pi.data.map((p) => ({ ...p, clientId: c.id }));
+          })
+        );
+        results.push(...batchResults);
+      }
 
       const merged = results.flat();
       return reply.send({ groupId, data: merged, hasMore: false });

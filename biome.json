@@ -11,11 +11,11 @@
       "front/src/**",
       "docs/**/*.md",
       "*.md",
-      "!**/node_modules/**",
-      "!**/dist/**",
-      "!**/coverage/**",
-      "!**/drizzle/**",
-      "!**/.vite/**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/coverage",
+      "!**/drizzle",
+      "!**/.vite",
       "!**/*.css"
     ]
   },

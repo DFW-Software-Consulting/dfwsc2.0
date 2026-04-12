@@ -9,7 +9,7 @@ import { requireAdminJwt } from "../lib/auth";
 import { createClientWithOnboardingToken } from "../lib/client-factory";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
-import { stripe } from "../lib/stripe";
+import { getSettings, stripe } from "../lib/stripe-billing";
 import { isWorkspace, type Workspace } from "../lib/workspace";
 
 function resolveServerBaseUrl(request: FastifyRequest): string {
@@ -208,16 +208,27 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             name: { type: "string", minLength: 1 },
             email: { type: "string", format: "email" },
             groupId: { type: "string" },
+            workspace: { type: "string" },
           },
         },
       },
     },
     async (request, reply) => {
-      const { name, email, groupId } = request.body as {
+      const {
+        name,
+        email,
+        groupId,
+        workspace: workspaceParam,
+      } = request.body as {
         name: string;
         email: string;
         groupId?: string;
+        workspace?: string;
       };
+
+      if (!isWorkspace(workspaceParam)) {
+        return reply.code(400).send({ error: "workspace is required." });
+      }
 
       if (groupId) {
         const [group] = await db
@@ -228,15 +239,18 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         if (!group) {
           return reply.code(400).send({ error: "Invalid groupId." });
         }
-        if (group.workspace !== "client_portal") {
-          return reply.code(400).send({ error: "groupId must belong to client_portal workspace." });
+        if (group.workspace !== workspaceParam) {
+          return reply.code(400).send({ error: "groupId must belong to the specified workspace." });
         }
       }
+
+      const settings = await getSettings();
+      const companyName = settings.company_name || "DFW Software Consulting";
 
       const { clientId, apiKey, token } = await createClientWithOnboardingToken({
         name,
         email,
-        workspace: "client_portal",
+        workspace: workspaceParam,
         groupId,
       });
 
@@ -249,7 +263,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const safeName = he.encode(name);
       const mailHtml = `
-        <h1>Welcome to DFW Software Consulting</h1>
+        <h1>Welcome to ${he.encode(companyName)}</h1>
         <p>Hi ${safeName},</p>
         <p>Click the link below to start your Stripe onboarding process.</p>
         <a href="${onboardingUrl}">Onboard Now</a>
@@ -257,7 +271,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       `;
 
       const mailText = `
-        Welcome to DFW Software Consulting
+        Welcome to ${companyName}
         Hi ${name},
         Click the link below to start your Stripe onboarding process.
         ${onboardingUrl}
@@ -266,7 +280,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       await sendMail({
         to: email,
-        subject: "DFW Software Consulting - Stripe Onboarding",
+        subject: `${companyName} - Stripe Onboarding`,
         html: mailHtml,
         text: mailText,
       });
@@ -284,12 +298,34 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     "/onboard-client/resend",
     {
       preHandler: [rateLimit({ max: 5, windowMs: 60_000 }), requireAdminJwt],
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            email: { type: "string", format: "email" },
+            clientId: { type: "string" },
+            workspace: { type: "string" },
+          },
+        },
+      },
     },
     async (request, reply) => {
-      const { email, clientId } = request.body as { email?: string; clientId?: string };
+      const {
+        email,
+        clientId,
+        workspace: workspaceParam,
+      } = request.body as {
+        email?: string;
+        clientId?: string;
+        workspace?: string;
+      };
 
       if (!email && !clientId) {
         return reply.code(400).send({ error: "Either email or clientId is required." });
+      }
+
+      if (workspaceParam && !isWorkspace(workspaceParam)) {
+        return reply.code(400).send({ error: "Invalid workspace." });
       }
 
       const [clientRecord] = clientId
@@ -300,6 +336,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       if (!clientRecord) {
         return reply.code(404).send({ error: "Client not found." });
+      }
+
+      if (workspaceParam && clientRecord.workspace !== workspaceParam) {
+        return reply
+          .code(400)
+          .send({ error: "Client does not belong to the specified workspace." });
       }
 
       const { rowCount } = await db
@@ -328,6 +370,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         status: "pending",
         email: clientRecord.email,
       });
+
+      const settings = await getSettings();
+      const companyName = settings.company_name || "DFW Software Consulting";
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
       if (!frontendOrigin) {
@@ -359,7 +404,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       await sendMail({
         to: clientRecord.email,
-        subject: "DFW Software Consulting - New Onboarding Link",
+        subject: `${companyName} - New Onboarding Link`,
         html: mailHtml,
         text: mailText,
       });

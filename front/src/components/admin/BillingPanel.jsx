@@ -713,7 +713,7 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace }) {
               ))}
             </select>
           </div>
-          <div className="sm:col-span-2">
+          <div>
             <label htmlFor="sub-amount" className="block text-sm text-gray-300 mb-1">
               Amount ($)
             </label>
@@ -724,6 +724,21 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace }) {
               onChange={(e) => setAmount(e.target.value)}
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
             />
+          </div>
+          <div>
+            <label htmlFor="sub-interval" className="block text-sm text-gray-300 mb-1">
+              Billing Interval
+            </label>
+            <select
+              id="sub-interval"
+              value={interval}
+              onChange={(e) => setInterval(e.target.value)}
+              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
+            >
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+              <option value="weekly">Weekly</option>
+            </select>
           </div>
           <div className="sm:col-span-2">
             <label htmlFor="sub-desc" className="block text-sm text-gray-300 mb-1">
@@ -741,9 +756,10 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace }) {
             <ErrorMessage message={formError} />
             <button
               type="submit"
-              className="px-6 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium"
+              disabled={createSubMutation.isPending}
+              className="px-6 py-2 rounded-md bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium"
             >
-              Create Subscription
+              {createSubMutation.isPending ? "Creating..." : "Create Subscription"}
             </button>
           </div>
         </form>

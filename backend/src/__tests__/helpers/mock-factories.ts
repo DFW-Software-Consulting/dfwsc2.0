@@ -54,6 +54,19 @@ function chainable(rowsPromise: Promise<any[]>) {
 
 function filterByExpr(rows: any[], expr: any): any[] {
   if (!expr) return rows;
+  if (expr.all?.length) {
+    return rows.filter((r) => {
+      return expr.all.every((cond: any) => {
+        if (cond.field && cond.value !== undefined) {
+          const colName = resolveColumnName(cond.field);
+          if (!colName) return true;
+          const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+          return r[colName] === cond.value || r[camel] === cond.value;
+        }
+        return true;
+      });
+    });
+  }
   if (expr.value !== undefined && expr.field !== undefined) {
     const colName = resolveColumnName(expr.field);
     if (!colName) return rows;
@@ -146,10 +159,30 @@ export function createAppDbMock(dataStore: AppDataStore) {
                   (c) => c.groupId === expr?.value
                 );
               }
+              if (isColumn(expr?.field, "workspace")) {
+                return Array.from(dataStore.clients.values()).filter(
+                  (c) => c.workspace === expr?.value
+                );
+              }
+              if (expr?.all?.length) {
+                const conditions = expr.all;
+                return Array.from(dataStore.clients.values()).filter((c) => {
+                  return conditions.every((cond: any) => {
+                    if (isColumn(cond?.field, "group_id")) return c.groupId === cond?.value;
+                    if (isColumn(cond?.field, "workspace")) return c.workspace === cond?.value;
+                    return false;
+                  });
+                });
+              }
               const row = dataStore.clients.get(expr?.value);
               return row ? [row] : [];
             }
             if (isTable(table, "client_groups")) {
+              if (isColumn(expr?.field, "workspace")) {
+                return Array.from(dataStore.clientGroups.values()).filter(
+                  (g) => g.workspace === expr?.value
+                );
+              }
               const row = dataStore.clientGroups.get(expr?.value);
               return row ? [row] : [];
             }
@@ -211,6 +244,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
             apiKeyHash,
             status: payload.status ?? existing?.status ?? "active",
             stripeAccountId: payload.stripeAccountId ?? existing?.stripeAccountId ?? null,
+            workspace: payload.workspace ?? existing?.workspace ?? "dfwsc_services",
             createdAt: existing?.createdAt ?? new Date(),
             updatedAt: new Date(),
           };
@@ -241,6 +275,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
             id: payload.id,
             name: payload.name,
             status: payload.status ?? "active",
+            workspace: payload.workspace ?? "dfwsc_services",
             createdAt: payload.createdAt ?? new Date(),
             updatedAt: payload.updatedAt ?? new Date(),
           };
