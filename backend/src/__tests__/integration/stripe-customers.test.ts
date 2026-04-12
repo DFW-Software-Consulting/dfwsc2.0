@@ -160,5 +160,106 @@ describe("Stripe Customers API Integration", () => {
       // Clean up
       await db.delete(clients).where(eq(clients.id, clientId));
     });
+
+    it("should return 400 if stripeCustomerId is missing", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/import-customer",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: {},
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("stripeCustomerId is required.");
+    });
+
+    it("should return 400 if groupId is invalid", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/import-customer",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { stripeCustomerId: "cus_any", groupId: "non-existent" },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("Invalid groupId.");
+    });
+
+    it("should return 400 if Stripe customer is deleted", async () => {
+      const stripeCustomerId = "cus_deleted";
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: stripeCustomerId,
+        deleted: true,
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/import-customer",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { stripeCustomerId },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("Stripe customer has been deleted.");
+    });
+
+    it("should return 400 if Stripe customer has no valid email", async () => {
+      const stripeCustomerId = "cus_no_email";
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: stripeCustomerId,
+        name: "No Email",
+        email: null,
+        deleted: false,
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/import-customer",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { stripeCustomerId },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("Stripe customer must have a valid email.");
+    });
+
+    it("should return 409 if a client with same email exists", async () => {
+      const stripeCustomerId = "cus_new_email_collision";
+      const email = "collision@example.com";
+      const existingClientId = randomUUID();
+
+      await db.insert(clients).values({
+        id: existingClientId,
+        name: "Existing Email Holder",
+        email: email,
+        status: "active",
+      });
+
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: stripeCustomerId,
+        name: "Colliding Customer",
+        email: email,
+        deleted: false,
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/import-customer",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { stripeCustomerId },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error).toBe("A client with this email already exists.");
+
+      // Clean up
+      await db.delete(clients).where(eq(clients.id, existingClientId));
+    });
   });
 });
