@@ -11,6 +11,9 @@ import {
 
 export const clientGroups = pgTable("client_groups", {
   id: text("id").primaryKey(),
+  workspace: text("workspace", { enum: ["dfwsc_services", "client_portal"] })
+    .default("client_portal")
+    .notNull(),
   name: text("name").notNull(),
   status: text("status", { enum: ["active", "inactive"] })
     .default("active")
@@ -27,6 +30,9 @@ export const clients = pgTable(
   "clients",
   {
     id: text("id").primaryKey(),
+    workspace: text("workspace", { enum: ["dfwsc_services", "client_portal"] })
+      .default("client_portal")
+      .notNull(),
     name: text("name").notNull(),
     email: text("email").notNull(),
     apiKeyHash: text("api_key_hash").unique(),

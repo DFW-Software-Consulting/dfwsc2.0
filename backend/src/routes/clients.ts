@@ -1,8 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { isWorkspace } from "../lib/workspace";
 
 interface ClientPatchBody {
   status?: "active" | "inactive";
@@ -30,7 +31,13 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
   // GET /clients - List all clients (admin only)
   app.get("/clients", { preHandler: requireAdminJwt }, async (req, res) => {
     try {
-      const { groupId } = req.query as { groupId?: string };
+      const { groupId, workspace } = req.query as { groupId?: string; workspace?: string };
+
+      if (!isWorkspace(workspace)) {
+        return res
+          .status(400)
+          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
+      }
 
       const query = db
         .select({
@@ -39,6 +46,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           email: clients.email,
           stripeAccountId: clients.stripeAccountId,
           status: clients.status,
+          workspace: clients.workspace,
           groupId: clients.groupId,
           processingFeePercent: clients.processingFeePercent,
           processingFeeCents: clients.processingFeeCents,
@@ -46,10 +54,27 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         })
         .from(clients);
 
-      const clientList = groupId ? await query.where(eq(clients.groupId, groupId)) : await query;
+      if (groupId) {
+        const [group] = await db
+          .select({ id: clientGroups.id, workspace: clientGroups.workspace })
+          .from(clientGroups)
+          .where(eq(clientGroups.id, groupId))
+          .limit(1);
+        if (!group || group.workspace !== workspace) {
+          return res
+            .status(400)
+            .send({ error: "groupId does not belong to the selected workspace." });
+        }
+      }
+
+      const clientList = groupId
+        ? await query.where(and(eq(clients.groupId, groupId), eq(clients.workspace, workspace)))
+        : await query.where(eq(clients.workspace, workspace));
+
+      const scopedList = clientList.filter((client) => client.workspace === workspace);
 
       return res.status(200).send(
-        clientList.map((client) => ({
+        scopedList.map((client) => ({
           ...client,
           createdAt: client.createdAt?.toISOString(),
         }))
@@ -113,13 +138,24 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       }
 
       if (groupId != null) {
+        const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
+
+        if (!existingClient) {
+          return res.status(404).send({ error: "Client not found." });
+        }
+
         const [group] = await db
-          .select()
+          .select({ id: clientGroups.id, workspace: clientGroups.workspace })
           .from(clientGroups)
           .where(eq(clientGroups.id, groupId))
           .limit(1);
         if (!group) {
           return res.status(400).send({ error: "Group not found." });
+        }
+        if (group.workspace !== existingClient.workspace) {
+          return res
+            .status(400)
+            .send({ error: "groupId workspace does not match client workspace." });
         }
       }
 

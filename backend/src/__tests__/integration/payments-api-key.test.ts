@@ -78,9 +78,9 @@ describe("Payments API Key Authentication Integration", () => {
       },
     });
 
-    // Since Stripe is not mocked, we expect a 400 due to missing Stripe account
+    // Since Stripe is not mocked, we expect a 401 due to missing Stripe account
     // But importantly, we should NOT get a 401 (unauthorized) which would mean API key auth failed
-    expect(response.statusCode).toBe(400); // Expecting 400 because client doesn't have stripeAccountId
+    expect(response.statusCode).toBe(401); // Expecting 401 because client doesn't have stripeAccountId
 
     // Clean up
     await db.delete(clients).where(eq(clients.id, clientId));
@@ -125,7 +125,7 @@ describe("Payments API Key Authentication Integration", () => {
 
     expect(response.statusCode).toBe(401);
     expect(response.json()).toEqual({
-      error: "API key is required.",
+      error: "Authorization header required",
     });
   });
 

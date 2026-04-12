@@ -4,7 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 
 export function useSetupStatus() {
   const { isLoggedIn } = useAuth();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["setup-status"],
     queryFn: getSetupStatus,
     staleTime: Infinity,
@@ -15,5 +15,6 @@ export function useSetupStatus() {
   return {
     ...(data ?? {}),
     isLoading,
+    error,
   };
 }

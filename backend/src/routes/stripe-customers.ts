@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import validator from "validator";
 import { db } from "../db/client";
@@ -6,15 +6,22 @@ import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { createClientWithOnboardingToken } from "../lib/client-factory";
 import { stripe } from "../lib/stripe";
+import { isWorkspace, type Workspace } from "../lib/workspace";
 
 const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
   // GET /stripe/customers - List Stripe customers not yet in the system
-  app.get<{ Querystring: { limit?: number; starting_after?: string } }>(
+  app.get<{ Querystring: { limit?: number; starting_after?: string; workspace?: string } }>(
     "/stripe/customers",
     { preHandler: requireAdminJwt },
     async (req, res) => {
       try {
-        const { limit = 100, starting_after } = req.query;
+        const { limit = 100, starting_after, workspace } = req.query;
+
+        if (!isWorkspace(workspace)) {
+          return res.status(400).send({
+            error: "workspace query parameter is required (dfwsc_services|client_portal).",
+          });
+        }
 
         // List customers from Stripe
         const customers = await stripe.customers.list({
@@ -28,7 +35,12 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
             ? await db
                 .select({ stripeCustomerId: clients.stripeCustomerId })
                 .from(clients)
-                .where(inArray(clients.stripeCustomerId, stripeIds))
+                .where(
+                  and(
+                    inArray(clients.stripeCustomerId, stripeIds),
+                    eq(clients.workspace, workspace)
+                  )
+                )
             : [];
         const existingIdSet = new Set(
           existingStripeIds.map((c) => c.stripeCustomerId).filter(Boolean)
@@ -54,12 +66,18 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // POST /stripe/import-customer - Create a local client from a Stripe customer ID
-  app.post<{ Body: { stripeCustomerId: string; groupId?: string } }>(
+  app.post<{ Body: { stripeCustomerId: string; groupId?: string; workspace: Workspace } }>(
     "/stripe/import-customer",
     { preHandler: requireAdminJwt },
     async (req, res) => {
       try {
-        const { stripeCustomerId, groupId } = req.body;
+        const { stripeCustomerId, groupId, workspace } = req.body;
+
+        if (!isWorkspace(workspace)) {
+          return res
+            .status(400)
+            .send({ error: "workspace is required (dfwsc_services|client_portal)." });
+        }
 
         if (!stripeCustomerId) {
           return res.status(400).send({ error: "stripeCustomerId is required." });
@@ -67,12 +85,15 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
 
         if (groupId) {
           const [group] = await db
-            .select({ id: clientGroups.id })
+            .select({ id: clientGroups.id, workspace: clientGroups.workspace })
             .from(clientGroups)
             .where(eq(clientGroups.id, groupId))
             .limit(1);
           if (!group) {
             return res.status(400).send({ error: "Invalid groupId." });
+          }
+          if (group.workspace !== workspace) {
+            return res.status(400).send({ error: "groupId workspace does not match workspace." });
           }
         }
 
@@ -80,7 +101,9 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
         const [existing] = await db
           .select()
           .from(clients)
-          .where(eq(clients.stripeCustomerId, stripeCustomerId))
+          .where(
+            and(eq(clients.stripeCustomerId, stripeCustomerId), eq(clients.workspace, workspace))
+          )
           .limit(1);
         if (existing) {
           return res.status(409).send({ error: "Client already exists in the portal." });
@@ -101,7 +124,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
         const [existingByEmail] = await db
           .select({ id: clients.id })
           .from(clients)
-          .where(eq(clients.email, email))
+          .where(and(eq(clients.email, email), eq(clients.workspace, workspace)))
           .limit(1);
         if (existingByEmail) {
           return res.status(409).send({ error: "A client with this email already exists." });
@@ -110,6 +133,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
         const { clientId, apiKey, token } = await createClientWithOnboardingToken({
           name,
           email,
+          workspace,
           stripeCustomerId,
           groupId,
         });
@@ -123,6 +147,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
           apiKey,
           onboardingToken: token,
           onboardingUrlHint,
+          workspace,
           groupId: groupId ?? null,
         });
       } catch (error) {

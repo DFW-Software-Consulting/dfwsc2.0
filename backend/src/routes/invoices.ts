@@ -2,17 +2,20 @@ import { eq, inArray } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import type Stripe from "stripe";
 import { db } from "../db/client";
-import { clients } from "../db/schema";
+import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { sendInvoiceEmail } from "../lib/mailer";
 import { stripe } from "../lib/stripe";
-import { ensureStripeCustomer } from "../lib/stripe-billing";
+import { ensureStripeCustomer, resolveClientFee } from "../lib/stripe-billing";
+import { isWorkspace, type Workspace } from "../lib/workspace";
 
 interface CreateInvoiceBody {
   clientId: string;
+  workspace: Workspace;
   amountCents: number;
   description: string;
   dueDate?: string | null;
+  waiveFee?: boolean;
 }
 
 interface InvoiceParams {
@@ -20,6 +23,7 @@ interface InvoiceParams {
 }
 
 interface InvoiceFilterQuery {
+  workspace?: string;
   clientId?: string;
   status?: string;
 }
@@ -51,7 +55,13 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
     "/invoices",
     { preHandler: requireAdminJwt },
     async (req, res) => {
-      const { clientId, amountCents, description, dueDate } = req.body;
+      const { clientId, workspace, amountCents, description, dueDate, waiveFee = false } = req.body;
+
+      if (!isWorkspace(workspace)) {
+        return res
+          .status(400)
+          .send({ error: "workspace is required (dfwsc_services|client_portal)." });
+      }
 
       if (!clientId) {
         return res.status(400).send({ error: "clientId is required." });
@@ -67,6 +77,24 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
       if (!client) {
         return res.status(404).send({ error: "Client not found." });
       }
+      if (client.workspace !== workspace) {
+        return res
+          .status(400)
+          .send({ error: "clientId does not belong to the selected workspace." });
+      }
+
+      const group = client.groupId
+        ? ((
+            await db.select().from(clientGroups).where(eq(clientGroups.id, client.groupId)).limit(1)
+          )[0] ?? null)
+        : null;
+
+      let feeAmount: number;
+      try {
+        feeAmount = await resolveClientFee(client, group, amountCents);
+      } catch (e: unknown) {
+        return res.status(400).send({ error: (e as Error).message });
+      }
 
       const customerId = await ensureStripeCustomer(client);
 
@@ -74,6 +102,7 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
         ? Math.max(1, Math.ceil((new Date(dueDate).getTime() - Date.now()) / 86_400_000))
         : 30;
 
+      // Base amount line item
       await stripe.invoiceItems.create({
         customer: customerId,
         amount: amountCents,
@@ -81,19 +110,36 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
         description: description.trim(),
       });
 
+      // Fee line item (Actual or Waived)
+      if (feeAmount > 0) {
+        await stripe.invoiceItems.create({
+          customer: customerId,
+          amount: waiveFee ? 0 : feeAmount,
+          currency: "usd",
+          description: waiveFee ? "Processing Fee (Waived)" : "Processing Fee",
+        });
+      }
+
       const invoice = await stripe.invoices.create({
         customer: customerId,
         collection_method: "send_invoice",
         days_until_due: daysUntilDue,
-        metadata: { clientId },
+        metadata: {
+          clientId,
+          baseAmount: amountCents.toString(),
+          feeAmount: waiveFee ? "0" : feeAmount.toString(),
+          waivedFeeAmount: waiveFee ? feeAmount.toString() : "0",
+        },
       });
 
       const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
 
+      const totalChargedCents = waiveFee ? amountCents : amountCents + feeAmount;
+
       await sendInvoiceEmail({
         to: client.email,
         clientName: client.name,
-        amountCents,
+        amountCents: totalChargedCents,
         description: description.trim(),
         dueDate: dueDate ? new Date(dueDate) : null,
         payUrl: finalized.hosted_invoice_url ?? "",
@@ -109,11 +155,17 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
     "/invoices",
     { preHandler: requireAdminJwt },
     async (req, res) => {
-      const { clientId, status } = req.query;
+      const { workspace, clientId, status } = req.query;
+
+      if (!isWorkspace(workspace)) {
+        return res
+          .status(400)
+          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
+      }
 
       if (clientId) {
         const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
-        if (!client?.stripeCustomerId) {
+        if (!client?.stripeCustomerId || client.workspace !== workspace) {
           return res.status(200).send([]);
         }
 
@@ -144,13 +196,17 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
           ? await db.select().from(clients).where(inArray(clients.id, clientIds))
           : [];
 
-      const clientMap = new Map(clientRows.map((c) => [c.id, c.name]));
+      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
+      const clientMap = new Map(scopedClients.map((c) => [c.id, c.name]));
 
       return res.status(200).send(
-        list.data.map((inv) => {
-          const cid = inv.metadata?.clientId ?? null;
-          return formatStripeInvoice(inv, cid, cid ? (clientMap.get(cid) ?? null) : null);
-        })
+        list.data
+          .map((inv) => {
+            const cid = inv.metadata?.clientId ?? null;
+            if (!cid || !clientMap.has(cid)) return null;
+            return formatStripeInvoice(inv, cid, clientMap.get(cid) ?? null);
+          })
+          .filter((entry): entry is ReturnType<typeof formatStripeInvoice> => entry !== null)
       );
     }
   );

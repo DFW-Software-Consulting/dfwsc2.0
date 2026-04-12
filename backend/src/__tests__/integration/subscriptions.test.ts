@@ -50,6 +50,7 @@ import { makeStripeInvoice, makeStripeSub } from "../helpers/stripe-factories";
 describe("Subscriptions API", () => {
   let app: any;
   let clientId: string;
+  const workspace = "client_portal";
 
   beforeAll(async () => {
     ensureBaseEnv();
@@ -111,7 +112,13 @@ describe("Subscriptions API", () => {
         method: "POST",
         url: "/api/v1/subscriptions",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { clientId, amountCents: 1999, description: "Basic plan", interval: "monthly" },
+        payload: {
+          clientId,
+          workspace,
+          amountCents: 1999,
+          description: "Basic plan",
+          interval: "monthly",
+        },
       });
 
       expect(response.statusCode).toBe(201);
@@ -143,6 +150,7 @@ describe("Subscriptions API", () => {
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         payload: {
           clientId,
+          workspace,
           amountCents: 2500,
           description: "Limited plan",
           interval: "quarterly",
@@ -162,7 +170,7 @@ describe("Subscriptions API", () => {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
         },
-        payload: { amountCents: 1000, description: "Plan", interval: "monthly" },
+        payload: { workspace, amountCents: 1000, description: "Plan", interval: "monthly" },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/clientId/i);
@@ -176,7 +184,7 @@ describe("Subscriptions API", () => {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
         },
-        payload: { clientId, amountCents: 0, description: "Plan", interval: "monthly" },
+        payload: { clientId, workspace, amountCents: 0, description: "Plan", interval: "monthly" },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/amountCents/i);
@@ -190,7 +198,13 @@ describe("Subscriptions API", () => {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
         },
-        payload: { clientId, amountCents: 10.5, description: "Plan", interval: "monthly" },
+        payload: {
+          clientId,
+          workspace,
+          amountCents: 10.5,
+          description: "Plan",
+          interval: "monthly",
+        },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/amountCents/i);
@@ -204,7 +218,13 @@ describe("Subscriptions API", () => {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
         },
-        payload: { clientId, amountCents: 1000, description: "   ", interval: "monthly" },
+        payload: {
+          clientId,
+          workspace,
+          amountCents: 1000,
+          description: "   ",
+          interval: "monthly",
+        },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/description/i);
@@ -218,7 +238,13 @@ describe("Subscriptions API", () => {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
         },
-        payload: { clientId, amountCents: 1000, description: "Plan", interval: "weekly" },
+        payload: {
+          clientId,
+          workspace,
+          amountCents: 1000,
+          description: "Plan",
+          interval: "weekly",
+        },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/interval/i);
@@ -234,6 +260,7 @@ describe("Subscriptions API", () => {
         },
         payload: {
           clientId,
+          workspace,
           amountCents: 1000,
           description: "Plan",
           interval: "monthly",
@@ -254,6 +281,7 @@ describe("Subscriptions API", () => {
         },
         payload: {
           clientId: randomUUID(),
+          workspace,
           amountCents: 1000,
           description: "Plan",
           interval: "monthly",
@@ -268,7 +296,13 @@ describe("Subscriptions API", () => {
         method: "POST",
         url: "/api/v1/subscriptions",
         headers: { "content-type": "application/json" },
-        payload: { clientId, amountCents: 1000, description: "Plan", interval: "monthly" },
+        payload: {
+          clientId,
+          workspace,
+          amountCents: 1000,
+          description: "Plan",
+          interval: "monthly",
+        },
       });
       expect(response.statusCode).toBe(401);
     });
@@ -289,7 +323,7 @@ describe("Subscriptions API", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/subscriptions",
+        url: `/api/v1/subscriptions?workspace=${workspace}`,
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -308,7 +342,7 @@ describe("Subscriptions API", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: `/api/v1/subscriptions?clientId=${unknownClientId}`,
+        url: `/api/v1/subscriptions?workspace=${workspace}&clientId=${unknownClientId}`,
         headers: { authorization: `Bearer ${makeAdminToken()}` },
       });
 

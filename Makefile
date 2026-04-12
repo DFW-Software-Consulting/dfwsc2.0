@@ -5,7 +5,7 @@ COMPOSE := docker compose -f docker-compose.base.yml -f docker-compose.dev.yml
 
 help:
 	@echo "Common targets:"
-	@echo "  make up           # Start dev stack (api, db, mailhog, stripe-cli)"
+	@echo "  make up           # Start dev stack (api, web, db, mailhog, stripe-cli)"
 	@echo "  make up-build     # Build + start dev stack"
 	@echo "  make down         # Stop dev stack"
 	@echo "  make down-v       # Stop dev stack and remove volumes"

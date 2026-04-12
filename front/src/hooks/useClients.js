@@ -9,20 +9,22 @@ import {
 import { resendOnboardingLink } from "../api/onboarding";
 import { useAuth } from "../contexts/AuthContext";
 
-export function useClients() {
+export function useClients(params = {}) {
   const { token } = useAuth();
+  const effectiveParams = { workspace: "client_portal", ...params };
   return useQuery({
-    queryKey: ["clients"],
-    queryFn: () => getClients(token),
+    queryKey: ["clients", effectiveParams],
+    queryFn: () => getClients(token, effectiveParams),
     enabled: !!token,
   });
 }
 
-export function useStripeCustomers(starting_after) {
+export function useStripeCustomers(starting_after, workspace) {
   const { token } = useAuth();
+  const effectiveWorkspace = workspace ?? "client_portal";
   return useQuery({
-    queryKey: ["stripe-customers", starting_after],
-    queryFn: () => getStripeCustomers(token, { starting_after }),
+    queryKey: ["stripe-customers", starting_after, effectiveWorkspace],
+    queryFn: () => getStripeCustomers(token, { starting_after, workspace: effectiveWorkspace }),
     enabled: !!token,
   });
 }
@@ -40,8 +42,8 @@ export function useImportStripeCustomer() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ stripeCustomerId, groupId }) =>
-      importStripeCustomer(token, stripeCustomerId, groupId),
+    mutationFn: ({ stripeCustomerId, groupId, workspace }) =>
+      importStripeCustomer(token, stripeCustomerId, groupId, workspace),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }

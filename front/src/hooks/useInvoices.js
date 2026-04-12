@@ -4,9 +4,10 @@ import { useAuth } from "../contexts/AuthContext";
 
 export function useInvoices(params = {}) {
   const { token } = useAuth();
+  const effectiveParams = { workspace: "client_portal", ...params };
   return useQuery({
-    queryKey: ["invoices", params],
-    queryFn: () => getInvoices(token, params),
+    queryKey: ["invoices", effectiveParams],
+    queryFn: () => getInvoices(token, effectiveParams),
     enabled: !!token,
   });
 }

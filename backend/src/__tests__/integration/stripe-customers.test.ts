@@ -27,6 +27,7 @@ describe("Stripe Customers API Integration", () => {
   let app: any;
   let adminToken: string;
   let cleanupIds: string[] = [];
+  const workspace = "client_portal";
 
   beforeAll(async () => {
     app = await buildServer();
@@ -69,6 +70,7 @@ describe("Stripe Customers API Integration", () => {
         id: clientId,
         name: "Existing Client",
         email: "existing@example.com",
+        workspace,
         stripeCustomerId: existingStripeId,
         status: "active",
       });
@@ -83,7 +85,7 @@ describe("Stripe Customers API Integration", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/stripe/customers",
+        url: `/api/v1/stripe/customers?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${adminToken}`,
         },
@@ -123,7 +125,7 @@ describe("Stripe Customers API Integration", () => {
         headers: {
           authorization: `Bearer ${adminToken}`,
         },
-        payload: { stripeCustomerId },
+        payload: { stripeCustomerId, workspace },
       });
 
       expect(response.statusCode).toBe(201);
@@ -147,6 +149,7 @@ describe("Stripe Customers API Integration", () => {
         id: clientId,
         name: "Already Here",
         email: "already@example.com",
+        workspace,
         stripeCustomerId,
         status: "active",
       });
@@ -157,7 +160,7 @@ describe("Stripe Customers API Integration", () => {
         headers: {
           authorization: `Bearer ${adminToken}`,
         },
-        payload: { stripeCustomerId },
+        payload: { stripeCustomerId, workspace },
       });
 
       expect(response.statusCode).toBe(409);
@@ -171,7 +174,7 @@ describe("Stripe Customers API Integration", () => {
         headers: {
           authorization: `Bearer ${adminToken}`,
         },
-        payload: {},
+        payload: { workspace },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toBe("stripeCustomerId is required.");
@@ -184,7 +187,7 @@ describe("Stripe Customers API Integration", () => {
         headers: {
           authorization: `Bearer ${adminToken}`,
         },
-        payload: { stripeCustomerId: "cus_any", groupId: "non-existent" },
+        payload: { stripeCustomerId: "cus_any", groupId: "non-existent", workspace },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toBe("Invalid groupId.");
@@ -203,7 +206,7 @@ describe("Stripe Customers API Integration", () => {
         headers: {
           authorization: `Bearer ${adminToken}`,
         },
-        payload: { stripeCustomerId },
+        payload: { stripeCustomerId, workspace },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toBe("Stripe customer has been deleted.");
@@ -224,7 +227,7 @@ describe("Stripe Customers API Integration", () => {
         headers: {
           authorization: `Bearer ${adminToken}`,
         },
-        payload: { stripeCustomerId },
+        payload: { stripeCustomerId, workspace },
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toBe("Stripe customer must have a valid email.");
@@ -240,6 +243,7 @@ describe("Stripe Customers API Integration", () => {
         id: existingClientId,
         name: "Existing Email Holder",
         email: email,
+        workspace,
         status: "active",
       });
 
@@ -256,7 +260,7 @@ describe("Stripe Customers API Integration", () => {
         headers: {
           authorization: `Bearer ${adminToken}`,
         },
-        payload: { stripeCustomerId },
+        payload: { stripeCustomerId, workspace },
       });
 
       expect(response.statusCode).toBe(409);

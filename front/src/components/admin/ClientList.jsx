@@ -21,9 +21,10 @@ function formatFee(client, groups) {
   return "Default";
 }
 
-export default function ClientList({ showToast }) {
-  const { data: clients = [], isLoading, isError, error, refetch } = useClients();
-  const { data: groups = [] } = useGroups();
+export default function ClientList({ showToast, workspace = "client_portal" }) {
+  const isDfwscMode = workspace === "dfwsc_services";
+  const { data: clients = [], isLoading, isError, error, refetch } = useClients({ workspace });
+  const { data: groups = [] } = useGroups(workspace);
   const patchClientStatusMutation = usePatchClientStatus();
   const resendMutation = useResendOnboarding();
 
@@ -105,13 +106,17 @@ export default function ClientList({ showToast }) {
       header: "Onboarding",
       render: (client) => <StatusBadge status={client.stripeAccountId ? "completed" : "pending"} />,
     },
-    {
-      header: "Group",
-      render: (client) => {
-        const groupName = groups.find((g) => g.id === client.groupId)?.name;
-        return groupName ?? <span className="text-gray-500">—</span>;
-      },
-    },
+    ...(!isDfwscMode
+      ? [
+          {
+            header: "Group",
+            render: (client) => {
+              const groupName = groups.find((g) => g.id === client.groupId)?.name;
+              return groupName ?? <span className="text-gray-500">—</span>;
+            },
+          },
+        ]
+      : []),
     {
       header: "Fee",
       render: (client) => formatFee(client, groups),
@@ -189,6 +194,7 @@ export default function ClientList({ showToast }) {
           onClose={() => setEditingClient(null)}
           onSaved={() => setEditingClient(null)}
           showToast={showToast}
+          workspace={workspace}
         />
       )}
     </>

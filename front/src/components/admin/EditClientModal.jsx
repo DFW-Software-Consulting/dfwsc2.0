@@ -8,8 +8,15 @@ import ErrorMessage from "./shared/ErrorMessage";
 import FeeConfigSection from "./shared/FeeConfigSection";
 import FormInput from "./shared/FormInput";
 
-export default function EditClientModal({ client, onClose, onSaved, showToast }) {
-  const { data: groups = [] } = useGroups();
+export default function EditClientModal({
+  client,
+  onClose,
+  onSaved,
+  showToast,
+  workspace = "client_portal",
+}) {
+  const isDfwscMode = workspace === "dfwsc_services";
+  const { data: groups = [] } = useGroups(workspace);
   const patchClientMutation = usePatchClient();
 
   const [feeType, setFeeType] = useState("none");
@@ -64,7 +71,7 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
   const handleSave = useCallback(() => {
     setError("");
     const body = {
-      groupId: groupId || null,
+      groupId: isDfwscMode ? null : groupId || null,
       paymentSuccessUrl: successUrl.trim() || null,
       paymentCancelUrl: cancelUrl.trim() || null,
     };
@@ -112,6 +119,7 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
     feeType,
     feeValue,
     groupId,
+    isDfwscMode,
     successUrl,
     cancelUrl,
     onClose,
@@ -126,28 +134,32 @@ export default function EditClientModal({ client, onClose, onSaved, showToast })
         {client.name} &bull; {client.email}
       </p>
 
-      {/* Group assignment */}
-      <div className="mb-4">
-        <label htmlFor="edit-client-group" className="block text-sm font-medium text-gray-300 mb-1">
-          Group
-        </label>
-        <select
-          id="edit-client-group"
-          value={groupId}
-          onChange={(e) => setGroupId(e.target.value)}
-          className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+      {!isDfwscMode && (
+        <div className="mb-4">
+          <label
+            htmlFor="edit-client-group"
+            className="block text-sm font-medium text-gray-300 mb-1"
+          >
+            Group
+          </label>
+          <select
+            id="edit-client-group"
+            value={groupId}
+            onChange={(e) => setGroupId(e.target.value)}
+            className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                      focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option value="">— No group —</option>
-          {groups
-            .filter((g) => g.status === "active")
-            .map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-        </select>
-      </div>
+          >
+            <option value="">— No group —</option>
+            {groups
+              .filter((g) => g.status === "active")
+              .map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+          </select>
+        </div>
+      )}
 
       <FeeConfigSection
         feeType={feeType}

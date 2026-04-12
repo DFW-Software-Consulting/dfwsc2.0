@@ -4,9 +4,11 @@ import { nanoid } from "nanoid";
 import { db } from "../db/client";
 import { clientGroups } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { isWorkspace, type Workspace } from "../lib/workspace";
 
 interface GroupBody {
   name: string;
+  workspace: Workspace;
 }
 
 interface GroupPatchBody {
@@ -34,6 +36,7 @@ function isValidHttpsUrl(value: string): boolean {
 function formatGroupResponse(g: typeof clientGroups.$inferSelect) {
   return {
     id: g.id,
+    workspace: g.workspace,
     name: g.name,
     status: g.status,
     processingFeePercent: g.processingFeePercent,
@@ -48,14 +51,21 @@ function formatGroupResponse(g: typeof clientGroups.$inferSelect) {
 const groupRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: GroupBody }>("/groups", { preHandler: requireAdminJwt }, async (req, res) => {
     const { name } = req.body;
+    const { workspace } = req.body;
     if (!name || typeof name !== "string" || name.trim().length === 0) {
       return res.status(400).send({ error: "name is required." });
+    }
+    if (!isWorkspace(workspace)) {
+      return res
+        .status(400)
+        .send({ error: "workspace is required (dfwsc_services|client_portal)." });
     }
 
     const id = nanoid();
     const now = new Date();
     await db.insert(clientGroups).values({
       id,
+      workspace,
       name: name.trim(),
       status: "active",
       createdAt: now,
@@ -66,8 +76,18 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
     return res.status(201).send(formatGroupResponse(group));
   });
 
-  app.get("/groups", { preHandler: requireAdminJwt }, async (_req, res) => {
-    const groups = await db.select().from(clientGroups);
+  app.get("/groups", { preHandler: requireAdminJwt }, async (req, res) => {
+    const { workspace } = req.query as { workspace?: string };
+    if (!isWorkspace(workspace)) {
+      return res
+        .status(400)
+        .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
+    }
+
+    const groups = await db
+      .select()
+      .from(clientGroups)
+      .where(eq(clientGroups.workspace, workspace));
     return res.status(200).send(groups.map(formatGroupResponse));
   });
 

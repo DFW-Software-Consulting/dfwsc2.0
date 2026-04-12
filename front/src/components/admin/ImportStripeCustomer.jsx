@@ -6,7 +6,8 @@ import AdminTable from "./shared/AdminTable";
 import Button from "./shared/Button";
 import ErrorMessage from "./shared/ErrorMessage";
 
-export default function ImportStripeCustomer({ showToast }) {
+export default function ImportStripeCustomer({ showToast, workspace = "client_portal" }) {
+  const isDfwscMode = workspace === "dfwsc_services";
   const startingAfter = undefined;
   const {
     data: stripeCustomers = { data: [], has_more: false },
@@ -14,9 +15,9 @@ export default function ImportStripeCustomer({ showToast }) {
     isError,
     error,
     refetch,
-  } = useStripeCustomers(startingAfter);
+  } = useStripeCustomers(startingAfter, workspace);
 
-  const { data: groups = [], isLoading: isLoadingGroups } = useGroups();
+  const { data: groups = [], isLoading: isLoadingGroups } = useGroups(workspace);
   const importMutation = useImportStripeCustomer();
   const [importedClientInfo, setImportedClientInfo] = useState(null);
   const [localError, setLocalError] = useState("");
@@ -26,7 +27,11 @@ export default function ImportStripeCustomer({ showToast }) {
     setLocalError("");
     setImportedClientInfo(null);
     importMutation.mutate(
-      { stripeCustomerId: customerId, groupId: selectedGroupId || undefined },
+      {
+        stripeCustomerId: customerId,
+        groupId: !isDfwscMode && selectedGroupId ? selectedGroupId : undefined,
+        workspace,
+      },
       {
         onSuccess: (data) => {
           setImportedClientInfo(data);
@@ -104,25 +109,27 @@ export default function ImportStripeCustomer({ showToast }) {
         Select a customer from your main Stripe account to import them into the portal.
       </p>
 
-      <div className="mb-6 max-w-sm">
-        <label htmlFor="import-group-id" className="block text-xs font-medium text-gray-400 mb-1">
-          ASSIGN TO GROUP (OPTIONAL)
-        </label>
-        <select
-          id="import-group-id"
-          value={selectedGroupId}
-          onChange={(e) => setSelectedGroupId(e.target.value)}
-          disabled={isLoadingGroups}
-          className="w-full bg-gray-900/50 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
-        >
-          <option value="">No Group (Independent)</option>
-          {groups.map((group) => (
-            <option key={group.id} value={group.id}>
-              {group.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {!isDfwscMode && (
+        <div className="mb-6 max-w-sm">
+          <label htmlFor="import-group-id" className="block text-xs font-medium text-gray-400 mb-1">
+            ASSIGN TO GROUP (OPTIONAL)
+          </label>
+          <select
+            id="import-group-id"
+            value={selectedGroupId}
+            onChange={(e) => setSelectedGroupId(e.target.value)}
+            disabled={isLoadingGroups}
+            className="w-full bg-gray-900/50 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50"
+          >
+            <option value="">No Group (Independent)</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <AdminTable
         columns={columns}

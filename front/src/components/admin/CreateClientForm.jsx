@@ -9,8 +9,9 @@ import FormInput from "./shared/FormInput";
 
 const NAME_MAX_LENGTH = 100;
 
-export default function CreateClientForm({ showToast }) {
-  const { data: groups = [] } = useGroups();
+export default function CreateClientForm({ showToast, workspace = "client_portal" }) {
+  const isDfwscMode = workspace === "dfwsc_services";
+  const { data: groups = [] } = useGroups(workspace);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [groupId, setGroupId] = useState("");
@@ -38,7 +39,12 @@ export default function CreateClientForm({ showToast }) {
       setError("");
       setCreatedClientInfo(null);
       createClientMutation.mutate(
-        { name: name.trim(), email: email.trim(), groupId: groupId || undefined },
+        {
+          name: name.trim(),
+          email: email.trim(),
+          workspace,
+          groupId: !isDfwscMode && groupId ? groupId : undefined,
+        },
         {
           onSuccess: (data) => {
             setCreatedClientInfo(data);
@@ -55,7 +61,7 @@ export default function CreateClientForm({ showToast }) {
         }
       );
     },
-    [name, email, groupId, validateForm, createClientMutation, showToast]
+    [name, email, groupId, workspace, isDfwscMode, validateForm, createClientMutation, showToast]
   );
 
   const copyToClipboard = useCallback(
@@ -98,31 +104,36 @@ export default function CreateClientForm({ showToast }) {
           />
         </div>
 
-        <div className="mb-4">
-          <label htmlFor="newClientGroup" className="block text-sm font-medium text-gray-300 mb-1">
-            Assign to Company (Optional)
-          </label>
-          <select
-            id="newClientGroup"
-            value={groupId}
-            onChange={(e) => setGroupId(e.target.value)}
-            className="w-full md:w-1/2 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+        {!isDfwscMode && (
+          <div className="mb-4">
+            <label
+              htmlFor="newClientGroup"
+              className="block text-sm font-medium text-gray-300 mb-1"
+            >
+              Assign to Company (Optional)
+            </label>
+            <select
+              id="newClientGroup"
+              value={groupId}
+              onChange={(e) => setGroupId(e.target.value)}
+              className="w-full md:w-1/2 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                        focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={createClientMutation.isPending}
-          >
-            <option value="">— No company (Independent Account) —</option>
-            {groups
-              .filter((g) => g.status === "active")
-              .map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-          </select>
-          <p className="text-xs text-gray-500 mt-1">
-            Grouping accounts allows you to manage them under a single client profile.
-          </p>
-        </div>
+              disabled={createClientMutation.isPending}
+            >
+              <option value="">— No company (Independent Account) —</option>
+              {groups
+                .filter((g) => g.status === "active")
+                .map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Grouping accounts allows you to manage them under a single client profile.
+            </p>
+          </div>
+        )}
 
         <Button
           type="submit"

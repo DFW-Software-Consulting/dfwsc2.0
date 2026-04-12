@@ -10,8 +10,13 @@ import FeeConfigSection from "./shared/FeeConfigSection";
 import FormInput from "./shared/FormInput";
 import StatusBadge from "./shared/StatusBadge";
 
-export default function ClientProfileView({ group, onClose, showToast }) {
-  const { data: allClients = [] } = useClients();
+export default function ClientProfileView({
+  group,
+  onClose,
+  showToast,
+  workspace = "client_portal",
+}) {
+  const { data: allClients = [] } = useClients({ workspace });
   const patchGroupMutation = usePatchGroup();
   const patchClientMutation = usePatchClient();
 
@@ -327,6 +332,7 @@ export default function ClientProfileView({ group, onClose, showToast }) {
           client={editingClient}
           onClose={() => setEditingClient(null)}
           showToast={showToast}
+          workspace={workspace}
         />
       )}
     </BaseModal>
