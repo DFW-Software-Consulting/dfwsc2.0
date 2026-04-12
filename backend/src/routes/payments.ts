@@ -7,19 +7,44 @@ import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 
+interface RequestWithClient extends FastifyRequest {
+  client?: typeof clients.$inferSelect;
+}
+
+/**
+ * Flexible auth: Try API key first, then try Admin JWT.
+ */
+async function requireClientOrAdmin(request: FastifyRequest, reply: FastifyReply) {
+  // 1. Try API Key if header exists
+  if (request.headers["x-api-key"]) {
+    try {
+      await requireApiKey(request, reply);
+      if ((request as RequestWithClient).client) return;
+    } catch {
+      // Continue to check JWT
+    }
+  }
+
+  // 2. Try Admin JWT
+  try {
+    await requireAdminJwt(request, reply);
+    return;
+  } catch {
+    // Both failed
+    return reply.code(401).send({ error: "Authentication required (API Key or Admin JWT)." });
+  }
+}
+
 function extractIdempotencyKey(request: FastifyRequest): string | undefined {
   const key = request.headers["idempotency-key"];
   return Array.isArray(key) ? key[0] : key;
 }
 
-type RequestWithClient = FastifyRequest & { client?: typeof clients.$inferSelect };
-
-function resolvePaymentRateLimitKey(request: RequestWithClient): string {
-  const client = request.client;
-  if (client?.stripeAccountId) {
-    return `stripe:${client.stripeAccountId}`;
+function resolvePaymentRateLimitKey(request: FastifyRequest): string {
+  const req = request as RequestWithClient;
+  if (req.client?.stripeAccountId) {
+    return `stripe:${req.client.stripeAccountId}`;
   }
-
   return request.ip || "unknown";
 }
 
@@ -80,14 +105,15 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     "/payments/create",
     {
       preHandler: [
-        requireApiKey,
+        requireClientOrAdmin,
         rateLimit({ max: 20, windowMs: 60_000, keyGenerator: resolvePaymentRateLimitKey }),
       ],
     },
     async (request, reply) => {
       const idempotencyKey = extractIdempotencyKey(request);
-      if (typeof idempotencyKey !== "string" || idempotencyKey.trim().length === 0) {
-        return reply.code(400).send({ error: "Idempotency-Key header is required." });
+      const isApiCall = !!request.headers["x-api-key"];
+      if (isApiCall && (!idempotencyKey || idempotencyKey.trim().length === 0)) {
+        return reply.code(400).send({ error: "Idempotency-Key header is required for API calls." });
       }
 
       const {
@@ -106,9 +132,21 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         waiveFee?: boolean;
       };
 
-      const client = (request as RequestWithClient).client;
+      let client = (request as RequestWithClient).client;
+
+      // If no client resolved from API key, but user is Admin, resolve from body.clientId or metadata.clientId
       if (!client) {
-        return reply.code(500).send({ error: "Unable to resolve client from API key." });
+        const bodyClientId = (request.body as any).clientId || metadata?.clientId;
+        if (!bodyClientId) {
+          return reply
+            .code(400)
+            .send({ error: "clientId is required when using Admin authentication." });
+        }
+        [client] = await db.select().from(clients).where(eq(clients.id, bodyClientId)).limit(1);
+      }
+
+      if (!client) {
+        return reply.code(404).send({ error: "Client not found." });
       }
 
       const clientId = client.id;
