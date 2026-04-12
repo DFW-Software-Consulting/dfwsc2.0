@@ -9,6 +9,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
     # Use migrate instead of push for production for better safety and consistency
     command: sh -lc "npm run db:migrate"
+    restart: "no"
 
   api:
     build:
