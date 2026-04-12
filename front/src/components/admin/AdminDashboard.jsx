@@ -9,6 +9,7 @@ import ClientList from "./ClientList";
 import CreateClientForm from "./CreateClientForm";
 import GroupPanel from "./GroupPanel";
 import ImportStripeCustomer from "./ImportStripeCustomer";
+import ImportStripeCustomerDfwsc from "./ImportStripeCustomerDfwsc";
 import PaymentReports from "./PaymentReports";
 import SettingsPanel from "./SettingsPanel";
 import Toast from "./Toast";
@@ -243,6 +244,8 @@ export default function AdminDashboard() {
               workspace={workspace}
               onSuccess={isDfwscMode ? handleDfwscClientCreated : undefined}
             />
+          ) : isDfwscMode ? (
+            <ImportStripeCustomerDfwsc showToast={showToast} />
           ) : (
             <ImportStripeCustomer showToast={showToast} workspace={workspace} />
           )}

@@ -4,9 +4,14 @@ import { useCancelInvoice, useCreateInvoice, useInvoices } from "../../hooks/use
 import { useCreatePayment } from "../../hooks/usePayments";
 import { useCreateProduct, useProducts } from "../../hooks/useProducts";
 import { useCreateSubscription, useSubscriptions } from "../../hooks/useSubscriptions";
+import { useTaxRates } from "../../hooks/useTaxRates";
 import ErrorMessage from "./shared/ErrorMessage";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import StatusBadge from "./shared/StatusBadge";
+
+function formatUsd(cents) {
+  return `$${(cents / 100).toFixed(2)}`;
+}
 
 // ─── Invoices Sub-Tab ────────────────────────────────────────────────────────
 
@@ -14,6 +19,7 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
   const { data: clients = [] } = useClients({ workspace });
   const { data: invoices = [], isLoading, isError, error, refetch } = useInvoices({ workspace });
   const { data: products = [], isLoading: productsLoading } = useProducts();
+  const { data: taxRates = [] } = useTaxRates();
   const createInvoiceMutation = useCreateInvoice();
   const cancelInvoiceMutation = useCancelInvoice();
   const createProductMutation = useCreateProduct();
@@ -30,6 +36,7 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [waiveFee, setWaiveFee] = useState(false);
+  const [taxRateId, setTaxRateId] = useState("");
   const [formError, setFormError] = useState("");
 
   const [selectedProductId, setSelectedProductId] = useState("");
@@ -38,6 +45,13 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
   const [newProductDesc, setNewProductDesc] = useState("");
   const [newProductAmount, setNewProductAmount] = useState("");
   const [productFormError, setProductFormError] = useState("");
+
+  const enteredAmountCents = Math.round((parseFloat(amount) || 0) * 100);
+  const selectedTaxRate = taxRates.find((rate) => rate.id === taxRateId) ?? null;
+  const estimatedInvoiceTaxCents = selectedTaxRate
+    ? Math.round(enteredAmountCents * (selectedTaxRate.percentage / 100))
+    : 0;
+  const estimatedInvoiceTotalCents = enteredAmountCents + estimatedInvoiceTaxCents;
 
   const handleProductSelect = useCallback(
     (e) => {
@@ -110,6 +124,7 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
           description: description.trim(),
           dueDate: dueDate || null,
           waiveFee,
+          taxRateId: taxRateId || null,
         },
         {
           onSuccess: () => {
@@ -118,6 +133,7 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
             setDescription("");
             setDueDate("");
             setWaiveFee(false);
+            setTaxRateId("");
             setSelectedProductId("");
             showToast?.("Invoice created and email sent.", "success");
           },
@@ -125,7 +141,17 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
         }
       );
     },
-    [clientId, amount, description, dueDate, waiveFee, workspace, createInvoiceMutation, showToast]
+    [
+      clientId,
+      amount,
+      description,
+      dueDate,
+      waiveFee,
+      taxRateId,
+      workspace,
+      createInvoiceMutation,
+      showToast,
+    ]
   );
 
   const handleCancel = useCallback(
@@ -314,6 +340,43 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
           </div>
 
           {/* Description */}
+          <div>
+            <label htmlFor="inv-tax-rate" className="block text-sm text-gray-300 mb-1">
+              Tax (optional)
+            </label>
+            <select
+              id="inv-tax-rate"
+              value={taxRateId}
+              onChange={(e) => setTaxRateId(e.target.value)}
+              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={createInvoiceMutation.isPending}
+            >
+              <option value="">No tax</option>
+              {taxRates.map((rate) => (
+                <option key={rate.id} value={rate.id}>
+                  {rate.displayName} ({rate.percentage}%)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {selectedTaxRate && enteredAmountCents > 0 && (
+            <div className="sm:col-span-2 rounded-md border border-blue-700/40 bg-blue-900/20 p-3 text-sm">
+              <p className="text-blue-200">
+                Estimated tax ({selectedTaxRate.percentage}%): {formatUsd(estimatedInvoiceTaxCents)}
+              </p>
+              <p className="text-white font-medium">
+                Estimated total before processing fee: {formatUsd(estimatedInvoiceTotalCents)}
+              </p>
+              {!waiveFee && (
+                <p className="text-xs text-gray-300 mt-1">
+                  Processing fee is calculated at send time and may increase final total.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="sm:col-span-2">
             <label htmlFor="inv-desc" className="block text-sm text-gray-300 mb-1">
               Description
@@ -639,6 +702,7 @@ function PaymentsTab({ showToast, isDfwscMode, workspace }) {
 function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
   const { data: clients = [] } = useClients({ workspace });
   const { data: subs = [], isLoading, isError, error, refetch } = useSubscriptions({ workspace });
+  const { data: taxRates = [] } = useTaxRates();
   const createSubMutation = useCreateSubscription();
 
   const [clientId, setClientId] = useState("");
@@ -653,7 +717,15 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
   const [description, setDescription] = useState("");
   const [interval, setInterval] = useState("monthly");
   const [totalPayments, setTotalPayments] = useState("");
+  const [taxRateId, setTaxRateId] = useState("");
   const [formError, setFormError] = useState("");
+
+  const enteredSubAmountCents = Math.round((parseFloat(amount) || 0) * 100);
+  const selectedSubTaxRate = taxRates.find((rate) => rate.id === taxRateId) ?? null;
+  const estimatedSubTaxCents = selectedSubTaxRate
+    ? Math.round(enteredSubAmountCents * (selectedSubTaxRate.percentage / 100))
+    : 0;
+  const estimatedSubTotalCents = enteredSubAmountCents + estimatedSubTaxCents;
 
   const handleCreate = useCallback(
     (e) => {
@@ -676,6 +748,7 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
           description: description.trim(),
           interval,
           totalPayments: total,
+          taxRateId: taxRateId || null,
         },
         {
           onSuccess: () => {
@@ -684,6 +757,7 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
             setDescription("");
             setInterval("monthly");
             setTotalPayments("");
+            setTaxRateId("");
             showToast?.("Subscription created.", "success");
           },
           onError: (err) => setFormError(err.message),
@@ -696,6 +770,7 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
       description,
       interval,
       totalPayments,
+      taxRateId,
       workspace,
       createSubMutation,
       showToast,
@@ -750,10 +825,40 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
               className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
             >
               <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
               <option value="yearly">Yearly</option>
-              <option value="weekly">Weekly</option>
             </select>
           </div>
+          <div>
+            <label htmlFor="sub-tax-rate" className="block text-sm text-gray-300 mb-1">
+              Tax (optional)
+            </label>
+            <select
+              id="sub-tax-rate"
+              value={taxRateId}
+              onChange={(e) => setTaxRateId(e.target.value)}
+              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
+              disabled={createSubMutation.isPending}
+            >
+              <option value="">No tax</option>
+              {taxRates.map((rate) => (
+                <option key={rate.id} value={rate.id}>
+                  {rate.displayName} ({rate.percentage}%)
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedSubTaxRate && enteredSubAmountCents > 0 && (
+            <div className="sm:col-span-2 rounded-md border border-blue-700/40 bg-blue-900/20 p-3 text-sm">
+              <p className="text-blue-200">
+                Estimated tax per cycle ({selectedSubTaxRate.percentage}%):{" "}
+                {formatUsd(estimatedSubTaxCents)}
+              </p>
+              <p className="text-white font-medium">
+                Estimated total per cycle: {formatUsd(estimatedSubTotalCents)}
+              </p>
+            </div>
+          )}
           <div className="sm:col-span-2">
             <label htmlFor="sub-desc" className="block text-sm text-gray-300 mb-1">
               Description

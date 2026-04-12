@@ -6,6 +6,7 @@ import {
   getStripeCustomers,
   importStripeCustomer,
   patchClient,
+  syncStripeCustomer,
 } from "../api/clients";
 import { resendOnboardingLink } from "../api/onboarding";
 import { useAuth } from "../contexts/AuthContext";
@@ -92,5 +93,14 @@ export function useDfwscClient() {
   return useMutation({
     mutationFn: (body) => createDfwscClient(token, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
+  });
+}
+
+export function useSyncStripeCustomer() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => syncStripeCustomer(token, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["stripe-customers"] }),
   });
 }

@@ -16,6 +16,7 @@ interface CreateSubscriptionBody {
   description: string;
   interval: "monthly" | "quarterly" | "yearly";
   totalPayments?: number | null;
+  taxRateId?: string | null;
 }
 
 interface SubscriptionParams {
@@ -78,7 +79,8 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     "/subscriptions",
     { preHandler: requireAdminJwt },
     async (req, res) => {
-      const { clientId, workspace, amountCents, description, interval, totalPayments } = req.body;
+      const { clientId, workspace, amountCents, description, interval, totalPayments, taxRateId } =
+        req.body;
 
       if (!isWorkspace(workspace)) {
         return res
@@ -108,6 +110,14 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         return res.status(400).send({ error: "totalPayments must be a positive integer." });
       }
 
+      if (taxRateId) {
+        try {
+          await stripe.taxRates.retrieve(taxRateId);
+        } catch {
+          return res.status(400).send({ error: "Invalid taxRateId." });
+        }
+      }
+
       const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
       if (!client) {
         return res.status(404).send({ error: "Client not found." });
@@ -125,12 +135,14 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         currency: "usd",
         recurring: toStripeInterval(interval),
         product_data: { name: description.trim() },
+        ...(taxRateId ? { tax_behavior: "exclusive" } : {}),
       });
 
       const subMetadata: Record<string, string> = {
         clientId,
         description: description.trim(),
         interval,
+        taxRateId: taxRateId ?? "",
       };
       if (totalPayments != null) {
         subMetadata.totalPayments = String(totalPayments);
@@ -142,6 +154,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         collection_method: "send_invoice",
         days_until_due: 30,
         metadata: subMetadata,
+        ...(taxRateId ? { default_tax_rates: [taxRateId] } : {}),
       });
 
       // Finalize first invoice if it's a draft

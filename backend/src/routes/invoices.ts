@@ -16,6 +16,7 @@ interface CreateInvoiceBody {
   description: string;
   dueDate?: string | null;
   waiveFee?: boolean;
+  taxRateId?: string | null;
 }
 
 interface InvoiceParams {
@@ -55,7 +56,15 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
     "/invoices",
     { preHandler: requireAdminJwt },
     async (req, res) => {
-      const { clientId, workspace, amountCents, description, dueDate, waiveFee = false } = req.body;
+      const {
+        clientId,
+        workspace,
+        amountCents,
+        description,
+        dueDate,
+        waiveFee = false,
+        taxRateId,
+      } = req.body;
 
       if (!isWorkspace(workspace)) {
         return res
@@ -71,6 +80,14 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
       }
       if (!description || description.trim().length === 0) {
         return res.status(400).send({ error: "description is required." });
+      }
+
+      if (taxRateId) {
+        try {
+          await stripe.taxRates.retrieve(taxRateId);
+        } catch {
+          return res.status(400).send({ error: "Invalid taxRateId." });
+        }
       }
 
       const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
@@ -129,7 +146,13 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
           baseAmount: amountCents.toString(),
           feeAmount: waiveFee ? "0" : feeAmount.toString(),
           waivedFeeAmount: waiveFee ? feeAmount.toString() : "0",
+          taxRateId: taxRateId ?? "",
         },
+        ...(taxRateId
+          ? {
+              default_tax_rates: [taxRateId],
+            }
+          : {}),
       });
 
       const finalized = await stripe.invoices.finalizeInvoice(invoice.id);

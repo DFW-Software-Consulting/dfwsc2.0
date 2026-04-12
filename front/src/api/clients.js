@@ -31,3 +31,10 @@ export const importStripeCustomer = (token, stripeCustomerId, groupId, workspace
     method: "POST",
     body: { stripeCustomerId, groupId, workspace },
   });
+
+export const syncStripeCustomer = (token, body) =>
+  apiFetch("/stripe/sync-customer", {
+    token,
+    method: "POST",
+    body,
+  });
