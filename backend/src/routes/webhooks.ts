@@ -120,6 +120,65 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           );
           break;
         }
+        case "invoice.paid": {
+          const inv = event.data.object as Stripe.Invoice;
+          fastify.log.info(
+            {
+              invoiceId: inv.id,
+              subscriptionId: inv.subscription,
+              clientId: inv.metadata?.clientId,
+            },
+            "Invoice paid - updating payment count."
+          );
+          // Track payment count in subscription metadata
+          if (inv.subscription && typeof inv.subscription === "string") {
+            try {
+              const sub = await stripe.subscriptions.retrieve(inv.subscription);
+              const currentPayments = parseInt(sub.metadata?.paymentsMade ?? "0", 10) || 0;
+              await stripe.subscriptions.update(inv.subscription, {
+                metadata: {
+                  ...sub.metadata,
+                  paymentsMade: String(currentPayments + 1),
+                  lastPaidAt: new Date().toISOString(),
+                },
+              });
+            } catch (err) {
+              fastify.log.warn(
+                { err, subscriptionId: inv.subscription },
+                "Failed to update subscription payment count."
+              );
+            }
+          }
+          break;
+        }
+        case "subscription_schedule.completed": {
+          const schedule = event.data.object as Stripe.SubscriptionSchedule;
+          fastify.log.info(
+            { scheduleId: schedule.id, clientId: schedule.metadata?.clientId },
+            "Subscription schedule completed - all payments made."
+          );
+          // Mark as completed in metadata
+          try {
+            await stripe.subscriptionSchedules.update(schedule.id, {
+              metadata: {
+                ...schedule.metadata,
+                status: "completed",
+                completedAt: new Date().toISOString(),
+              },
+            });
+          } catch (err) {
+            fastify.log.warn({ err, scheduleId: schedule.id }, "Failed to update schedule status.");
+          }
+          break;
+        }
+        case "subscription_schedule.canceled": {
+          const schedule = event.data.object as Stripe.SubscriptionSchedule;
+          fastify.log.info(
+            { scheduleId: schedule.id, clientId: schedule.metadata?.clientId },
+            "Subscription schedule cancelled."
+          );
+          break;
+        }
         default: {
           fastify.log.debug({ eventType: event.type }, "Unhandled Stripe event type.");
         }
