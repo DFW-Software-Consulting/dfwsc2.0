@@ -277,9 +277,15 @@ export function createAppDbMock(dataStore: AppDataStore) {
           };
         }
         if (isTable(table, "webhook_events")) {
-          if (!dataStore.webhookEvents.has(payload.stripeEventId)) {
+          const wasNew = !dataStore.webhookEvents.has(payload.stripeEventId);
+          if (wasNew) {
             dataStore.webhookEvents.set(payload.stripeEventId, { ...payload });
           }
+          return {
+            onConflictDoNothing: (_opts?: any) => ({
+              returning: async (_fields?: any) => (wasNew ? [{ id: payload.id }] : []),
+            }),
+          };
         }
         if (isTable(table, "onboarding_tokens")) {
           const next = {

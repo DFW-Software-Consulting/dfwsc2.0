@@ -91,27 +91,31 @@ export function calculateIterations(
       return Math.ceil(diffDays / 14);
     }
     case "month": {
-      const yearDiff = end.getUTCFullYear() - start.getUTCFullYear();
-      const monthDiff = end.getUTCMonth() - start.getUTCMonth();
-      const dayDiff = end.getUTCDate() - start.getUTCDate();
-      // If end day is before start day, we haven't completed the full month
-      const totalMonths = yearDiff * 12 + monthDiff + (dayDiff >= 0 ? 0 : -1);
-      return Math.max(1, totalMonths + 1); // Include the starting month
+      let count = 0;
+      const cursor = new Date(start);
+      while (cursor < end) {
+        cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+        count++;
+      }
+      return Math.max(1, count);
     }
     case "quarter": {
-      const yearDiff = end.getUTCFullYear() - start.getUTCFullYear();
-      const monthDiff = end.getUTCMonth() - start.getUTCMonth();
-      const dayDiff = end.getUTCDate() - start.getUTCDate();
-      const totalMonths = yearDiff * 12 + monthDiff + (dayDiff >= 0 ? 0 : -1);
-      return Math.max(1, Math.ceil((totalMonths + 1) / 3));
+      let count = 0;
+      const cursor = new Date(start);
+      while (cursor < end) {
+        cursor.setUTCMonth(cursor.getUTCMonth() + 3);
+        count++;
+      }
+      return Math.max(1, count);
     }
     case "year": {
-      const yearDiff = end.getUTCFullYear() - start.getUTCFullYear();
-      const monthDiff = end.getUTCMonth() - start.getUTCMonth();
-      const dayDiff = end.getUTCDate() - start.getUTCDate();
-      // If end is before the anniversary date, subtract a year
-      const totalYears = yearDiff + (monthDiff > 0 || (monthDiff === 0 && dayDiff >= 0) ? 0 : -1);
-      return Math.max(1, totalYears + 1); // Include the starting year
+      let count = 0;
+      const cursor = new Date(start);
+      while (cursor < end) {
+        cursor.setUTCFullYear(cursor.getUTCFullYear() + 1);
+        count++;
+      }
+      return Math.max(1, count);
     }
     default:
       return 0;
@@ -135,12 +139,21 @@ export function calculateNextPaymentDate(
       return new Date(start.getTime() + paymentsMade * 14 * 24 * 60 * 60 * 1000);
     case "month": {
       const next = new Date(start);
-      next.setUTCMonth(next.getUTCMonth() + paymentsMade);
+      const targetMonth = next.getUTCMonth() + paymentsMade;
+      next.setUTCMonth(targetMonth);
+      // Clamp overflow: e.g. Jan 31 + 1 month overflows to Mar — roll back to last day of target month
+      if (next.getUTCMonth() !== ((targetMonth % 12) + 12) % 12) {
+        next.setUTCDate(0);
+      }
       return next;
     }
     case "quarter": {
       const next = new Date(start);
-      next.setUTCMonth(next.getUTCMonth() + paymentsMade * 3);
+      const targetMonth = next.getUTCMonth() + paymentsMade * 3;
+      next.setUTCMonth(targetMonth);
+      if (next.getUTCMonth() !== ((targetMonth % 12) + 12) % 12) {
+        next.setUTCDate(0);
+      }
       return next;
     }
     case "year": {

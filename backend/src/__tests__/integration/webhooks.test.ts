@@ -392,7 +392,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
-  it("returns 200 for invoice.paid even when subscription update fails", async () => {
+  it("returns 500 for invoice.paid when subscription update fails (so Stripe retries)", async () => {
     const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const retrieveMock = stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>;
     retrieveMock.mockRejectedValueOnce(new Error("stripe retrieve failed"));
@@ -406,8 +406,8 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     const response = await sendWebhook(app, event);
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ received: true });
+    // Error must propagate so processedAt is NOT set and Stripe will retry
+    expect(response.statusCode).toBe(500);
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
@@ -437,7 +437,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
-  it("returns 200 for subscription_schedule.completed even when metadata update fails", async () => {
+  it("returns 500 for subscription_schedule.completed when metadata update fails (so Stripe retries)", async () => {
     const scheduleUpdateMock = stripe.subscriptionSchedules.update as ReturnType<typeof vi.fn>;
     scheduleUpdateMock.mockRejectedValueOnce(new Error("schedule update failed"));
 
@@ -449,8 +449,8 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     const response = await sendWebhook(app, event);
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ received: true });
+    // Error must propagate so processedAt is NOT set and Stripe will retry
+    expect(response.statusCode).toBe(500);
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });

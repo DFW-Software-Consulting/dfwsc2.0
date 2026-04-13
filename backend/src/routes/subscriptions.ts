@@ -145,6 +145,7 @@ async function getDashboardStripeData(workspace: Workspace): Promise<{
   ]);
 
   if (DASHBOARD_CACHE_TTL_MS > 0) {
+    if (dashboardStripeCache.size >= 50) dashboardStripeCache.clear();
     dashboardStripeCache.set(workspace, {
       expiresAt: now + DASHBOARD_CACHE_TTL_MS,
       subscriptions,

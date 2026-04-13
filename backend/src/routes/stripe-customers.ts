@@ -145,6 +145,25 @@ async function listAllStripeCustomers(): Promise<StripeCustomer[]> {
   return customers;
 }
 
+const RECONCILE_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 5 * 60 * 1000;
+
+type ReconcileCacheEntry = { expiresAt: number; result: ReconciliationResult };
+const reconcileCache = new Map<string, ReconcileCacheEntry>();
+
+async function getCachedReconciliation(
+  workspace: string,
+  forceRefresh = false
+): Promise<ReconciliationResult> {
+  const now = Date.now();
+  const cached = reconcileCache.get(workspace);
+  if (!forceRefresh && cached && cached.expiresAt > now) return cached.result;
+  const result = await reconcileDfwscCustomers();
+  if (RECONCILE_CACHE_TTL_MS > 0) {
+    reconcileCache.set(workspace, { expiresAt: now + RECONCILE_CACHE_TTL_MS, result });
+  }
+  return result;
+}
+
 async function reconcileDfwscCustomers(): Promise<ReconciliationResult> {
   const allStripe = await listAllStripeCustomers();
 
@@ -282,12 +301,10 @@ async function reconcileDfwscCustomers(): Promise<ReconciliationResult> {
 
 const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
   // GET /stripe/customers - List Stripe customers not yet in the system
-  app.get<{ Querystring: { limit?: number; starting_after?: string; workspace?: string } }>(
-    "/stripe/customers",
-    { preHandler: requireAdminJwt },
-    async (req, res) => {
+  // biome-ignore format: keep route signature on one line for readability
+  app.get<{ Querystring: { limit?: number; starting_after?: string; workspace?: string; refresh?: string } }>( "/stripe/customers", { preHandler: requireAdminJwt }, async (req, res) => {
       try {
-        const { limit = 100, starting_after, workspace } = req.query;
+        const { limit = 100, starting_after, workspace, refresh } = req.query;
 
         if (!isWorkspace(workspace)) {
           return res.status(400).send({
@@ -319,7 +336,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
         );
 
         if (workspace === "dfwsc_services") {
-          const reconciliation = await reconcileDfwscCustomers();
+          const reconciliation = await getCachedReconciliation(workspace, refresh === "true");
           return res.status(200).send({
             toImport: reconciliation.toImport.map((item) => ({
               stripeCustomerId: item.stripeCustomer.id,

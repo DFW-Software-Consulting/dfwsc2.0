@@ -32,7 +32,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: `Webhook Error: ${message}` });
     }
 
-    await db
+    const [inserted] = await db
       .insert(webhookEvents)
       .values({
         id: uuidv4(),
@@ -40,16 +40,19 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         type: event.type,
         payload: JSON.parse(JSON.stringify(event)) as Record<string, unknown>,
       })
-      .onConflictDoNothing({ target: webhookEvents.stripeEventId });
+      .onConflictDoNothing({ target: webhookEvents.stripeEventId })
+      .returning({ id: webhookEvents.id });
 
-    const [existingEvent] = await db
-      .select({ processedAt: webhookEvents.processedAt })
-      .from(webhookEvents)
-      .where(eq(webhookEvents.stripeEventId, event.id))
-      .limit(1);
-
-    if (existingEvent?.processedAt) {
-      return reply.send({ received: true });
+    if (!inserted) {
+      // A prior delivery already inserted this event; check if it was processed
+      const [existing] = await db
+        .select({ processedAt: webhookEvents.processedAt })
+        .from(webhookEvents)
+        .where(eq(webhookEvents.stripeEventId, event.id))
+        .limit(1);
+      if (existing?.processedAt) {
+        return reply.send({ received: true });
+      }
     }
 
     switch (event.type) {
@@ -154,25 +157,15 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         );
 
         if (inv.subscription && typeof inv.subscription === "string") {
-          const subscriptionId = inv.subscription;
-          void (async () => {
-            try {
-              const sub = await stripe.subscriptions.retrieve(subscriptionId);
-              const currentPayments = parseInt(sub.metadata?.paymentsMade ?? "0", 10) || 0;
-              await stripe.subscriptions.update(subscriptionId, {
-                metadata: {
-                  ...sub.metadata,
-                  paymentsMade: String(currentPayments + 1),
-                  lastPaidAt: new Date().toISOString(),
-                },
-              });
-            } catch (err) {
-              fastify.log.warn(
-                { err, subscriptionId },
-                "Failed to update subscription payment count."
-              );
-            }
-          })();
+          const sub = await stripe.subscriptions.retrieve(inv.subscription);
+          const currentPayments = parseInt(sub.metadata?.paymentsMade ?? "0", 10) || 0;
+          await stripe.subscriptions.update(inv.subscription, {
+            metadata: {
+              ...sub.metadata,
+              paymentsMade: String(currentPayments + 1),
+              lastPaidAt: new Date().toISOString(),
+            },
+          });
         }
         break;
       }
@@ -183,20 +176,13 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           "Subscription schedule completed - all payments made."
         );
 
-        const scheduleId = schedule.id;
-        void (async () => {
-          try {
-            await stripe.subscriptionSchedules.update(scheduleId, {
-              metadata: {
-                ...schedule.metadata,
-                status: "completed",
-                completedAt: new Date().toISOString(),
-              },
-            });
-          } catch (err) {
-            fastify.log.warn({ err, scheduleId }, "Failed to update schedule status.");
-          }
-        })();
+        await stripe.subscriptionSchedules.update(schedule.id, {
+          metadata: {
+            ...schedule.metadata,
+            status: "completed",
+            completedAt: new Date().toISOString(),
+          },
+        });
         break;
       }
       case "subscription_schedule.canceled": {
