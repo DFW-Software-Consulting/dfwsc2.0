@@ -20,16 +20,24 @@ interface RequestWithClient extends FastifyRequest {
 async function requireClientOrAdmin(request: FastifyRequest, reply: FastifyReply) {
   const apiKeyHeader = request.headers["x-api-key"];
 
+  interface ReplyMock {
+    sent: boolean;
+    statusCode: number;
+    code(n: number): ReplyMock;
+    status(n: number): ReplyMock;
+    send(p: unknown): ReplyMock;
+  }
+
   const runAuthCheck = async (
     checker: (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>
   ) => {
-    const state = {
+    const state: { sent: boolean; statusCode: number; payload: unknown } = {
       sent: false,
       statusCode: 200,
-      payload: undefined as unknown,
+      payload: undefined,
     };
 
-    const replyMock = {
+    const replyMock: ReplyMock = {
       sent: false,
       statusCode: 200,
       code(code: number) {
@@ -48,9 +56,9 @@ async function requireClientOrAdmin(request: FastifyRequest, reply: FastifyReply
         this.sent = true;
         return this;
       },
-    } as unknown as FastifyReply;
+    };
 
-    await checker(request, replyMock);
+    await checker(request, replyMock as unknown as FastifyReply);
     return state;
   };
 

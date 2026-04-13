@@ -24,6 +24,10 @@ import {
   type Workspace,
 } from "../lib/validation";
 
+interface StripeSubscriptionWithPeriod extends Stripe.Subscription {
+  current_period_end: number;
+}
+
 // Legacy interface for backward compatibility during transition
 interface CreateSubscriptionBodyLegacy {
   clientId: string;
@@ -214,9 +218,11 @@ function formatStripeSchedule(
   const totalPayments = schedule.metadata?.totalPayments
     ? Number(schedule.metadata.totalPayments)
     : null;
+  const phaseItem = phase?.items?.[0] as { plan?: { amount?: number } } | undefined;
+  const phaseItemAmount = phaseItem?.plan?.amount ?? 0;
   const amountPerPaymentCents = schedule.metadata?.amountPerPaymentCents
     ? Number(schedule.metadata.amountPerPaymentCents)
-    : (item?.plan?.amount ?? 0);
+    : phaseItemAmount;
   const totalAmountCents = schedule.metadata?.totalAmountCents
     ? Number(schedule.metadata.totalAmountCents)
     : null;
@@ -445,6 +451,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
 
         let schedule: Stripe.SubscriptionSchedule;
         try {
+          // @ts-expect-error: Stripe SDK typings missing subscriptionSchedules.create overload for phases with items
           schedule = await stripe.subscriptionSchedules.create({
             customer: customerId,
             start_date: startTimestamp,
@@ -770,10 +777,6 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       return res.status(422).send({ error: "Cannot modify a cancelled subscription." });
     }
 
-    if (status === "active" && currentStatus === "cancelled") {
-      return res.status(422).send({ error: "Cannot resume a cancelled subscription." });
-    }
-
     if (isSchedule) {
       // Handle subscription schedule updates
       let updated = schedule!;
@@ -854,11 +857,11 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         clientRows.filter((c) => c.workspace === workspace).map((c) => c.id)
       );
 
-      const filteredSubs = allSubscriptions.filter((s) =>
-        scopedClientIds.has(s.metadata?.clientId)
+      const filteredSubs = allSubscriptions.filter(
+        (s) => s.metadata?.clientId && scopedClientIds.has(s.metadata.clientId)
       );
-      const filteredSchedules = allSchedules.filter((s) =>
-        scopedClientIds.has(s.metadata?.clientId)
+      const filteredSchedules = allSchedules.filter(
+        (s) => s.metadata?.clientId && scopedClientIds.has(s.metadata.clientId)
       );
 
       const activeSubs = filteredSubs.filter(
@@ -948,8 +951,10 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           type: "recurring",
           amountPerPaymentCents: sub.items.data[0]?.price?.unit_amount ?? 0,
           interval: sub.metadata?.interval ?? "month",
-          nextPaymentDate: sub.current_period_end
-            ? new Date(sub.current_period_end * 1000).toISOString()
+          nextPaymentDate: (sub as StripeSubscriptionWithPeriod).current_period_end
+            ? new Date(
+                (sub as StripeSubscriptionWithPeriod).current_period_end * 1000
+              ).toISOString()
             : null,
           status: "active",
         });
@@ -969,7 +974,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           type: "payment_plan",
           amountPerPaymentCents: sch.metadata?.amountPerPaymentCents
             ? Number(sch.metadata.amountPerPaymentCents)
-            : (phase?.items?.[0]?.plan?.amount ?? 0),
+            : ((phase?.items?.[0]?.plan as { amount?: number })?.amount ?? 0),
           interval: sch.metadata?.interval ?? "month",
           startDate: sch.metadata?.startDate,
           endDate: sch.metadata?.endDate,
@@ -1023,8 +1028,10 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           type: sub.metadata?.type ?? "recurring",
           amountPerPaymentCents: sub.items.data[0]?.price?.unit_amount ?? 0,
           interval: sub.metadata?.interval ?? "month",
-          pastDueSince: sub.current_period_end
-            ? new Date(sub.current_period_end * 1000).toISOString()
+          pastDueSince: (sub as StripeSubscriptionWithPeriod).current_period_end
+            ? new Date(
+                (sub as StripeSubscriptionWithPeriod).current_period_end * 1000
+              ).toISOString()
             : null,
           status: "past_due",
         });
@@ -1086,7 +1093,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           type: "payment_plan",
           amountPerPaymentCents: sch.metadata?.amountPerPaymentCents
             ? Number(sch.metadata.amountPerPaymentCents)
-            : (phase?.items?.[0]?.plan?.amount ?? 0),
+            : ((phase?.items?.[0]?.plan as { amount?: number })?.amount ?? 0),
           interval: sch.metadata?.interval ?? "month",
           endDate: phase?.end_date
             ? new Date(phase.end_date * 1000).toISOString().split("T")[0]
@@ -1122,9 +1129,13 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const canceledSchedules = allSchedules.filter((s) => s.status === "canceled");
 
       // Filter by cancellation time
-      const recentlyCancelledSubs = canceledSubs.filter((s) => s.canceled_at >= cutoffTimestamp);
+      const recentlyCancelledSubs = canceledSubs.filter(
+        (s) =>
+          s.canceled_at !== null && s.canceled_at !== undefined && s.canceled_at >= cutoffTimestamp
+      );
       const recentlyCancelledSchedules = canceledSchedules.filter(
-        (s) => s.canceled_at && s.canceled_at >= cutoffTimestamp
+        (s) =>
+          s.canceled_at !== null && s.canceled_at !== undefined && s.canceled_at >= cutoffTimestamp
       );
 
       const allClientIds = [
