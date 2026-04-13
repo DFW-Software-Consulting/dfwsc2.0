@@ -361,4 +361,42 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
+
+  it("returns 200 for invoice.paid even when subscription update fails", async () => {
+    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const retrieveMock = stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>;
+    retrieveMock.mockRejectedValueOnce(new Error("stripe retrieve failed"));
+
+    const event = makeStripeEvent("invoice.paid", {
+      id: "inv_paid_failure_branch",
+      subscription: subscriptionId,
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for subscription_schedule.completed even when metadata update fails", async () => {
+    const scheduleUpdateMock = stripe.subscriptionSchedules.update as ReturnType<typeof vi.fn>;
+    scheduleUpdateMock.mockRejectedValueOnce(new Error("schedule update failed"));
+
+    const event = makeStripeEvent("subscription_schedule.completed", {
+      id: "sched_completed_error_branch",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
 });

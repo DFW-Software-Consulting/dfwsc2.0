@@ -96,6 +96,20 @@ describe("Settings API Integration", () => {
       expect(response.json().error).toBe("Invalid setting key.");
     });
 
+    it("should return 400 when value is null", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/settings/company_name",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { value: null },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("Value is required.");
+    });
+
     it("should validate default_fee_cents", async () => {
       const response = await app.inject({
         method: "PATCH",

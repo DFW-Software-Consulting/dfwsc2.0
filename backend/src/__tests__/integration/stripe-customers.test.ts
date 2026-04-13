@@ -45,6 +45,9 @@ describe("Stripe Customers API Integration", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListCustomers.mockReset();
+    mockRetrieveCustomer.mockReset();
+    mockUpdateCustomer.mockReset();
   });
 
   afterEach(async () => {
@@ -242,6 +245,30 @@ describe("Stripe Customers API Integration", () => {
           }),
         ])
       );
+    });
+
+    it("returns 400 when workspace is missing", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/stripe/customers",
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/workspace query parameter is required/i);
+    });
+
+    it("returns 500 when Stripe customer listing fails", async () => {
+      mockListCustomers.mockRejectedValueOnce(new Error("stripe list failed"));
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/stripe/customers?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(response.json().error).toBe("Internal server error");
     });
   });
 
@@ -467,6 +494,36 @@ describe("Stripe Customers API Integration", () => {
       expect(client.defaultPaymentTermsDays).toBe(45);
       expect(client.notes).toBe("Imported from Stripe");
     });
+
+    it("returns 400 when import workspace is invalid", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/import-customer",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { stripeCustomerId: "cus_any", workspace: "invalid_workspace" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/workspace is required/i);
+    });
+
+    it("returns 500 when Stripe retrieve fails during import", async () => {
+      mockRetrieveCustomer.mockRejectedValueOnce(new Error("stripe retrieve failed"));
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/import-customer",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { stripeCustomerId: "cus_failure", workspace },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(response.json().error).toBe("Internal server error");
+    });
   });
 
   describe("POST /api/v1/stripe/sync-customer", () => {
@@ -534,6 +591,313 @@ describe("Stripe Customers API Integration", () => {
       expect(updated.defaultPaymentTermsDays).toBe(30);
       expect(updated.name).toBe("Local Name");
       expect(updated.notes).toBe("Keep local notes");
+    });
+
+    it("returns 400 when workspace is not dfwsc_services", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/sync-customer",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          stripeCustomerId: "cus_any",
+          localClientId: randomUUID(),
+          workspace: "client_portal",
+          resolutions: [{ fieldName: "name", source: "local" }],
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/only available for dfwsc_services/i);
+    });
+
+    it("returns 400 when required sync fields are missing", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/sync-customer",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          stripeCustomerId: "",
+          localClientId: "",
+          workspace: "dfwsc_services",
+          resolutions: [],
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/required/i);
+    });
+
+    it("returns 404 when local client does not exist", async () => {
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: "cus_missing_local",
+        name: "Stripe Name",
+        email: "stripe@example.com",
+        metadata: {},
+        address: null,
+        phone: null,
+        created: 123,
+        deleted: false,
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/sync-customer",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          stripeCustomerId: "cus_missing_local",
+          localClientId: randomUUID(),
+          workspace: "dfwsc_services",
+          resolutions: [{ fieldName: "name", source: "stripe" }],
+        },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error).toMatch(/local client not found/i);
+    });
+
+    it("returns 200 and skips updates for unknown resolution fields", async () => {
+      const localClientId = randomUUID();
+      cleanupIds.push(localClientId);
+
+      await db.insert(clients).values({
+        id: localClientId,
+        name: "Local Client",
+        email: "local-unknown-fields@example.com",
+        workspace: "dfwsc_services",
+        stripeCustomerId: "cus_sync_unknown",
+        status: "active",
+      });
+
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: "cus_sync_unknown",
+        name: "Stripe Name",
+        email: "stripe@example.com",
+        metadata: {},
+        address: null,
+        phone: null,
+        created: 123,
+        deleted: false,
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/sync-customer",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          stripeCustomerId: "cus_sync_unknown",
+          localClientId,
+          workspace: "dfwsc_services",
+          resolutions: [{ fieldName: "unknownField", source: "local" }],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ success: true });
+      expect(mockUpdateCustomer).not.toHaveBeenCalled();
+    });
+
+    it("keeps local email unchanged when Stripe email is invalid", async () => {
+      const localClientId = randomUUID();
+      const stripeCustomerId = "cus_sync_bad_email";
+      cleanupIds.push(localClientId);
+
+      await db.insert(clients).values({
+        id: localClientId,
+        name: "Email Source",
+        email: "local-valid@example.com",
+        workspace: "dfwsc_services",
+        stripeCustomerId,
+        status: "active",
+      });
+
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: stripeCustomerId,
+        name: "Stripe Bad Email",
+        email: "not-an-email",
+        phone: null,
+        address: null,
+        metadata: {},
+        created: 12345,
+        deleted: false,
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/sync-customer",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          stripeCustomerId,
+          localClientId,
+          workspace: "dfwsc_services",
+          resolutions: [{ fieldName: "email", source: "stripe" }],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+
+      const [updated] = await db.select().from(clients).where(eq(clients.id, localClientId));
+      expect(updated.email).toBe("local-valid@example.com");
+    });
+
+    it("syncs address fields from local into Stripe nested address", async () => {
+      const localClientId = randomUUID();
+      const stripeCustomerId = "cus_sync_addr_nested";
+      cleanupIds.push(localClientId);
+
+      await db.insert(clients).values({
+        id: localClientId,
+        name: "Addr Local",
+        email: "addr-local@example.com",
+        addressLine1: "123 Main",
+        city: "Dallas",
+        state: "TX",
+        postalCode: "75001",
+        country: "US",
+        workspace: "dfwsc_services",
+        stripeCustomerId,
+        status: "active",
+      });
+
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: stripeCustomerId,
+        name: "Stripe Address",
+        email: "stripe-address@example.com",
+        phone: null,
+        address: null,
+        metadata: {},
+        created: 12345,
+        deleted: false,
+      });
+      mockUpdateCustomer.mockResolvedValueOnce({ id: stripeCustomerId });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/sync-customer",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          stripeCustomerId,
+          localClientId,
+          workspace: "dfwsc_services",
+          resolutions: [
+            { fieldName: "addressLine1", source: "local" },
+            { fieldName: "city", source: "local" },
+            { fieldName: "state", source: "local" },
+            { fieldName: "postalCode", source: "local" },
+            { fieldName: "country", source: "local" },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(mockUpdateCustomer).toHaveBeenCalledWith(
+        stripeCustomerId,
+        expect.objectContaining({
+          address: expect.objectContaining({
+            line1: "123 Main",
+            city: "Dallas",
+            state: "TX",
+            postal_code: "75001",
+            country: "US",
+          }),
+        })
+      );
+    });
+
+    it("returns 500 when Stripe update fails during sync", async () => {
+      const localClientId = randomUUID();
+      const stripeCustomerId = "cus_sync_update_fail";
+      cleanupIds.push(localClientId);
+
+      await db.insert(clients).values({
+        id: localClientId,
+        name: "Sync Fail",
+        email: "sync-fail@example.com",
+        workspace: "dfwsc_services",
+        stripeCustomerId,
+        status: "active",
+      });
+
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: stripeCustomerId,
+        name: "Stripe Sync Fail",
+        email: "stripe-sync-fail@example.com",
+        phone: null,
+        address: null,
+        metadata: {},
+        created: 12345,
+        deleted: false,
+      });
+      mockUpdateCustomer.mockRejectedValueOnce(new Error("update failed"));
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/sync-customer",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          stripeCustomerId,
+          localClientId,
+          workspace: "dfwsc_services",
+          resolutions: [{ fieldName: "name", source: "local" }],
+        },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(response.json().error).toBe("Internal server error");
+    });
+
+    it("syncs app metadata fields from Stripe into local client", async () => {
+      const localClientId = randomUUID();
+      const stripeCustomerId = "cus_sync_app_fields";
+      cleanupIds.push(localClientId);
+
+      await db.insert(clients).values({
+        id: localClientId,
+        name: "App Fields Local",
+        email: "app-fields-local@example.com",
+        billingContactName: "Old Billing",
+        notes: "Old note",
+        defaultPaymentTermsDays: 15,
+        workspace: "dfwsc_services",
+        stripeCustomerId,
+        status: "active",
+      });
+
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: stripeCustomerId,
+        name: "Stripe App Fields",
+        email: "stripe-app-fields@example.com",
+        phone: null,
+        address: null,
+        metadata: {
+          billingContactName: "New Billing",
+          notes: "New note",
+          defaultPaymentTermsDays: "45",
+        },
+        created: 12345,
+        deleted: false,
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/sync-customer",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          stripeCustomerId,
+          localClientId,
+          workspace: "dfwsc_services",
+          resolutions: [
+            { fieldName: "billingContactName", source: "stripe" },
+            { fieldName: "notes", source: "stripe" },
+            { fieldName: "defaultPaymentTermsDays", source: "stripe" },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const [updated] = await db.select().from(clients).where(eq(clients.id, localClientId));
+      expect(updated.billingContactName).toBe("New Billing");
+      expect(updated.notes).toBe("New note");
+      expect(updated.defaultPaymentTermsDays).toBe(45);
     });
   });
 });
