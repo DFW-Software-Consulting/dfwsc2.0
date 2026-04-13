@@ -39,14 +39,77 @@ All payments resolve platform fees via a 5-level priority chain:
 - **Admin/Onboard Routes**: 10 req/min per IP.
 - **Payment Routes**: 20 req/min per Stripe Account ID (fallback to IP).
 
-## 5. API Route Map
+## 5. Workspace Separation
+All client-facing entities include a `workspace` field that separates:
+- **`client_portal`** — External consulting clients
+- **`dfwsc_services`** — Internal DFWSC service clients
+
+Routes like `/clients` and `/dfwsc-clients` provide filtered access by workspace.
+
+## 6. API Route Map
 All routes are prefixed with `/api/v1`.
 
-| Method | Path | Auth |
-|--------|------|------|
-| GET | `/health` | Public |
-| POST | `/auth/login` | Public |
-| GET | `/clients` | Admin |
-| POST | `/payments/create` | API Key |
-| POST | `/webhooks/stripe` | Stripe Signature |
-| ... | (See CLAUDE.md for full list) | ... |
+### Public Routes
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| GET | `/config` | Public config (useCheckout flag) |
+| GET | `/auth/setup/status` | Check if setup is needed |
+
+### Authentication
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/auth/login` | Admin login (returns JWT) | Public |
+| POST | `/auth/setup` | First-run setup (legacy) | Public |
+| POST | `/auth/confirm-bootstrap` | Finalize admin setup | Public |
+
+### Clients & Groups
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| GET | `/clients` | List clients | Admin JWT |
+| POST | `/accounts` | Create client | Admin JWT |
+| PATCH | `/clients/:id` | Update client | Admin JWT |
+| GET | `/dfwsc-clients` | List DFWSC workspace clients | Admin JWT |
+| GET | `/groups` | List groups | Admin JWT |
+| POST | `/groups` | Create group | Admin JWT |
+| PATCH | `/groups/:id` | Update group | Admin JWT |
+
+### Onboarding
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/onboard-client/initiate` | Send onboarding email | Admin JWT |
+| POST | `/onboard-client/resend` | Resend onboarding email | Admin JWT |
+| GET | `/onboard-client` | Get Stripe onboarding link | Public (token) |
+| GET | `/connect/callback` | Stripe Connect callback | Public |
+| GET | `/connect/refresh` | Refresh account link | Public |
+
+### Payments & Billing
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/payments/create` | Create payment | API Key |
+| GET | `/reports/payments` | List payments | Admin JWT |
+| GET | `/invoices` | List invoices | Admin JWT |
+| POST | `/invoices` | Create invoice | Admin JWT |
+| PATCH | `/invoices/:id` | Cancel invoice | Admin JWT |
+| GET | `/invoices/pay/:token` | Get invoice by token | Public |
+| POST | `/invoices/pay/:token` | Submit invoice payment | Public |
+| GET | `/subscriptions` | List subscriptions | Admin JWT |
+| POST | `/subscriptions` | Create subscription | Admin JWT |
+| GET | `/subscriptions/:id` | Get subscription details | Admin JWT |
+| PATCH | `/subscriptions/:id` | Update subscription | Admin JWT |
+
+### Stripe Management
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| GET | `/products` | List Stripe products | Admin JWT |
+| POST | `/products` | Create Stripe product | Admin JWT |
+| GET | `/stripe-customers` | List Stripe customers | Admin JWT |
+| POST | `/stripe-customers` | Create Stripe customer | Admin JWT |
+
+### System
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| GET | `/settings` | Get system settings | Admin JWT |
+| POST | `/webhooks/stripe` | Stripe webhooks | Stripe Signature |
+
+For complete endpoint details, see `API_DOCS.md`.
