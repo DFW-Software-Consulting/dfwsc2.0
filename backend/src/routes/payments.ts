@@ -7,12 +7,7 @@ import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
-import {
-  STRIPE_LIST_LIMIT,
-  validateLimit,
-  validateWorkspace,
-  validateWorkspaceQuery,
-} from "../lib/validation";
+import { validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
 
 interface RequestWithClient extends FastifyRequest {
   client?: typeof clients.$inferSelect;
@@ -24,43 +19,57 @@ interface RequestWithClient extends FastifyRequest {
  */
 async function requireClientOrAdmin(request: FastifyRequest, reply: FastifyReply) {
   const apiKeyHeader = request.headers["x-api-key"];
-  let authError = false;
 
-  // 1. Try API Key if header exists
+  const runAuthCheck = async (
+    checker: (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>
+  ) => {
+    const state = {
+      sent: false,
+      statusCode: 200,
+      payload: undefined as unknown,
+    };
+
+    const replyMock = {
+      sent: false,
+      statusCode: 200,
+      code(code: number) {
+        state.statusCode = code;
+        this.statusCode = code;
+        return this;
+      },
+      status(code: number) {
+        state.statusCode = code;
+        this.statusCode = code;
+        return this;
+      },
+      send(payload: unknown) {
+        state.sent = true;
+        state.payload = payload;
+        this.sent = true;
+        return this;
+      },
+    } as unknown as FastifyReply;
+
+    await checker(request, replyMock);
+    return state;
+  };
+
   if (apiKeyHeader) {
-    try {
-      await requireApiKey(request, reply);
-    } catch {
-      throw new Error("System error during API key validation");
-    }
+    const apiKeyResult = await runAuthCheck(requireApiKey);
     if ((request as RequestWithClient).client) return;
-
-    // API key auth failed (returned 401 but didn't throw) - try JWT
-    const initialSent = reply.sent;
-    if (initialSent && reply.statusCode === 401) {
-      authError = true;
-      // Reset reply for next attempt
-      reply.sent = false;
+    if (apiKeyResult.statusCode >= 500) {
+      return reply.code(apiKeyResult.statusCode).send(apiKeyResult.payload);
+    }
+    if (!request.headers.authorization) {
+      return reply
+        .code(apiKeyResult.sent ? apiKeyResult.statusCode : 401)
+        .send(apiKeyResult.payload ?? { error: "Authentication required (API Key or Admin JWT)." });
     }
   }
 
-  // 2. Try Admin JWT
-  if (!(request as RequestWithClient).client) {
-    try {
-      await requireAdminJwt(request, reply);
-    } catch {
-      throw new Error("System error during JWT validation");
-    }
-    if ((request as RequestWithClient).client) return;
-
-    // Both failed
-    if (reply.sent && reply.statusCode === 401) {
-      authError = true;
-    }
-    if (!authError) {
-      return reply.code(401).send({ error: "Authentication required (API Key or Admin JWT)." });
-    }
-  }
+  const adminResult = await runAuthCheck(requireAdminJwt);
+  if (!adminResult.sent) return;
+  return reply.code(adminResult.statusCode).send(adminResult.payload);
 }
 
 function extractIdempotencyKey(request: FastifyRequest): string | undefined {

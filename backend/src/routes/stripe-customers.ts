@@ -120,15 +120,38 @@ interface ReconciliationResult {
   }>;
 }
 
+async function listAllStripeCustomers(): Promise<StripeCustomer[]> {
+  const customers: StripeCustomer[] = [];
+  let startingAfter: string | undefined;
+
+  while (true) {
+    const page = await stripe.customers.list({
+      limit: 100,
+      starting_after: startingAfter,
+    });
+    const data = page.data as StripeCustomer[];
+    customers.push(...data);
+
+    if (!page.has_more || data.length === 0) {
+      break;
+    }
+
+    startingAfter = data[data.length - 1]?.id;
+    if (!startingAfter) {
+      break;
+    }
+  }
+
+  return customers;
+}
+
 async function reconcileDfwscCustomers(): Promise<ReconciliationResult> {
-  const allStripeCustomers = await stripe.customers.list({ limit: 100 });
-  const allStripe = allStripeCustomers.data as StripeCustomer[];
+  const allStripe = await listAllStripeCustomers();
 
   const allLocalClients = await db
     .select()
     .from(clients)
-    .where(eq(clients.workspace, "dfwsc_services"))
-    .limit(100);
+    .where(eq(clients.workspace, "dfwsc_services"));
 
   const localByStripeId = new Map<string, LocalClient>();
   const localByEmail = new Map<string, LocalClient>();

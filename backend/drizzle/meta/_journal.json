@@ -43,6 +43,13 @@
       "when": 1776025414113,
       "tag": "0005_breezy_shape",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776029000000,
+      "tag": "0006_clients_billing_columns",
+      "breakpoints": true
     }
   ]
 }

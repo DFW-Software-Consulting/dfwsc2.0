@@ -229,6 +229,10 @@ export function createAppDbMock(dataStore: AppDataStore) {
               const record = dataStore.onboardingTokens.get(expr?.value);
               return record ? [record] : [];
             }
+            if (isTable(table, "webhook_events")) {
+              const row = dataStore.webhookEvents.get(expr?.value);
+              return row ? [row] : [];
+            }
             return [];
           })();
           return createWhereResult(rowsPromise);

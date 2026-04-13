@@ -345,6 +345,36 @@ describe("POST /api/v1/webhooks/stripe", () => {
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
+  it("returns 200 for customer.subscription.paused event", async () => {
+    const event = makeStripeEvent("customer.subscription.paused", {
+      id: "sub_paused123",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for customer.subscription.resumed event", async () => {
+    const event = makeStripeEvent("customer.subscription.resumed", {
+      id: "sub_resumed123",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
   it("returns 200 for invoice.paid event with subscription and updates payment count", async () => {
     const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const event = makeStripeEvent("invoice.paid", {
@@ -378,6 +408,31 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("does not reprocess duplicate webhook events", async () => {
+    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const retrieveMock = stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>;
+    const updateMock = stripe.subscriptions.update as ReturnType<typeof vi.fn>;
+
+    const event = makeStripeEvent("invoice.paid", {
+      id: `evt_duplicate_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      subscription: subscriptionId,
+      metadata: { clientId: "client_123" },
+    });
+
+    mockConstructEvent.mockReturnValue(event);
+
+    const first = await sendWebhook(app, event);
+    const second = await sendWebhook(app, event);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(retrieveMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });

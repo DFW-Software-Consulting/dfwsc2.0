@@ -29,6 +29,8 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
   useEffect(() => {
     if (preselectedClient?.id) {
       setClientId(preselectedClient.id);
+    } else {
+      setClientId("");
     }
   }, [preselectedClient]);
 
@@ -710,6 +712,8 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
   useEffect(() => {
     if (preselectedClient?.id) {
       setClientId(preselectedClient.id);
+    } else {
+      setClientId("");
     }
   }, [preselectedClient]);
 

@@ -91,24 +91,24 @@ export function calculateIterations(
       return Math.ceil(diffDays / 14);
     }
     case "month": {
-      const yearDiff = end.getFullYear() - start.getFullYear();
-      const monthDiff = end.getMonth() - start.getMonth();
-      const dayDiff = end.getDate() - start.getDate();
+      const yearDiff = end.getUTCFullYear() - start.getUTCFullYear();
+      const monthDiff = end.getUTCMonth() - start.getUTCMonth();
+      const dayDiff = end.getUTCDate() - start.getUTCDate();
       // If end day is before start day, we haven't completed the full month
       const totalMonths = yearDiff * 12 + monthDiff + (dayDiff >= 0 ? 0 : -1);
       return Math.max(1, totalMonths + 1); // Include the starting month
     }
     case "quarter": {
-      const yearDiff = end.getFullYear() - start.getFullYear();
-      const monthDiff = end.getMonth() - start.getMonth();
-      const dayDiff = end.getDate() - start.getDate();
+      const yearDiff = end.getUTCFullYear() - start.getUTCFullYear();
+      const monthDiff = end.getUTCMonth() - start.getUTCMonth();
+      const dayDiff = end.getUTCDate() - start.getUTCDate();
       const totalMonths = yearDiff * 12 + monthDiff + (dayDiff >= 0 ? 0 : -1);
       return Math.max(1, Math.ceil((totalMonths + 1) / 3));
     }
     case "year": {
-      const yearDiff = end.getFullYear() - start.getFullYear();
-      const monthDiff = end.getMonth() - start.getMonth();
-      const dayDiff = end.getDate() - start.getDate();
+      const yearDiff = end.getUTCFullYear() - start.getUTCFullYear();
+      const monthDiff = end.getUTCMonth() - start.getUTCMonth();
+      const dayDiff = end.getUTCDate() - start.getUTCDate();
       // If end is before the anniversary date, subtract a year
       const totalYears = yearDiff + (monthDiff > 0 || (monthDiff === 0 && dayDiff >= 0) ? 0 : -1);
       return Math.max(1, totalYears + 1); // Include the starting year
@@ -135,17 +135,17 @@ export function calculateNextPaymentDate(
       return new Date(start.getTime() + paymentsMade * 14 * 24 * 60 * 60 * 1000);
     case "month": {
       const next = new Date(start);
-      next.setMonth(next.getMonth() + paymentsMade);
+      next.setUTCMonth(next.getUTCMonth() + paymentsMade);
       return next;
     }
     case "quarter": {
       const next = new Date(start);
-      next.setMonth(next.getMonth() + paymentsMade * 3);
+      next.setUTCMonth(next.getUTCMonth() + paymentsMade * 3);
       return next;
     }
     case "year": {
       const next = new Date(start);
-      next.setFullYear(next.getFullYear() + paymentsMade);
+      next.setUTCFullYear(next.getUTCFullYear() + paymentsMade);
       return next;
     }
     default:

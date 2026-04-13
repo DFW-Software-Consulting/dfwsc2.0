@@ -526,7 +526,7 @@ describe("Subscriptions API", () => {
     it("returns 401 when no JWT provided", async () => {
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
       });
       expect(response.statusCode).toBe(401);
     });
@@ -536,14 +536,16 @@ describe("Subscriptions API", () => {
 
   describe("PATCH /api/v1/subscriptions/:id", () => {
     it("returns 200 and pauses subscription", async () => {
-      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(makeStripeSub({ status: "active" }));
+      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
+        makeStripeSub({ status: "active", metadata: { clientId, interval: "monthly" } })
+      );
       stripeMock.subscriptions.update.mockResolvedValueOnce(
         makeStripeSub({ pause_collection: { behavior: "void" } })
       );
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
@@ -560,7 +562,9 @@ describe("Subscriptions API", () => {
     });
 
     it("returns 200 and cancels subscription", async () => {
-      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(makeStripeSub({ status: "active" }));
+      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
+        makeStripeSub({ status: "active", metadata: { clientId, interval: "monthly" } })
+      );
       stripeMock.subscriptions.update.mockResolvedValueOnce(
         makeStripeSub({
           cancel_at_period_end: true,
@@ -570,7 +574,7 @@ describe("Subscriptions API", () => {
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
@@ -587,7 +591,11 @@ describe("Subscriptions API", () => {
 
     it("returns 200 and resumes a paused subscription", async () => {
       stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
-        makeStripeSub({ status: "active", pause_collection: { behavior: "void" } })
+        makeStripeSub({
+          status: "active",
+          pause_collection: { behavior: "void" },
+          metadata: { clientId, interval: "monthly" },
+        })
       );
       stripeMock.subscriptions.update.mockResolvedValueOnce(
         makeStripeSub({ status: "active", pause_collection: null })
@@ -595,7 +603,7 @@ describe("Subscriptions API", () => {
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
@@ -612,12 +620,12 @@ describe("Subscriptions API", () => {
 
     it("returns 422 when attempting to modify a cancelled (Stripe 'canceled') subscription", async () => {
       stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
-        makeStripeSub({ status: "canceled" })
+        makeStripeSub({ status: "canceled", metadata: { clientId, interval: "monthly" } })
       );
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
@@ -632,7 +640,7 @@ describe("Subscriptions API", () => {
     it("returns 400 when amountCents is sent", async () => {
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
@@ -645,7 +653,7 @@ describe("Subscriptions API", () => {
     it("returns 400 when description is sent", async () => {
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
@@ -656,7 +664,9 @@ describe("Subscriptions API", () => {
     });
 
     it("returns 200 and updates totalPayments metadata", async () => {
-      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(makeStripeSub({ status: "active" }));
+      stripeMock.subscriptions.retrieve.mockResolvedValueOnce(
+        makeStripeSub({ status: "active", metadata: { clientId, interval: "monthly" } })
+      );
       stripeMock.subscriptions.update.mockResolvedValueOnce(
         makeStripeSub({
           metadata: { clientId, description: "Hosting", interval: "monthly", totalPayments: "6" },
@@ -665,7 +675,7 @@ describe("Subscriptions API", () => {
 
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
@@ -680,7 +690,7 @@ describe("Subscriptions API", () => {
     it("returns 422 when totalPayments is 0", async () => {
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
@@ -694,7 +704,7 @@ describe("Subscriptions API", () => {
     it("returns 422 when totalPayments is a float", async () => {
       const response = await app.inject({
         method: "PATCH",
-        url: "/api/v1/subscriptions/sub_test_001",
+        url: `/api/v1/subscriptions/sub_test_001?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",
@@ -703,6 +713,36 @@ describe("Subscriptions API", () => {
       });
       expect(response.statusCode).toBe(422);
       expect(response.json().error).toMatch(/totalPayments/i);
+    });
+
+    it("returns 400 when workspace query param is missing", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/subscriptions/sub_test_001",
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: { status: "paused" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/workspace query parameter is required/i);
+    });
+
+    it("returns 400 when subscription does not match workspace", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/subscriptions/sub_test_001?workspace=dfwsc_services",
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: { status: "paused" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/does not belong to the selected workspace/i);
     });
 
     it("returns 404 for unknown id", async () => {
@@ -717,7 +757,7 @@ describe("Subscriptions API", () => {
 
       const response = await app.inject({
         method: "PATCH",
-        url: `/api/v1/subscriptions/${randomUUID()}`,
+        url: `/api/v1/subscriptions/${randomUUID()}?workspace=${workspace}`,
         headers: {
           authorization: `Bearer ${makeAdminToken()}`,
           "content-type": "application/json",

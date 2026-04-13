@@ -58,6 +58,10 @@ interface SubscriptionPatchBody {
   description?: string;
 }
 
+interface SubscriptionPatchQuery {
+  workspace?: string;
+}
+
 interface SubscriptionFilterQuery {
   workspace?: string;
   clientId?: string;
@@ -66,6 +70,89 @@ interface SubscriptionFilterQuery {
 interface DashboardQuery {
   workspace?: string;
   days?: string;
+}
+
+const DASHBOARD_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 30_000;
+
+type DashboardCacheEntry = {
+  expiresAt: number;
+  subscriptions: Stripe.Subscription[];
+  schedules: Stripe.SubscriptionSchedule[];
+};
+
+const dashboardStripeCache = new Map<Workspace, DashboardCacheEntry>();
+
+async function listAllSubscriptions(
+  params: Stripe.SubscriptionListParams
+): Promise<Stripe.Subscription[]> {
+  const all: Stripe.Subscription[] = [];
+  let startingAfter: string | undefined;
+
+  while (true) {
+    const page = await stripe.subscriptions.list({
+      ...params,
+      limit: STRIPE_LIST_LIMIT,
+      starting_after: startingAfter,
+    });
+    all.push(...page.data);
+
+    if (!page.has_more || page.data.length === 0) break;
+    startingAfter = page.data[page.data.length - 1]?.id;
+    if (!startingAfter) break;
+  }
+
+  return all;
+}
+
+async function listAllSchedules(
+  params: Stripe.SubscriptionScheduleListParams
+): Promise<Stripe.SubscriptionSchedule[]> {
+  const all: Stripe.SubscriptionSchedule[] = [];
+  let startingAfter: string | undefined;
+
+  while (true) {
+    const page = await stripe.subscriptionSchedules.list({
+      ...params,
+      limit: STRIPE_LIST_LIMIT,
+      starting_after: startingAfter,
+    });
+    all.push(...page.data);
+
+    if (!page.has_more || page.data.length === 0) break;
+    startingAfter = page.data[page.data.length - 1]?.id;
+    if (!startingAfter) break;
+  }
+
+  return all;
+}
+
+async function getDashboardStripeData(workspace: Workspace): Promise<{
+  subscriptions: Stripe.Subscription[];
+  schedules: Stripe.SubscriptionSchedule[];
+}> {
+  const now = Date.now();
+  const cached = dashboardStripeCache.get(workspace);
+  if (cached && cached.expiresAt > now) {
+    return {
+      subscriptions: cached.subscriptions,
+      schedules: cached.schedules,
+    };
+  }
+
+  const [subscriptions, schedules] = await Promise.all([
+    listAllSubscriptions({ status: "all" }),
+    listAllSchedules({}),
+  ]);
+
+  if (DASHBOARD_CACHE_TTL_MS > 0) {
+    dashboardStripeCache.set(workspace, {
+      expiresAt: now + DASHBOARD_CACHE_TTL_MS,
+      subscriptions,
+      schedules,
+    });
+  }
+
+  return { subscriptions, schedules };
 }
 
 // Format Stripe subscription for response
@@ -339,23 +426,36 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         const startTimestamp = Math.floor(startDateObj.getTime() / 1000);
         const endTimestamp = Math.floor(new Date(endDate).getTime() / 1000);
 
-        // Create subscription schedule
-        const schedule = await stripe.subscriptionSchedules.create({
-          customer: customerId,
-          start_date: startTimestamp,
-          end_behavior: "cancel",
-          phases: [
-            {
-              items: [{ price: price.id }],
-              start_date: startTimestamp,
-              end_date: endTimestamp,
-              collection_method: "send_invoice",
-              days_until_due: 30,
-              ...(taxRateId ? { default_tax_rates: [taxRateId] } : {}),
-            },
-          ],
-          metadata: commonMetadata,
-        });
+        let schedule: Stripe.SubscriptionSchedule;
+        try {
+          schedule = await stripe.subscriptionSchedules.create({
+            customer: customerId,
+            start_date: startTimestamp,
+            end_behavior: "cancel",
+            phases: [
+              {
+                items: [{ price: price.id }],
+                start_date: startTimestamp,
+                end_date: endTimestamp,
+                collection_method: "send_invoice",
+                days_until_due: 30,
+                ...(taxRateId ? { default_tax_rates: [taxRateId] } : {}),
+              },
+            ],
+            metadata: commonMetadata,
+          });
+        } catch (err) {
+          await stripe.prices
+            .update(price.id, {
+              active: false,
+              metadata: {
+                orphaned: "true",
+                orphanedAt: new Date().toISOString(),
+              },
+            })
+            .catch(() => {});
+          throw err;
+        }
 
         await sendInvoiceEmail({
           to: client.email,
@@ -387,15 +487,29 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       // Calculate billing_cycle_anchor from startDate
       const billingCycleAnchor = Math.floor(startDateObj.getTime() / 1000);
 
-      const sub = await stripe.subscriptions.create({
-        customer: customerId,
-        items: [{ price: price.id }],
-        billing_cycle_anchor: billingCycleAnchor,
-        collection_method: "send_invoice",
-        days_until_due: 30,
-        metadata: commonMetadata,
-        ...(taxRateId ? { default_tax_rates: [taxRateId] } : {}),
-      });
+      let sub: Stripe.Subscription;
+      try {
+        sub = await stripe.subscriptions.create({
+          customer: customerId,
+          items: [{ price: price.id }],
+          billing_cycle_anchor: billingCycleAnchor,
+          collection_method: "send_invoice",
+          days_until_due: 30,
+          metadata: commonMetadata,
+          ...(taxRateId ? { default_tax_rates: [taxRateId] } : {}),
+        });
+      } catch (err) {
+        await stripe.prices
+          .update(price.id, {
+            active: false,
+            metadata: {
+              orphaned: "true",
+              orphanedAt: new Date().toISOString(),
+            },
+          })
+          .catch(() => {});
+        throw err;
+      }
 
       // Finalize first invoice if it's a draft
       let firstInvoice: Stripe.Invoice | null = null;
@@ -440,19 +554,17 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       if (!validWorkspace) return;
 
       // Fetch both regular subscriptions and subscription schedules
-      const [subList, scheduleList] = await Promise.all([
-        stripe.subscriptions.list({ limit: STRIPE_LIST_LIMIT }),
-        stripe.subscriptionSchedules.list({ limit: STRIPE_LIST_LIMIT }),
+      const [allSubs, allSchedules] = await Promise.all([
+        listAllSubscriptions({}),
+        listAllSchedules({}),
       ]);
 
       // Get all client IDs from both subscriptions and schedules
       const subClientIds = [
-        ...new Set(subList.data.map((sub) => sub.metadata?.clientId).filter(Boolean) as string[]),
+        ...new Set(allSubs.map((sub) => sub.metadata?.clientId).filter(Boolean) as string[]),
       ];
       const scheduleClientIds = [
-        ...new Set(
-          scheduleList.data.map((sch) => sch.metadata?.clientId).filter(Boolean) as string[]
-        ),
+        ...new Set(allSchedules.map((sch) => sch.metadata?.clientId).filter(Boolean) as string[]),
       ];
       const allClientIds = [...new Set([...subClientIds, ...scheduleClientIds])];
 
@@ -471,10 +583,8 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           return res.status(200).send([]);
         }
 
-        const filteredSubs = subList.data.filter((sub) => sub.metadata?.clientId === clientId);
-        const filteredSchedules = scheduleList.data.filter(
-          (sch) => sch.metadata?.clientId === clientId
-        );
+        const filteredSubs = allSubs.filter((sub) => sub.metadata?.clientId === clientId);
+        const filteredSchedules = allSchedules.filter((sch) => sch.metadata?.clientId === clientId);
 
         const formattedSubs = filteredSubs.map((sub) =>
           formatStripeSub(sub, clientId, client.name)
@@ -487,7 +597,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // Format all subscriptions and schedules
-      const formattedSubs = subList.data
+      const formattedSubs = allSubs
         .map((sub) => {
           const cid = sub.metadata?.clientId ?? "";
           if (!cid || !clientMap.has(cid)) return null;
@@ -495,7 +605,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         })
         .filter((entry): entry is ReturnType<typeof formatStripeSub> => entry !== null);
 
-      const formattedSchedules = scheduleList.data
+      const formattedSchedules = allSchedules
         .map((sch) => {
           const cid = sch.metadata?.clientId ?? "";
           if (!cid || !clientMap.has(cid)) return null;
@@ -562,103 +672,101 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // PATCH /subscriptions/:id — pause, cancel, resume, or update
-  app.patch<{ Params: SubscriptionParams; Body: SubscriptionPatchBody }>(
-    "/subscriptions/:id",
-    { preHandler: requireAdminJwt },
-    async (req, res) => {
-      const { id } = req.params;
-      const { status, totalPayments, amountCents, description } = req.body;
+  app.patch<{
+    Params: SubscriptionParams;
+    Querystring: SubscriptionPatchQuery;
+    Body: SubscriptionPatchBody;
+  }>("/subscriptions/:id", { preHandler: requireAdminJwt }, async (req, res) => {
+    const { id } = req.params;
+    const { workspace } = req.query;
+    const { status, totalPayments, amountCents, description } = req.body;
 
-      if (amountCents !== undefined || description !== undefined) {
-        return res.status(400).send({
-          error:
-            "Editing amountCents and description is not supported. Only totalPayments and status can be changed.",
-        });
+    const validWorkspace = validateWorkspaceQuery(workspace, res);
+    if (!validWorkspace) return;
+
+    if (amountCents !== undefined || description !== undefined) {
+      return res.status(400).send({
+        error:
+          "Editing amountCents and description is not supported. Only totalPayments and status can be changed.",
+      });
+    }
+
+    if (status !== undefined) {
+      const ALLOWED_STATUSES = ["paused", "cancelled", "active"];
+      if (!ALLOWED_STATUSES.includes(status)) {
+        return res.status(422).send({ error: "status must be one of: paused, cancelled, active." });
       }
+    }
 
-      if (status !== undefined) {
-        const ALLOWED_STATUSES = ["paused", "cancelled", "active"];
-        if (!ALLOWED_STATUSES.includes(status)) {
-          return res
-            .status(422)
-            .send({ error: "status must be one of: paused, cancelled, active." });
-        }
+    if (totalPayments !== undefined && totalPayments !== null) {
+      if (!Number.isInteger(totalPayments) || totalPayments < 1) {
+        return res.status(422).send({ error: "totalPayments must be a positive integer." });
       }
+    }
 
-      if (totalPayments !== undefined && totalPayments !== null) {
-        if (!Number.isInteger(totalPayments) || totalPayments < 1) {
-          return res.status(422).send({ error: "totalPayments must be a positive integer." });
-        }
-      }
+    // Try subscription first
+    let isSchedule = false;
+    let sub: Stripe.Subscription | null = null;
+    let schedule: Stripe.SubscriptionSchedule | null = null;
 
-      // Try subscription first
-      let isSchedule = false;
-      let sub: Stripe.Subscription | null = null;
-      let schedule: Stripe.SubscriptionSchedule | null = null;
-
+    try {
+      sub = await stripe.subscriptions.retrieve(id);
+    } catch {
+      // Try schedule
       try {
-        sub = await stripe.subscriptions.retrieve(id);
+        schedule = await stripe.subscriptionSchedules.retrieve(id);
+        isSchedule = true;
       } catch {
-        // Try schedule
-        try {
-          schedule = await stripe.subscriptionSchedules.retrieve(id);
-          isSchedule = true;
-        } catch {
-          return res.status(404).send({ error: "Subscription not found." });
-        }
+        return res.status(404).send({ error: "Subscription not found." });
       }
+    }
 
-      const currentStatus = isSchedule
-        ? schedule?.status === "canceled"
-          ? "cancelled"
-          : schedule?.status
-        : sub?.status;
+    const currentStatus = isSchedule
+      ? schedule?.status === "canceled"
+        ? "cancelled"
+        : schedule?.status
+      : sub?.status;
 
-      if (currentStatus === "cancelled" || currentStatus === "canceled") {
-        return res.status(422).send({ error: "Cannot modify a cancelled subscription." });
-      }
+    const scopedClientId =
+      (isSchedule ? schedule?.metadata?.clientId : sub?.metadata?.clientId) ?? "";
+    if (!scopedClientId) {
+      return res.status(400).send({ error: "Subscription is missing client metadata." });
+    }
 
-      if (status === "active" && currentStatus === "cancelled") {
-        return res.status(422).send({ error: "Cannot resume a cancelled subscription." });
-      }
+    const [scopedClient] = await db
+      .select({ id: clients.id, workspace: clients.workspace })
+      .from(clients)
+      .where(eq(clients.id, scopedClientId))
+      .limit(1);
 
-      if (isSchedule) {
-        // Handle subscription schedule updates
-        let updated = schedule!;
+    if (!scopedClient) {
+      return res.status(404).send({ error: "Client not found for subscription." });
+    }
 
-        if (status === "cancelled") {
-          updated = await stripe.subscriptionSchedules.cancel(id);
-        }
+    if (scopedClient.workspace !== validWorkspace) {
+      return res
+        .status(400)
+        .send({ error: "Subscription does not belong to the selected workspace." });
+    }
 
-        if (totalPayments !== undefined) {
-          updated = await stripe.subscriptionSchedules.update(id, {
-            metadata: {
-              ...updated.metadata,
-              totalPayments: totalPayments !== null ? String(totalPayments) : "",
-            },
-          });
-        }
+    if (currentStatus === "cancelled" || currentStatus === "canceled") {
+      return res.status(422).send({ error: "Cannot modify a cancelled subscription." });
+    }
 
-        const clientId = updated.metadata?.clientId ?? "";
-        return res.status(200).send(formatStripeSchedule(updated, clientId));
-      }
+    if (status === "active" && currentStatus === "cancelled") {
+      return res.status(422).send({ error: "Cannot resume a cancelled subscription." });
+    }
 
-      // Handle regular subscription updates
-      let updated = sub!;
+    if (isSchedule) {
+      // Handle subscription schedule updates
+      let updated = schedule!;
 
-      if (status === "paused") {
-        updated = await stripe.subscriptions.update(id, {
-          pause_collection: { behavior: "void" },
-        });
-      } else if (status === "active") {
-        // biome-ignore lint/suspicious/noExplicitAny: Stripe SDK requires "" to clear Emptyable fields
-        updated = await stripe.subscriptions.update(id, { pause_collection: "" as any });
-      } else if (status === "cancelled") {
-        updated = await stripe.subscriptions.update(id, { cancel_at_period_end: true });
+      if (status === "cancelled") {
+        updated = await stripe.subscriptionSchedules.cancel(id);
       }
 
       if (totalPayments !== undefined) {
-        updated = await stripe.subscriptions.update(id, {
+        updated = await stripe.subscriptionSchedules.update(id, {
           metadata: {
             ...updated.metadata,
             totalPayments: totalPayments !== null ? String(totalPayments) : "",
@@ -667,9 +775,35 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const clientId = updated.metadata?.clientId ?? "";
-      return res.status(200).send(formatStripeSub(updated, clientId));
+      return res.status(200).send(formatStripeSchedule(updated, clientId));
     }
-  );
+
+    // Handle regular subscription updates
+    let updated = sub!;
+
+    if (status === "paused") {
+      updated = await stripe.subscriptions.update(id, {
+        pause_collection: { behavior: "void" },
+      });
+    } else if (status === "active") {
+      // biome-ignore lint/suspicious/noExplicitAny: Stripe SDK requires "" to clear Emptyable fields
+      updated = await stripe.subscriptions.update(id, { pause_collection: "" as any });
+    } else if (status === "cancelled") {
+      updated = await stripe.subscriptions.update(id, { cancel_at_period_end: true });
+    }
+
+    if (totalPayments !== undefined) {
+      updated = await stripe.subscriptions.update(id, {
+        metadata: {
+          ...updated.metadata,
+          totalPayments: totalPayments !== null ? String(totalPayments) : "",
+        },
+      });
+    }
+
+    const clientId = updated.metadata?.clientId ?? "";
+    return res.status(200).send(formatStripeSub(updated, clientId));
+  });
 
   // ==================== ADMIN DASHBOARD ENDPOINTS ====================
 
@@ -683,16 +817,14 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const validWorkspace = validateWorkspaceQuery(workspace, res);
       if (!validWorkspace) return;
 
-      const [subList, scheduleList] = await Promise.all([
-        stripe.subscriptions.list({ limit: STRIPE_LIST_LIMIT, status: "all" }),
-        stripe.subscriptionSchedules.list({ limit: STRIPE_LIST_LIMIT }),
-      ]);
+      const { subscriptions: allSubscriptions, schedules: allSchedules } =
+        await getDashboardStripeData(validWorkspace);
 
       // Filter by workspace
       const allClientIds = [
         ...new Set([
-          ...subList.data.map((s) => s.metadata?.clientId),
-          ...scheduleList.data.map((s) => s.metadata?.clientId),
+          ...allSubscriptions.map((s) => s.metadata?.clientId),
+          ...allSchedules.map((s) => s.metadata?.clientId),
         ]),
       ].filter(Boolean) as string[];
 
@@ -705,8 +837,10 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         clientRows.filter((c) => c.workspace === workspace).map((c) => c.id)
       );
 
-      const filteredSubs = subList.data.filter((s) => scopedClientIds.has(s.metadata?.clientId));
-      const filteredSchedules = scheduleList.data.filter((s) =>
+      const filteredSubs = allSubscriptions.filter((s) =>
+        scopedClientIds.has(s.metadata?.clientId)
+      );
+      const filteredSchedules = allSchedules.filter((s) =>
         scopedClientIds.has(s.metadata?.clientId)
       );
 
@@ -758,14 +892,14 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const validWorkspace = validateWorkspaceQuery(workspace, res);
       if (!validWorkspace) return;
 
-      const [subList, scheduleList] = await Promise.all([
-        stripe.subscriptions.list({ limit: STRIPE_LIST_LIMIT, status: "active" }),
-        stripe.subscriptionSchedules.list({ limit: STRIPE_LIST_LIMIT }),
-      ]);
+      const { subscriptions: allSubscriptions, schedules: allSchedules } =
+        await getDashboardStripeData(validWorkspace);
 
       // Get active subscriptions (not paused)
-      const activeSubs = subList.data.filter((s) => !s.pause_collection);
-      const activeSchedules = scheduleList.data.filter((s) => s.status === "active");
+      const activeSubs = allSubscriptions.filter(
+        (s) => s.status === "active" && !s.pause_collection
+      );
+      const activeSchedules = allSchedules.filter((s) => s.status === "active");
 
       const allClientIds = [
         ...new Set([
@@ -842,13 +976,11 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const validWorkspace = validateWorkspaceQuery(workspace, res);
       if (!validWorkspace) return;
 
-      const subList = await stripe.subscriptions.list({
-        limit: STRIPE_LIST_LIMIT,
-        status: "past_due",
-      });
+      const { subscriptions: allSubscriptions } = await getDashboardStripeData(validWorkspace);
+      const pastDueSubs = allSubscriptions.filter((s) => s.status === "past_due");
 
       const allClientIds = [
-        ...new Set(subList.data.map((s) => s.metadata?.clientId).filter(Boolean) as string[]),
+        ...new Set(pastDueSubs.map((s) => s.metadata?.clientId).filter(Boolean) as string[]),
       ];
 
       const clientRows =
@@ -861,7 +993,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
 
       const result = [];
 
-      for (const sub of subList.data) {
+      for (const sub of pastDueSubs) {
         const clientId = sub.metadata?.clientId;
         if (!clientId || !clientMap.has(clientId)) continue;
         const client = clientMap.get(clientId)!;
@@ -900,13 +1032,11 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       cutoffDate.setDate(cutoffDate.getDate() + daysNum);
       const cutoffTimestamp = Math.floor(cutoffDate.getTime() / 1000);
 
-      const scheduleList = await stripe.subscriptionSchedules.list({
-        limit: STRIPE_LIST_LIMIT,
-        status: "active",
-      });
+      const { schedules: allSchedules } = await getDashboardStripeData(validWorkspace);
+      const activeSchedules = allSchedules.filter((s) => s.status === "active");
 
       // Filter schedules ending before cutoff
-      const endingSoon = scheduleList.data.filter((sch) => {
+      const endingSoon = activeSchedules.filter((sch) => {
         const phase = sch.phases?.[0];
         return phase?.end_date && phase.end_date <= cutoffTimestamp;
       });
@@ -969,20 +1099,14 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       cutoffDate.setDate(cutoffDate.getDate() - daysNum);
       const cutoffTimestamp = Math.floor(cutoffDate.getTime() / 1000);
 
-      const [subList, scheduleList] = await Promise.all([
-        stripe.subscriptions.list({
-          limit: STRIPE_LIST_LIMIT,
-          status: "canceled",
-        }),
-        stripe.subscriptionSchedules.list({
-          limit: STRIPE_LIST_LIMIT,
-          status: "canceled",
-        }),
-      ]);
+      const { subscriptions: allSubscriptions, schedules: allSchedules } =
+        await getDashboardStripeData(validWorkspace);
+      const canceledSubs = allSubscriptions.filter((s) => s.status === "canceled");
+      const canceledSchedules = allSchedules.filter((s) => s.status === "canceled");
 
       // Filter by cancellation time
-      const recentlyCancelledSubs = subList.data.filter((s) => s.canceled_at >= cutoffTimestamp);
-      const recentlyCancelledSchedules = scheduleList.data.filter(
+      const recentlyCancelledSubs = canceledSubs.filter((s) => s.canceled_at >= cutoffTimestamp);
+      const recentlyCancelledSchedules = canceledSchedules.filter(
         (s) => s.canceled_at && s.canceled_at >= cutoffTimestamp
       );
 
@@ -1080,14 +1204,11 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
 
       // Fetch subscriptions and schedules for this client
       const [subList, scheduleList, invoiceList] = await Promise.all([
-        stripe.subscriptions.list({
+        listAllSubscriptions({
           customer: client.stripeCustomerId,
-          limit: STRIPE_LIST_LIMIT,
           expand: ["data.latest_invoice"],
         }),
-        stripe.subscriptionSchedules.list({
-          limit: STRIPE_LIST_LIMIT,
-        }),
+        listAllSchedules({}),
         stripe.invoices.list({
           customer: client.stripeCustomerId,
           limit: STRIPE_LIST_LIMIT,
@@ -1095,10 +1216,10 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       ]);
 
       // Filter schedules for this client
-      const clientSchedules = scheduleList.data.filter((s) => s.metadata?.clientId === clientId);
+      const clientSchedules = scheduleList.filter((s) => s.metadata?.clientId === clientId);
 
       // Format subscriptions
-      const formattedSubs = subList.data.map((sub) => formatStripeSub(sub, clientId, client.name));
+      const formattedSubs = subList.map((sub) => formatStripeSub(sub, clientId, client.name));
 
       // Format schedules
       const formattedSchedules = clientSchedules.map((sch) =>

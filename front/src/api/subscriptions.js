@@ -9,6 +9,13 @@ export const createSubscription = (token, body) =>
   apiFetch("/subscriptions", { token, method: "POST", body });
 
 export const patchSubscription = (token, id, body) =>
-  apiFetch(`/subscriptions/${id}`, { token, method: "PATCH", body });
+  apiFetch(
+    `/subscriptions/${id}${
+      body?.workspace
+        ? `?${new URLSearchParams({ workspace: String(body.workspace) }).toString()}`
+        : ""
+    }`,
+    { token, method: "PATCH", body }
+  );
 
 export const getSubscriptionDetail = (token, id) => apiFetch(`/subscriptions/${id}`, { token });
