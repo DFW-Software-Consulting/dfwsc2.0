@@ -2,6 +2,8 @@ import type { FastifyReply } from "fastify";
 import { stripe } from "./stripe";
 import { isWorkspace, type Workspace } from "./workspace";
 
+export type { Workspace };
+
 // Constants for Stripe operations
 export const STRIPE_LIST_LIMIT = 100;
 export const DEFAULT_DAYS_UNTIL_DUE = 30;

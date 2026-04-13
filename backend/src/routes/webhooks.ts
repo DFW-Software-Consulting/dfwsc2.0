@@ -6,6 +6,10 @@ import { db } from "../db/client";
 import { clients, webhookEvents } from "../db/schema";
 import { stripe } from "../lib/stripe";
 
+interface StripeInvoiceWithSubscription extends Stripe.Invoice {
+  subscription: string | Stripe.Subscription | null;
+}
+
 export default async function webhooksRoute(fastify: FastifyInstance) {
   // Validate required environment variable at route registration time
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -146,7 +150,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         break;
       }
       case "invoice.paid": {
-        const inv = event.data.object as Stripe.Invoice;
+        const inv = event.data.object as StripeInvoiceWithSubscription;
         fastify.log.info(
           {
             invoiceId: inv.id,
