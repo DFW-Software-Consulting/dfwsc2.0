@@ -5,7 +5,8 @@
       "Read(//home/**)",
       "Read(//home/messyginger0804/**)",
       "Bash(npx *)",
-      "Bash(git diff *)"
+      "Bash(git diff *)",
+      "Bash(npm run *)"
     ]
   },
   "$version": 3
