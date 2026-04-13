@@ -9,6 +9,7 @@ vi.mock("../../lib/stripe", () => ({
     checkout: { sessions: { create: vi.fn() } },
     products: { list: vi.fn(), create: vi.fn(), update: vi.fn() },
     prices: { create: vi.fn() },
+    taxRates: { list: vi.fn() },
   },
 }));
 
@@ -326,6 +327,96 @@ describe("Products API", () => {
         url: "/api/v1/products",
         headers: { "content-type": "application/json" },
         payload: { name: "Plan", amountCents: 1000 },
+      });
+
+      expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── GET /tax-rates ──────────────────────────────────────────────────────────
+
+  describe("GET /api/v1/tax-rates", () => {
+    it("returns 200 with formatted tax rate list", async () => {
+      const token = makeAdminToken();
+      const mockTaxRates = [
+        {
+          id: "txr_1",
+          display_name: "Sales Tax",
+          description: "State sales tax",
+          percentage: 8.25,
+          inclusive: false,
+          jurisdiction: "CA",
+        },
+        {
+          id: "txr_2",
+          display_name: "VAT",
+          description: null,
+          percentage: 20,
+          inclusive: true,
+          jurisdiction: null,
+        },
+      ];
+
+      (stripe.taxRates.list as any).mockResolvedValueOnce({ data: mockTaxRates });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/tax-rates",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(Array.isArray(body)).toBe(true);
+      expect(body).toHaveLength(2);
+      expect(body[0]).toEqual({
+        id: "txr_1",
+        displayName: "Sales Tax",
+        description: "State sales tax",
+        percentage: 8.25,
+        inclusive: false,
+        jurisdiction: "CA",
+      });
+      expect(body[1].description).toBeNull();
+      expect(body[1].jurisdiction).toBeNull();
+    });
+
+    it("returns 200 with empty array when no tax rates", async () => {
+      const token = makeAdminToken();
+
+      (stripe.taxRates.list as any).mockResolvedValueOnce({ data: [] });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/tax-rates",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual([]);
+    });
+
+    it("calls stripe.taxRates.list with correct args", async () => {
+      const token = makeAdminToken();
+
+      (stripe.taxRates.list as any).mockResolvedValueOnce({ data: [] });
+
+      await app.inject({
+        method: "GET",
+        url: "/api/v1/tax-rates",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(stripe.taxRates.list).toHaveBeenCalledWith({
+        active: true,
+        limit: 100,
+      });
+    });
+
+    it("returns 401 when no JWT provided", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/tax-rates",
       });
 
       expect(response.statusCode).toBe(401);

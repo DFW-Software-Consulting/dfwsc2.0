@@ -6,16 +6,45 @@ import { clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { sendInvoiceEmail } from "../lib/mailer";
 import { stripe } from "../lib/stripe";
-import { ensureStripeCustomer, toStripeInterval } from "../lib/stripe-billing";
-import { isWorkspace, type Workspace } from "../lib/workspace";
+import {
+  type CalendarInterval,
+  calculateIterations,
+  ensureStripeCustomer,
+  toStripeInterval,
+} from "../lib/stripe-billing";
+import {
+  STRIPE_LIST_LIMIT,
+  validateDateFormat,
+  validateDateRange,
+  validateInterval,
+  validateRequiredString,
+  validateTaxRate,
+  validateWorkspace,
+  validateWorkspaceQuery,
+  type Workspace,
+} from "../lib/validation";
 
-interface CreateSubscriptionBody {
+// Legacy interface for backward compatibility during transition
+interface CreateSubscriptionBodyLegacy {
   clientId: string;
   workspace: Workspace;
   amountCents: number;
   description: string;
   interval: "monthly" | "quarterly" | "yearly";
   totalPayments?: number | null;
+  taxRateId?: string | null;
+}
+
+// New calendar-based interface
+interface CreateSubscriptionBody {
+  clientId: string;
+  workspace: Workspace;
+  amountPerPaymentCents: number;
+  description: string;
+  interval: CalendarInterval;
+  startDate: string; // YYYY-MM-DD
+  endDate?: string | null; // YYYY-MM-DD, null = forever (recurring)
+  taxRateId?: string | null;
 }
 
 interface SubscriptionParams {
@@ -29,30 +58,187 @@ interface SubscriptionPatchBody {
   description?: string;
 }
 
+interface SubscriptionPatchQuery {
+  workspace?: string;
+}
+
 interface SubscriptionFilterQuery {
   workspace?: string;
   clientId?: string;
 }
 
+interface DashboardQuery {
+  workspace?: string;
+  days?: string;
+}
+
+const DASHBOARD_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 30_000;
+
+type DashboardCacheEntry = {
+  expiresAt: number;
+  subscriptions: Stripe.Subscription[];
+  schedules: Stripe.SubscriptionSchedule[];
+};
+
+const dashboardStripeCache = new Map<Workspace, DashboardCacheEntry>();
+
+async function listAllSubscriptions(
+  params: Stripe.SubscriptionListParams
+): Promise<Stripe.Subscription[]> {
+  const all: Stripe.Subscription[] = [];
+  let startingAfter: string | undefined;
+
+  while (true) {
+    const page = await stripe.subscriptions.list({
+      ...params,
+      limit: STRIPE_LIST_LIMIT,
+      starting_after: startingAfter,
+    });
+    all.push(...page.data);
+
+    if (!page.has_more || page.data.length === 0) break;
+    startingAfter = page.data[page.data.length - 1]?.id;
+    if (!startingAfter) break;
+  }
+
+  return all;
+}
+
+async function listAllSchedules(
+  params: Stripe.SubscriptionScheduleListParams
+): Promise<Stripe.SubscriptionSchedule[]> {
+  const all: Stripe.SubscriptionSchedule[] = [];
+  let startingAfter: string | undefined;
+
+  while (true) {
+    const page = await stripe.subscriptionSchedules.list({
+      ...params,
+      limit: STRIPE_LIST_LIMIT,
+      starting_after: startingAfter,
+    });
+    all.push(...page.data);
+
+    if (!page.has_more || page.data.length === 0) break;
+    startingAfter = page.data[page.data.length - 1]?.id;
+    if (!startingAfter) break;
+  }
+
+  return all;
+}
+
+async function getDashboardStripeData(workspace: Workspace): Promise<{
+  subscriptions: Stripe.Subscription[];
+  schedules: Stripe.SubscriptionSchedule[];
+}> {
+  const now = Date.now();
+  const cached = dashboardStripeCache.get(workspace);
+  if (cached && cached.expiresAt > now) {
+    return {
+      subscriptions: cached.subscriptions,
+      schedules: cached.schedules,
+    };
+  }
+
+  const [subscriptions, schedules] = await Promise.all([
+    listAllSubscriptions({ status: "all" }),
+    listAllSchedules({}),
+  ]);
+
+  if (DASHBOARD_CACHE_TTL_MS > 0) {
+    if (dashboardStripeCache.size >= 50) dashboardStripeCache.clear();
+    dashboardStripeCache.set(workspace, {
+      expiresAt: now + DASHBOARD_CACHE_TTL_MS,
+      subscriptions,
+      schedules,
+    });
+  }
+
+  return { subscriptions, schedules };
+}
+
+// Format Stripe subscription for response
 function formatStripeSub(sub: Stripe.Subscription, clientId: string, clientName?: string | null) {
   const item = sub.items.data[0];
   const rawStatus = sub.pause_collection ? "paused" : sub.status;
-  // Normalize Stripe's 'canceled' to 'cancelled'
   const status = (rawStatus as string) === "canceled" ? "cancelled" : rawStatus;
-  // current_period_end exists at runtime but may not be in all SDK type versions
   const periodEnd = (sub as unknown as { current_period_end?: number }).current_period_end;
+
+  // Determine subscription type from metadata
+  const type = (sub.metadata?.type as "payment_plan" | "recurring") ?? "recurring";
+  const startDate = sub.metadata?.startDate;
+  const endDate = sub.metadata?.endDate ?? null;
+  const totalPayments = sub.metadata?.totalPayments ? Number(sub.metadata.totalPayments) : null;
+  const amountPerPaymentCents = sub.metadata?.amountPerPaymentCents
+    ? Number(sub.metadata.amountPerPaymentCents)
+    : (item?.price?.unit_amount ?? 0);
+  const totalAmountCents = sub.metadata?.totalAmountCents
+    ? Number(sub.metadata.totalAmountCents)
+    : null;
+  const paymentsMade = sub.metadata?.paymentsMade ? Number(sub.metadata.paymentsMade) : 0;
 
   return {
     id: sub.id,
     clientId,
     clientName: clientName ?? null,
-    amountCents: item?.price?.unit_amount ?? 0,
+    type,
     description: sub.metadata?.description ?? "",
-    interval: sub.metadata?.interval ?? "monthly",
-    totalPayments: sub.metadata?.totalPayments ? Number(sub.metadata.totalPayments) : null,
+    amountPerPaymentCents,
+    totalAmountCents,
+    totalPayments,
+    paymentsMade,
+    interval: sub.metadata?.interval ?? "month",
+    startDate,
+    endDate,
+    nextPaymentDate: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
     status,
     currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
     createdAt: new Date(sub.created * 1000).toISOString(),
+  };
+}
+
+// Format Stripe subscription schedule for response
+function formatStripeSchedule(
+  schedule: Stripe.SubscriptionSchedule,
+  clientId: string,
+  clientName?: string | null
+) {
+  const phase = schedule.phases?.[0];
+  const item = phase?.items?.[0];
+  const startDate = phase?.start_date
+    ? new Date(phase.start_date * 1000).toISOString().split("T")[0]
+    : null;
+  const endDate = phase?.end_date
+    ? new Date(phase.end_date * 1000).toISOString().split("T")[0]
+    : null;
+
+  const totalPayments = schedule.metadata?.totalPayments
+    ? Number(schedule.metadata.totalPayments)
+    : null;
+  const amountPerPaymentCents = schedule.metadata?.amountPerPaymentCents
+    ? Number(schedule.metadata.amountPerPaymentCents)
+    : (item?.plan?.amount ?? 0);
+  const totalAmountCents = schedule.metadata?.totalAmountCents
+    ? Number(schedule.metadata.totalAmountCents)
+    : null;
+  const paymentsMade = schedule.metadata?.paymentsMade ? Number(schedule.metadata.paymentsMade) : 0;
+
+  return {
+    id: schedule.id,
+    clientId,
+    clientName: clientName ?? null,
+    type: "payment_plan" as const,
+    description: schedule.metadata?.description ?? "",
+    amountPerPaymentCents,
+    totalAmountCents,
+    totalPayments,
+    paymentsMade,
+    interval: schedule.metadata?.interval ?? "month",
+    startDate,
+    endDate,
+    nextPaymentDate: startDate, // First payment is on start date
+    status: schedule.status === "canceled" ? "cancelled" : schedule.status,
+    currentPeriodEnd: null,
+    createdAt: new Date(schedule.created * 1000).toISOString(),
   };
 }
 
@@ -72,41 +258,128 @@ function formatStripeInvoice(inv: Stripe.Invoice, clientId?: string | null) {
   };
 }
 
+// Helper to convert legacy interval to new interval
+function legacyToNewInterval(interval: "monthly" | "quarterly" | "yearly"): CalendarInterval {
+  switch (interval) {
+    case "monthly":
+      return "month";
+    case "quarterly":
+      return "quarter";
+    case "yearly":
+      return "year";
+  }
+}
+
+// Type guard to check if body is new format
+function isNewFormat(body: unknown): body is CreateSubscriptionBody {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    "amountPerPaymentCents" in body &&
+    "startDate" in body
+  );
+}
+
 const subscriptionRoutes: FastifyPluginAsync = async (app) => {
-  // POST /subscriptions — create Stripe subscription + send first invoice
-  app.post<{ Body: CreateSubscriptionBody }>(
+  // POST /subscriptions — create Stripe subscription (calendar-based or legacy)
+  app.post<{ Body: CreateSubscriptionBody | CreateSubscriptionBodyLegacy }>(
     "/subscriptions",
     { preHandler: requireAdminJwt },
     async (req, res) => {
-      const { clientId, workspace, amountCents, description, interval, totalPayments } = req.body;
+      const body = req.body;
+      const isNew = isNewFormat(body);
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace is required (dfwsc_services|client_portal)." });
+      // Extract common fields
+      const clientId = body.clientId;
+      const workspace = body.workspace;
+      const description = body.description;
+      const taxRateId = body.taxRateId;
+
+      // New format fields
+      let amountPerPaymentCents: number;
+      let interval: CalendarInterval;
+      let startDate: string;
+      let endDate: string | null = null;
+      let totalPayments: number | null = null;
+
+      if (isNew) {
+        amountPerPaymentCents = body.amountPerPaymentCents;
+        interval = body.interval;
+        startDate = body.startDate;
+        endDate = body.endDate ?? null;
+      } else {
+        // Legacy format - convert to new format
+        amountPerPaymentCents = body.amountCents;
+        interval = legacyToNewInterval(body.interval);
+        // For legacy, start today
+        startDate = new Date().toISOString().split("T")[0];
+        if (body.totalPayments) {
+          // Calculate end date based on total payments.
+          // We advance by (N-1) intervals so the schedule's end_date falls on the
+          // last billing date rather than one interval past it. Without the -1,
+          // Stripe opens a new billing cycle on end_date before cancelling the
+          // schedule, generating N+1 invoices instead of N.
+          // Special-case N=1: advance by 1 interval so the schedule has a valid
+          // non-zero duration; totalPayments is still stored as 1 in metadata.
+          const intervals = body.totalPayments === 1 ? 1 : body.totalPayments - 1;
+          const start = new Date(startDate);
+          switch (interval) {
+            case "month":
+              start.setMonth(start.getMonth() + intervals);
+              break;
+            case "quarter":
+              start.setMonth(start.getMonth() + intervals * 3);
+              break;
+            case "year":
+              start.setFullYear(start.getFullYear() + intervals);
+              break;
+            case "week":
+              start.setDate(start.getDate() + intervals * 7);
+              break;
+            case "bi_weekly":
+              start.setDate(start.getDate() + intervals * 14);
+              break;
+          }
+          endDate = start.toISOString().split("T")[0];
+        }
       }
+
+      // Validation
+      const validWorkspace = validateWorkspace(workspace, res);
+      if (!validWorkspace) return;
 
       if (!clientId) {
         return res.status(400).send({ error: "clientId is required." });
       }
-      if (!Number.isInteger(amountCents) || amountCents <= 0) {
-        return res.status(400).send({ error: "amountCents must be a positive integer." });
+      if (!Number.isInteger(amountPerPaymentCents) || amountPerPaymentCents <= 0) {
+        return res.status(400).send({ error: "amountPerPaymentCents must be a positive integer." });
       }
-      if (!description || description.trim().length === 0) {
-        return res.status(400).send({ error: "description is required." });
-      }
-      if (!["monthly", "quarterly", "yearly"].includes(interval)) {
-        return res
-          .status(400)
-          .send({ error: "interval must be one of: monthly, quarterly, yearly." });
-      }
+      if (!validateRequiredString(description, "description", res)) return;
+      if (!validateInterval(interval, ["week", "bi_weekly", "month", "quarter", "year"], res))
+        return;
+
+      // Validate totalPayments if provided (legacy format)
       if (
-        totalPayments !== undefined &&
-        totalPayments !== null &&
-        (!Number.isInteger(totalPayments) || totalPayments <= 0)
+        !isNew &&
+        "totalPayments" in body &&
+        body.totalPayments !== undefined &&
+        body.totalPayments !== null
       ) {
-        return res.status(400).send({ error: "totalPayments must be a positive integer." });
+        if (!Number.isInteger(body.totalPayments) || body.totalPayments < 1) {
+          return res.status(400).send({ error: "totalPayments must be a positive integer." });
+        }
       }
+
+      const startDateObj = validateDateFormat(startDate, "startDate", res);
+      if (!startDateObj) return;
+
+      if (endDate !== null) {
+        const endDateObj = validateDateFormat(endDate, "endDate", res);
+        if (!endDateObj) return;
+        if (!validateDateRange(startDateObj, endDateObj, res)) return;
+      }
+
+      if (taxRateId && !(await validateTaxRate(taxRateId, res))) return;
 
       const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
       if (!client) {
@@ -120,29 +393,140 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
 
       const customerId = await ensureStripeCustomer(client);
 
-      const price = await stripe.prices.create({
-        unit_amount: amountCents,
-        currency: "usd",
-        recurring: toStripeInterval(interval),
-        product_data: { name: description.trim() },
-      });
+      // Calculate total payments and total amount if endDate is provided.
+      // For the legacy format the caller already specified totalPayments; trust
+      // that value rather than re-deriving it from calculateIterations (which
+      // would produce N-1 after the endDate adjustment above).
+      let totalAmountCents: number | null = null;
+      if (endDate) {
+        if (!isNew && "totalPayments" in body && body.totalPayments) {
+          totalPayments = body.totalPayments;
+        } else {
+          totalPayments = calculateIterations(startDate, endDate, interval);
+        }
+        totalAmountCents = amountPerPaymentCents * totalPayments;
+      }
 
-      const subMetadata: Record<string, string> = {
+      // Common metadata
+      const commonMetadata: Record<string, string> = {
         clientId,
         description: description.trim(),
         interval,
+        startDate,
+        amountPerPaymentCents: String(amountPerPaymentCents),
+        taxRateId: taxRateId ?? "",
       };
-      if (totalPayments != null) {
-        subMetadata.totalPayments = String(totalPayments);
+
+      if (endDate) {
+        commonMetadata.endDate = endDate;
+        commonMetadata.totalPayments = String(totalPayments);
+        commonMetadata.totalAmountCents = String(totalAmountCents);
+        commonMetadata.type = "payment_plan";
+      } else {
+        commonMetadata.type = "recurring";
       }
 
-      const sub = await stripe.subscriptions.create({
-        customer: customerId,
-        items: [{ price: price.id }],
-        collection_method: "send_invoice",
-        days_until_due: 30,
-        metadata: subMetadata,
+      // Path 1: Payment Plan (with endDate) - Use Subscription Schedules
+      if (endDate && totalPayments && totalPayments > 0) {
+        const stripeInterval = toStripeInterval(interval);
+
+        // Create the price for the subscription schedule
+        const price = await stripe.prices.create({
+          unit_amount: amountPerPaymentCents,
+          currency: "usd",
+          recurring: stripeInterval,
+          product_data: { name: description.trim() },
+          ...(taxRateId ? { tax_behavior: "exclusive" } : {}),
+        });
+
+        // Calculate start and end timestamps
+        const startTimestamp = Math.floor(startDateObj.getTime() / 1000);
+        const endTimestamp = Math.floor(new Date(endDate).getTime() / 1000);
+
+        let schedule: Stripe.SubscriptionSchedule;
+        try {
+          schedule = await stripe.subscriptionSchedules.create({
+            customer: customerId,
+            start_date: startTimestamp,
+            end_behavior: "cancel",
+            phases: [
+              {
+                items: [{ price: price.id }],
+                start_date: startTimestamp,
+                end_date: endTimestamp,
+                collection_method: "send_invoice",
+                days_until_due: 30,
+                ...(taxRateId ? { default_tax_rates: [taxRateId] } : {}),
+              },
+            ],
+            metadata: commonMetadata,
+          });
+        } catch (err) {
+          await stripe.prices
+            .update(price.id, {
+              active: false,
+              metadata: {
+                orphaned: "true",
+                orphanedAt: new Date().toISOString(),
+              },
+            })
+            .catch(() => {});
+          throw err;
+        }
+
+        await sendInvoiceEmail({
+          to: client.email,
+          clientName: client.name,
+          amountCents: amountPerPaymentCents,
+          description: description.trim(),
+          dueDate: null,
+          payUrl: "",
+          isSubscription: true,
+          paymentsRemaining: totalPayments,
+        }).catch(() => {});
+
+        return res.status(201).send({
+          subscription: formatStripeSchedule(schedule, clientId, client.name),
+        });
+      }
+
+      // Path 2: Recurring (no endDate) - Use regular Subscriptions
+      const stripeInterval = toStripeInterval(interval);
+
+      const price = await stripe.prices.create({
+        unit_amount: amountPerPaymentCents,
+        currency: "usd",
+        recurring: stripeInterval,
+        product_data: { name: description.trim() },
+        ...(taxRateId ? { tax_behavior: "exclusive" } : {}),
       });
+
+      // Calculate billing_cycle_anchor from startDate
+      const billingCycleAnchor = Math.floor(startDateObj.getTime() / 1000);
+
+      let sub: Stripe.Subscription;
+      try {
+        sub = await stripe.subscriptions.create({
+          customer: customerId,
+          items: [{ price: price.id }],
+          billing_cycle_anchor: billingCycleAnchor,
+          collection_method: "send_invoice",
+          days_until_due: 30,
+          metadata: commonMetadata,
+          ...(taxRateId ? { default_tax_rates: [taxRateId] } : {}),
+        });
+      } catch (err) {
+        await stripe.prices
+          .update(price.id, {
+            active: false,
+            metadata: {
+              orphaned: "true",
+              orphanedAt: new Date().toISOString(),
+            },
+          })
+          .catch(() => {});
+        throw err;
+      }
 
       // Finalize first invoice if it's a draft
       let firstInvoice: Stripe.Invoice | null = null;
@@ -161,12 +545,12 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       await sendInvoiceEmail({
         to: client.email,
         clientName: client.name,
-        amountCents,
+        amountCents: amountPerPaymentCents,
         description: description.trim(),
         dueDate: null,
         payUrl: hostedInvoiceUrl ?? "",
         isSubscription: true,
-        paymentsRemaining: totalPayments ?? null,
+        paymentsRemaining: null,
       }).catch(() => {});
 
       return res.status(201).send({
@@ -183,50 +567,70 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { workspace, clientId } = req.query;
 
-      if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-      }
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
 
-      if (clientId) {
-        const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
-        if (!client?.stripeCustomerId || client.workspace !== workspace) {
-          return res.status(200).send([]);
-        }
+      // Fetch both regular subscriptions and subscription schedules
+      const [allSubs, allSchedules] = await Promise.all([
+        listAllSubscriptions({}),
+        listAllSchedules({}),
+      ]);
 
-        const list = await stripe.subscriptions.list({
-          customer: client.stripeCustomerId,
-          limit: 100,
-        });
-        return res
-          .status(200)
-          .send(list.data.map((sub) => formatStripeSub(sub, clientId, client.name)));
-      }
-
-      const list = await stripe.subscriptions.list({ limit: 100 });
-
-      const clientIds = [
-        ...new Set(list.data.map((sub) => sub.metadata?.clientId).filter(Boolean) as string[]),
+      // Get all client IDs from both subscriptions and schedules
+      const subClientIds = [
+        ...new Set(allSubs.map((sub) => sub.metadata?.clientId).filter(Boolean) as string[]),
       ];
+      const scheduleClientIds = [
+        ...new Set(allSchedules.map((sch) => sch.metadata?.clientId).filter(Boolean) as string[]),
+      ];
+      const allClientIds = [...new Set([...subClientIds, ...scheduleClientIds])];
 
       const clientRows =
-        clientIds.length > 0
-          ? await db.select().from(clients).where(inArray(clients.id, clientIds))
+        allClientIds.length > 0
+          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
           : [];
 
       const scopedClients = clientRows.filter((c) => c.workspace === workspace);
       const clientMap = new Map(scopedClients.map((c) => [c.id, c.name]));
 
-      return res.status(200).send(
-        list.data
-          .map((sub) => {
-            const cid = sub.metadata?.clientId ?? "";
-            if (!cid || !clientMap.has(cid)) return null;
-            return formatStripeSub(sub, cid, clientMap.get(cid) ?? null);
-          })
-          .filter((entry): entry is ReturnType<typeof formatStripeSub> => entry !== null)
-      );
+      // Filter by clientId if provided
+      if (clientId) {
+        const client = scopedClients.find((c) => c.id === clientId);
+        if (!client) {
+          return res.status(200).send([]);
+        }
+
+        const filteredSubs = allSubs.filter((sub) => sub.metadata?.clientId === clientId);
+        const filteredSchedules = allSchedules.filter((sch) => sch.metadata?.clientId === clientId);
+
+        const formattedSubs = filteredSubs.map((sub) =>
+          formatStripeSub(sub, clientId, client.name)
+        );
+        const formattedSchedules = filteredSchedules.map((sch) =>
+          formatStripeSchedule(sch, clientId, client.name)
+        );
+
+        return res.status(200).send([...formattedSchedules, ...formattedSubs]);
+      }
+
+      // Format all subscriptions and schedules
+      const formattedSubs = allSubs
+        .map((sub) => {
+          const cid = sub.metadata?.clientId ?? "";
+          if (!cid || !clientMap.has(cid)) return null;
+          return formatStripeSub(sub, cid, clientMap.get(cid) ?? null);
+        })
+        .filter((entry): entry is ReturnType<typeof formatStripeSub> => entry !== null);
+
+      const formattedSchedules = allSchedules
+        .map((sch) => {
+          const cid = sch.metadata?.clientId ?? "";
+          if (!cid || !clientMap.has(cid)) return null;
+          return formatStripeSchedule(sch, cid, clientMap.get(cid) ?? null);
+        })
+        .filter((entry): entry is ReturnType<typeof formatStripeSchedule> => entry !== null);
+
+      return res.status(200).send([...formattedSchedules, ...formattedSubs]);
     }
   );
 
@@ -237,16 +641,26 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const { id } = req.params;
 
-      let sub: Stripe.Subscription;
+      // Try to fetch as subscription first
+      let sub: Stripe.Subscription | null = null;
+      let schedule: Stripe.SubscriptionSchedule | null = null;
+
       try {
         sub = await stripe.subscriptions.retrieve(id, {
           expand: ["latest_invoice", "items.data.price"],
         });
       } catch {
-        return res.status(404).send({ error: "Subscription not found." });
+        // Not a subscription, try as schedule
+        try {
+          schedule = await stripe.subscriptionSchedules.retrieve(id, {
+            expand: ["phases.items.plan"],
+          });
+        } catch {
+          return res.status(404).send({ error: "Subscription not found." });
+        }
       }
 
-      const clientId = sub.metadata?.clientId ?? "";
+      const clientId = sub?.metadata?.clientId ?? schedule?.metadata?.clientId ?? "";
 
       let clientName: string | null = null;
       if (clientId) {
@@ -254,76 +668,122 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         clientName = client?.name ?? null;
       }
 
-      const invoiceList = await stripe.invoices.list({ subscription: id, limit: 100 });
+      // Get invoices for this subscription/schedule
+      const invoiceList = await stripe.invoices.list({
+        subscription: sub?.id ?? undefined,
+        limit: STRIPE_LIST_LIMIT,
+      });
+
+      if (schedule) {
+        return res.status(200).send({
+          ...formatStripeSchedule(schedule, clientId, clientName),
+          invoices: invoiceList.data.map((inv) => formatStripeInvoice(inv, clientId)),
+        });
+      }
 
       return res.status(200).send({
-        ...formatStripeSub(sub, clientId, clientName),
+        ...formatStripeSub(sub!, clientId, clientName),
         invoices: invoiceList.data.map((inv) => formatStripeInvoice(inv, clientId)),
       });
     }
   );
 
-  // PATCH /subscriptions/:id — pause, cancel, resume, or update totalPayments
-  app.patch<{ Params: SubscriptionParams; Body: SubscriptionPatchBody }>(
-    "/subscriptions/:id",
-    { preHandler: requireAdminJwt },
-    async (req, res) => {
-      const { id } = req.params;
-      const { status, totalPayments, amountCents, description } = req.body;
+  // PATCH /subscriptions/:id — pause, cancel, resume, or update
+  app.patch<{
+    Params: SubscriptionParams;
+    Querystring: SubscriptionPatchQuery;
+    Body: SubscriptionPatchBody;
+  }>("/subscriptions/:id", { preHandler: requireAdminJwt }, async (req, res) => {
+    const { id } = req.params;
+    const { workspace } = req.query;
+    const { status, totalPayments, amountCents, description } = req.body;
 
-      if (amountCents !== undefined || description !== undefined) {
-        return res.status(400).send({
-          error:
-            "Editing amountCents and description is not supported. Only totalPayments and status can be changed.",
-        });
+    const validWorkspace = validateWorkspaceQuery(workspace, res);
+    if (!validWorkspace) return;
+
+    if (amountCents !== undefined || description !== undefined) {
+      return res.status(400).send({
+        error:
+          "Editing amountCents and description is not supported. Only totalPayments and status can be changed.",
+      });
+    }
+
+    if (status !== undefined) {
+      const ALLOWED_STATUSES = ["paused", "cancelled", "active"];
+      if (!ALLOWED_STATUSES.includes(status)) {
+        return res.status(422).send({ error: "status must be one of: paused, cancelled, active." });
       }
+    }
 
-      if (status !== undefined) {
-        const ALLOWED_STATUSES = ["paused", "cancelled", "active"];
-        if (!ALLOWED_STATUSES.includes(status)) {
-          return res
-            .status(422)
-            .send({ error: "status must be one of: paused, cancelled, active." });
-        }
+    if (totalPayments !== undefined && totalPayments !== null) {
+      if (!Number.isInteger(totalPayments) || totalPayments < 1) {
+        return res.status(422).send({ error: "totalPayments must be a positive integer." });
       }
+    }
 
-      if (totalPayments !== undefined && totalPayments !== null) {
-        if (!Number.isInteger(totalPayments) || totalPayments < 1) {
-          return res.status(422).send({ error: "totalPayments must be a positive integer." });
-        }
-      }
+    // Try subscription first
+    let isSchedule = false;
+    let sub: Stripe.Subscription | null = null;
+    let schedule: Stripe.SubscriptionSchedule | null = null;
 
-      let sub: Stripe.Subscription;
+    try {
+      sub = await stripe.subscriptions.retrieve(id);
+    } catch {
+      // Try schedule
       try {
-        sub = await stripe.subscriptions.retrieve(id);
+        schedule = await stripe.subscriptionSchedules.retrieve(id);
+        isSchedule = true;
       } catch {
         return res.status(404).send({ error: "Subscription not found." });
       }
+    }
 
-      if ((sub.status as string) === "canceled") {
-        return res.status(422).send({ error: "Cannot modify a cancelled subscription." });
-      }
+    const currentStatus = isSchedule
+      ? schedule?.status === "canceled"
+        ? "cancelled"
+        : schedule?.status
+      : sub?.status;
 
-      if (status === "active" && (sub.status as string) === "canceled") {
-        return res.status(422).send({ error: "Cannot resume a cancelled subscription." });
-      }
+    const scopedClientId =
+      (isSchedule ? schedule?.metadata?.clientId : sub?.metadata?.clientId) ?? "";
+    if (!scopedClientId) {
+      return res.status(400).send({ error: "Subscription is missing client metadata." });
+    }
 
-      let updated = sub;
+    const [scopedClient] = await db
+      .select({ id: clients.id, workspace: clients.workspace })
+      .from(clients)
+      .where(eq(clients.id, scopedClientId))
+      .limit(1);
 
-      if (status === "paused") {
-        updated = await stripe.subscriptions.update(id, {
-          pause_collection: { behavior: "void" },
-        });
-      } else if (status === "active") {
-        // Pass "" to clear pause_collection (Stripe Emptyable field)
-        // biome-ignore lint/suspicious/noExplicitAny: Stripe SDK requires "" to clear Emptyable fields
-        updated = await stripe.subscriptions.update(id, { pause_collection: "" as any });
-      } else if (status === "cancelled") {
-        updated = await stripe.subscriptions.update(id, { cancel_at_period_end: true });
+    if (!scopedClient) {
+      return res.status(404).send({ error: "Client not found for subscription." });
+    }
+
+    if (scopedClient.workspace !== validWorkspace) {
+      return res
+        .status(400)
+        .send({ error: "Subscription does not belong to the selected workspace." });
+    }
+
+    if (currentStatus === "cancelled" || currentStatus === "canceled") {
+      return res.status(422).send({ error: "Cannot modify a cancelled subscription." });
+    }
+
+    if (status === "active" && currentStatus === "cancelled") {
+      return res.status(422).send({ error: "Cannot resume a cancelled subscription." });
+    }
+
+    if (isSchedule) {
+      // Handle subscription schedule updates
+      let updated = schedule!;
+
+      if (status === "cancelled") {
+        updated = await stripe.subscriptionSchedules.cancel(id);
       }
 
       if (totalPayments !== undefined) {
-        updated = await stripe.subscriptions.update(id, {
+        updated = await stripe.subscriptionSchedules.update(id, {
           metadata: {
             ...updated.metadata,
             totalPayments: totalPayments !== null ? String(totalPayments) : "",
@@ -332,7 +792,467 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const clientId = updated.metadata?.clientId ?? "";
-      return res.status(200).send(formatStripeSub(updated, clientId));
+      return res.status(200).send(formatStripeSchedule(updated, clientId));
+    }
+
+    // Handle regular subscription updates
+    let updated = sub!;
+
+    if (status === "paused") {
+      updated = await stripe.subscriptions.update(id, {
+        pause_collection: { behavior: "void" },
+      });
+    } else if (status === "active") {
+      // biome-ignore lint/suspicious/noExplicitAny: Stripe SDK requires "" to clear Emptyable fields
+      updated = await stripe.subscriptions.update(id, { pause_collection: "" as any });
+    } else if (status === "cancelled") {
+      updated = await stripe.subscriptions.update(id, { cancel_at_period_end: true });
+    }
+
+    if (totalPayments !== undefined) {
+      updated = await stripe.subscriptions.update(id, {
+        metadata: {
+          ...updated.metadata,
+          totalPayments: totalPayments !== null ? String(totalPayments) : "",
+        },
+      });
+    }
+
+    const clientId = updated.metadata?.clientId ?? "";
+    return res.status(200).send(formatStripeSub(updated, clientId));
+  });
+
+  // ==================== ADMIN DASHBOARD ENDPOINTS ====================
+
+  // GET /subscriptions/dashboard/summary — Quick stats
+  app.get<{ Querystring: DashboardQuery }>(
+    "/subscriptions/dashboard/summary",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      const { workspace } = req.query;
+
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
+
+      const { subscriptions: allSubscriptions, schedules: allSchedules } =
+        await getDashboardStripeData(validWorkspace);
+
+      // Filter by workspace
+      const allClientIds = [
+        ...new Set([
+          ...allSubscriptions.map((s) => s.metadata?.clientId),
+          ...allSchedules.map((s) => s.metadata?.clientId),
+        ]),
+      ].filter(Boolean) as string[];
+
+      const clientRows =
+        allClientIds.length > 0
+          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
+          : [];
+
+      const scopedClientIds = new Set(
+        clientRows.filter((c) => c.workspace === workspace).map((c) => c.id)
+      );
+
+      const filteredSubs = allSubscriptions.filter((s) =>
+        scopedClientIds.has(s.metadata?.clientId)
+      );
+      const filteredSchedules = allSchedules.filter((s) =>
+        scopedClientIds.has(s.metadata?.clientId)
+      );
+
+      const activeSubs = filteredSubs.filter(
+        (s) => s.status === "active" && !s.pause_collection
+      ).length;
+      const pausedSubs = filteredSubs.filter((s) => s.pause_collection).length;
+      const cancelledSubs = filteredSubs.filter((s) => s.status === "canceled").length;
+      const pastDueSubs = filteredSubs.filter((s) => s.status === "past_due").length;
+
+      const activeSchedules = filteredSchedules.filter((s) => s.status === "active").length;
+      const completedSchedules = filteredSchedules.filter((s) => s.status === "completed").length;
+      const cancelledSchedules = filteredSchedules.filter((s) => s.status === "canceled").length;
+
+      const totalRecurringMRR = filteredSubs
+        .filter((s) => s.status === "active" && !s.pause_collection)
+        .reduce((sum, s) => sum + (s.items.data[0]?.price?.unit_amount ?? 0), 0);
+
+      return res.status(200).send({
+        recurring: {
+          active: activeSubs,
+          paused: pausedSubs,
+          cancelled: cancelledSubs,
+          pastDue: pastDueSubs,
+          totalMrrCents: totalRecurringMRR,
+        },
+        paymentPlans: {
+          active: activeSchedules,
+          completed: completedSchedules,
+          cancelled: cancelledSchedules,
+        },
+        total: {
+          active: activeSubs + activeSchedules,
+          paused: pausedSubs,
+          cancelled: cancelledSubs + cancelledSchedules,
+          completed: completedSchedules,
+        },
+      });
+    }
+  );
+
+  // GET /subscriptions/dashboard/active — All clients with active subs
+  app.get<{ Querystring: DashboardQuery }>(
+    "/subscriptions/dashboard/active",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      const { workspace } = req.query;
+
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
+
+      const { subscriptions: allSubscriptions, schedules: allSchedules } =
+        await getDashboardStripeData(validWorkspace);
+
+      // Get active subscriptions (not paused)
+      const activeSubs = allSubscriptions.filter(
+        (s) => s.status === "active" && !s.pause_collection
+      );
+      const activeSchedules = allSchedules.filter((s) => s.status === "active");
+
+      const allClientIds = [
+        ...new Set([
+          ...activeSubs.map((s) => s.metadata?.clientId),
+          ...activeSchedules.map((s) => s.metadata?.clientId),
+        ]),
+      ].filter(Boolean) as string[];
+
+      const clientRows =
+        allClientIds.length > 0
+          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
+          : [];
+
+      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
+      const clientMap = new Map(scopedClients.map((c) => [c.id, c]));
+
+      const result = [];
+
+      for (const sub of activeSubs) {
+        const clientId = sub.metadata?.clientId;
+        if (!clientId || !clientMap.has(clientId)) continue;
+        const client = clientMap.get(clientId)!;
+
+        result.push({
+          clientId,
+          clientName: client.name,
+          clientEmail: client.email,
+          subscriptionId: sub.id,
+          type: "recurring",
+          amountPerPaymentCents: sub.items.data[0]?.price?.unit_amount ?? 0,
+          interval: sub.metadata?.interval ?? "month",
+          nextPaymentDate: sub.current_period_end
+            ? new Date(sub.current_period_end * 1000).toISOString()
+            : null,
+          status: "active",
+        });
+      }
+
+      for (const sch of activeSchedules) {
+        const clientId = sch.metadata?.clientId;
+        if (!clientId || !clientMap.has(clientId)) continue;
+        const client = clientMap.get(clientId)!;
+
+        const phase = sch.phases?.[0];
+        result.push({
+          clientId,
+          clientName: client.name,
+          clientEmail: client.email,
+          subscriptionId: sch.id,
+          type: "payment_plan",
+          amountPerPaymentCents: sch.metadata?.amountPerPaymentCents
+            ? Number(sch.metadata.amountPerPaymentCents)
+            : (phase?.items?.[0]?.plan?.amount ?? 0),
+          interval: sch.metadata?.interval ?? "month",
+          startDate: sch.metadata?.startDate,
+          endDate: sch.metadata?.endDate,
+          totalPayments: sch.metadata?.totalPayments ? Number(sch.metadata.totalPayments) : null,
+          paymentsMade: sch.metadata?.paymentsMade ? Number(sch.metadata.paymentsMade) : 0,
+          status: "active",
+        });
+      }
+
+      return res.status(200).send(result);
+    }
+  );
+
+  // GET /subscriptions/dashboard/overdue — Past due subscriptions
+  app.get<{ Querystring: DashboardQuery }>(
+    "/subscriptions/dashboard/overdue",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      const { workspace } = req.query;
+
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
+
+      const { subscriptions: allSubscriptions } = await getDashboardStripeData(validWorkspace);
+      const pastDueSubs = allSubscriptions.filter((s) => s.status === "past_due");
+
+      const allClientIds = [
+        ...new Set(pastDueSubs.map((s) => s.metadata?.clientId).filter(Boolean) as string[]),
+      ];
+
+      const clientRows =
+        allClientIds.length > 0
+          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
+          : [];
+
+      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
+      const clientMap = new Map(scopedClients.map((c) => [c.id, c]));
+
+      const result = [];
+
+      for (const sub of pastDueSubs) {
+        const clientId = sub.metadata?.clientId;
+        if (!clientId || !clientMap.has(clientId)) continue;
+        const client = clientMap.get(clientId)!;
+
+        result.push({
+          clientId,
+          clientName: client.name,
+          clientEmail: client.email,
+          subscriptionId: sub.id,
+          type: sub.metadata?.type ?? "recurring",
+          amountPerPaymentCents: sub.items.data[0]?.price?.unit_amount ?? 0,
+          interval: sub.metadata?.interval ?? "month",
+          pastDueSince: sub.current_period_end
+            ? new Date(sub.current_period_end * 1000).toISOString()
+            : null,
+          status: "past_due",
+        });
+      }
+
+      return res.status(200).send(result);
+    }
+  );
+
+  // GET /subscriptions/dashboard/ending-soon?days=30 — Payment plans ending soon
+  app.get<{ Querystring: DashboardQuery }>(
+    "/subscriptions/dashboard/ending-soon",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      const { workspace, days = "30" } = req.query;
+      const daysNum = parseInt(days, 10) || 30;
+
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
+
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() + daysNum);
+      const cutoffTimestamp = Math.floor(cutoffDate.getTime() / 1000);
+
+      const { schedules: allSchedules } = await getDashboardStripeData(validWorkspace);
+      const activeSchedules = allSchedules.filter((s) => s.status === "active");
+
+      // Filter schedules ending before cutoff
+      const endingSoon = activeSchedules.filter((sch) => {
+        const phase = sch.phases?.[0];
+        return phase?.end_date && phase.end_date <= cutoffTimestamp;
+      });
+
+      const allClientIds = [
+        ...new Set(endingSoon.map((s) => s.metadata?.clientId).filter(Boolean) as string[]),
+      ];
+
+      const clientRows =
+        allClientIds.length > 0
+          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
+          : [];
+
+      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
+      const clientMap = new Map(scopedClients.map((c) => [c.id, c]));
+
+      const result = [];
+
+      for (const sch of endingSoon) {
+        const clientId = sch.metadata?.clientId;
+        if (!clientId || !clientMap.has(clientId)) continue;
+        const client = clientMap.get(clientId)!;
+        const phase = sch.phases?.[0];
+
+        result.push({
+          clientId,
+          clientName: client.name,
+          clientEmail: client.email,
+          subscriptionId: sch.id,
+          type: "payment_plan",
+          amountPerPaymentCents: sch.metadata?.amountPerPaymentCents
+            ? Number(sch.metadata.amountPerPaymentCents)
+            : (phase?.items?.[0]?.plan?.amount ?? 0),
+          interval: sch.metadata?.interval ?? "month",
+          endDate: phase?.end_date
+            ? new Date(phase.end_date * 1000).toISOString().split("T")[0]
+            : null,
+          totalPayments: sch.metadata?.totalPayments ? Number(sch.metadata.totalPayments) : null,
+          paymentsMade: sch.metadata?.paymentsMade ? Number(sch.metadata.paymentsMade) : 0,
+          status: "active",
+        });
+      }
+
+      return res.status(200).send(result);
+    }
+  );
+
+  // GET /subscriptions/dashboard/recently-cancelled?days=30 — Recently cancelled
+  app.get<{ Querystring: DashboardQuery }>(
+    "/subscriptions/dashboard/recently-cancelled",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      const { workspace, days = "30" } = req.query;
+      const daysNum = parseInt(days, 10) || 30;
+
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
+
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysNum);
+      const cutoffTimestamp = Math.floor(cutoffDate.getTime() / 1000);
+
+      const { subscriptions: allSubscriptions, schedules: allSchedules } =
+        await getDashboardStripeData(validWorkspace);
+      const canceledSubs = allSubscriptions.filter((s) => s.status === "canceled");
+      const canceledSchedules = allSchedules.filter((s) => s.status === "canceled");
+
+      // Filter by cancellation time
+      const recentlyCancelledSubs = canceledSubs.filter((s) => s.canceled_at >= cutoffTimestamp);
+      const recentlyCancelledSchedules = canceledSchedules.filter(
+        (s) => s.canceled_at && s.canceled_at >= cutoffTimestamp
+      );
+
+      const allClientIds = [
+        ...new Set([
+          ...recentlyCancelledSubs.map((s) => s.metadata?.clientId),
+          ...recentlyCancelledSchedules.map((s) => s.metadata?.clientId),
+        ]),
+      ].filter(Boolean) as string[];
+
+      const clientRows =
+        allClientIds.length > 0
+          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
+          : [];
+
+      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
+      const clientMap = new Map(scopedClients.map((c) => [c.id, c]));
+
+      const result = [];
+
+      for (const sub of recentlyCancelledSubs) {
+        const clientId = sub.metadata?.clientId;
+        if (!clientId || !clientMap.has(clientId)) continue;
+        const client = clientMap.get(clientId)!;
+
+        result.push({
+          clientId,
+          clientName: client.name,
+          clientEmail: client.email,
+          subscriptionId: sub.id,
+          type: sub.metadata?.type ?? "recurring",
+          amountPerPaymentCents: sub.items.data[0]?.price?.unit_amount ?? 0,
+          interval: sub.metadata?.interval ?? "month",
+          cancelledAt: sub.canceled_at ? new Date(sub.canceled_at * 1000).toISOString() : null,
+          status: "cancelled",
+        });
+      }
+
+      for (const sch of recentlyCancelledSchedules) {
+        const clientId = sch.metadata?.clientId;
+        if (!clientId || !clientMap.has(clientId)) continue;
+        const client = clientMap.get(clientId)!;
+
+        result.push({
+          clientId,
+          clientName: client.name,
+          clientEmail: client.email,
+          subscriptionId: sch.id,
+          type: "payment_plan",
+          amountPerPaymentCents: sch.metadata?.amountPerPaymentCents
+            ? Number(sch.metadata.amountPerPaymentCents)
+            : 0,
+          interval: sch.metadata?.interval ?? "month",
+          cancelledAt: sch.canceled_at ? new Date(sch.canceled_at * 1000).toISOString() : null,
+          status: "cancelled",
+        });
+      }
+
+      return res.status(200).send(result);
+    }
+  );
+
+  // GET /clients/:clientId/subscriptions — Full subscription details for one client
+  app.get<{ Params: { clientId: string }; Querystring: DashboardQuery }>(
+    "/clients/:clientId/subscriptions",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      const { clientId } = req.params;
+      const { workspace } = req.query;
+
+      const validWorkspace = validateWorkspaceQuery(workspace, res);
+      if (!validWorkspace) return;
+
+      const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+
+      if (!client) {
+        return res.status(404).send({ error: "Client not found." });
+      }
+
+      if (client.workspace !== workspace) {
+        return res.status(400).send({ error: "Client does not belong to the selected workspace." });
+      }
+
+      if (!client.stripeCustomerId) {
+        return res.status(200).send({
+          client: {
+            id: client.id,
+            name: client.name,
+            email: client.email,
+          },
+          subscriptions: [],
+          invoices: [],
+        });
+      }
+
+      // Fetch subscriptions and schedules for this client
+      const [subList, scheduleList, invoiceList] = await Promise.all([
+        listAllSubscriptions({
+          customer: client.stripeCustomerId,
+          expand: ["data.latest_invoice"],
+        }),
+        listAllSchedules({}),
+        stripe.invoices.list({
+          customer: client.stripeCustomerId,
+          limit: STRIPE_LIST_LIMIT,
+        }),
+      ]);
+
+      // Filter schedules for this client
+      const clientSchedules = scheduleList.filter((s) => s.metadata?.clientId === clientId);
+
+      // Format subscriptions
+      const formattedSubs = subList.map((sub) => formatStripeSub(sub, clientId, client.name));
+
+      // Format schedules
+      const formattedSchedules = clientSchedules.map((sch) =>
+        formatStripeSchedule(sch, clientId, client.name)
+      );
+
+      return res.status(200).send({
+        client: {
+          id: client.id,
+          name: client.name,
+          email: client.email,
+          stripeCustomerId: client.stripeCustomerId,
+        },
+        subscriptions: [...formattedSchedules, ...formattedSubs],
+        invoices: invoiceList.data.map((inv) => formatStripeInvoice(inv, clientId)),
+      });
     }
   );
 };

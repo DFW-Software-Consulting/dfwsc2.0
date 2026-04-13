@@ -7,6 +7,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
 } from "drizzle-orm/pg-core";
 
 export const clientGroups = pgTable("client_groups", {
@@ -47,12 +48,23 @@ export const clients = pgTable(
     paymentCancelUrl: text("payment_cancel_url"),
     processingFeePercent: numeric("processing_fee_percent", { precision: 5, scale: 2 }),
     processingFeeCents: integer("processing_fee_cents"),
+    phone: text("phone"),
+    billingContactName: text("billing_contact_name"),
+    addressLine1: text("address_line1"),
+    addressLine2: text("address_line2"),
+    city: text("city"),
+    state: text("state"),
+    postalCode: text("postal_code"),
+    country: text("country"),
+    notes: text("notes"),
+    defaultPaymentTermsDays: integer("default_payment_terms_days"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (table) => ({
     apiKeyHashIdx: index("clients_api_key_hash_idx").on(table.apiKeyHash),
     apiKeyLookupIdx: index("clients_api_key_lookup_idx").on(table.apiKeyLookup),
+    emailWorkspaceUnique: unique("clients_email_workspace_unique").on(table.email, table.workspace),
   })
 );
 

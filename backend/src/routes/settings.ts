@@ -33,6 +33,7 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
         defaultFeePercent: settingsMap.default_fee_percent || null,
         companyName: settingsMap.company_name || "DFW Software Consulting",
         contactEmail: settingsMap.contact_email || process.env.SMTP_FROM || "",
+        smtpFrom: process.env.SMTP_FROM || "",
       };
 
       return res.status(200).send(response);

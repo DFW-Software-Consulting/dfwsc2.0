@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { useCreateClient } from "../../hooks/useClients";
+import { useCreateClient, useDfwscClient } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import logger from "../../utils/logger";
 import { validateEmail, validateName } from "../../utils/validation";
@@ -9,7 +9,7 @@ import FormInput from "./shared/FormInput";
 
 const NAME_MAX_LENGTH = 100;
 
-export default function CreateClientForm({ showToast, workspace = "client_portal" }) {
+export default function CreateClientForm({ showToast, workspace = "client_portal", onSuccess }) {
   const isDfwscMode = workspace === "dfwsc_services";
   const { data: groups = [] } = useGroups(workspace);
   const [name, setName] = useState("");
@@ -18,7 +18,19 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
   const [error, setError] = useState("");
   const [createdClientInfo, setCreatedClientInfo] = useState(null);
 
+  const [phone, setPhone] = useState("");
+  const [billingContactName, setBillingContactName] = useState("");
+  const [addressLine1, setAddressLine1] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("");
+  const [postalCode, setPostalCode] = useState("");
+  const [country, setCountry] = useState("");
+  const [notes, setNotes] = useState("");
+  const [defaultPaymentTermsDays, setDefaultPaymentTermsDays] = useState("");
+
   const createClientMutation = useCreateClient();
+  const dfwscClientMutation = useDfwscClient();
 
   const validateForm = useCallback(() => {
     const nameErr = validateName(name, 1, NAME_MAX_LENGTH, "Client name");
@@ -31,19 +43,67 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
   const handleSubmit = useCallback(
     (e) => {
       e.preventDefault();
+      setError("");
+      setCreatedClientInfo(null);
+
+      if (isDfwscMode) {
+        dfwscClientMutation.mutate(
+          {
+            name: name.trim(),
+            email: email.trim(),
+            phone: phone.trim() || undefined,
+            billingContactName: billingContactName.trim() || undefined,
+            addressLine1: addressLine1.trim() || undefined,
+            addressLine2: addressLine2.trim() || undefined,
+            city: city.trim() || undefined,
+            state: state.trim() || undefined,
+            postalCode: postalCode.trim() || undefined,
+            country: country.trim() || undefined,
+            notes: notes.trim() || undefined,
+            defaultPaymentTermsDays: defaultPaymentTermsDays
+              ? parseInt(defaultPaymentTermsDays, 10)
+              : undefined,
+          },
+          {
+            onSuccess: (data) => {
+              setCreatedClientInfo(data);
+              setName("");
+              setEmail("");
+              setPhone("");
+              setBillingContactName("");
+              setAddressLine1("");
+              setAddressLine2("");
+              setCity("");
+              setState("");
+              setPostalCode("");
+              setCountry("");
+              setNotes("");
+              setDefaultPaymentTermsDays("");
+              showToast?.(`Client ${data.name} created successfully!`, "success");
+              onSuccess?.(data);
+            },
+            onError: (err) => {
+              logger.error("Error creating DFWSC client:", err);
+              setError(err.message);
+              showToast?.(`Error creating client: ${err.message}`, "error");
+            },
+          }
+        );
+        return;
+      }
+
       const validationError = validateForm();
       if (validationError) {
         setError(validationError);
         return;
       }
-      setError("");
-      setCreatedClientInfo(null);
+
       createClientMutation.mutate(
         {
           name: name.trim(),
           email: email.trim(),
           workspace,
-          groupId: !isDfwscMode && groupId ? groupId : undefined,
+          groupId: groupId ? groupId : undefined,
         },
         {
           onSuccess: (data) => {
@@ -52,6 +112,7 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
             setEmail("");
             setGroupId("");
             showToast?.(`Client ${data.name} created successfully!`, "success");
+            onSuccess?.(data);
           },
           onError: (err) => {
             logger.error("Error creating client:", err);
@@ -61,7 +122,28 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
         }
       );
     },
-    [name, email, groupId, workspace, isDfwscMode, validateForm, createClientMutation, showToast]
+    [
+      name,
+      email,
+      groupId,
+      workspace,
+      validateForm,
+      createClientMutation,
+      showToast,
+      isDfwscMode,
+      phone,
+      billingContactName,
+      addressLine1,
+      addressLine2,
+      city,
+      state,
+      postalCode,
+      country,
+      notes,
+      defaultPaymentTermsDays,
+      dfwscClientMutation,
+      onSuccess,
+    ]
   );
 
   const copyToClipboard = useCallback(
@@ -77,6 +159,10 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
     [showToast]
   );
 
+  const canSubmit = !!name.trim() && !!email.trim();
+
+  const mutation = isDfwscMode ? dfwscClientMutation : createClientMutation;
+
   return (
     <div className="mb-6 p-4 bg-gray-700/50 rounded-lg">
       <h4 className="text-md font-semibold text-white mb-3">Create New Client</h4>
@@ -90,7 +176,7 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Acme Marketing"
             maxLength={NAME_MAX_LENGTH}
-            disabled={createClientMutation.isPending}
+            disabled={mutation.isPending}
             helper={`${name.length}/${NAME_MAX_LENGTH} characters`}
           />
           <FormInput
@@ -100,9 +186,118 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="e.g. payments@acme.com"
-            disabled={createClientMutation.isPending}
+            disabled={mutation.isPending}
           />
         </div>
+
+        {isDfwscMode && (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <FormInput
+                id="newClientPhone"
+                label="Phone"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="e.g. +1 (555) 123-4567"
+                disabled={mutation.isPending}
+              />
+              <FormInput
+                id="billingContactName"
+                label="Billing Contact Name"
+                value={billingContactName}
+                onChange={(e) => setBillingContactName(e.target.value)}
+                placeholder="e.g. John Smith"
+                disabled={mutation.isPending}
+              />
+            </div>
+
+            <div className="mb-4">
+              <FormInput
+                id="addressLine1"
+                label="Address Line 1"
+                value={addressLine1}
+                onChange={(e) => setAddressLine1(e.target.value)}
+                placeholder="e.g. 123 Main Street"
+                disabled={mutation.isPending}
+              />
+            </div>
+
+            <div className="mb-4">
+              <FormInput
+                id="addressLine2"
+                label="Address Line 2"
+                value={addressLine2}
+                onChange={(e) => setAddressLine2(e.target.value)}
+                placeholder="e.g. Suite 100"
+                disabled={mutation.isPending}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <FormInput
+                id="city"
+                label="City"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="e.g. Austin"
+                disabled={mutation.isPending}
+              />
+              <FormInput
+                id="state"
+                label="State"
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+                placeholder="e.g. TX"
+                disabled={mutation.isPending}
+              />
+              <FormInput
+                id="postalCode"
+                label="Postal Code"
+                value={postalCode}
+                onChange={(e) => setPostalCode(e.target.value)}
+                placeholder="e.g. 78701"
+                disabled={mutation.isPending}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <FormInput
+                id="country"
+                label="Country"
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                placeholder="e.g. US"
+                disabled={mutation.isPending}
+              />
+              <FormInput
+                id="defaultPaymentTermsDays"
+                label="Default Payment Terms (days)"
+                type="number"
+                value={defaultPaymentTermsDays}
+                onChange={(e) => setDefaultPaymentTermsDays(e.target.value)}
+                placeholder="e.g. 30"
+                disabled={mutation.isPending}
+              />
+            </div>
+
+            <div className="mb-4">
+              <label htmlFor="notes" className="block text-sm font-medium text-gray-300 mb-1">
+                Notes (Optional)
+              </label>
+              <textarea
+                id="notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Any additional notes..."
+                rows={3}
+                className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
+                       focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={mutation.isPending}
+              />
+            </div>
+          </>
+        )}
 
         {!isDfwscMode && (
           <div className="mb-4">
@@ -118,7 +313,7 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
               onChange={(e) => setGroupId(e.target.value)}
               className="w-full md:w-1/2 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
                        focus:outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={createClientMutation.isPending}
+              disabled={mutation.isPending}
             >
               <option value="">— No company (Independent Account) —</option>
               {groups
@@ -137,17 +332,17 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
 
         <Button
           type="submit"
-          disabled={createClientMutation.isPending || !name.trim() || !email.trim()}
-          isLoading={createClientMutation.isPending}
+          disabled={mutation.isPending || !canSubmit}
+          isLoading={mutation.isPending}
           className="w-full md:w-auto shadow-lg focus:ring-2 focus:ring-blue-400"
         >
-          {createClientMutation.isPending ? "Creating..." : "Create Client"}
+          {mutation.isPending ? "Creating..." : "Create Client"}
         </Button>
 
         <ErrorMessage message={error} className="mt-2" />
       </form>
 
-      {createdClientInfo && (
+      {createdClientInfo && !isDfwscMode && (
         <div className="mt-4 p-4 bg-gray-800/50 rounded-lg border border-gray-600">
           <h5 className="font-semibold text-green-400 mb-2">Client Created Successfully!</h5>
 

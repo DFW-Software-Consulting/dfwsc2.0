@@ -1,13 +1,15 @@
-import { TEST_WEBHOOK_SECRET } from "./constants";
+import { TEST_JWT_SECRET, TEST_WEBHOOK_SECRET } from "./constants";
 
 // For integration tests — idempotent, only sets if missing
 export function ensureBaseEnv(): void {
   process.env.FRONTEND_ORIGIN ??= "http://localhost:5173";
   process.env.USE_CHECKOUT ??= "false";
+  process.env.DATABASE_URL ??= "postgres://postgres:postgres@localhost:5432/postgres";
   process.env.SMTP_HOST ??= "mailhog";
   process.env.SMTP_PORT ??= "1025";
   process.env.SMTP_USER ??= "test";
   process.env.SMTP_PASS ??= "test";
+  process.env.JWT_SECRET ??= TEST_JWT_SECRET;
 }
 
 // For unit tests (mocked DB) — forces all values
@@ -17,8 +19,10 @@ export function setTestEnv(): void {
   process.env.FRONTEND_ORIGIN = "http://localhost:5173";
   process.env.API_BASE_URL = "http://localhost:4242";
   process.env.USE_CHECKOUT = "false";
+  process.env.DATABASE_URL = "postgres://postgres:postgres@localhost:5432/postgres";
   process.env.SMTP_HOST = "mailhog";
   process.env.SMTP_PORT = "1025";
   process.env.SMTP_USER = "test";
   process.env.SMTP_PASS = "test";
+  process.env.JWT_SECRET = TEST_JWT_SECRET;
 }

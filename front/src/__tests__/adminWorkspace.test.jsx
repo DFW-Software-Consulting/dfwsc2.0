@@ -43,11 +43,12 @@ describe("AdminDashboard workspace behavior", () => {
 
     expect(screen.queryByRole("button", { name: "Companies" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Accounts" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reports" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reports" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Billing" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Client Portal" }));
     expect(screen.getByRole("button", { name: "Companies" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reports" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Companies" }));
     expect(screen.getByText("GroupPanel:client_portal")).toBeInTheDocument();

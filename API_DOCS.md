@@ -198,13 +198,13 @@ Check whether first-run admin setup is available.
 }
 ```
 
-> This is only relevant for first-time deployment. Once `ADMIN_PASSWORD` is set in the environment, `setupAllowed` will be `false`.
+> This is only relevant for first-time deployment. Once an admin is configured and `setupConfirmed` is true, bootstrap will be complete.
 
 ---
 
 #### `POST /api/v1/auth/setup`
 
-First-run only. Creates the initial admin account. Requires `ALLOW_ADMIN_SETUP=true` and no `ADMIN_PASSWORD` set.
+First-run only. Initiates the initial admin account creation. Requires `ALLOW_ADMIN_SETUP=true` and no existing admin in the database.
 
 **Headers (if `ADMIN_SETUP_TOKEN` is set):**
 ```
@@ -226,14 +226,40 @@ X-Setup-Token: <your-setup-token>
   "passwordHash": "$2b$10$...",
   "instructions": [
     "1. Copy the credentials above",
-    "2. Add to your environment configuration:",
-    "   ADMIN_USERNAME=admin",
-    "   ADMIN_PASSWORD=$2b$10$...",
-    "3. Remove or set ALLOW_ADMIN_SETUP=false",
-    "4. Restart your application"
+    "2. Use these credentials with /auth/confirm-bootstrap to finalize setup",
+    "3. (Recommended) Set ALLOW_ADMIN_SETUP=false in your environment."
   ]
 }
 ```
+
+> **Note:** This endpoint returns a password hash for verification. The admin account is not fully active until confirmed via `/auth/confirm-bootstrap`.
+
+---
+
+#### `POST /api/v1/auth/confirm-bootstrap`
+
+Finalizes the admin account setup after initial creation via `/auth/setup`. This stores the credentials in the database and enables login.
+
+**Request:**
+```json
+{
+  "username": "admin",
+  "password": "at-least-8-chars"
+}
+```
+
+**Response `200`:**
+```json
+{
+  "message": "Admin credentials confirmed"
+}
+```
+
+**Errors:**
+- `400` — Missing username/password, or bootstrap already confirmed, or no bootstrap admin found
+- `429` — Rate limited
+
+> **Setup Flow:** 1) Call `/auth/setup` to generate credentials → 2) Call `/auth/confirm-bootstrap` with same credentials to store in DB → 3) Login via `/auth/login`
 
 ---
 
@@ -832,6 +858,139 @@ The server handles these events:
 - `payout.failed` — logged
 
 Events are stored in `webhook_events` for idempotency — duplicate events are ignored.
+
+---
+
+### Configuration
+
+#### `GET /api/v1/config`
+
+No auth required. Returns public configuration used by the frontend.
+
+**Response `200`:**
+```json
+{
+  "useCheckout": true
+}
+```
+
+This indicates whether the backend is configured to use Stripe Checkout (`true`) or PaymentIntent (`false`) mode.
+
+---
+
+### Products
+
+#### `GET /api/v1/products`
+
+**Auth: Admin JWT**
+
+List Stripe products for the workspace.
+
+**Query params:**
+- `workspace` (optional) — `"dfwsc_services"` or `"client_portal"` (default: `"client_portal"`)
+- `limit` (optional) — Max results (1-100, default: 10)
+
+**Response `200`:**
+```json
+{
+  "workspace": "client_portal",
+  "data": [
+    {
+      "id": "prod_xxx",
+      "name": "Monthly Retainer",
+      "description": "...",
+      "active": true
+    }
+  ],
+  "hasMore": false
+}
+```
+
+#### `POST /api/v1/products`
+
+**Auth: Admin JWT**
+
+Create a new Stripe product.
+
+**Request:**
+```json
+{
+  "workspace": "client_portal",
+  "name": "Consulting Package",
+  "description": "10 hours of consulting",
+  "unitAmount": 50000,
+  "currency": "usd"
+}
+```
+
+**Response `201`:** Created product object.
+
+---
+
+### Stripe Customers
+
+#### `GET /api/v1/stripe-customers`
+
+**Auth: Admin JWT**
+
+List Stripe customers linked to workspace clients.
+
+**Query params:**
+- `workspace` (optional) — Filter by workspace
+- `clientId` (optional) — Filter by specific client
+- `limit` (optional) — Max results (1-100, default: 10)
+
+**Response `200`:** Array of customer objects with `stripeCustomerId`, `email`, `name`, etc.
+
+#### `POST /api/v1/stripe-customers`
+
+**Auth: Admin JWT**
+
+Create a Stripe customer for a client.
+
+**Request:**
+```json
+{
+  "clientId": "abc123",
+  "email": "billing@example.com",
+  "name": "Acme Corp"
+}
+```
+
+**Response `201`:** Created customer object with `stripeCustomerId`.
+
+---
+
+### DFWSC Clients
+
+#### `GET /api/v1/dfwsc-clients`
+
+**Auth: Admin JWT**
+
+List all clients in the `dfwsc_services` workspace (internal DFWSC clients). Same response format as `GET /api/v1/clients`.
+
+**Query params:**
+- `limit` (optional) — Max results
+- `starting_after` (optional) — Cursor for pagination
+- `ending_before` (optional) — Cursor for pagination
+
+---
+
+### Settings
+
+#### `GET /api/v1/settings`
+
+**Auth: Admin JWT**
+
+Get system settings and billing defaults.
+
+**Response `200`:**
+```json
+{
+  "defaultPaymentTermsDays": 30,
+  "processingFeePercent": 2.5
+}
+```
 
 ---
 

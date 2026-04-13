@@ -7,7 +7,7 @@ import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
-import { isWorkspace } from "../lib/workspace";
+import { validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
 
 interface RequestWithClient extends FastifyRequest {
   client?: typeof clients.$inferSelect;
@@ -19,43 +19,57 @@ interface RequestWithClient extends FastifyRequest {
  */
 async function requireClientOrAdmin(request: FastifyRequest, reply: FastifyReply) {
   const apiKeyHeader = request.headers["x-api-key"];
-  let authError = false;
 
-  // 1. Try API Key if header exists
+  const runAuthCheck = async (
+    checker: (request: FastifyRequest, reply: FastifyReply) => Promise<unknown>
+  ) => {
+    const state = {
+      sent: false,
+      statusCode: 200,
+      payload: undefined as unknown,
+    };
+
+    const replyMock = {
+      sent: false,
+      statusCode: 200,
+      code(code: number) {
+        state.statusCode = code;
+        this.statusCode = code;
+        return this;
+      },
+      status(code: number) {
+        state.statusCode = code;
+        this.statusCode = code;
+        return this;
+      },
+      send(payload: unknown) {
+        state.sent = true;
+        state.payload = payload;
+        this.sent = true;
+        return this;
+      },
+    } as unknown as FastifyReply;
+
+    await checker(request, replyMock);
+    return state;
+  };
+
   if (apiKeyHeader) {
-    try {
-      await requireApiKey(request, reply);
-    } catch {
-      throw new Error("System error during API key validation");
-    }
+    const apiKeyResult = await runAuthCheck(requireApiKey);
     if ((request as RequestWithClient).client) return;
-
-    // API key auth failed (returned 401 but didn't throw) - try JWT
-    const initialSent = reply.sent;
-    if (initialSent && reply.statusCode === 401) {
-      authError = true;
-      // Reset reply for next attempt
-      reply.sent = false;
+    if (apiKeyResult.statusCode >= 500) {
+      return reply.code(apiKeyResult.statusCode).send(apiKeyResult.payload);
+    }
+    if (!request.headers.authorization) {
+      return reply
+        .code(apiKeyResult.sent ? apiKeyResult.statusCode : 401)
+        .send(apiKeyResult.payload ?? { error: "Authentication required (API Key or Admin JWT)." });
     }
   }
 
-  // 2. Try Admin JWT
-  if (!(request as RequestWithClient).client) {
-    try {
-      await requireAdminJwt(request, reply);
-    } catch {
-      throw new Error("System error during JWT validation");
-    }
-    if ((request as RequestWithClient).client) return;
-
-    // Both failed
-    if (reply.sent && reply.statusCode === 401) {
-      authError = true;
-    }
-    if (!authError) {
-      return reply.code(401).send({ error: "Authentication required (API Key or Admin JWT)." });
-    }
-  }
+  const adminResult = await runAuthCheck(requireAdminJwt);
+  if (!adminResult.sent) return;
+  return reply.code(adminResult.statusCode).send(adminResult.payload);
 }
 
 function extractIdempotencyKey(request: FastifyRequest): string | undefined {
@@ -111,11 +125,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       // If no client resolved from API key, but user is Admin, resolve from body.clientId or metadata.clientId
       if (!client) {
-        if (!isWorkspace(workspace)) {
-          return reply
-            .code(400)
-            .send({ error: "workspace is required for admin payment creation." });
-        }
+        const validWorkspace = validateWorkspace(workspace, reply);
+        if (!validWorkspace) return;
         const bodyClientId = (request.body as { clientId?: string }).clientId || metadata?.clientId;
         if (!bodyClientId) {
           return reply
@@ -308,13 +319,13 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         ending_before?: string;
       };
 
-    if (!isWorkspace(workspace)) {
-      return reply
-        .code(400)
-        .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
-    }
+    const validWorkspace = validateWorkspaceQuery(workspace, reply);
+    if (!validWorkspace) return;
 
-    if (!clientId && !groupId) {
+    // For DFWSC services, allow fetching all payments across all clients in the workspace
+    const allowAllClients = workspace === "dfwsc_services";
+
+    if (!clientId && !groupId && !allowAllClients) {
       return reply.code(400).send({ error: "clientId or groupId query parameter is required." });
     }
 
@@ -376,6 +387,37 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       const merged = results.flat();
       return reply.send({ groupId, data: merged, hasMore: false });
+    }
+
+    // DFWSC: Fetch all payments across all clients in the workspace
+    if (!clientId && !groupId && allowAllClients) {
+      const allClients = await db.select().from(clients).where(eq(clients.workspace, workspace));
+
+      const connected = allClients.filter(
+        (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null
+      );
+
+      if (connected.length === 0) {
+        return reply.send({ workspace, data: [], hasMore: false });
+      }
+
+      const maxConcurrency = 3;
+      const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
+      for (let i = 0; i < connected.length; i += maxConcurrency) {
+        const batch = connected.slice(i, i + maxConcurrency);
+        const batchResults = await Promise.all(
+          batch.map(async (c) => {
+            const pi = await stripe.paymentIntents.list(listParams, {
+              stripeAccount: c.stripeAccountId,
+            });
+            return pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name }));
+          })
+        );
+        results.push(...batchResults);
+      }
+
+      const merged = results.flat();
+      return reply.send({ workspace, data: merged, hasMore: false });
     }
 
     if (!clientId) {

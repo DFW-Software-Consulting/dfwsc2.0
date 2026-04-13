@@ -36,13 +36,134 @@ export async function ensureStripeCustomer(client: {
   return cust.id;
 }
 
-export function toStripeInterval(interval: "monthly" | "quarterly" | "yearly"): {
-  interval: "month" | "year";
+export type CalendarInterval = "week" | "bi_weekly" | "month" | "quarter" | "year";
+
+/**
+ * Convert calendar interval to Stripe interval format.
+ * Supports: week, bi_weekly, month, quarter, year
+ */
+export function toStripeInterval(interval: CalendarInterval): {
+  interval: "week" | "month" | "year";
   interval_count: number;
 } {
-  if (interval === "monthly") return { interval: "month", interval_count: 1 };
-  if (interval === "quarterly") return { interval: "month", interval_count: 3 };
-  return { interval: "year", interval_count: 1 };
+  switch (interval) {
+    case "week":
+      return { interval: "week", interval_count: 1 };
+    case "bi_weekly":
+      return { interval: "week", interval_count: 2 };
+    case "month":
+      return { interval: "month", interval_count: 1 };
+    case "quarter":
+      return { interval: "month", interval_count: 3 };
+    case "year":
+      return { interval: "year", interval_count: 1 };
+    default:
+      // Fallback for any unexpected values
+      return { interval: "month", interval_count: 1 };
+  }
+}
+
+/**
+ * Calculate the number of billing iterations between two dates.
+ * Returns the ceiling of iterations (partial periods count as full periods).
+ */
+export function calculateIterations(
+  startDate: string,
+  endDate: string,
+  interval: CalendarInterval
+): number {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (end <= start) {
+    return 0;
+  }
+
+  switch (interval) {
+    case "week": {
+      const diffTime = end.getTime() - start.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return Math.ceil(diffDays / 7);
+    }
+    case "bi_weekly": {
+      const diffTime = end.getTime() - start.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return Math.ceil(diffDays / 14);
+    }
+    case "month": {
+      let count = 0;
+      const cursor = new Date(start);
+      while (cursor < end) {
+        cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+        count++;
+      }
+      return Math.max(1, count);
+    }
+    case "quarter": {
+      let count = 0;
+      const cursor = new Date(start);
+      while (cursor < end) {
+        cursor.setUTCMonth(cursor.getUTCMonth() + 3);
+        count++;
+      }
+      return Math.max(1, count);
+    }
+    case "year": {
+      let count = 0;
+      const cursor = new Date(start);
+      while (cursor < end) {
+        cursor.setUTCFullYear(cursor.getUTCFullYear() + 1);
+        count++;
+      }
+      return Math.max(1, count);
+    }
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Calculate the next payment date based on start date and interval.
+ */
+export function calculateNextPaymentDate(
+  startDate: string,
+  interval: CalendarInterval,
+  paymentsMade: number
+): Date {
+  const start = new Date(startDate);
+
+  switch (interval) {
+    case "week":
+      return new Date(start.getTime() + paymentsMade * 7 * 24 * 60 * 60 * 1000);
+    case "bi_weekly":
+      return new Date(start.getTime() + paymentsMade * 14 * 24 * 60 * 60 * 1000);
+    case "month": {
+      const next = new Date(start);
+      const targetMonth = next.getUTCMonth() + paymentsMade;
+      next.setUTCMonth(targetMonth);
+      // Clamp overflow: e.g. Jan 31 + 1 month overflows to Mar — roll back to last day of target month
+      if (next.getUTCMonth() !== ((targetMonth % 12) + 12) % 12) {
+        next.setUTCDate(0);
+      }
+      return next;
+    }
+    case "quarter": {
+      const next = new Date(start);
+      const targetMonth = next.getUTCMonth() + paymentsMade * 3;
+      next.setUTCMonth(targetMonth);
+      if (next.getUTCMonth() !== ((targetMonth % 12) + 12) % 12) {
+        next.setUTCDate(0);
+      }
+      return next;
+    }
+    case "year": {
+      const next = new Date(start);
+      next.setUTCFullYear(next.getUTCFullYear() + paymentsMade);
+      return next;
+    }
+    default:
+      return start;
+  }
 }
 
 function validateFeePercent(value: string, source: string): number {

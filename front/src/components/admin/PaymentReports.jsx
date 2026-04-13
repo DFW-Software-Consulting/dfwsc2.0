@@ -30,9 +30,11 @@ export default function PaymentReports({ workspace = "client_portal" }) {
   const [limit, setLimit] = useState("10");
   const [reportEnabled, setReportEnabled] = useState(false);
 
+  const isAllClients = selectedId === "__all__";
   const params = selectedId
     ? {
-        ...(reportType === "client" ? { clientId: selectedId } : { groupId: selectedId }),
+        ...(reportType === "client" && !isAllClients ? { clientId: selectedId } : {}),
+        ...(reportType === "group" ? { groupId: selectedId } : {}),
         workspace,
         limit,
       }
@@ -77,6 +79,7 @@ export default function PaymentReports({ workspace = "client_portal" }) {
     }
   }, [isDfwscMode, reportType]);
 
+  const showClientColumn = reportType === "group" || isAllClients;
   const resultColumns = [
     {
       header: "Date",
@@ -87,6 +90,14 @@ export default function PaymentReports({ workspace = "client_portal" }) {
       tdClassName: "font-mono text-gray-400 text-xs",
       render: (pi) => pi.id,
     },
+    ...(showClientColumn
+      ? [
+          {
+            header: "Client",
+            render: (pi) => pi.clientName || pi.clientId || "—",
+          },
+        ]
+      : []),
     {
       header: "Amount",
       render: (pi) => formatCurrency(pi.amount, pi.currency),
@@ -102,14 +113,6 @@ export default function PaymentReports({ workspace = "client_portal" }) {
       header: "Status",
       render: (pi) => <StatusBadge status={pi.status} />,
     },
-    ...(reportType === "group"
-      ? [
-          {
-            header: "Client",
-            render: (pi) => pi.clientId ?? "—",
-          },
-        ]
-      : []),
   ];
 
   return (
@@ -150,6 +153,9 @@ export default function PaymentReports({ workspace = "client_portal" }) {
                          focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">— Select {reportType} —</option>
+              {isDfwscMode && reportType === "client" && (
+                <option value="__all__">All Clients</option>
+              )}
               {items.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}

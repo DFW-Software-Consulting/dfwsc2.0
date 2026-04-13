@@ -1,0 +1,10 @@
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "phone" text;
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "billing_contact_name" text;
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "address_line1" text;
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "address_line2" text;
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "city" text;
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "state" text;
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "postal_code" text;
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "country" text;
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "notes" text;
+ALTER TABLE "clients" ADD COLUMN IF NOT EXISTS "default_payment_terms_days" integer;

@@ -94,6 +94,41 @@ vi.mock("../lib/stripe", () => ({
   stripe: stripeMock,
 }));
 
+vi.mock("../lib/stripe-billing", () => ({
+  stripe: stripeMock,
+  resolveClientFee: vi.fn(async (_client: any, _group: any, _amount?: number) => {
+    // Default fee calculation: use DEFAULT_PROCESS_FEE_CENTS env var or 0
+    return Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
+  }),
+  ensureStripeCustomer: vi.fn(async (client: any) => {
+    if (client.stripeCustomerId) return client.stripeCustomerId;
+    return `cus_${client.id}`;
+  }),
+  toStripeInterval: vi.fn((interval: string) => {
+    switch (interval) {
+      case "week":
+        return { interval: "week", interval_count: 1 };
+      case "bi_weekly":
+        return { interval: "week", interval_count: 2 };
+      case "month":
+      case "monthly":
+        return { interval: "month", interval_count: 1 };
+      case "quarter":
+      case "quarterly":
+        return { interval: "month", interval_count: 3 };
+      case "year":
+      case "yearly":
+        return { interval: "year", interval_count: 1 };
+      default:
+        return { interval: "month", interval_count: 1 };
+    }
+  }),
+  calculateIterations: vi.fn(() => 12),
+  getSettings: vi.fn(async () => ({
+    default_fee_cents: process.env.DEFAULT_PROCESS_FEE_CENTS ?? "0",
+  })),
+}));
+
 const nodemailerMock = createNodemailerMock(mailhogMessages, (options: any) => {
   const to = options.to;
   const recipients = Array.isArray(to) ? to.map(String) : [String(to ?? "")];
@@ -225,6 +260,12 @@ describe("payments", () => {
   });
 
   it("requires client to have a connected account", async () => {
+    process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
+    stripeMock.paymentIntents.create.mockResolvedValue({
+      id: "pi_platform",
+      client_secret: "secret_platform",
+    });
+
     const server = await createServer();
 
     const apiKey = "api-key-client_no_connect";
@@ -243,11 +284,20 @@ describe("payments", () => {
       },
     });
 
-    expect(response.statusCode).toBe(500); // Platform payment fails without mock setup
+    // Platform payments are now allowed - client can pay without stripeAccountId
+    expect(response.statusCode).toBe(201);
+    expect(stripeMock.paymentIntents.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 1100,
+        currency: "usd",
+      }),
+      expect.objectContaining({ idempotencyKey: "no-connect" }) // No stripeAccount when null
+    );
     await server.close();
   });
 
   it("creates a payment intent when USE_CHECKOUT=false", async () => {
+    process.env.USE_CHECKOUT = "false";
     process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
     stripeMock.paymentIntents.create.mockResolvedValue({
       id: "pi_123",
@@ -267,7 +317,6 @@ describe("payments", () => {
         "idempotency-key": "test-key",
       },
       payload: {
-        clientId: "different-id",
         amount: 1000,
         currency: "usd",
         applicationFeeAmount: 50,
@@ -326,8 +375,12 @@ describe("payments", () => {
     await server.close();
   });
 
-  it("rejects fees that exceed the payment amount", async () => {
+  it("allows fees that exceed the payment amount (fees handled by DFWSC)", async () => {
     process.env.DEFAULT_PROCESS_FEE_CENTS = "2000";
+    stripeMock.paymentIntents.create.mockResolvedValue({
+      id: "pi_fee_test",
+      client_secret: "secret_fee",
+    });
 
     const server = await createServer();
 
@@ -348,20 +401,23 @@ describe("payments", () => {
       },
     });
 
-    expect(response.statusCode).toBe(201); // Fee validation removed - fees handled by DFWSC
+    // Fee validation removed - fees handled by DFWSC
+    expect(response.statusCode).toBe(201);
+    expect(stripeMock.paymentIntents.create).toHaveBeenCalled();
     await server.close();
   });
 
   it("creates a checkout session when USE_CHECKOUT=true", async () => {
     process.env.USE_CHECKOUT = "true";
+    process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
     stripeMock.checkout.sessions.create.mockResolvedValue({
       url: "https://checkout.stripe.com/c/pay/mock",
     });
 
     const server = await createServer();
 
-    const apiKey = "api-key-client_1";
-    seedClient({ id: "client_1", stripeAccountId: "acct_123", apiKey });
+    const apiKey = "api-key-client_checkout";
+    seedClient({ id: "client_checkout", stripeAccountId: "acct_checkout", apiKey });
 
     const response = await server.inject({
       method: "POST",
@@ -417,6 +473,7 @@ describe("payments", () => {
 
   it("uses client paymentSuccessUrl as checkout success_url when set", async () => {
     process.env.USE_CHECKOUT = "true";
+    process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
     stripeMock.checkout.sessions.create.mockResolvedValue({
       url: "https://checkout.stripe.com/c/pay/mock",
     });
@@ -424,20 +481,15 @@ describe("payments", () => {
     const server = await createServer();
 
     const apiKey = "api-key-client_custom_url";
-    dataStore.clients.set("client_custom_url", {
+    seedClient({
       id: "client_custom_url",
       name: "Custom URL Client",
       email: "custom@example.test",
       apiKey,
-      apiKeyHash: `hashed:${apiKey}`,
-      status: "active",
       stripeAccountId: "acct_custom",
       paymentSuccessUrl: "https://myclient.com/thank-you",
       paymentCancelUrl: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
     });
-    dataStore.clientsByApiKey.set(apiKey, "client_custom_url");
 
     const response = await server.inject({
       method: "POST",
@@ -460,7 +512,10 @@ describe("payments", () => {
       },
     });
 
-    expect(response.statusCode).toBe(201);
+    expect(
+      response.statusCode,
+      `Expected 201 but got ${response.statusCode}: ${JSON.stringify(response.json())}`
+    ).toBe(201);
     expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
         success_url: "https://myclient.com/thank-you",
@@ -557,7 +612,10 @@ describe("connect onboarding", () => {
       },
     });
 
-    expect(response.statusCode).toBe(201);
+    expect(
+      response.statusCode,
+      `Expected 201 but got ${response.statusCode}: ${JSON.stringify(response.json())}`
+    ).toBe(201);
     const body = response.json();
     expect(body).toMatchObject({ message: "Onboarding email sent successfully." });
     expect(body.apiKey).toBeDefined();
@@ -843,7 +901,7 @@ describe("reports", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/v1/reports/payments?workspace=dfwsc_services",
+      url: "/api/v1/reports/payments?workspace=client_portal",
       headers: {
         authorization: `Bearer ${adminToken}`,
       },
@@ -1219,6 +1277,178 @@ describe("client groups", () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json()).toEqual({ error: "Group not found." });
+    await server.close();
+  });
+});
+
+describe("DFWSC client creation", () => {
+  it("creates a client with Stripe Customer and returns stripeCustomerId", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    stripeMock.customers.create.mockResolvedValueOnce({
+      id: "cus_dfwsc123",
+      email: "test@example.com",
+      name: "Test Client",
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: "Test Client",
+        email: "test@example.com",
+        phone: "+1234567890",
+        billingContactName: "John Doe",
+        addressLine1: "123 Main St",
+        city: "Austin",
+        state: "TX",
+        postalCode: "78701",
+        country: "US",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.name).toBe("Test Client");
+    expect(body.email).toBe("test@example.com");
+    expect(body.stripeCustomerId).toBe("cus_dfwsc123");
+    expect(body.status).toBe("active");
+    expect(body.phone).toBe("+1234567890");
+    expect(body.billingContactName).toBe("John Doe");
+    expect(body.addressLine1).toBe("123 Main St");
+    expect(body.city).toBe("Austin");
+    expect(body.state).toBe("TX");
+    expect(body.postalCode).toBe("78701");
+    expect(body.country).toBe("US");
+    expect(stripeMock.customers.create).toHaveBeenCalledWith({
+      email: "test@example.com",
+      name: "Test Client",
+      phone: "+1234567890",
+      address: {
+        line1: "123 Main St",
+        line2: undefined,
+        city: "Austin",
+        state: "TX",
+        postal_code: "78701",
+        country: "US",
+      },
+      metadata: {
+        billingContactName: "John Doe",
+        notes: "",
+        defaultPaymentTermsDays: "",
+      },
+    });
+    await server.close();
+  });
+
+  it("creates a client with only required fields (name, email)", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    stripeMock.customers.create.mockResolvedValueOnce({
+      id: "cus_minimal",
+      email: "minimal@example.com",
+      name: "Minimal Client",
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: "Minimal Client",
+        email: "minimal@example.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.name).toBe("Minimal Client");
+    expect(body.email).toBe("minimal@example.com");
+    expect(body.stripeCustomerId).toBe("cus_minimal");
+    expect(body.phone).toBeNull();
+    expect(body.addressLine1).toBeNull();
+    await server.close();
+  });
+
+  it("rejects duplicate email", async () => {
+    seedClient({
+      id: "existing_client",
+      email: "existing@example.com",
+      workspace: "dfwsc_services",
+    });
+
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: "Duplicate Client",
+        email: "existing@example.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toBe(
+      "A client with this email already exists in this workspace."
+    );
+    await server.close();
+  });
+
+  it("rejects missing name", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        email: "test@example.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("name and email are required.");
+    await server.close();
+  });
+
+  it("rejects missing email", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: "Test Client",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("name and email are required.");
+    await server.close();
+  });
+
+  it("rejects unauthenticated request", async () => {
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/dfwsc/clients",
+      payload: {
+        name: "Test Client",
+        email: "test@example.com",
+      },
+    });
+
+    expect(response.statusCode).toBe(401);
     await server.close();
   });
 });

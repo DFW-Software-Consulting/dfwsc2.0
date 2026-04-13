@@ -23,6 +23,25 @@ function formatProduct(product: Stripe.Product, price: Stripe.Price | null) {
 }
 
 const productRoutes: FastifyPluginAsync = async (app) => {
+  // GET /tax-rates — list active Stripe tax rates (platform account)
+  app.get("/tax-rates", { preHandler: requireAdminJwt }, async (_req, res) => {
+    const { data: taxRates } = await stripe.taxRates.list({
+      active: true,
+      limit: 100,
+    });
+
+    return res.send(
+      taxRates.map((rate) => ({
+        id: rate.id,
+        displayName: rate.display_name,
+        description: rate.description ?? null,
+        percentage: rate.percentage,
+        inclusive: rate.inclusive,
+        jurisdiction: rate.jurisdiction ?? null,
+      }))
+    );
+  });
+
   // GET /products — list active Stripe products (platform account)
   app.get("/products", { preHandler: requireAdminJwt }, async (_req, res) => {
     const { data: products } = await stripe.products.list({

@@ -8,6 +8,16 @@ vi.mock("../../lib/stripe", () => ({
     },
     accounts: { create: vi.fn() },
     accountLinks: { create: vi.fn() },
+    subscriptions: {
+      retrieve: vi.fn().mockResolvedValue({
+        id: "sub_test",
+        metadata: { paymentsMade: "0" },
+      }),
+      update: vi.fn().mockResolvedValue({ id: "sub_test" }),
+    },
+    subscriptionSchedules: {
+      update: vi.fn().mockResolvedValue({ id: "sched_test" }),
+    },
   },
 }));
 
@@ -240,6 +250,207 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for invoice.payment_succeeded event", async () => {
+    const event = makeStripeEvent("invoice.payment_succeeded", {
+      id: "inv_success123",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for invoice.payment_failed event", async () => {
+    const event = makeStripeEvent("invoice.payment_failed", {
+      id: "inv_failed123",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for customer.subscription.updated event", async () => {
+    const event = makeStripeEvent("customer.subscription.updated", {
+      id: "sub_updated123",
+      status: "active",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for customer.subscription.deleted event", async () => {
+    const event = makeStripeEvent("customer.subscription.deleted", {
+      id: "sub_deleted123",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for subscription_schedule.completed event", async () => {
+    const event = makeStripeEvent("subscription_schedule.completed", {
+      id: "sched_completed123",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for subscription_schedule.canceled event", async () => {
+    const event = makeStripeEvent("subscription_schedule.canceled", {
+      id: "sched_canceled123",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for customer.subscription.paused event", async () => {
+    const event = makeStripeEvent("customer.subscription.paused", {
+      id: "sub_paused123",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for customer.subscription.resumed event", async () => {
+    const event = makeStripeEvent("customer.subscription.resumed", {
+      id: "sub_resumed123",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 200 for invoice.paid event with subscription and updates payment count", async () => {
+    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const event = makeStripeEvent("invoice.paid", {
+      id: "inv_paid123",
+      subscription: subscriptionId,
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true });
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 500 for invoice.paid when subscription update fails (so Stripe retries)", async () => {
+    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const retrieveMock = stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>;
+    retrieveMock.mockRejectedValueOnce(new Error("stripe retrieve failed"));
+
+    const event = makeStripeEvent("invoice.paid", {
+      id: "inv_paid_failure_branch",
+      subscription: subscriptionId,
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    // Error must propagate so processedAt is NOT set and Stripe will retry
+    expect(response.statusCode).toBe(500);
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("does not reprocess duplicate webhook events", async () => {
+    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const retrieveMock = stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>;
+    const updateMock = stripe.subscriptions.update as ReturnType<typeof vi.fn>;
+
+    const event = makeStripeEvent("invoice.paid", {
+      id: `evt_duplicate_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      subscription: subscriptionId,
+      metadata: { clientId: "client_123" },
+    });
+
+    mockConstructEvent.mockReturnValue(event);
+
+    const first = await sendWebhook(app, event);
+    const second = await sendWebhook(app, event);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(retrieveMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("returns 500 for subscription_schedule.completed when metadata update fails (so Stripe retries)", async () => {
+    const scheduleUpdateMock = stripe.subscriptionSchedules.update as ReturnType<typeof vi.fn>;
+    scheduleUpdateMock.mockRejectedValueOnce(new Error("schedule update failed"));
+
+    const event = makeStripeEvent("subscription_schedule.completed", {
+      id: "sched_completed_error_branch",
+      metadata: { clientId: "client_123" },
+    });
+    mockConstructEvent.mockReturnValueOnce(event);
+
+    const response = await sendWebhook(app, event);
+
+    // Error must propagate so processedAt is NOT set and Stripe will retry
+    expect(response.statusCode).toBe(500);
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });

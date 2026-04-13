@@ -10,9 +10,23 @@ The project uses **PostgreSQL 17** with the **Drizzle ORM**. All schema definiti
 ### `clients`
 The primary entity for each consultant's client.
 - **Keys**: `id` (UUID), `name`, `email`.
+- **Workspace**: `workspace` (`"dfwsc_services"` or `"client_portal"`) - separates internal and external clients.
 - **Credentials**: `apiKeyHash` (bcrypt), `apiKeyLookup` (SHA256).
-- **Stripe**: `stripeAccountId` (linked Express account).
+- **Stripe**: `stripeAccountId` (linked Express account), `stripeCustomerId` (for invoicing).
+- **Status**: `status` (`"active"` or `"inactive"`).
+- **Group**: `groupId` (optional) - links to `client_groups`.
 - **Pricing**: `processingFeePercent`, `processingFeeCents`.
+- **URLs**: `paymentSuccessUrl`, `paymentCancelUrl` - redirect URLs after payment.
+- **Contact Info**: `phone`, `billingContactName`.
+- **Address**: `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`.
+- **Billing**: `defaultPaymentTermsDays` - default payment terms for invoices.
+- **Notes**: `notes` - free-form text field for admin notes.
+- **Timestamps**: `createdAt`, `updatedAt`.
+
+**Indexes:**
+- `apiKeyHashIdx` - Fast API key lookup
+- `apiKeyLookupIdx` - SHA256 lookup for API key
+- `emailWorkspaceUnique` - Ensures unique email per workspace
 
 ### `client_groups`
 Allows grouping multiple clients to share configuration.
@@ -29,6 +43,17 @@ Manages the lifecycle of Stripe Connect onboarding sessions.
 
 ### `webhook_events`
 - An **idempotency table** used to de-duplicate Stripe webhook notifications.
+- **Fields**: `id`, `stripeEventId` (unique), `type`, `payload` (JSONB), `processedAt`, `createdAt`.
+
+### `admins`
+Stores administrator accounts for the admin dashboard.
+- **Fields**: `id`, `username` (unique), `passwordHash`, `role` (default: `"admin"`), `active`, `setupConfirmed`, `lastLoginAt`, `createdAt`, `updatedAt`.
+- **Note**: Admin accounts are created via the bootstrap flow (`/auth/setup` → `/auth/confirm-bootstrap`).
+
+### `settings`
+Simple key-value store for system configuration.
+- **Fields**: `key` (primary key), `value`, `updatedAt`.
+- **Usage**: Stores system-wide defaults like payment terms.
 
 ## 3. Tooling & Migrations
 - **Schema Changes**: Modify `backend/src/db/schema.ts`.

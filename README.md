@@ -201,17 +201,20 @@ SMTP_USER=your-email@gmail.com
 SMTP_PASS=your-app-password
 
 # Admin Authentication (JWT)
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=changeme_secure_password
 JWT_SECRET=your_jwt_secret_minimum_32_characters_long
 JWT_EXPIRY=1h
+
+# First-run Admin Setup (remove after setup)
+ALLOW_ADMIN_SETUP=true
+ADMIN_SETUP_TOKEN=your_secure_setup_token
+SETUP_FLAG_PATH=/data/admin-setup-used
 
 # Payment Config
 USE_CHECKOUT=true
 DEFAULT_PROCESS_FEE_CENTS=100
 ```
 
-**Admin Authentication:** The backend uses JWT tokens for admin endpoints (client list, status management). Configure `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `JWT_SECRET` (minimum 32 characters). `JWT_EXPIRY` is optional (defaults to `1h`). See `backend/.env.example` for detailed documentation.
+**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, enable `ALLOW_ADMIN_SETUP=true`, use `/auth/setup` to create credentials, then confirm with `/auth/confirm-bootstrap`. After setup, set `ALLOW_ADMIN_SETUP=false`. See `.env.example` for detailed documentation.
 
 ### Frontend (.env)
 
