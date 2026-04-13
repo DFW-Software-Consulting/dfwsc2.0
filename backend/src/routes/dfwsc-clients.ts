@@ -72,6 +72,20 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
             email: normalizedEmail,
             name,
             phone,
+            address: {
+              line1: addressLine1 ?? undefined,
+              line2: addressLine2 ?? undefined,
+              city: city ?? undefined,
+              state: state ?? undefined,
+              postal_code: postalCode ?? undefined,
+              country: country ?? undefined,
+            },
+            metadata: {
+              billingContactName: billingContactName ?? "",
+              notes: notes ?? "",
+              defaultPaymentTermsDays:
+                defaultPaymentTermsDays != null ? String(defaultPaymentTermsDays) : "",
+            },
           });
           stripeCustomerId = stripeCustomer.id;
 

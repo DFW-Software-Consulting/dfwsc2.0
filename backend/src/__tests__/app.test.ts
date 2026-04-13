@@ -1326,6 +1326,19 @@ describe("DFWSC client creation", () => {
       email: "test@example.com",
       name: "Test Client",
       phone: "+1234567890",
+      address: {
+        line1: "123 Main St",
+        line2: undefined,
+        city: "Austin",
+        state: "TX",
+        postal_code: "78701",
+        country: "US",
+      },
+      metadata: {
+        billingContactName: "John Doe",
+        notes: "",
+        defaultPaymentTermsDays: "",
+      },
     });
     await server.close();
   });

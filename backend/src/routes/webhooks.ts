@@ -166,6 +166,22 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
               lastPaidAt: new Date().toISOString(),
             },
           });
+
+          // Propagate to the owning SubscriptionSchedule when this subscription
+          // is part of a payment plan — formatStripeSchedule reads paymentsMade
+          // from schedule metadata, not subscription metadata.
+          const scheduleId = typeof sub.schedule === "string" ? sub.schedule : null;
+          if (scheduleId) {
+            const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+            const schedulePaid = parseInt(schedule.metadata?.paymentsMade ?? "0", 10) || 0;
+            await stripe.subscriptionSchedules.update(scheduleId, {
+              metadata: {
+                ...schedule.metadata,
+                paymentsMade: String(schedulePaid + 1),
+                lastPaidAt: new Date().toISOString(),
+              },
+            });
+          }
         }
         break;
       }

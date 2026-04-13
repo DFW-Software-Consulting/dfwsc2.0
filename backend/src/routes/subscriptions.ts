@@ -181,6 +181,7 @@ function formatStripeSub(sub: Stripe.Subscription, clientId: string, clientName?
     clientId,
     clientName: clientName ?? null,
     type,
+    description: sub.metadata?.description ?? "",
     amountPerPaymentCents,
     totalAmountCents,
     totalPayments,
@@ -226,6 +227,7 @@ function formatStripeSchedule(
     clientId,
     clientName: clientName ?? null,
     type: "payment_plan" as const,
+    description: schedule.metadata?.description ?? "",
     amountPerPaymentCents,
     totalAmountCents,
     totalPayments,
@@ -312,23 +314,30 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         // For legacy, start today
         startDate = new Date().toISOString().split("T")[0];
         if (body.totalPayments) {
-          // Calculate end date based on total payments
+          // Calculate end date based on total payments.
+          // We advance by (N-1) intervals so the schedule's end_date falls on the
+          // last billing date rather than one interval past it. Without the -1,
+          // Stripe opens a new billing cycle on end_date before cancelling the
+          // schedule, generating N+1 invoices instead of N.
+          // Special-case N=1: advance by 1 interval so the schedule has a valid
+          // non-zero duration; totalPayments is still stored as 1 in metadata.
+          const intervals = body.totalPayments === 1 ? 1 : body.totalPayments - 1;
           const start = new Date(startDate);
           switch (interval) {
             case "month":
-              start.setMonth(start.getMonth() + body.totalPayments);
+              start.setMonth(start.getMonth() + intervals);
               break;
             case "quarter":
-              start.setMonth(start.getMonth() + body.totalPayments * 3);
+              start.setMonth(start.getMonth() + intervals * 3);
               break;
             case "year":
-              start.setFullYear(start.getFullYear() + body.totalPayments);
+              start.setFullYear(start.getFullYear() + intervals);
               break;
             case "week":
-              start.setDate(start.getDate() + body.totalPayments * 7);
+              start.setDate(start.getDate() + intervals * 7);
               break;
             case "bi_weekly":
-              start.setDate(start.getDate() + body.totalPayments * 14);
+              start.setDate(start.getDate() + intervals * 14);
               break;
           }
           endDate = start.toISOString().split("T")[0];
@@ -384,10 +393,17 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
 
       const customerId = await ensureStripeCustomer(client);
 
-      // Calculate total payments and total amount if endDate is provided
+      // Calculate total payments and total amount if endDate is provided.
+      // For the legacy format the caller already specified totalPayments; trust
+      // that value rather than re-deriving it from calculateIterations (which
+      // would produce N-1 after the endDate adjustment above).
       let totalAmountCents: number | null = null;
       if (endDate) {
-        totalPayments = calculateIterations(startDate, endDate, interval);
+        if (!isNew && "totalPayments" in body && body.totalPayments) {
+          totalPayments = body.totalPayments;
+        } else {
+          totalPayments = calculateIterations(startDate, endDate, interval);
+        }
         totalAmountCents = amountPerPaymentCents * totalPayments;
       }
 

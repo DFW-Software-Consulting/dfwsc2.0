@@ -926,7 +926,7 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
                   <td className="px-3 py-2 text-sm text-gray-200">{sub.clientName}</td>
                   <td className="px-3 py-2 text-sm text-gray-200">{sub.description}</td>
                   <td className="px-3 py-2 text-sm text-gray-200">
-                    ${(sub.amountCents / 100).toFixed(2)}
+                    ${(sub.amountPerPaymentCents / 100).toFixed(2)}
                   </td>
                   <td className="px-3 py-2 text-sm">
                     <StatusBadge status={sub.status} />

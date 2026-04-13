@@ -150,12 +150,10 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
 
       const finalized = await stripe.invoices.finalizeInvoice(invoice.id);
 
-      const totalChargedCents = waiveFee ? amountCents : amountCents + feeAmount;
-
       await sendInvoiceEmail({
         to: client.email,
         clientName: client.name,
-        amountCents: totalChargedCents,
+        amountCents: finalized.amount_due,
         description: description.trim(),
         dueDate: dueDate ? new Date(dueDate) : null,
         payUrl: finalized.hosted_invoice_url ?? "",
