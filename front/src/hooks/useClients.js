@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createClient,
   createDfwscClient,
+  getClient,
   getClients,
   getStripeCustomers,
   importStripeCustomer,
@@ -10,6 +11,16 @@ import {
 } from "../api/clients";
 import { resendOnboardingLink } from "../api/onboarding";
 import { useAuth } from "../contexts/AuthContext";
+
+export function useClient(id, workspace) {
+  const { token } = useAuth();
+  return useQuery({
+    queryKey: ["client", id],
+    queryFn: () => getClient(token, id, workspace),
+    enabled: !!token && !!id,
+    select: (data) => data.client,
+  });
+}
 
 export function useClients(params = {}) {
   const { token } = useAuth();
@@ -55,9 +66,10 @@ export function usePatchClient() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }) => patchClient(token, id, body),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["client", variables.id] });
     },
   });
 }

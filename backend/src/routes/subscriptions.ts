@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import type Stripe from "stripe";
 import { db } from "../db/client";
@@ -12,6 +12,7 @@ import {
   ensureStripeCustomer,
   toStripeInterval,
 } from "../lib/stripe-billing";
+import { getStripeCustomerId, resolveSubscriptionClients } from "../lib/subscription-resolution";
 import {
   STRIPE_LIST_LIMIT,
   validateDateFormat,
@@ -74,6 +75,12 @@ interface SubscriptionFilterQuery {
 interface DashboardQuery {
   workspace?: string;
   days?: string;
+}
+
+interface LinkSubscriptionBody {
+  subscriptionId: string;
+  clientId: string;
+  workspace: Workspace;
 }
 
 const DASHBOARD_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 30_000;
@@ -161,7 +168,12 @@ async function getDashboardStripeData(workspace: Workspace): Promise<{
 }
 
 // Format Stripe subscription for response
-function formatStripeSub(sub: Stripe.Subscription, clientId: string, clientName?: string | null) {
+function formatStripeSub(
+  sub: Stripe.Subscription,
+  clientId: string,
+  clientName?: string | null,
+  unlinked = false
+) {
   const item = sub.items.data[0];
   const rawStatus = sub.pause_collection ? "paused" : sub.status;
   const status = (rawStatus as string) === "canceled" ? "cancelled" : rawStatus;
@@ -197,6 +209,7 @@ function formatStripeSub(sub: Stripe.Subscription, clientId: string, clientName?
     status,
     currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
     createdAt: new Date(sub.created * 1000).toISOString(),
+    unlinked,
   };
 }
 
@@ -204,10 +217,10 @@ function formatStripeSub(sub: Stripe.Subscription, clientId: string, clientName?
 function formatStripeSchedule(
   schedule: Stripe.SubscriptionSchedule,
   clientId: string,
-  clientName?: string | null
+  clientName?: string | null,
+  unlinked = false
 ) {
   const phase = schedule.phases?.[0];
-  const item = phase?.items?.[0];
   const startDate = phase?.start_date
     ? new Date(phase.start_date * 1000).toISOString().split("T")[0]
     : null;
@@ -245,6 +258,7 @@ function formatStripeSchedule(
     status: schedule.status === "canceled" ? "cancelled" : schedule.status,
     currentPeriodEnd: null,
     createdAt: new Date(schedule.created * 1000).toISOString(),
+    unlinked,
   };
 }
 
@@ -262,6 +276,36 @@ function formatStripeInvoice(inv: Stripe.Invoice, clientId?: string | null) {
       : null,
     createdAt: new Date(inv.created * 1000).toISOString(),
   };
+}
+
+function backfillClientMetadata(
+  backfills: Array<{
+    kind: "subscription" | "schedule";
+    id: string;
+    clientId: string;
+    existingMetadata: Record<string, string>;
+  }>
+) {
+  if (backfills.length === 0) return;
+
+  void Promise.allSettled(
+    backfills.map((entry) => {
+      const metadata = { ...entry.existingMetadata, clientId: entry.clientId };
+      if (entry.kind === "subscription") {
+        return stripe.subscriptions.update(entry.id, { metadata });
+      }
+      return stripe.subscriptionSchedules.update(entry.id, { metadata });
+    })
+  ).then((results) => {
+    for (const [i, result] of results.entries()) {
+      if (result.status === "rejected") {
+        console.error(
+          `[backfillClientMetadata] Failed to update ${backfills[i].kind} ${backfills[i].id}:`,
+          result.reason
+        );
+      }
+    }
+  });
 }
 
 // Helper to convert legacy interval to new interval
@@ -583,59 +627,76 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         listAllSchedules({}),
       ]);
 
-      // Get all client IDs from both subscriptions and schedules
-      const subClientIds = [
-        ...new Set(allSubs.map((sub) => sub.metadata?.clientId).filter(Boolean) as string[]),
-      ];
-      const scheduleClientIds = [
-        ...new Set(allSchedules.map((sch) => sch.metadata?.clientId).filter(Boolean) as string[]),
-      ];
-      const allClientIds = [...new Set([...subClientIds, ...scheduleClientIds])];
-
-      const clientRows =
-        allClientIds.length > 0
-          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
-          : [];
-
-      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
-      const clientMap = new Map(scopedClients.map((c) => [c.id, c.name]));
+      const { subscriptionMap, scheduleMap, backfills } = await resolveSubscriptionClients({
+        subscriptions: allSubs,
+        schedules: allSchedules,
+        workspace: validWorkspace,
+      });
 
       // Filter by clientId if provided
       if (clientId) {
-        const client = scopedClients.find((c) => c.id === clientId);
-        if (!client) {
-          return res.status(200).send([]);
-        }
-
-        const filteredSubs = allSubs.filter((sub) => sub.metadata?.clientId === clientId);
-        const filteredSchedules = allSchedules.filter((sch) => sch.metadata?.clientId === clientId);
+        const filteredSubs = allSubs.filter(
+          (sub) => subscriptionMap.get(sub.id)?.clientId === clientId
+        );
+        const filteredSchedules = allSchedules.filter(
+          (sch) => scheduleMap.get(sch.id)?.clientId === clientId
+        );
 
         const formattedSubs = filteredSubs.map((sub) =>
-          formatStripeSub(sub, clientId, client.name)
+          formatStripeSub(
+            sub,
+            subscriptionMap.get(sub.id)?.clientId ?? clientId,
+            subscriptionMap.get(sub.id)?.clientName ?? null,
+            false
+          )
         );
         const formattedSchedules = filteredSchedules.map((sch) =>
-          formatStripeSchedule(sch, clientId, client.name)
+          formatStripeSchedule(
+            sch,
+            scheduleMap.get(sch.id)?.clientId ?? clientId,
+            scheduleMap.get(sch.id)?.clientName ?? null,
+            false
+          )
+        );
+
+        backfillClientMetadata(
+          backfills.filter((entry) =>
+            entry.kind === "subscription"
+              ? filteredSubs.some((sub) => sub.id === entry.id)
+              : filteredSchedules.some((sch) => sch.id === entry.id)
+          )
         );
 
         return res.status(200).send([...formattedSchedules, ...formattedSubs]);
       }
 
-      // Format all subscriptions and schedules
-      const formattedSubs = allSubs
-        .map((sub) => {
-          const cid = sub.metadata?.clientId ?? "";
-          if (!cid || !clientMap.has(cid)) return null;
-          return formatStripeSub(sub, cid, clientMap.get(cid) ?? null);
-        })
-        .filter((entry): entry is ReturnType<typeof formatStripeSub> => entry !== null);
+      const formattedSubs = allSubs.map((sub) => {
+        const resolved = subscriptionMap.get(sub.id);
+        if (!resolved) {
+          return formatStripeSub(sub, "", null, true);
+        }
+        return formatStripeSub(
+          sub,
+          resolved.clientId,
+          resolved.clientName,
+          resolved.matchedBy !== "metadata"
+        );
+      });
 
-      const formattedSchedules = allSchedules
-        .map((sch) => {
-          const cid = sch.metadata?.clientId ?? "";
-          if (!cid || !clientMap.has(cid)) return null;
-          return formatStripeSchedule(sch, cid, clientMap.get(cid) ?? null);
-        })
-        .filter((entry): entry is ReturnType<typeof formatStripeSchedule> => entry !== null);
+      const formattedSchedules = allSchedules.map((sch) => {
+        const resolved = scheduleMap.get(sch.id);
+        if (!resolved) {
+          return formatStripeSchedule(sch, "", null, true);
+        }
+        return formatStripeSchedule(
+          sch,
+          resolved.clientId,
+          resolved.clientName,
+          resolved.matchedBy !== "metadata"
+        );
+      });
+
+      backfillClientMetadata(backfills);
 
       return res.status(200).send([...formattedSchedules, ...formattedSubs]);
     }
@@ -688,8 +749,12 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         });
       }
 
+      if (!sub) {
+        return res.status(404).send({ error: "Subscription not found." });
+      }
+
       return res.status(200).send({
-        ...formatStripeSub(sub!, clientId, clientName),
+        ...formatStripeSub(sub, clientId, clientName),
         invoices: invoiceList.data.map((inv) => formatStripeInvoice(inv, clientId)),
       });
     }
@@ -778,8 +843,12 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     if (isSchedule) {
+      if (!schedule) {
+        return res.status(404).send({ error: "Subscription not found." });
+      }
+
       // Handle subscription schedule updates
-      let updated = schedule!;
+      let updated = schedule;
 
       if (status === "cancelled") {
         updated = await stripe.subscriptionSchedules.cancel(id);
@@ -799,7 +868,11 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     }
 
     // Handle regular subscription updates
-    let updated = sub!;
+    if (!sub) {
+      return res.status(404).send({ error: "Subscription not found." });
+    }
+
+    let updated = sub;
 
     if (status === "paused") {
       updated = await stripe.subscriptions.update(id, {
@@ -825,6 +898,82 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
     return res.status(200).send(formatStripeSub(updated, clientId));
   });
 
+  // POST /subscriptions/link — manually link an existing Stripe subscription to a local client
+  app.post<{ Body: LinkSubscriptionBody }>(
+    "/subscriptions/link",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      const { subscriptionId, clientId, workspace } = req.body;
+
+      const validWorkspace = validateWorkspace(workspace, res);
+      if (!validWorkspace) return;
+      if (!validateRequiredString(subscriptionId, "subscriptionId", res)) return;
+      if (!validateRequiredString(clientId, "clientId", res)) return;
+
+      const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+
+      if (!client) {
+        return res.status(404).send({ error: "Client not found." });
+      }
+      if (client.workspace !== validWorkspace) {
+        return res
+          .status(400)
+          .send({ error: "clientId does not belong to the selected workspace." });
+      }
+
+      let sub: Stripe.Subscription | null = null;
+      let schedule: Stripe.SubscriptionSchedule | null = null;
+
+      try {
+        sub = await stripe.subscriptions.retrieve(subscriptionId);
+      } catch {
+        try {
+          schedule = await stripe.subscriptionSchedules.retrieve(subscriptionId);
+        } catch {
+          return res.status(404).send({ error: "Subscription not found." });
+        }
+      }
+
+      const customerId = getStripeCustomerId(sub?.customer ?? schedule?.customer);
+      if (client.stripeCustomerId && customerId && client.stripeCustomerId !== customerId) {
+        return res.status(400).send({
+          error:
+            "Subscription customer does not match this client's Stripe customer. Import/sync the customer first.",
+        });
+      }
+
+      if (!client.stripeCustomerId && customerId) {
+        await db
+          .update(clients)
+          .set({ stripeCustomerId: customerId })
+          .where(eq(clients.id, client.id));
+      }
+
+      if (sub) {
+        const updated = await stripe.subscriptions.update(sub.id, {
+          metadata: {
+            ...sub.metadata,
+            clientId: client.id,
+          },
+        });
+        return res.status(200).send(formatStripeSub(updated, client.id, client.name, false));
+      }
+
+      if (!schedule) {
+        return res.status(404).send({ error: "Subscription not found." });
+      }
+
+      const updated = await stripe.subscriptionSchedules.update(schedule.id, {
+        metadata: {
+          ...schedule.metadata,
+          clientId: client.id,
+        },
+      });
+
+      return res.status(200).send(formatStripeSchedule(updated, client.id, client.name, false));
+    }
+  );
+
   // ==================== ADMIN DASHBOARD ENDPOINTS ====================
 
   // GET /subscriptions/dashboard/summary — Quick stats
@@ -840,29 +989,16 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const { subscriptions: allSubscriptions, schedules: allSchedules } =
         await getDashboardStripeData(validWorkspace);
 
-      // Filter by workspace
-      const allClientIds = [
-        ...new Set([
-          ...allSubscriptions.map((s) => s.metadata?.clientId),
-          ...allSchedules.map((s) => s.metadata?.clientId),
-        ]),
-      ].filter(Boolean) as string[];
+      const { subscriptionMap, scheduleMap, backfills } = await resolveSubscriptionClients({
+        subscriptions: allSubscriptions,
+        schedules: allSchedules,
+        workspace: validWorkspace,
+      });
 
-      const clientRows =
-        allClientIds.length > 0
-          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
-          : [];
+      const filteredSubs = allSubscriptions.filter((s) => subscriptionMap.has(s.id));
+      const filteredSchedules = allSchedules.filter((s) => scheduleMap.has(s.id));
 
-      const scopedClientIds = new Set(
-        clientRows.filter((c) => c.workspace === workspace).map((c) => c.id)
-      );
-
-      const filteredSubs = allSubscriptions.filter(
-        (s) => s.metadata?.clientId && scopedClientIds.has(s.metadata.clientId)
-      );
-      const filteredSchedules = allSchedules.filter(
-        (s) => s.metadata?.clientId && scopedClientIds.has(s.metadata.clientId)
-      );
+      backfillClientMetadata(backfills);
 
       const activeSubs = filteredSubs.filter(
         (s) => s.status === "active" && !s.pause_collection
@@ -921,32 +1057,22 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       );
       const activeSchedules = allSchedules.filter((s) => s.status === "active");
 
-      const allClientIds = [
-        ...new Set([
-          ...activeSubs.map((s) => s.metadata?.clientId),
-          ...activeSchedules.map((s) => s.metadata?.clientId),
-        ]),
-      ].filter(Boolean) as string[];
-
-      const clientRows =
-        allClientIds.length > 0
-          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
-          : [];
-
-      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
-      const clientMap = new Map(scopedClients.map((c) => [c.id, c]));
+      const { subscriptionMap, scheduleMap, backfills } = await resolveSubscriptionClients({
+        subscriptions: activeSubs,
+        schedules: activeSchedules,
+        workspace: validWorkspace,
+      });
 
       const result = [];
 
       for (const sub of activeSubs) {
-        const clientId = sub.metadata?.clientId;
-        if (!clientId || !clientMap.has(clientId)) continue;
-        const client = clientMap.get(clientId)!;
+        const resolved = subscriptionMap.get(sub.id);
+        if (!resolved) continue;
 
         result.push({
-          clientId,
-          clientName: client.name,
-          clientEmail: client.email,
+          clientId: resolved.clientId,
+          clientName: resolved.clientName,
+          clientEmail: resolved.clientEmail,
           subscriptionId: sub.id,
           type: "recurring",
           amountPerPaymentCents: sub.items.data[0]?.price?.unit_amount ?? 0,
@@ -961,15 +1087,14 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       for (const sch of activeSchedules) {
-        const clientId = sch.metadata?.clientId;
-        if (!clientId || !clientMap.has(clientId)) continue;
-        const client = clientMap.get(clientId)!;
+        const resolved = scheduleMap.get(sch.id);
+        if (!resolved) continue;
 
         const phase = sch.phases?.[0];
         result.push({
-          clientId,
-          clientName: client.name,
-          clientEmail: client.email,
+          clientId: resolved.clientId,
+          clientName: resolved.clientName,
+          clientEmail: resolved.clientEmail,
           subscriptionId: sch.id,
           type: "payment_plan",
           amountPerPaymentCents: sch.metadata?.amountPerPaymentCents
@@ -983,6 +1108,8 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           status: "active",
         });
       }
+
+      backfillClientMetadata(backfills);
 
       return res.status(200).send(result);
     }
@@ -1001,29 +1128,22 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       const { subscriptions: allSubscriptions } = await getDashboardStripeData(validWorkspace);
       const pastDueSubs = allSubscriptions.filter((s) => s.status === "past_due");
 
-      const allClientIds = [
-        ...new Set(pastDueSubs.map((s) => s.metadata?.clientId).filter(Boolean) as string[]),
-      ];
-
-      const clientRows =
-        allClientIds.length > 0
-          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
-          : [];
-
-      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
-      const clientMap = new Map(scopedClients.map((c) => [c.id, c]));
+      const { subscriptionMap, backfills } = await resolveSubscriptionClients({
+        subscriptions: pastDueSubs,
+        schedules: [],
+        workspace: validWorkspace,
+      });
 
       const result = [];
 
       for (const sub of pastDueSubs) {
-        const clientId = sub.metadata?.clientId;
-        if (!clientId || !clientMap.has(clientId)) continue;
-        const client = clientMap.get(clientId)!;
+        const resolved = subscriptionMap.get(sub.id);
+        if (!resolved) continue;
 
         result.push({
-          clientId,
-          clientName: client.name,
-          clientEmail: client.email,
+          clientId: resolved.clientId,
+          clientName: resolved.clientName,
+          clientEmail: resolved.clientEmail,
           subscriptionId: sub.id,
           type: sub.metadata?.type ?? "recurring",
           amountPerPaymentCents: sub.items.data[0]?.price?.unit_amount ?? 0,
@@ -1036,6 +1156,8 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           status: "past_due",
         });
       }
+
+      backfillClientMetadata(backfills);
 
       return res.status(200).send(result);
     }
@@ -1065,30 +1187,23 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         return phase?.end_date && phase.end_date <= cutoffTimestamp;
       });
 
-      const allClientIds = [
-        ...new Set(endingSoon.map((s) => s.metadata?.clientId).filter(Boolean) as string[]),
-      ];
-
-      const clientRows =
-        allClientIds.length > 0
-          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
-          : [];
-
-      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
-      const clientMap = new Map(scopedClients.map((c) => [c.id, c]));
+      const { scheduleMap, backfills } = await resolveSubscriptionClients({
+        subscriptions: [],
+        schedules: endingSoon,
+        workspace: validWorkspace,
+      });
 
       const result = [];
 
       for (const sch of endingSoon) {
-        const clientId = sch.metadata?.clientId;
-        if (!clientId || !clientMap.has(clientId)) continue;
-        const client = clientMap.get(clientId)!;
+        const resolved = scheduleMap.get(sch.id);
+        if (!resolved) continue;
         const phase = sch.phases?.[0];
 
         result.push({
-          clientId,
-          clientName: client.name,
-          clientEmail: client.email,
+          clientId: resolved.clientId,
+          clientName: resolved.clientName,
+          clientEmail: resolved.clientEmail,
           subscriptionId: sch.id,
           type: "payment_plan",
           amountPerPaymentCents: sch.metadata?.amountPerPaymentCents
@@ -1103,6 +1218,8 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           status: "active",
         });
       }
+
+      backfillClientMetadata(backfills);
 
       return res.status(200).send(result);
     }
@@ -1138,32 +1255,22 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           s.canceled_at !== null && s.canceled_at !== undefined && s.canceled_at >= cutoffTimestamp
       );
 
-      const allClientIds = [
-        ...new Set([
-          ...recentlyCancelledSubs.map((s) => s.metadata?.clientId),
-          ...recentlyCancelledSchedules.map((s) => s.metadata?.clientId),
-        ]),
-      ].filter(Boolean) as string[];
-
-      const clientRows =
-        allClientIds.length > 0
-          ? await db.select().from(clients).where(inArray(clients.id, allClientIds))
-          : [];
-
-      const scopedClients = clientRows.filter((c) => c.workspace === workspace);
-      const clientMap = new Map(scopedClients.map((c) => [c.id, c]));
+      const { subscriptionMap, scheduleMap, backfills } = await resolveSubscriptionClients({
+        subscriptions: recentlyCancelledSubs,
+        schedules: recentlyCancelledSchedules,
+        workspace: validWorkspace,
+      });
 
       const result = [];
 
       for (const sub of recentlyCancelledSubs) {
-        const clientId = sub.metadata?.clientId;
-        if (!clientId || !clientMap.has(clientId)) continue;
-        const client = clientMap.get(clientId)!;
+        const resolved = subscriptionMap.get(sub.id);
+        if (!resolved) continue;
 
         result.push({
-          clientId,
-          clientName: client.name,
-          clientEmail: client.email,
+          clientId: resolved.clientId,
+          clientName: resolved.clientName,
+          clientEmail: resolved.clientEmail,
           subscriptionId: sub.id,
           type: sub.metadata?.type ?? "recurring",
           amountPerPaymentCents: sub.items.data[0]?.price?.unit_amount ?? 0,
@@ -1174,14 +1281,13 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       for (const sch of recentlyCancelledSchedules) {
-        const clientId = sch.metadata?.clientId;
-        if (!clientId || !clientMap.has(clientId)) continue;
-        const client = clientMap.get(clientId)!;
+        const resolved = scheduleMap.get(sch.id);
+        if (!resolved) continue;
 
         result.push({
-          clientId,
-          clientName: client.name,
-          clientEmail: client.email,
+          clientId: resolved.clientId,
+          clientName: resolved.clientName,
+          clientEmail: resolved.clientEmail,
           subscriptionId: sch.id,
           type: "payment_plan",
           amountPerPaymentCents: sch.metadata?.amountPerPaymentCents
@@ -1192,6 +1298,8 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
           status: "cancelled",
         });
       }
+
+      backfillClientMetadata(backfills);
 
       return res.status(200).send(result);
     }
@@ -1243,8 +1351,22 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
         }),
       ]);
 
-      // Filter schedules for this client
-      const clientSchedules = scheduleList.filter((s) => s.metadata?.clientId === clientId);
+      const { scheduleMap, backfills } = await resolveSubscriptionClients({
+        subscriptions: [],
+        schedules: scheduleList,
+        workspace: validWorkspace,
+      });
+
+      const clientSchedules = scheduleList.filter((s) => {
+        const resolved = scheduleMap.get(s.id);
+        if (resolved?.clientId === clientId) return true;
+        const scheduleCustomerId = getStripeCustomerId(s.customer);
+        return !!client.stripeCustomerId && scheduleCustomerId === client.stripeCustomerId;
+      });
+
+      backfillClientMetadata(
+        backfills.filter((entry) => clientSchedules.some((s) => s.id === entry.id))
+      );
 
       // Format subscriptions
       const formattedSubs = subList.map((sub) => formatStripeSub(sub, clientId, client.name));

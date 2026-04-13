@@ -6,6 +6,7 @@ import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { createClientWithOnboardingToken } from "../lib/client-factory";
 import { stripe } from "../lib/stripe";
+import { getStripeCustomerId, type StripeCustomerRef } from "../lib/subscription-resolution";
 import { isWorkspace, type Workspace } from "../lib/workspace";
 
 type StripeCustomer = {
@@ -26,6 +27,7 @@ type StripeCustomer = {
   created: number;
   deleted?: boolean;
 };
+
 
 const NATIVE_FIELDS = [
   "name",
@@ -143,6 +145,87 @@ async function listAllStripeCustomers(): Promise<StripeCustomer[]> {
   }
 
   return customers;
+}
+
+async function listAllSubscriptionsForCustomer(customerId: string) {
+  const subscriptions: Array<{ id: string; metadata: Record<string, string> }> = [];
+  let startingAfter: string | undefined;
+
+  while (true) {
+    const page = await stripe.subscriptions.list({
+      customer: customerId,
+      limit: 100,
+      starting_after: startingAfter,
+    });
+
+    subscriptions.push(...page.data.map((sub) => ({ id: sub.id, metadata: sub.metadata ?? {} })));
+
+    if (!page.has_more || page.data.length === 0) break;
+    startingAfter = page.data[page.data.length - 1]?.id;
+    if (!startingAfter) break;
+  }
+
+  return subscriptions;
+}
+
+async function listAllSchedulesForCustomer(customerId: string) {
+  const schedules: Array<{ id: string; metadata: Record<string, string> }> = [];
+  let startingAfter: string | undefined;
+
+  while (true) {
+    const page = await stripe.subscriptionSchedules.list({
+      limit: 100,
+      starting_after: startingAfter,
+    });
+
+    for (const schedule of page.data) {
+      if (getStripeCustomerId(schedule.customer) !== customerId) continue;
+      schedules.push({ id: schedule.id, metadata: schedule.metadata ?? {} });
+    }
+
+    if (!page.has_more || page.data.length === 0) break;
+    startingAfter = page.data[page.data.length - 1]?.id;
+    if (!startingAfter) break;
+  }
+
+  return schedules;
+}
+
+async function backfillCustomerSubscriptionsClientId(stripeCustomerId: string, clientId: string) {
+  const [subscriptions, schedules] = await Promise.all([
+    listAllSubscriptionsForCustomer(stripeCustomerId),
+    listAllSchedulesForCustomer(stripeCustomerId),
+  ]);
+
+  const subUpdates = subscriptions.filter((sub) => sub.metadata?.clientId !== clientId);
+  const scheduleUpdates = schedules.filter((sch) => sch.metadata?.clientId !== clientId);
+
+  const results = await Promise.allSettled([
+    ...subUpdates.map((sub) =>
+      stripe.subscriptions.update(sub.id, {
+        metadata: {
+          ...sub.metadata,
+          clientId,
+        },
+      })
+    ),
+    ...scheduleUpdates.map((sch) =>
+      stripe.subscriptionSchedules.update(sch.id, {
+        metadata: {
+          ...sch.metadata,
+          clientId,
+        },
+      })
+    ),
+  ]);
+
+  const failed = results.filter((r) => r.status === "rejected").length;
+
+  return {
+    subscriptionsLinked: subUpdates.length,
+    schedulesLinked: scheduleUpdates.length,
+    failed,
+  };
 }
 
 const RECONCILE_CACHE_TTL_MS = process.env.NODE_ENV === "test" ? 0 : 5 * 60 * 1000;
@@ -470,11 +553,22 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
             })(),
           });
 
+          const linkResult = await backfillCustomerSubscriptionsClientId(
+            stripeCustomerId,
+            clientId
+          ).catch((error) => {
+            req.log.error(error, "Failed to auto-link Stripe subscriptions after customer import");
+            return { subscriptionsLinked: 0, schedulesLinked: 0, failed: 1 };
+          });
+
           return res.status(201).send({
             name,
             clientId,
             workspace,
             importedFromStripe: true,
+            subscriptionsLinked: linkResult.subscriptionsLinked,
+            schedulesLinked: linkResult.schedulesLinked,
+            linkFailures: linkResult.failed,
           });
         }
 
@@ -507,6 +601,14 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
           groupId,
         });
 
+        const linkResult = await backfillCustomerSubscriptionsClientId(
+          stripeCustomerId,
+          clientId
+        ).catch((error) => {
+          req.log.error(error, "Failed to auto-link Stripe subscriptions after customer import");
+          return { subscriptionsLinked: 0, schedulesLinked: 0, failed: 1 };
+        });
+
         const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
         const onboardingUrlHint = `${frontendOrigin}/onboard?token=${token}`;
 
@@ -518,6 +620,9 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
           onboardingUrlHint,
           workspace,
           groupId: groupId ?? null,
+          subscriptionsLinked: linkResult.subscriptionsLinked,
+          schedulesLinked: linkResult.schedulesLinked,
+          linkFailures: linkResult.failed,
         });
       } catch (error) {
         req.log.error(error, "Error importing Stripe customer");
@@ -692,7 +797,27 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
             .where(and(eq(clients.id, localClientId), eq(clients.workspace, workspace)));
         }
 
-        return res.status(200).send({ success: true });
+        const linkResult = await backfillCustomerSubscriptionsClientId(
+          stripeCustomerId,
+          localClientId
+        ).catch((error) => {
+          req.log.error(error, "Failed to auto-link Stripe subscriptions after customer sync");
+          return { subscriptionsLinked: 0, schedulesLinked: 0, failed: 1 };
+        });
+
+        if (!localClient.stripeCustomerId || localClient.stripeCustomerId !== stripeCustomerId) {
+          await db
+            .update(clients)
+            .set({ stripeCustomerId, updatedAt: new Date() })
+            .where(and(eq(clients.id, localClientId), eq(clients.workspace, workspace)));
+        }
+
+        return res.status(200).send({
+          success: true,
+          subscriptionsLinked: linkResult.subscriptionsLinked,
+          schedulesLinked: linkResult.schedulesLinked,
+          linkFailures: linkResult.failed,
+        });
       } catch (error) {
         req.log.error(error, "Error syncing Stripe customer");
         return res.status(500).send({ error: "Internal server error" });

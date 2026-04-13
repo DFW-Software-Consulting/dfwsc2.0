@@ -1,8 +1,9 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { stripe } from "../lib/stripe";
 import { isWorkspace } from "../lib/workspace";
 
 interface ClientPatchBody {
@@ -12,11 +13,25 @@ interface ClientPatchBody {
   paymentCancelUrl?: string | null;
   processingFeePercent?: number | null;
   processingFeeCents?: number | null;
+  name?: string;
+  email?: string;
+  phone?: string | null;
+  billingContactName?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+  notes?: string | null;
+  defaultPaymentTermsDays?: number | null;
 }
 
 interface ClientParams {
   id: string;
 }
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function isValidHttpsUrl(value: string): boolean {
   try {
@@ -85,6 +100,45 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // GET /clients/:id - Get a single client (admin only)
+  app.get<{ Params: ClientParams; Querystring: { workspace?: string } }>(
+    "/clients/:id",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { workspace } = req.query;
+
+        if (!isWorkspace(workspace)) {
+          return res.status(400).send({
+            error: "workspace query parameter is required (dfwsc_services|client_portal).",
+          });
+        }
+
+        const [client] = await db
+          .select()
+          .from(clients)
+          .where(and(eq(clients.id, id), eq(clients.workspace, workspace)))
+          .limit(1);
+
+        if (!client) {
+          return res.status(404).send({ error: "Client not found." });
+        }
+
+        return res.status(200).send({
+          client: {
+            ...client,
+            createdAt: client.createdAt?.toISOString(),
+            updatedAt: client.updatedAt?.toISOString(),
+          },
+        });
+      } catch (error) {
+        req.log.error(error, "Error fetching client");
+        return res.status(500).send({ error: "Internal server error" });
+      }
+    }
+  );
+
   // PATCH /clients/:id - Update client (admin only)
   app.patch<{
     Params: ClientParams;
@@ -92,6 +146,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
   }>("/clients/:id", { preHandler: requireAdminJwt }, async (req, res) => {
     try {
       const { id } = req.params;
+      const body = req.body;
       const {
         status,
         groupId,
@@ -99,7 +154,10 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         paymentCancelUrl,
         processingFeePercent,
         processingFeeCents,
-      } = req.body;
+        name,
+        email,
+        defaultPaymentTermsDays,
+      } = body;
 
       if (status !== undefined && status !== "active" && status !== "inactive") {
         return res.status(400).send({
@@ -137,6 +195,24 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           .send({ error: "processingFeeCents must be a non-negative integer." });
       }
 
+      if (name !== undefined && (!name || !name.trim())) {
+        return res.status(400).send({ error: "name must not be empty." });
+      }
+
+      if (email !== undefined && !EMAIL_RE.test(email)) {
+        return res.status(400).send({ error: "email must be a valid email address." });
+      }
+
+      if (
+        defaultPaymentTermsDays !== undefined &&
+        defaultPaymentTermsDays !== null &&
+        (!Number.isInteger(defaultPaymentTermsDays) || defaultPaymentTermsDays <= 0)
+      ) {
+        return res
+          .status(400)
+          .send({ error: "defaultPaymentTermsDays must be a positive integer." });
+      }
+
       if (groupId != null) {
         const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
 
@@ -159,10 +235,29 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
-      const existingClient = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
+      const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
 
-      if (existingClient.length === 0) {
+      if (!existingClient) {
         return res.status(404).send({ error: "Client not found." });
+      }
+
+      if (email !== undefined) {
+        const [conflict] = await db
+          .select({ id: clients.id })
+          .from(clients)
+          .where(
+            and(
+              eq(clients.email, email),
+              eq(clients.workspace, existingClient.workspace),
+              ne(clients.id, id)
+            )
+          )
+          .limit(1);
+        if (conflict) {
+          return res
+            .status(409)
+            .send({ error: "A client with this email already exists in this workspace." });
+        }
       }
 
       const setValues: {
@@ -173,16 +268,41 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         paymentCancelUrl?: string | null;
         processingFeePercent?: string | null;
         processingFeeCents?: number | null;
+        name?: string;
+        email?: string;
+        phone?: string | null;
+        billingContactName?: string | null;
+        addressLine1?: string | null;
+        addressLine2?: string | null;
+        city?: string | null;
+        state?: string | null;
+        postalCode?: string | null;
+        country?: string | null;
+        notes?: string | null;
+        defaultPaymentTermsDays?: number | null;
       } = { updatedAt: new Date() };
 
       if (status !== undefined) setValues.status = status;
-      if ("groupId" in req.body) setValues.groupId = groupId;
-      if ("paymentSuccessUrl" in req.body) setValues.paymentSuccessUrl = paymentSuccessUrl;
-      if ("paymentCancelUrl" in req.body) setValues.paymentCancelUrl = paymentCancelUrl;
-      if ("processingFeePercent" in req.body)
+      if ("groupId" in body) setValues.groupId = groupId;
+      if ("paymentSuccessUrl" in body) setValues.paymentSuccessUrl = paymentSuccessUrl;
+      if ("paymentCancelUrl" in body) setValues.paymentCancelUrl = paymentCancelUrl;
+      if ("processingFeePercent" in body)
         setValues.processingFeePercent =
           processingFeePercent != null ? String(processingFeePercent) : null;
-      if ("processingFeeCents" in req.body) setValues.processingFeeCents = processingFeeCents;
+      if ("processingFeeCents" in body) setValues.processingFeeCents = processingFeeCents;
+      if (name !== undefined) setValues.name = name;
+      if (email !== undefined) setValues.email = email;
+      if ("phone" in body) setValues.phone = body.phone;
+      if ("billingContactName" in body) setValues.billingContactName = body.billingContactName;
+      if ("addressLine1" in body) setValues.addressLine1 = body.addressLine1;
+      if ("addressLine2" in body) setValues.addressLine2 = body.addressLine2;
+      if ("city" in body) setValues.city = body.city;
+      if ("state" in body) setValues.state = body.state;
+      if ("postalCode" in body) setValues.postalCode = body.postalCode;
+      if ("country" in body) setValues.country = body.country;
+      if ("notes" in body) setValues.notes = body.notes;
+      if ("defaultPaymentTermsDays" in body)
+        setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
 
       const updatedClients = await db
         .update(clients)
@@ -195,17 +315,39 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const updatedClient = updatedClients[0];
+
+      // Auto-sync profile changes to Stripe for dfwsc_services clients
+      if (updatedClient.workspace === "dfwsc_services" && updatedClient.stripeCustomerId) {
+        const stripeNative: Record<string, unknown> = {};
+        const stripeAddress: Record<string, unknown> = {};
+        const stripeMeta: Record<string, string> = {};
+
+        if ("name" in body && body.name) stripeNative.name = body.name;
+        if ("email" in body && body.email) stripeNative.email = body.email;
+        if ("phone" in body) stripeNative.phone = body.phone ?? "";
+        if ("addressLine1" in body) stripeAddress.line1 = body.addressLine1 ?? "";
+        if ("addressLine2" in body) stripeAddress.line2 = body.addressLine2 ?? "";
+        if ("city" in body) stripeAddress.city = body.city ?? "";
+        if ("state" in body) stripeAddress.state = body.state ?? "";
+        if ("postalCode" in body) stripeAddress.postal_code = body.postalCode ?? "";
+        if ("country" in body) stripeAddress.country = body.country ?? "";
+        if ("billingContactName" in body)
+          stripeMeta.billingContactName = body.billingContactName ?? "";
+        if ("notes" in body) stripeMeta.notes = body.notes ?? "";
+        if ("defaultPaymentTermsDays" in body)
+          stripeMeta.defaultPaymentTermsDays =
+            body.defaultPaymentTermsDays != null ? String(body.defaultPaymentTermsDays) : "";
+
+        const stripePayload: Record<string, unknown> = { ...stripeNative };
+        if (Object.keys(stripeAddress).length) stripePayload.address = stripeAddress;
+        if (Object.keys(stripeMeta).length) stripePayload.metadata = stripeMeta;
+        if (Object.keys(stripePayload).length) {
+          await stripe.customers.update(updatedClient.stripeCustomerId, stripePayload);
+        }
+      }
+
       return res.status(200).send({
-        id: updatedClient.id,
-        name: updatedClient.name,
-        email: updatedClient.email,
-        stripeAccountId: updatedClient.stripeAccountId,
-        status: updatedClient.status,
-        groupId: updatedClient.groupId,
-        paymentSuccessUrl: updatedClient.paymentSuccessUrl,
-        paymentCancelUrl: updatedClient.paymentCancelUrl,
-        processingFeePercent: updatedClient.processingFeePercent,
-        processingFeeCents: updatedClient.processingFeeCents,
+        ...updatedClient,
         createdAt: updatedClient.createdAt?.toISOString(),
         updatedAt: updatedClient.updatedAt?.toISOString(),
       });

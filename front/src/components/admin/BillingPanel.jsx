@@ -3,7 +3,11 @@ import { useClients } from "../../hooks/useClients";
 import { useCancelInvoice, useCreateInvoice, useInvoices } from "../../hooks/useInvoices";
 import { useCreatePayment } from "../../hooks/usePayments";
 import { useCreateProduct, useProducts } from "../../hooks/useProducts";
-import { useCreateSubscription, useSubscriptions } from "../../hooks/useSubscriptions";
+import {
+  useCreateSubscription,
+  useLinkSubscription,
+  useSubscriptions,
+} from "../../hooks/useSubscriptions";
 import { useTaxRates } from "../../hooks/useTaxRates";
 import ErrorMessage from "./shared/ErrorMessage";
 import LoadingSpinner from "./shared/LoadingSpinner";
@@ -706,8 +710,10 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
   const { data: subs = [], isLoading, isError, error, refetch } = useSubscriptions({ workspace });
   const { data: taxRates = [] } = useTaxRates();
   const createSubMutation = useCreateSubscription();
+  const linkSubMutation = useLinkSubscription();
 
   const [clientId, setClientId] = useState("");
+  const [linkTargets, setLinkTargets] = useState({});
 
   useEffect(() => {
     if (preselectedClient?.id) {
@@ -779,6 +785,35 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
       createSubMutation,
       showToast,
     ]
+  );
+
+  const handleLinkSubscription = useCallback(
+    (subscriptionId) => {
+      const targetClientId = linkTargets[subscriptionId];
+      if (!targetClientId) {
+        showToast?.("Select a client to link this subscription.", "error");
+        return;
+      }
+
+      linkSubMutation.mutate(
+        {
+          subscriptionId,
+          clientId: targetClientId,
+          workspace,
+        },
+        {
+          onSuccess: () => {
+            setLinkTargets((prev) => ({ ...prev, [subscriptionId]: "" }));
+            showToast?.("Subscription linked.", "success");
+            refetch();
+          },
+          onError: (err) => {
+            showToast?.(err.message, "error");
+          },
+        }
+      );
+    },
+    [linkSubMutation, linkTargets, refetch, showToast, workspace]
   );
 
   return (
@@ -910,7 +945,7 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
           <table className="min-w-full divide-y divide-gray-700">
             <thead>
               <tr>
-                {["Client", "Description", "Amount", "Status"].map((h) => (
+                {["Client", "Description", "Amount", "Status", "Actions"].map((h) => (
                   <th
                     key={h}
                     className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase"
@@ -922,14 +957,52 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
             </thead>
             <tbody className="divide-y divide-gray-800">
               {subs.map((sub) => (
-                <tr key={sub.id}>
-                  <td className="px-3 py-2 text-sm text-gray-200">{sub.clientName}</td>
+                <tr key={sub.id} className={sub.unlinked ? "bg-amber-900/10" : ""}>
+                  <td className="px-3 py-2 text-sm text-gray-200">
+                    {sub.clientName || "Unlinked"}
+                    {sub.unlinked && (
+                      <span className="ml-2 inline-flex items-center rounded-full bg-amber-800/40 px-2 py-0.5 text-xs text-amber-200">
+                        Needs link
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-sm text-gray-200">{sub.description}</td>
                   <td className="px-3 py-2 text-sm text-gray-200">
                     ${(sub.amountPerPaymentCents / 100).toFixed(2)}
                   </td>
                   <td className="px-3 py-2 text-sm">
                     <StatusBadge status={sub.status} />
+                  </td>
+                  <td className="px-3 py-2 text-sm text-gray-200">
+                    {sub.unlinked ? (
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={linkTargets[sub.id] || ""}
+                          onChange={(e) =>
+                            setLinkTargets((prev) => ({ ...prev, [sub.id]: e.target.value }))
+                          }
+                          className="rounded-md border border-gray-600 bg-gray-900/50 px-2 py-1 text-xs text-gray-100"
+                          disabled={linkSubMutation.isPending}
+                        >
+                          <option value="">Select client...</option>
+                          {clients.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => handleLinkSubscription(sub.id)}
+                          disabled={linkSubMutation.isPending}
+                          className="rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {linkSubMutation.isPending ? "Linking..." : "Link"}
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-gray-500">-</span>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -1,5 +1,8 @@
 import { apiFetch } from "./client";
 
+export const getClient = (token, id, workspace) =>
+  apiFetch(`/clients/${id}?workspace=${encodeURIComponent(workspace)}`, { token });
+
 export const getClients = (token, { groupId, workspace } = {}) => {
   const qs = new URLSearchParams();
   if (groupId) qs.set("groupId", groupId);

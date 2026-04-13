@@ -27,6 +27,13 @@ const { stripeMock } = vi.hoisted(() => {
       voidInvoice: vi.fn(),
     },
     invoiceItems: { create: vi.fn() },
+    subscriptionSchedules: {
+      list: vi.fn(),
+      create: vi.fn(),
+      retrieve: vi.fn(),
+      update: vi.fn(),
+      cancel: vi.fn(),
+    },
   };
 
   return { stripeMock };
@@ -100,14 +107,11 @@ describe("Subscriptions API", () => {
     stripeMock.subscriptions.update.mockImplementation((_id: string, params: any) =>
       Promise.resolve(makeStripeSub(params))
     );
-    // Add subscription schedules mock
-    stripeMock.subscriptionSchedules = {
-      list: vi.fn().mockResolvedValue({ data: [] }),
-      create: vi.fn(),
-      retrieve: vi.fn(),
-      update: vi.fn(),
-      cancel: vi.fn(),
-    };
+    stripeMock.subscriptionSchedules.list.mockResolvedValue({ data: [] });
+    stripeMock.subscriptionSchedules.create.mockReset();
+    stripeMock.subscriptionSchedules.retrieve.mockReset();
+    stripeMock.subscriptionSchedules.update.mockReset();
+    stripeMock.subscriptionSchedules.cancel.mockReset();
   });
 
   afterEach(() => {
@@ -1340,6 +1344,194 @@ describe("Subscriptions API", () => {
       expect(body.invoices).toEqual([]);
 
       await db.delete(clients).where(eq(clients.id, noStripeClientId));
+    });
+  });
+
+  // ── POST /subscriptions/link ──────────────────────────────────────────────
+
+  describe("POST /api/v1/subscriptions/link", () => {
+    let linkClientId: string;
+
+    beforeEach(async () => {
+      linkClientId = randomUUID();
+      await db.insert(clients).values({
+        id: linkClientId,
+        name: "Link Test Client",
+        email: `link-${linkClientId}@test.com`,
+        workspace,
+        status: "active",
+      });
+    });
+
+    afterEach(async () => {
+      await db.delete(clients).where(eq(clients.id, linkClientId)).catch(() => undefined);
+    });
+
+    it("200 — links an existing Stripe subscription to a client", async () => {
+      const token = makeAdminToken();
+      const sub = makeStripeSub({
+        id: "sub_link_001",
+        customer: "cus_LINK",
+        metadata: {},
+      });
+      stripeMock.subscriptions.retrieve.mockResolvedValue(sub);
+      stripeMock.subscriptions.update.mockResolvedValue({
+        ...sub,
+        metadata: { clientId: linkClientId },
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions/link",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { subscriptionId: "sub_link_001", clientId: linkClientId, workspace },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.id).toBe("sub_link_001");
+      expect(body.clientId).toBe(linkClientId);
+    });
+
+    it("200 — links a subscription schedule when subscription retrieve throws", async () => {
+      const token = makeAdminToken();
+      const schedule = {
+        id: "sch_link_001",
+        customer: "cus_LINK",
+        metadata: {},
+        phases: [],
+        status: "not_started",
+        created: Math.floor(Date.now() / 1000),
+        end_behavior: "cancel",
+      };
+      stripeMock.subscriptions.retrieve.mockRejectedValue(new Error("no such subscription"));
+      stripeMock.subscriptionSchedules.retrieve.mockResolvedValue(schedule);
+      stripeMock.subscriptionSchedules.update.mockResolvedValue({
+        ...schedule,
+        metadata: { clientId: linkClientId },
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions/link",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { subscriptionId: "sch_link_001", clientId: linkClientId, workspace },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.id).toBe("sch_link_001");
+      expect(body.clientId).toBe(linkClientId);
+    });
+
+    it("200 — backfills stripeCustomerId on the client when not yet set", async () => {
+      const token = makeAdminToken();
+      const newCustomerId = "cus_BACKFILL";
+      const sub = makeStripeSub({ id: "sub_bf", customer: newCustomerId, metadata: {} });
+      stripeMock.subscriptions.retrieve.mockResolvedValue(sub);
+      stripeMock.subscriptions.update.mockResolvedValue({ ...sub, metadata: { clientId: linkClientId } });
+
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions/link",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { subscriptionId: "sub_bf", clientId: linkClientId, workspace },
+      });
+
+      const [updated] = await db.select().from(clients).where(eq(clients.id, linkClientId)).limit(1);
+      expect(updated?.stripeCustomerId).toBe(newCustomerId);
+    });
+
+    it("404 — returns error when client does not exist", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions/link",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { subscriptionId: "sub_x", clientId: randomUUID(), workspace },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error).toMatch(/client not found/i);
+    });
+
+    it("404 — returns error when neither subscription nor schedule is found", async () => {
+      const token = makeAdminToken();
+      stripeMock.subscriptions.retrieve.mockRejectedValue(new Error("not found"));
+      stripeMock.subscriptionSchedules.retrieve.mockRejectedValue(new Error("not found"));
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions/link",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { subscriptionId: "sub_missing", clientId: linkClientId, workspace },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error).toMatch(/subscription not found/i);
+    });
+
+    it("400 — returns error when clientId belongs to a different workspace", async () => {
+      const token = makeAdminToken();
+      // linkClientId was inserted with workspace="client_portal"; request dfwsc_services
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions/link",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { subscriptionId: "sub_ws", clientId: linkClientId, workspace: "dfwsc_services" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/workspace/i);
+    });
+
+    it("400 — returns error when subscription customer does not match client's Stripe customer", async () => {
+      const token = makeAdminToken();
+      // Pre-set a stripeCustomerId on the client
+      await db
+        .update(clients)
+        .set({ stripeCustomerId: "cus_EXISTING" })
+        .where(eq(clients.id, linkClientId));
+
+      const sub = makeStripeSub({ id: "sub_mismatch", customer: "cus_DIFFERENT", metadata: {} });
+      stripeMock.subscriptions.retrieve.mockResolvedValue(sub);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions/link",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { subscriptionId: "sub_mismatch", clientId: linkClientId, workspace },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/customer/i);
+    });
+
+    it("400 — returns error when subscriptionId is missing", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions/link",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { clientId: linkClientId, workspace },
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it("400 — returns error when clientId is missing", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/subscriptions/link",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { subscriptionId: "sub_x", workspace },
+      });
+
+      expect(response.statusCode).toBe(400);
     });
   });
 });

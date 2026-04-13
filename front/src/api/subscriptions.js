@@ -8,6 +8,9 @@ export const getSubscriptions = (token, params = {}) => {
 export const createSubscription = (token, body) =>
   apiFetch("/subscriptions", { token, method: "POST", body });
 
+export const linkSubscription = (token, body) =>
+  apiFetch("/subscriptions/link", { token, method: "POST", body });
+
 export const patchSubscription = (token, id, body) =>
   apiFetch(
     `/subscriptions/${id}${
