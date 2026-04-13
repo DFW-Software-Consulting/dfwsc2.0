@@ -100,6 +100,14 @@ describe("Subscriptions API", () => {
     stripeMock.subscriptions.update.mockImplementation((_id: string, params: any) =>
       Promise.resolve(makeStripeSub(params))
     );
+    // Add subscription schedules mock
+    stripeMock.subscriptionSchedules = {
+      list: vi.fn().mockResolvedValue({ data: [] }),
+      create: vi.fn(),
+      retrieve: vi.fn(),
+      update: vi.fn(),
+      cancel: vi.fn(),
+    };
   });
 
   afterEach(() => {
@@ -137,16 +145,34 @@ describe("Subscriptions API", () => {
 
     it("returns 201 with totalPayments in metadata when provided", async () => {
       const token = makeAdminToken();
-      stripeMock.subscriptions.create.mockResolvedValueOnce(
-        makeStripeSub({
+      // For legacy format with totalPayments, a subscription schedule is created
+      stripeMock.subscriptionSchedules = {
+        create: vi.fn().mockResolvedValueOnce({
+          id: "sub_sched_test_001",
+          status: "active",
+          customer: "cus_test_001",
           metadata: {
             clientId,
             description: "Limited plan",
             interval: "quarterly",
             totalPayments: "4",
+            amountPerPaymentCents: "2500",
           },
-        })
-      );
+          phases: [
+            {
+              items: [{ price: "price_test_001" }],
+              start_date: Math.floor(Date.now() / 1000),
+              end_date: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
+            },
+          ],
+          created: Math.floor(Date.now() / 1000),
+        }),
+        retrieve: vi.fn(),
+        update: vi.fn(),
+        cancel: vi.fn(),
+        list: vi.fn().mockResolvedValue({ data: [] }),
+      };
+      stripeMock.prices.create.mockResolvedValueOnce({ id: "price_test_001" });
 
       const response = await app.inject({
         method: "POST",
@@ -270,7 +296,7 @@ describe("Subscriptions API", () => {
         payload: { clientId, workspace, amountCents: 0, description: "Plan", interval: "monthly" },
       });
       expect(response.statusCode).toBe(400);
-      expect(response.json().error).toMatch(/amountCents/i);
+      expect(response.json().error).toMatch(/amountPerPaymentCents/i);
     });
 
     it("returns 400 when amountCents is a float", async () => {
@@ -290,7 +316,7 @@ describe("Subscriptions API", () => {
         },
       });
       expect(response.statusCode).toBe(400);
-      expect(response.json().error).toMatch(/amountCents/i);
+      expect(response.json().error).toMatch(/amountPerPaymentCents/i);
     });
 
     it("returns 400 when description is blank", async () => {
@@ -403,6 +429,13 @@ describe("Subscriptions API", () => {
           }),
         ],
       });
+      stripeMock.subscriptionSchedules = {
+        list: vi.fn().mockResolvedValueOnce({ data: [] }),
+        create: vi.fn(),
+        retrieve: vi.fn(),
+        update: vi.fn(),
+        cancel: vi.fn(),
+      };
 
       const response = await app.inject({
         method: "GET",
@@ -419,7 +452,7 @@ describe("Subscriptions API", () => {
       await db.insert(clients).values({
         id: unknownClientId,
         name: "No Stripe",
-        email: "nostripe@test.com",
+        email: `nostripe-${unknownClientId}@test.com`,
         status: "active",
       });
 
@@ -472,6 +505,13 @@ describe("Subscriptions API", () => {
 
     it("returns 404 for unknown id", async () => {
       stripeMock.subscriptions.retrieve.mockRejectedValueOnce(new Error("No such subscription"));
+      stripeMock.subscriptionSchedules = {
+        retrieve: vi.fn().mockRejectedValueOnce(new Error("No such subscription schedule")),
+        list: vi.fn().mockResolvedValue({ data: [] }),
+        create: vi.fn(),
+        update: vi.fn(),
+        cancel: vi.fn(),
+      };
 
       const response = await app.inject({
         method: "GET",
@@ -642,6 +682,13 @@ describe("Subscriptions API", () => {
 
     it("returns 404 for unknown id", async () => {
       stripeMock.subscriptions.retrieve.mockRejectedValueOnce(new Error("No such subscription"));
+      stripeMock.subscriptionSchedules = {
+        retrieve: vi.fn().mockRejectedValueOnce(new Error("No such subscription schedule")),
+        list: vi.fn().mockResolvedValue({ data: [] }),
+        create: vi.fn(),
+        update: vi.fn(),
+        cancel: vi.fn(),
+      };
 
       const response = await app.inject({
         method: "PATCH",
@@ -665,6 +712,313 @@ describe("Subscriptions API", () => {
         payload: { status: "paused" },
       });
       expect(response.statusCode).toBe(401);
+    });
+  });
+
+  // ── Dashboard Endpoints ───────────────────────────────────────────────────
+
+  describe("GET /api/v1/subscriptions/dashboard/summary", () => {
+    it("returns subscription summary stats", async () => {
+      const token = makeAdminToken();
+      stripeMock.subscriptions.list.mockResolvedValueOnce({
+        data: [
+          makeStripeSub({ status: "active", metadata: { clientId, interval: "month" } }),
+          makeStripeSub({ status: "canceled", metadata: { clientId, interval: "month" } }),
+        ],
+      });
+      stripeMock.subscriptionSchedules = {
+        list: vi.fn().mockResolvedValueOnce({
+          data: [
+            { id: "sched_1", status: "active", metadata: { clientId, interval: "month" } },
+            { id: "sched_2", status: "completed", metadata: { clientId, interval: "month" } },
+          ],
+        }),
+        create: vi.fn(),
+        retrieve: vi.fn(),
+        update: vi.fn(),
+        cancel: vi.fn(),
+      };
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/subscriptions/dashboard/summary?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body).toHaveProperty("recurring");
+      expect(body).toHaveProperty("paymentPlans");
+      expect(body).toHaveProperty("total");
+    });
+  });
+
+  describe("GET /api/v1/subscriptions/dashboard/active", () => {
+    it("returns active subscriptions list", async () => {
+      const token = makeAdminToken();
+      stripeMock.subscriptions.list.mockResolvedValueOnce({
+        data: [
+          makeStripeSub({
+            status: "active",
+            metadata: { clientId, interval: "month" },
+            current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
+          }),
+        ],
+      });
+      stripeMock.subscriptionSchedules = {
+        list: vi.fn().mockResolvedValueOnce({
+          data: [
+            {
+              id: "sched_active",
+              status: "active",
+              metadata: { clientId, interval: "month", amountPerPaymentCents: "1000" },
+              phases: [{ items: [{ plan: { amount: 1000 } }], start_date: Date.now() / 1000 }],
+            },
+          ],
+        }),
+        create: vi.fn(),
+        retrieve: vi.fn(),
+        update: vi.fn(),
+        cancel: vi.fn(),
+      };
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/subscriptions/dashboard/active?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(Array.isArray(response.json())).toBe(true);
+    });
+  });
+
+  describe("GET /api/v1/subscriptions/dashboard/overdue", () => {
+    it("returns overdue subscriptions", async () => {
+      const token = makeAdminToken();
+      stripeMock.subscriptions.list.mockResolvedValueOnce({
+        data: [
+          makeStripeSub({
+            status: "past_due",
+            metadata: { clientId, interval: "month" },
+            current_period_end: Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60,
+          }),
+        ],
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/subscriptions/dashboard/overdue?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(Array.isArray(response.json())).toBe(true);
+    });
+  });
+
+  describe("GET /api/v1/subscriptions/dashboard/ending-soon", () => {
+    it("returns payment plans ending soon", async () => {
+      const token = makeAdminToken();
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() + 15);
+      stripeMock.subscriptionSchedules = {
+        list: vi.fn().mockResolvedValueOnce({
+          data: [
+            {
+              id: "sched_ending",
+              status: "active",
+              metadata: { clientId, interval: "month", amountPerPaymentCents: "1000" },
+              phases: [
+                {
+                  items: [{ plan: { amount: 1000 } }],
+                  end_date: Math.floor(cutoffDate.getTime() / 1000),
+                },
+              ],
+            },
+          ],
+        }),
+        create: vi.fn(),
+        retrieve: vi.fn(),
+        update: vi.fn(),
+        cancel: vi.fn(),
+      };
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/subscriptions/dashboard/ending-soon?workspace=${workspace}&days=30`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(Array.isArray(response.json())).toBe(true);
+    });
+  });
+
+  describe("GET /api/v1/subscriptions/dashboard/recently-cancelled", () => {
+    it("returns recently cancelled subscriptions", async () => {
+      const token = makeAdminToken();
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - 15);
+      stripeMock.subscriptions.list.mockResolvedValueOnce({
+        data: [
+          makeStripeSub({
+            status: "canceled",
+            metadata: { clientId, interval: "month" },
+            canceled_at: Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60,
+          }),
+        ],
+      });
+      stripeMock.subscriptionSchedules = {
+        list: vi.fn().mockResolvedValueOnce({
+          data: [
+            {
+              id: "sched_cancelled",
+              status: "canceled",
+              metadata: { clientId, interval: "month", amountPerPaymentCents: "1000" },
+              canceled_at: Math.floor(Date.now() / 1000) - 5 * 24 * 60 * 60,
+            },
+          ],
+        }),
+        create: vi.fn(),
+        retrieve: vi.fn(),
+        update: vi.fn(),
+        cancel: vi.fn(),
+      };
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/subscriptions/dashboard/recently-cancelled?workspace=${workspace}&days=30`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(Array.isArray(response.json())).toBe(true);
+    });
+  });
+
+  describe("GET /api/v1/clients/:clientId/subscriptions", () => {
+    it("returns full subscription details for one client", async () => {
+      const token = makeAdminToken();
+      stripeMock.subscriptions.list.mockResolvedValueOnce({
+        data: [
+          makeStripeSub({
+            status: "active",
+            metadata: { clientId, interval: "month" },
+            customer: "cus_test_001",
+          }),
+        ],
+      });
+      stripeMock.subscriptionSchedules = {
+        list: vi.fn().mockResolvedValueOnce({
+          data: [
+            {
+              id: "sched_client",
+              status: "active",
+              metadata: {
+                clientId,
+                interval: "month",
+                amountPerPaymentCents: "1000",
+                startDate: "2024-01-01",
+              },
+              phases: [
+                {
+                  items: [{ plan: { amount: 1000 } }],
+                  start_date: Math.floor(Date.now() / 1000),
+                  end_date: Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
+                },
+              ],
+              created: Math.floor(Date.now() / 1000),
+            },
+          ],
+        }),
+        create: vi.fn(),
+        retrieve: vi.fn(),
+        update: vi.fn(),
+        cancel: vi.fn(),
+      };
+      stripeMock.invoices.list.mockResolvedValueOnce({ data: [] });
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients/${clientId}/subscriptions?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(
+        response.statusCode,
+        `Expected 200 but got ${response.statusCode}: ${JSON.stringify(response.json())}`
+      ).toBe(200);
+      const body = response.json();
+      expect(body).toHaveProperty("client");
+      expect(body).toHaveProperty("subscriptions");
+      expect(body).toHaveProperty("invoices");
+    });
+
+    it("returns 404 when client does not exist", async () => {
+      const token = makeAdminToken();
+      const nonExistentId = randomUUID();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients/${nonExistentId}/subscriptions?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error).toMatch(/not found/i);
+    });
+
+    it("returns 400 when client belongs to different workspace", async () => {
+      const token = makeAdminToken();
+      const otherWorkspaceClientId = randomUUID();
+      await db.insert(clients).values({
+        id: otherWorkspaceClientId,
+        name: "Other Workspace Client",
+        email: `other-${otherWorkspaceClientId}@test.com`,
+        workspace: "dfwsc_services",
+        status: "active",
+        stripeCustomerId: "cus_other_workspace",
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients/${otherWorkspaceClientId}/subscriptions?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      const responseBody = response.json();
+      expect(response.statusCode).toBe(400);
+      expect(responseBody.error).toMatch(/does not belong/i);
+
+      await db.delete(clients).where(eq(clients.id, otherWorkspaceClientId));
+    });
+
+    it("returns empty arrays when client has no stripeCustomerId", async () => {
+      const token = makeAdminToken();
+      const noStripeClientId = randomUUID();
+      await db.insert(clients).values({
+        id: noStripeClientId,
+        name: "No Stripe Client",
+        email: `nostripe-${noStripeClientId}@test.com`,
+        workspace,
+        status: "active",
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients/${noStripeClientId}/subscriptions?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body).toHaveProperty("client");
+      expect(body.client.id).toBe(noStripeClientId);
+      expect(body.subscriptions).toEqual([]);
+      expect(body.invoices).toEqual([]);
+
+      await db.delete(clients).where(eq(clients.id, noStripeClientId));
     });
   });
 });

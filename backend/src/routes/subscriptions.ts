@@ -261,6 +261,18 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       if (!validateInterval(interval, ["week", "bi_weekly", "month", "quarter", "year"], res))
         return;
 
+      // Validate totalPayments if provided (legacy format)
+      if (
+        !isNew &&
+        "totalPayments" in body &&
+        body.totalPayments !== undefined &&
+        body.totalPayments !== null
+      ) {
+        if (!Number.isInteger(body.totalPayments) || body.totalPayments < 1) {
+          return res.status(400).send({ error: "totalPayments must be a positive integer." });
+        }
+      }
+
       const startDateObj = validateDateFormat(startDate, "startDate", res);
       if (!startDateObj) return;
 

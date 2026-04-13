@@ -524,10 +524,8 @@ describe("Stripe Customers API Integration", () => {
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ success: true });
 
-      expect(mockUpdateCustomer).toHaveBeenNthCalledWith(1, stripeCustomerId, {
+      expect(mockUpdateCustomer).toHaveBeenCalledWith(stripeCustomerId, {
         name: "Local Name",
-      });
-      expect(mockUpdateCustomer).toHaveBeenNthCalledWith(2, stripeCustomerId, {
         metadata: { notes: "Keep local notes" },
       });
 

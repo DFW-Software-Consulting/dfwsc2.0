@@ -109,6 +109,31 @@ describe("Settings API Integration", () => {
       expect(response.json().error).toBe("Fee in cents must be a non-negative integer.");
     });
 
+    it("should reject negative default_fee_cents", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/settings/default_fee_cents",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { value: "-1" },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("Fee in cents must be a non-negative integer.");
+    });
+
+    it("should accept zero as valid default_fee_cents", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/settings/default_fee_cents",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { value: "0" },
+      });
+      expect(response.statusCode).toBe(200);
+    });
+
     it("should validate default_fee_percent", async () => {
       const response = await app.inject({
         method: "PATCH",
@@ -133,6 +158,58 @@ describe("Settings API Integration", () => {
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toBe("Contact email must be a valid email address.");
+    });
+
+    it("should reject empty company_name", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/settings/company_name",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { value: "" },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("Company name must be between 1 and 120 characters.");
+    });
+
+    it("should reject whitespace-only company_name", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/settings/company_name",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { value: "   " },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("Company name must be between 1 and 120 characters.");
+    });
+
+    it("should reject company_name over 120 characters", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/settings/company_name",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { value: "A".repeat(121) },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("Company name must be between 1 and 120 characters.");
+    });
+
+    it("should accept company_name at exactly 120 characters", async () => {
+      const response = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/settings/company_name",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { value: "A".repeat(120) },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().message).toBe("Setting updated successfully.");
     });
   });
 });
