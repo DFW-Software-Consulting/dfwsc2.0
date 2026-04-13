@@ -96,7 +96,7 @@ vi.mock("../lib/stripe", () => ({
 
 vi.mock("../lib/stripe-billing", () => ({
   stripe: stripeMock,
-  resolveClientFee: vi.fn(async (_client: any, _group: any, amount?: number) => {
+  resolveClientFee: vi.fn(async (_client: any, _group: any, _amount?: number) => {
     // Default fee calculation: use DEFAULT_PROCESS_FEE_CENTS env var or 0
     return Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
   }),

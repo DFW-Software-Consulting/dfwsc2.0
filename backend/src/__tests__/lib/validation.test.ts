@@ -259,10 +259,10 @@ describe("validateTaxRate", () => {
 });
 
 describe("validateLimit", () => {
-  it("should return undefined when limit is undefined", () => {
+  it("should return null when limit is undefined", () => {
     const res = mockReply();
     const result = validateLimit(undefined, res);
-    expect(result).toBeUndefined();
+    expect(result).toBeNull();
     expect(res.status).not.toHaveBeenCalled();
   });
 
@@ -529,7 +529,7 @@ describe("validateInterval", () => {
   it("should format error message correctly", () => {
     const res = mockReply();
     const customIntervals = ["a", "b", "c"] as const;
-    const result = validateInterval("d", customIntervals, res);
+    validateInterval("d", customIntervals, res);
     expect(res.send).toHaveBeenCalledWith({
       error: "interval must be one of: a, b, c.",
     });

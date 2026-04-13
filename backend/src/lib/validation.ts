@@ -90,7 +90,7 @@ export async function validateTaxRate(taxRateId: string, res: FastifyReply): Pro
  * Returns parsed limit or null if invalid (response already sent).
  */
 export function validateLimit(limit: unknown, res: FastifyReply): number | null {
-  if (limit === undefined) return undefined;
+  if (limit === undefined) return null;
 
   const parsed = Number(limit);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {

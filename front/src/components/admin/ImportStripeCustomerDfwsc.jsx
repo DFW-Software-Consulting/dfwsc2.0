@@ -6,9 +6,9 @@ import {
 } from "../../hooks/useClients";
 import logger from "../../utils/logger";
 import AdminTable from "./shared/AdminTable";
+import BaseModal from "./shared/BaseModal";
 import Button from "./shared/Button";
 import ErrorMessage from "./shared/ErrorMessage";
-import BaseModal from "./shared/BaseModal";
 
 function DiscrepancyModal({ isOpen, onClose, discrepancy, onResolve, isResolving }) {
   const [resolutions, setResolutions] = useState({});
@@ -281,6 +281,7 @@ export default function ImportStripeCustomerDfwsc({ showToast }) {
               strokeWidth="2"
               strokeLinecap="round"
               strokeLinejoin="round"
+              aria-hidden="true"
             >
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
               <polyline points="22 4 12 14.01 9 11.01" />
