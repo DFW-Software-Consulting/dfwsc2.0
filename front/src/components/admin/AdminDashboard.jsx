@@ -41,7 +41,9 @@ export default function AdminDashboard() {
   const [showDfwscClientSuccess, setShowDfwscClientSuccess] = useState(false);
 
   const isDfwscMode = workspace === "dfwsc_services";
-  const visibleTabs = isDfwscMode ? TABS.filter((tab) => tab.id !== "groups") : TABS;
+  const visibleTabs = isDfwscMode
+    ? TABS.filter((tab) => tab.id !== "groups" && tab.id !== "reports")
+    : TABS;
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
@@ -87,7 +89,9 @@ export default function AdminDashboard() {
     setShowDfwscClientSuccess(false);
     setPreselectedClient(null);
     setActiveTab((prev) =>
-      prev === "groups" && nextWorkspace === "dfwsc_services" ? "clients" : prev
+      (prev === "groups" || prev === "reports") && nextWorkspace === "dfwsc_services"
+        ? "clients"
+        : prev
     );
   }, []);
 
@@ -265,7 +269,9 @@ export default function AdminDashboard() {
       )}
 
       {/* Reports tab */}
-      {activeTab === "reports" && <PaymentReports showToast={showToast} workspace={workspace} />}
+      {activeTab === "reports" && !isDfwscMode && (
+        <PaymentReports showToast={showToast} workspace={workspace} />
+      )}
 
       {/* Billing tab */}
       {activeTab === "billing" && (

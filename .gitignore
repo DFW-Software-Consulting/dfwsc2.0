@@ -44,6 +44,9 @@ Gemini.md
 *.swo
 *~
 
+# Local AI tool settings
+.qwen/
+
 # Database - Note: drizzle migrations SHOULD be committed
 # Only ignore if you want to regenerate migrations
 # /backend/drizzle
