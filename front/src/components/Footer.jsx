@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useTheme } from "../contexts/ThemeContext.jsx";
 
 const socialLinks = [
   {
