@@ -5,6 +5,7 @@ import { useSetupStatus } from "../../hooks/useSetupStatus";
 import AdminLogin from "./AdminLogin";
 import AdminSetup from "./AdminSetup";
 import BillingPanel from "./BillingPanel";
+import CRMPanel from "./CRMPanel";
 import ClientList from "./ClientList";
 import CreateClientForm from "./CreateClientForm";
 import GroupPanel from "./GroupPanel";
@@ -19,6 +20,7 @@ const TABS = [
   { id: "groups", label: "Companies" },
   { id: "reports", label: "Reports" },
   { id: "billing", label: "Billing" },
+  { id: "crm", label: "CRM" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -43,7 +45,7 @@ export default function AdminDashboard() {
   const isDfwscMode = workspace === "dfwsc_services";
   const visibleTabs = isDfwscMode
     ? TABS.filter((tab) => tab.id !== "groups" && tab.id !== "reports")
-    : TABS;
+    : TABS.filter((tab) => tab.id !== "crm");
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
@@ -88,11 +90,12 @@ export default function AdminDashboard() {
     setWorkspace(nextWorkspace);
     setShowDfwscClientSuccess(false);
     setPreselectedClient(null);
-    setActiveTab((prev) =>
-      (prev === "groups" || prev === "reports") && nextWorkspace === "dfwsc_services"
-        ? "clients"
-        : prev
-    );
+    setActiveTab((prev) => {
+      if (nextWorkspace === "dfwsc_services" && (prev === "groups" || prev === "reports"))
+        return "clients";
+      if (nextWorkspace === "client_portal" && prev === "crm") return "clients";
+      return prev;
+    });
   }, []);
 
   // ─── Unauthenticated state ───────────────────────────────────────────────
@@ -317,6 +320,11 @@ export default function AdminDashboard() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* CRM tab */}
+      {activeTab === "crm" && isDfwscMode && (
+        <CRMPanel showToast={showToast} />
       )}
 
       {/* Settings tab */}

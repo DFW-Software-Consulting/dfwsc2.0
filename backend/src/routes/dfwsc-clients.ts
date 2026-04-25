@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import validator from "validator";
@@ -19,6 +20,17 @@ interface DfwscClientBody {
   country?: string;
   notes?: string;
   defaultPaymentTermsDays?: number;
+}
+
+interface LeadBody {
+  name: string;
+  email: string;
+  phone?: string;
+  notes?: string;
+}
+
+interface ConvertParams {
+  id: string;
 }
 
 const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
@@ -154,6 +166,129 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
         if (errorMessage.includes("unique constraint") || errorMessage.includes("duplicate key")) {
           return res.status(400).send({ error: "A client with this email already exists." });
         }
+        return res.status(500).send({ error: "Internal server error" });
+      }
+    }
+  );
+  // POST /dfwsc/leads — create a potential client (no Stripe, no billing yet)
+  app.post<{ Body: LeadBody }>("/dfwsc/leads", { preHandler: requireAdminJwt }, async (req, res) => {
+    try {
+      const { name, email, phone, notes } = req.body;
+
+      if (!name || !email) {
+        return res.status(400).send({ error: "name and email are required." });
+      }
+      if (!validator.isEmail(email)) {
+        return res.status(400).send({ error: "Invalid email format." });
+      }
+
+      const workspace = "dfwsc_services";
+      const normalizedEmail = email.toLowerCase().trim();
+
+      const [existing] = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(and(eq(clients.email, normalizedEmail), eq(clients.workspace, workspace)))
+        .limit(1);
+
+      if (existing) {
+        return res.status(409).send({ error: "A client or lead with this email already exists." });
+      }
+
+      const [lead] = await db
+        .insert(clients)
+        .values({
+          id: randomUUID(),
+          workspace,
+          name: name.trim(),
+          email: normalizedEmail,
+          phone: phone?.trim() ?? null,
+          notes: notes?.trim() ?? null,
+          status: "lead",
+        })
+        .returning();
+
+      return res.status(201).send({
+        id: lead.id,
+        name: lead.name,
+        email: lead.email,
+        phone: lead.phone,
+        notes: lead.notes,
+        status: lead.status,
+        createdAt: lead.createdAt?.toISOString(),
+      });
+    } catch (error) {
+      req.log.error(error, "Error creating lead");
+      return res.status(500).send({ error: "Internal server error" });
+    }
+  });
+
+  // POST /dfwsc/leads/:id/convert — promote a lead to a real client by creating their Stripe customer
+  app.post<{ Params: ConvertParams }>(
+    "/dfwsc/leads/:id/convert",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const [lead] = await db
+          .select()
+          .from(clients)
+          .where(and(eq(clients.id, id), eq(clients.workspace, "dfwsc_services")))
+          .limit(1);
+
+        if (!lead) return res.status(404).send({ error: "Lead not found." });
+        if (lead.status !== "lead") {
+          return res.status(400).send({ error: "This record is already a client." });
+        }
+
+        let stripeCustomerId: string | null = null;
+        try {
+          const stripeCustomer = await stripe.customers.create({
+            email: lead.email,
+            name: lead.name,
+            phone: lead.phone ?? undefined,
+            address: {
+              line1: lead.addressLine1 ?? undefined,
+              line2: lead.addressLine2 ?? undefined,
+              city: lead.city ?? undefined,
+              state: lead.state ?? undefined,
+              postal_code: lead.postalCode ?? undefined,
+              country: lead.country ?? undefined,
+            },
+            metadata: {
+              billingContactName: lead.billingContactName ?? "",
+              notes: lead.notes ?? "",
+            },
+          });
+          stripeCustomerId = stripeCustomer.id;
+
+          const [updated] = await db
+            .update(clients)
+            .set({ stripeCustomerId, status: "active", updatedAt: new Date() })
+            .where(eq(clients.id, id))
+            .returning();
+
+          const { apiKeyHash, apiKeyLookup, ...safe } = updated;
+          return res.status(200).send({
+            ...safe,
+            createdAt: updated.createdAt?.toISOString(),
+            updatedAt: updated.updatedAt?.toISOString(),
+            suspendedAt: null,
+            paymentStatusSyncedAt: null,
+          });
+        } catch (stripeOrDbError) {
+          if (stripeCustomerId) {
+            try {
+              await stripe.customers.del(stripeCustomerId);
+            } catch (rollbackError) {
+              req.log.error({ stripeCustomerId, rollbackError }, "Failed to rollback Stripe customer");
+            }
+          }
+          throw stripeOrDbError;
+        }
+      } catch (error) {
+        req.log.error(error, "Error converting lead to client");
         return res.status(500).send({ error: "Internal server error" });
       }
     }

@@ -40,7 +40,7 @@ export const clients = pgTable(
     apiKeyLookup: text("api_key_lookup").unique(),
     stripeAccountId: text("stripe_account_id"),
     stripeCustomerId: text("stripe_customer_id"),
-    status: text("status", { enum: ["active", "inactive"] })
+    status: text("status", { enum: ["active", "inactive", "lead"] })
       .default("active")
       .notNull(),
     groupId: text("group_id").references(() => clientGroups.id),
@@ -58,6 +58,12 @@ export const clients = pgTable(
     country: text("country"),
     notes: text("notes"),
     defaultPaymentTermsDays: integer("default_payment_terms_days"),
+    paymentStatus: text("payment_status", {
+      enum: ["active", "past_due", "canceled", "unpaid", "trialing", "none"],
+    }).default("none"),
+    paymentStatusSyncedAt: timestamp("payment_status_synced_at", { withTimezone: true }),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    suspensionReason: text("suspension_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },

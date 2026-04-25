@@ -60,11 +60,16 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           name: clients.name,
           email: clients.email,
           stripeAccountId: clients.stripeAccountId,
+          stripeCustomerId: clients.stripeCustomerId,
           status: clients.status,
           workspace: clients.workspace,
           groupId: clients.groupId,
           processingFeePercent: clients.processingFeePercent,
           processingFeeCents: clients.processingFeeCents,
+          paymentStatus: clients.paymentStatus,
+          paymentStatusSyncedAt: clients.paymentStatusSyncedAt,
+          suspendedAt: clients.suspendedAt,
+          suspensionReason: clients.suspensionReason,
           createdAt: clients.createdAt,
         })
         .from(clients);
@@ -92,6 +97,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         scopedList.map((client) => ({
           ...client,
           createdAt: client.createdAt?.toISOString(),
+          paymentStatusSyncedAt: client.paymentStatusSyncedAt?.toISOString() ?? null,
+          suspendedAt: client.suspendedAt?.toISOString() ?? null,
         }))
       );
     } catch (error) {
@@ -358,6 +365,93 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       return res.status(500).send({ error: "Internal server error" });
     }
   });
+  // POST /clients/sync-payment-status — manual trigger for the background sync job
+  // Must be registered BEFORE /clients/:id to avoid Fastify treating "sync-payment-status" as an :id param
+  app.post("/clients/sync-payment-status", { preHandler: requireAdminJwt }, async (req, res) => {
+    try {
+      const { runPaymentSync } = await import("../lib/payment-sync");
+      const synced = await runPaymentSync();
+      return res.status(200).send({ synced });
+    } catch (err) {
+      req.log.error(err, "Manual payment sync failed");
+      return res.status(500).send({ error: "Payment sync failed." });
+    }
+  });
+
+  // POST /clients/:id/suspend
+  app.post<{ Params: ClientParams; Body: { reason?: string } }>(
+    "/clients/:id/suspend",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const reason = req.body?.reason?.trim() || null;
+
+        const [client] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
+        if (!client) return res.status(404).send({ error: "Client not found." });
+        if (client.workspace !== "dfwsc_services") {
+          return res
+            .status(400)
+            .send({ error: "Suspend is only available for dfwsc_services clients." });
+        }
+
+        const [updated] = await db
+          .update(clients)
+          .set({ status: "inactive", suspendedAt: new Date(), suspensionReason: reason, updatedAt: new Date() })
+          .where(eq(clients.id, id))
+          .returning();
+
+        const { apiKeyHash, apiKeyLookup, ...safe } = updated;
+        return res.status(200).send({
+          ...safe,
+          createdAt: updated.createdAt?.toISOString(),
+          updatedAt: updated.updatedAt?.toISOString(),
+          suspendedAt: updated.suspendedAt?.toISOString() ?? null,
+          paymentStatusSyncedAt: updated.paymentStatusSyncedAt?.toISOString() ?? null,
+        });
+      } catch (error) {
+        req.log.error(error, "Error suspending client");
+        return res.status(500).send({ error: "Internal server error" });
+      }
+    }
+  );
+
+  // POST /clients/:id/reinstate
+  app.post<{ Params: ClientParams }>(
+    "/clients/:id/reinstate",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const [client] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
+        if (!client) return res.status(404).send({ error: "Client not found." });
+        if (client.workspace !== "dfwsc_services") {
+          return res
+            .status(400)
+            .send({ error: "Reinstate is only available for dfwsc_services clients." });
+        }
+
+        const [updated] = await db
+          .update(clients)
+          .set({ status: "active", suspendedAt: null, suspensionReason: null, updatedAt: new Date() })
+          .where(eq(clients.id, id))
+          .returning();
+
+        const { apiKeyHash, apiKeyLookup, ...safe } = updated;
+        return res.status(200).send({
+          ...safe,
+          createdAt: updated.createdAt?.toISOString(),
+          updatedAt: updated.updatedAt?.toISOString(),
+          suspendedAt: null,
+          paymentStatusSyncedAt: updated.paymentStatusSyncedAt?.toISOString() ?? null,
+        });
+      } catch (error) {
+        req.log.error(error, "Error reinstating client");
+        return res.status(500).send({ error: "Internal server error" });
+      }
+    }
+  );
 };
 
 export default clientRoutes;

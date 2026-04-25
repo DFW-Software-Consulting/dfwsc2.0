@@ -14,6 +14,10 @@ const COLOR_MAP = {
   failed: "bg-red-800 text-red-200",
   completed: "bg-blue-800 text-blue-200",
   onboarded: "bg-blue-800 text-blue-200",
+  past_due: "bg-orange-800 text-orange-200",
+  unpaid: "bg-orange-800 text-orange-200",
+  trialing: "bg-blue-800 text-blue-200",
+  lead: "bg-purple-800 text-purple-200",
 };
 
 export default function StatusBadge({ status }) {
