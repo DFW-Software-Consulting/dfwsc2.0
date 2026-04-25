@@ -16,24 +16,28 @@ const values = [
 
 export default function Values() {
   return (
-    <section id="values" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-      <div className="mx-auto max-w-3xl text-center">
-        <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-100/80">
+    <section id="values" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
+      <div className="mx-auto max-w-3xl text-center mb-16">
+        <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-300">
           Team values
         </span>
-        <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+        <h2 className="text-3xl font-bold tracking-tight sm:text-5xl text-gradient">
           Principles that keep partnerships smooth
         </h2>
       </div>
 
-      <div className="mt-12 grid gap-6 md:grid-cols-3">
+      <div className="grid gap-8 md:grid-cols-3">
         {values.map((value) => (
           <article
             key={value.title}
-            className="rounded-3xl border border-white/10 bg-slate-900/50 p-8 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:scale-105 hover:border-brand-500/40 hover:shadow-sky-400/20 hover:bg-brand-500"
+            className="group relative rounded-2xl border border-white/5 bg-white/[0.02] p-10 text-left transition-all duration-300 hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow"
           >
-            <h3 className="text-xl font-semibold text-white">{value.title}</h3>
-            <p className="mt-4 text-sm text-slate-300">{value.description}</p>
+            <h3 className="text-2xl font-bold text-white group-hover:text-brand-200 transition-colors">
+              {value.title}
+            </h3>
+            <p className="mt-6 text-base text-slate-400 leading-relaxed">
+              {value.description}
+            </p>
           </article>
         ))}
       </div>

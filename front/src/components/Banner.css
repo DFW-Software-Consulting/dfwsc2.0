@@ -1,32 +1,33 @@
 .banner {
-  background: linear-gradient(90deg, #0b7285, #2ca1b4);
-  color: white;
+  background: rgba(11, 114, 133, 0.05);
+  color: #c9e9ef;
   text-align: center;
-  padding: 1rem 2rem;
+  padding: 1rem 0;
   overflow: hidden;
   position: relative;
-  min-height: 64px;
-  border-radius: 999px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: min(100%, 72rem);
-  margin-inline: auto;
-  box-shadow: 0 18px 40px -24px rgba(11, 114, 133, 0.65);
+  width: 100%;
+  border-block: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-blur: 8px;
 }
 
 .banner-track {
   display: flex;
   width: max-content;
-  animation: slide 30s linear infinite;
+  animation: slide 40s linear infinite;
 }
 
 .banner-text {
   white-space: nowrap;
-  font-weight: 800;
-  font-size: 1.2rem;
-  letter-spacing: 0.2em;
-  padding-right: 4rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  padding-right: 6rem;
+  opacity: 0.8;
 }
 
 @keyframes slide {

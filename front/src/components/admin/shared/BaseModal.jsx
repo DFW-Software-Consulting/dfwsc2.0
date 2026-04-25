@@ -33,28 +33,30 @@ export default function BaseModal({ isOpen, onClose, title, titleId, size = "md"
     <div
       ref={backdropRef}
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-sm p-4 sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
     >
-      <div
-        className={`bg-gray-800 rounded-xl shadow-xl border border-gray-700 p-6 w-full mx-4 max-h-[90vh] overflow-y-auto ${SIZE_CLASSES[size] ?? SIZE_CLASSES.md}`}
-      >
-        <div className="flex justify-between items-center mb-4">
-          <h3 id={titleId} className="text-lg font-semibold text-white">
-            {title}
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl leading-none"
-            aria-label="Close"
-          >
-            &times;
-          </button>
+      <div className="min-h-full flex items-start sm:items-center justify-center">
+        <div
+          className={`bg-gray-800 rounded-xl shadow-xl border border-gray-700 p-6 w-full max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] overflow-y-auto ${SIZE_CLASSES[size] ?? SIZE_CLASSES.md}`}
+        >
+          <div className="flex justify-between items-center mb-4">
+            <h3 id={titleId} className="text-lg font-semibold text-white">
+              {title}
+            </h3>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-gray-400 hover:text-white text-2xl leading-none"
+              aria-label="Close"
+            >
+              &times;
+            </button>
+          </div>
+          {children}
         </div>
-        {children}
       </div>
     </div>
   );

@@ -8,6 +8,16 @@
   --color-brand-300: #63bdcc;
   --color-brand-400: #2ca1b4;
   --color-brand-500: #0b7285;
+  --color-brand-600: #095d6d;
+  --color-brand-700: #074955;
+
+  --animate-pulse-slow: pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-float: float 3s ease-in-out infinite;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
 }
 
 @layer base {
@@ -16,6 +26,32 @@
   }
 
   body {
-    @apply bg-slate-950 text-slate-100 antialiased font-sans;
+    @apply bg-[#020617] text-slate-100 antialiased font-sans selection:bg-brand-500/30 selection:text-white;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply border border-white/10 bg-white/[0.03] backdrop-blur-md;
+  }
+  
+  .glass-dark {
+    @apply border border-white/5 bg-black/20 backdrop-blur-xl;
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-br from-white via-white to-white/60 bg-clip-text text-transparent;
+  }
+
+  .text-gradient-brand {
+    @apply bg-gradient-to-r from-brand-300 via-brand-400 to-brand-600 bg-clip-text text-transparent;
+  }
+
+  .shadow-glow {
+    @apply shadow-[0_0_20px_-5px_rgba(11,114,133,0.3)];
+  }
+
+  .shadow-glow-strong {
+    @apply shadow-[0_0_40px_-10px_rgba(11,114,133,0.5)];
   }
 }

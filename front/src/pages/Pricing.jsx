@@ -43,78 +43,89 @@ const plans = [
 
 export default function Pricing() {
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-16 px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
+    <div className="mx-auto w-full max-w-6xl space-y-24 px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
       <section className="mx-auto max-w-4xl text-center">
-        <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-100/80">
+        <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-300">
           Hosting & Maintenance
         </span>
-        <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
+        <h1 className="text-4xl font-extrabold tracking-tight sm:text-6xl text-gradient">
           Predictable pricing for platforms you can depend on
         </h1>
-        <p className="mt-6 text-lg text-slate-300">
+        <p className="mt-8 text-xl text-slate-400 leading-relaxed">
           Every plan includes SSL, global CDN delivery, and DFWSC-managed updates so you can focus
           on customers.
-        </p>
-        <p className="mt-4 text-sm text-slate-400">
-          Backend features, integrations, and new development are scoped separately and billed
-          hourly ($100–$150/hr).
         </p>
       </section>
 
       <Banner
-        className="mt-10"
+        className="mt-12 glass rounded-2xl p-4 text-center border-brand-500/20"
         message="🌐 From cloud migrations to compliance-ready hosting, our bench of engineers has your infrastructure on lock."
       />
 
-      <section className="overflow-hidden rounded-3xl border border-white/10 bg-slate-900/50 shadow-xl shadow-cyan-500/10">
-        <div className="grid divide-y divide-white/5 text-left sm:grid-cols-2 sm:divide-x sm:divide-y-0">
-          {plans.map((plan) => (
-            <article key={plan.name} className="p-8">
-              <h2 className="text-xl font-semibold text-white">{plan.name}</h2>
+      <section className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+        {plans.map((plan) => (
+          <article 
+            key={plan.name} 
+            className="group relative flex flex-col rounded-[2rem] border border-white/5 bg-white/[0.02] p-8 transition-all duration-500 hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow"
+          >
+            <div className="mb-6">
+              <h2 className="text-xl font-bold text-white group-hover:text-brand-200 transition-colors">{plan.name}</h2>
               <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="text-3xl font-bold text-brand-300">{plan.price}</span>
-                {plan.alt ? <span className="text-sm text-slate-400">{plan.alt}</span> : null}
+                <span className="text-4xl font-black text-white">{plan.price.split(' ')[0]}</span>
+                <span className="text-sm font-medium text-slate-500">/ {plan.price.split(' ')[2]}</span>
               </div>
-              <p className="mt-6 text-sm text-slate-300">{plan.includes}</p>
-              <p className="mt-3 text-xs uppercase tracking-wide text-slate-400">
-                Ideal for: {plan.idealFor}
-              </p>
-            </article>
-          ))}
-        </div>
-        <div className="border-t border-white/5 bg-slate-900/60 p-6 text-sm text-slate-300 sm:text-base">
-          All hosting plans include DFWSC-managed uptime, SSL, monitoring, and incident response,
-          but labor for devops work is billed separately.
-        </div>
+              {plan.alt ? (
+                <span className="mt-1 block text-xs font-medium text-brand-400/80 uppercase tracking-wider">
+                  {plan.alt}
+                </span>
+              ) : (
+                <div className="h-4" />
+              )}
+            </div>
+            
+            <div className="mt-auto pt-8 border-t border-white/5">
+              <p className="text-sm text-slate-400 leading-relaxed min-h-[3rem]">{plan.includes}</p>
+              <div className="mt-6 flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Ideal for:</span>
+                <span className="text-[11px] font-semibold text-brand-300/90">{plan.idealFor}</span>
+              </div>
+            </div>
+          </article>
+        ))}
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-lg shadow-black/20 backdrop-blur">
-          <h2 className="text-2xl font-semibold text-white">Project Kickoffs</h2>
-          <p className="mt-3 text-sm text-slate-300">
+      <div className="rounded-[2rem] border border-white/5 bg-white/[0.01] p-6 text-center text-sm text-slate-500 backdrop-blur-sm">
+        All hosting plans include DFWSC-managed uptime, SSL, monitoring, and incident response. 
+        Labor for devops and custom feature development is billed separately at $100–$150/hr.
+      </div>
+
+      <section className="grid gap-8 lg:grid-cols-2">
+        <div className="rounded-[2rem] border border-white/5 bg-white/[0.02] p-10 transition-all duration-300 hover:bg-white/[0.04]">
+          <h2 className="text-3xl font-bold text-white">Project Kickoffs</h2>
+          <p className="mt-6 text-lg text-slate-400 leading-relaxed">
             Need a new build or major feature? We start with a short discovery workshop to define
-            scope, handoff plan, and success metrics. You&apos;ll get a written proposal with
-            milestone pricing before any code is written.
+            scope, handoff plan, and success metrics.
           </p>
-          <ul className="mt-6 space-y-3 text-sm text-slate-200">
-            <li className="flex items-start gap-3">
-              <span className="mt-1 h-2.5 w-2.5 flex-none rounded-full bg-brand-400" />
-              <span>2–6 week MVP timelines with weekly previews and async updates.</span>
-            </li>
-            <li className="flex items-start gap-3">
-              <span className="mt-1 h-2.5 w-2.5 flex-none rounded-full bg-brand-400" />
-              <span>Clear documentation so you can run in-house or keep us on retainer.</span>
-            </li>
-            <li className="flex items-start gap-3">
-              <span className="mt-1 h-2.5 w-2.5 flex-none rounded-full bg-brand-400" />
-              <span>Integrations with Stripe, CRMs, and analytics platforms baked in.</span>
-            </li>
+          <ul className="mt-10 space-y-5">
+            {[
+              "2–6 week MVP timelines with weekly previews and async updates.",
+              "Clear documentation so you can run in-house or keep us on retainer.",
+              "Integrations with Stripe, CRMs, and analytics platforms baked in."
+            ].map((item, i) => (
+              <li key={i} className="flex items-start gap-4">
+                <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-500/10 border border-brand-500/20">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brand-400" />
+                </div>
+                <span className="text-base text-slate-300">{item}</span>
+              </li>
+            ))}
           </ul>
         </div>
-        <div className="flex flex-col justify-between rounded-3xl border border-white/10 bg-slate-900/50 p-8 shadow-lg shadow-black/20 backdrop-blur">
+        
+        <div className="flex flex-col justify-between rounded-[2rem] border border-white/5 bg-gradient-to-br from-brand-600/10 to-transparent p-10 transition-all duration-300 hover:bg-white/[0.04]">
           <div>
-            <h2 className="text-2xl font-semibold text-white">Let&apos;s pick the right plan</h2>
-            <p className="mt-3 text-sm text-slate-300">
+            <h2 className="text-3xl font-bold text-white">Let&apos;s pick the right plan</h2>
+            <p className="mt-6 text-lg text-slate-400 leading-relaxed">
               Tell us about the app, traffic expectations, and compliance needs. We&apos;ll
               recommend an environment and share a migration path if you&apos;re moving from an
               existing host.
@@ -123,7 +134,7 @@ export default function Pricing() {
           <Link
             to="/"
             state={{ scrollTo: "contact" }}
-            className="mt-8 inline-flex w-fit items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_20px_40px_-18px_rgba(11,114,133,0.6)] transition duration-200 hover:-translate-y-0.5 hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+            className="mt-12 inline-flex w-full sm:w-fit items-center justify-center gap-2 rounded-full bg-brand-500 px-10 py-4 text-base font-bold text-white shadow-glow transition-all duration-300 hover:shadow-glow-strong hover:-translate-y-1 active:translate-y-0"
           >
             Start the conversation
           </Link>

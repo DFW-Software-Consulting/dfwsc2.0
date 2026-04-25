@@ -16,14 +16,14 @@ export default function Navbar() {
 
   // Unified clickable pill style
   const desktopItemClasses =
-    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition duration-200 hover:border-white/20 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 cursor-pointer";
+    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-white/5 px-4 py-2 text-sm font-medium text-slate-400 transition-all duration-300 hover:border-white/20 hover:text-white hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 cursor-pointer";
   const desktopGlow =
-    "pointer-events-none absolute inset-0 rounded-full bg-white/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-white/10";
+    "pointer-events-none absolute inset-0 rounded-full bg-gradient-to-r from-brand-500/0 via-brand-500/5 to-brand-500/0 opacity-0 transition-opacity duration-500 group-hover:opacity-100";
 
   const mobileItemClasses =
-    "group relative overflow-hidden rounded-full border border-white/10 px-4 py-2 text-left text-slate-200 transition duration-200 hover:border-white/20 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 cursor-pointer";
+    "group relative overflow-hidden rounded-xl border border-white/5 px-4 py-3 text-left text-slate-300 transition-all duration-200 hover:border-white/20 hover:text-white hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 cursor-pointer";
   const mobileGlow =
-    "pointer-events-none absolute inset-0 rounded-full bg-white/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-white/10";
+    "pointer-events-none absolute inset-0 rounded-xl bg-white/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-white/5";
 
   useEffect(() => {
     setMenuOpen(false);
@@ -45,22 +45,22 @@ export default function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
+    <header className="sticky top-0 z-50 border-b border-white/[0.08] bg-[#020617]/80 backdrop-blur-xl">
       <div className="relative mx-auto flex h-20 w-full max-w-6xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
         <Link
           to="/"
           onClick={handleLogoClick}
-          className="group relative inline-flex items-center gap-3 cursor-pointer bg-sky-200 p-1 rounded-md hover:scale-105 transition-transform duration-200"
+          className="group relative inline-flex items-center gap-3 cursor-pointer transition-all duration-300 hover:brightness-110"
         >
-          <span className="absolute -left-4 hidden h-12 w-12 rounded-2xl bg-brand-500/20 blur-xl transition group-hover:opacity-90 sm:block" />
+          <div className="absolute -inset-2 rounded-xl bg-brand-500/10 blur-xl transition-opacity opacity-0 group-hover:opacity-100" />
           <img
             src="/DFWSC-Logo-HorizWordmarkPNG.png"
             alt="DFW Software Consulting"
-            className="h-9 w-auto"
+            className="h-8 w-auto relative z-10 brightness-110 grayscale-[0.2] hover:grayscale-0 transition-all duration-300"
           />
         </Link>
 
-        <nav className="hidden items-center gap-6 text-sm font-medium sm:flex">
+        <nav className="hidden items-center gap-4 text-sm font-medium sm:flex">
           {navItems.map((item) => {
             if (item.type === "scroll") {
               return (
@@ -95,7 +95,7 @@ export default function Navbar() {
         <Link
           to="/"
           state={{ scrollTo: "contact" }}
-          className="hidden cursor-pointer items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_20px_40px_-18px_rgba(11,114,133,0.6)] transition duration-200 hover:-translate-y-0.5 hover:bg-brand-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 sm:inline-flex"
+          className="hidden cursor-pointer items-center justify-center gap-2 rounded-full bg-gradient-to-b from-brand-400 to-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition-all duration-300 hover:shadow-glow-strong hover:-translate-y-0.5 active:translate-y-0 active:scale-95 sm:inline-flex"
           title="Start a project"
         >
           Start a project
