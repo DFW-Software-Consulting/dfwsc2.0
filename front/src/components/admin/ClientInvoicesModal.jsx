@@ -1,4 +1,6 @@
-import { useInvoices } from "../../hooks/useInvoices";
+import { useState } from "react";
+import { useInvoices, useMarkInvoicePaidOutOfBand } from "../../hooks/useInvoices";
+import MarkInvoicePaidModal from "./MarkInvoicePaidModal";
 import AdminTable from "./shared/AdminTable";
 import BaseModal from "./shared/BaseModal";
 import Button from "./shared/Button";
@@ -17,7 +19,7 @@ function formatDate(iso) {
   });
 }
 
-export default function ClientInvoicesModal({ client, workspace, onClose }) {
+export default function ClientInvoicesModal({ client, workspace, onClose, showToast }) {
   const {
     data: invoices = [],
     isLoading,
@@ -26,12 +28,29 @@ export default function ClientInvoicesModal({ client, workspace, onClose }) {
     refetch,
   } = useInvoices({ workspace, clientId: client.id });
 
+  const markPaidMutation = useMarkInvoicePaidOutOfBand();
+  const [oobInvoice, setOobInvoice] = useState(null);
+
   const totalPaid = invoices
     .filter((inv) => inv.status === "paid")
     .reduce((sum, inv) => sum + inv.amountCents, 0);
   const totalOpen = invoices
     .filter((inv) => inv.status === "open")
     .reduce((sum, inv) => sum + inv.amountCents, 0);
+
+  const handleMarkPaid = (body) => {
+    if (!oobInvoice) return;
+    markPaidMutation.mutate(
+      { id: oobInvoice.id, ...body },
+      {
+        onSuccess: () => {
+          showToast?.("Invoice marked paid.", "success");
+          setOobInvoice(null);
+        },
+        onError: (err) => showToast?.(err.message, "error"),
+      }
+    );
+  };
 
   const columns = [
     {
@@ -45,20 +64,40 @@ export default function ClientInvoicesModal({ client, workspace, onClose }) {
     { header: "Amount", render: (inv) => formatCurrency(inv.amountCents) },
     { header: "Due", render: (inv) => formatDate(inv.dueDate) },
     { header: "Paid", render: (inv) => formatDate(inv.paidAt) },
+    {
+      header: "Method",
+      render: (inv) => (
+        <span className="text-xs text-gray-300">
+          {inv.paymentMethod ?? <span className="text-gray-500">—</span>}
+        </span>
+      ),
+    },
     { header: "Status", render: (inv) => <StatusBadge status={inv.status} /> },
     {
       header: "",
-      render: (inv) =>
-        inv.hostedUrl ? (
-          <a
-            href={inv.hostedUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-2 py-1 rounded text-xs bg-gray-600 hover:bg-gray-500 text-white transition-colors"
-          >
-            Open
-          </a>
-        ) : null,
+      render: (inv) => (
+        <div className="flex gap-2">
+          {inv.hostedUrl && (
+            <a
+              href={inv.hostedUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2 py-1 rounded text-xs bg-gray-600 hover:bg-gray-500 text-white transition-colors"
+            >
+              Open
+            </a>
+          )}
+          {inv.status === "open" && (
+            <button
+              type="button"
+              onClick={() => setOobInvoice(inv)}
+              className="px-2 py-1 rounded text-xs bg-green-700 hover:bg-green-600 text-white transition-colors"
+            >
+              Mark Paid
+            </button>
+          )}
+        </div>
+      ),
     },
   ];
 
@@ -96,6 +135,14 @@ export default function ClientInvoicesModal({ client, workspace, onClose }) {
         onRetry={refetch}
         emptyMessage="No invoices yet for this client."
         loadingMessage="Loading invoices..."
+      />
+
+      <MarkInvoicePaidModal
+        isOpen={!!oobInvoice}
+        invoice={oobInvoice}
+        onClose={() => setOobInvoice(null)}
+        onConfirm={handleMarkPaid}
+        isLoading={markPaidMutation.isPending}
       />
     </BaseModal>
   );

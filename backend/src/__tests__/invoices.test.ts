@@ -50,6 +50,8 @@ const stripeMock = {
     list: vi.fn().mockResolvedValue({ data: [] }),
     voidInvoice: vi.fn().mockResolvedValue(makeStripeInvoice({ status: "void" })),
     del: vi.fn().mockResolvedValue({ id: "in_test_001", deleted: true }),
+    update: vi.fn().mockResolvedValue(makeStripeInvoice()),
+    pay: vi.fn().mockResolvedValue(makeStripeInvoice({ status: "paid" })),
   },
   taxRates: {
     retrieve: vi.fn().mockResolvedValue({ id: "txr_default" }),
@@ -467,5 +469,127 @@ describe("PATCH /invoices/:id", () => {
     });
 
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("POST /invoices/:id/mark-paid-out-of-band", () => {
+  let app: Awaited<ReturnType<typeof import("../app").buildServer>>;
+
+  beforeEach(async () => {
+    dataStore.clients.clear();
+    sentEmails.length = 0;
+    vi.clearAllMocks();
+    seedClient(dataStore, {
+      id: "client-001",
+      name: "Test Corp",
+      email: "billing@testcorp.test",
+      workspace: "dfwsc_services",
+      apiKeyHash: null,
+      stripeCustomerId: "cus_test_001",
+    });
+    setTestEnv();
+    const { buildServer } = await import("../app");
+    app = await buildServer();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    vi.resetModules();
+  });
+
+  it("returns 401 without admin JWT", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices/in_test/mark-paid-out-of-band",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "check" }),
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns 400 for an invalid method", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices/in_open_001/mark-paid-out-of-band",
+      headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "bitcoin" }),
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 404 when Stripe throws not-found", async () => {
+    stripeMock.invoices.retrieve.mockRejectedValueOnce(new Error("No such invoice"));
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices/in_ghost/mark-paid-out-of-band",
+      headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "check" }),
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("returns 422 when invoice is not open", async () => {
+    stripeMock.invoices.retrieve.mockResolvedValueOnce(makeStripeInvoice({ status: "paid" }));
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices/in_paid_001/mark-paid-out-of-band",
+      headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "check" }),
+    });
+    expect(res.statusCode).toBe(422);
+  });
+
+  it("marks an open invoice paid out of band, attaches metadata, and calls Stripe pay", async () => {
+    stripeMock.invoices.retrieve.mockResolvedValueOnce(
+      makeStripeInvoice({ status: "open", metadata: { clientId: "client-001" } })
+    );
+    stripeMock.invoices.update.mockResolvedValueOnce(
+      makeStripeInvoice({
+        status: "open",
+        metadata: {
+          clientId: "client-001",
+          paidOutOfBand: "true",
+          paymentMethod: "check",
+          paymentReference: "1234",
+          paidAtOverride: "",
+        },
+      })
+    );
+    stripeMock.invoices.pay.mockResolvedValueOnce(
+      makeStripeInvoice({
+        status: "paid",
+        metadata: {
+          clientId: "client-001",
+          paidOutOfBand: "true",
+          paymentMethod: "check",
+          paymentReference: "1234",
+        },
+      })
+    );
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/invoices/in_open_001/mark-paid-out-of-band",
+      headers: { Authorization: `Bearer ${makeAdminToken()}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ method: "check", reference: "1234" }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(stripeMock.invoices.update).toHaveBeenCalledWith(
+      "in_open_001",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          paidOutOfBand: "true",
+          paymentMethod: "check",
+          paymentReference: "1234",
+        }),
+      })
+    );
+    expect(stripeMock.invoices.pay).toHaveBeenCalledWith("in_open_001", { paid_out_of_band: true });
+
+    const body = JSON.parse(res.body);
+    expect(body.status).toBe("paid");
+    expect(body.paymentMethod).toBe("check");
+    expect(body.paymentReference).toBe("1234");
   });
 });

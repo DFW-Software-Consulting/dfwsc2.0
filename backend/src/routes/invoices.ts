@@ -56,6 +56,12 @@ function formatStripeInvoice(
       ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
       : null,
     createdAt: new Date(inv.created * 1000).toISOString(),
+    paymentMethod: inv.metadata?.paidOutOfBand === "true"
+      ? (inv.metadata?.paymentMethod ?? null)
+      : inv.status === "paid"
+        ? "stripe"
+        : null,
+    paymentReference: inv.metadata?.paymentReference || null,
   };
 }
 
@@ -177,6 +183,8 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
         status: finalized.status ?? "open",
         dueDate: dueDate ?? null,
         paidAt: null,
+        method: "stripe",
+        reference: null,
       }).catch((err) => req.log.warn({ err }, "Nextcloud ledger append failed"));
 
       return res.status(201).send(formatted);
@@ -257,7 +265,7 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
 
       if (invoice.status === "open") {
         const voided = await stripe.invoices.voidInvoice(id);
-        updateLedgerRow(id, "void").catch((err) =>
+        updateLedgerRow(id, "void", {}).catch((err) =>
           req.log.warn({ err }, "Nextcloud ledger update failed")
         );
         return res.status(200).send(formatStripeInvoice(voided));
@@ -273,6 +281,72 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
       });
     }
   );
+  // POST /invoices/:id/mark-paid-out-of-band — record a payment received outside Stripe
+  // (PayPal / cash / check). Uses Stripe's paid_out_of_band flow so the invoice flips to
+  // paid in Stripe, the dashboard stays accurate, and the existing invoice.paid webhook
+  // updates the Nextcloud ledger.
+  app.post<{
+    Params: InvoiceParams;
+    Body: { method: string; reference?: string; paidAt?: string };
+  }>(
+    "/invoices/:id/mark-paid-out-of-band",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      const { id } = req.params;
+      const { method, reference, paidAt } = req.body ?? {};
+
+      const validMethods = ["paypal", "cash", "check", "other"];
+      if (!method || !validMethods.includes(method)) {
+        return res.status(400).send({
+          error: `method must be one of: ${validMethods.join(", ")}.`,
+        });
+      }
+
+      let invoice: Stripe.Invoice;
+      try {
+        invoice = await stripe.invoices.retrieve(id);
+      } catch {
+        return res.status(404).send({ error: "Invoice not found." });
+      }
+
+      if (invoice.status !== "open") {
+        return res.status(422).send({
+          error: `Invoice cannot be marked paid (status: ${invoice.status}).`,
+        });
+      }
+
+      let paidAtIso: string | null = null;
+      if (paidAt) {
+        const d = new Date(paidAt);
+        if (Number.isNaN(d.getTime())) {
+          return res.status(400).send({ error: "paidAt must be a valid ISO date." });
+        }
+        paidAtIso = d.toISOString();
+      }
+
+      await stripe.invoices.update(id, {
+        metadata: {
+          ...(invoice.metadata ?? {}),
+          paidOutOfBand: "true",
+          paymentMethod: method,
+          paymentReference: reference ?? "",
+          paidAtOverride: paidAtIso ?? "",
+        },
+      });
+
+      const paid = await stripe.invoices.pay(id, { paid_out_of_band: true });
+
+      // Webhook handles the ledger update via the metadata we just set.
+      const cidMeta = paid.metadata?.clientId ?? null;
+      let clientName: string | null = null;
+      if (cidMeta) {
+        const [c] = await db.select().from(clients).where(eq(clients.id, cidMeta)).limit(1);
+        clientName = c?.name ?? null;
+      }
+      return res.status(200).send(formatStripeInvoice(paid, cidMeta, clientName));
+    }
+  );
+
   // POST /invoices/backfill-ledger — one-time seed of Nextcloud ledger from all existing Stripe invoices
   app.post("/invoices/backfill-ledger", { preHandler: requireAdminJwt }, async (req, res) => {
     try {
@@ -310,6 +384,12 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
         const baseAmount = inv.metadata?.baseAmount ? parseInt(inv.metadata.baseAmount, 10) : inv.amount_due;
         const feeAmount = inv.metadata?.feeAmount ? parseInt(inv.metadata.feeAmount, 10) : 0;
 
+        const paidOutOfBand = inv.metadata?.paidOutOfBand === "true";
+        const paidAtOverride = inv.metadata?.paidAtOverride || null;
+        const stripePaidAt = inv.status_transitions?.paid_at
+          ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
+          : null;
+
         rows.push({
           date: new Date(inv.created * 1000).toISOString().split("T")[0],
           client: client.name,
@@ -320,9 +400,9 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
           totalCents: inv.amount_due,
           status: inv.status ?? "unknown",
           dueDate: inv.due_date ? new Date(inv.due_date * 1000).toISOString() : null,
-          paidAt: inv.status_transitions?.paid_at
-            ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
-            : null,
+          paidAt: paidOutOfBand && paidAtOverride ? paidAtOverride : stripePaidAt,
+          method: paidOutOfBand ? (inv.metadata?.paymentMethod ?? "stripe") : "stripe",
+          reference: paidOutOfBand ? (inv.metadata?.paymentReference || null) : null,
         });
       }
 

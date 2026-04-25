@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useClients } from "../../hooks/useClients";
-import { useCancelInvoice, useCreateInvoice, useInvoices } from "../../hooks/useInvoices";
+import {
+  useCancelInvoice,
+  useCreateInvoice,
+  useInvoices,
+  useMarkInvoicePaidOutOfBand,
+} from "../../hooks/useInvoices";
 import { useCreatePayment } from "../../hooks/usePayments";
 import { useCreateProduct, useProducts } from "../../hooks/useProducts";
 import {
@@ -9,6 +14,7 @@ import {
   useSubscriptions,
 } from "../../hooks/useSubscriptions";
 import { useTaxRates } from "../../hooks/useTaxRates";
+import MarkInvoicePaidModal from "./MarkInvoicePaidModal";
 import ErrorMessage from "./shared/ErrorMessage";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import StatusBadge from "./shared/StatusBadge";
@@ -26,7 +32,10 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
   const { data: taxRates = [] } = useTaxRates();
   const createInvoiceMutation = useCreateInvoice();
   const cancelInvoiceMutation = useCancelInvoice();
+  const markPaidOutOfBandMutation = useMarkInvoicePaidOutOfBand();
   const createProductMutation = useCreateProduct();
+
+  const [oobInvoice, setOobInvoice] = useState(null);
 
   const [clientId, setClientId] = useState("");
 
@@ -173,6 +182,23 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
   const handleOpenLink = useCallback((url) => {
     window.open(url, "_blank");
   }, []);
+
+  const handleMarkPaidConfirm = useCallback(
+    (body) => {
+      if (!oobInvoice) return;
+      markPaidOutOfBandMutation.mutate(
+        { id: oobInvoice.id, ...body },
+        {
+          onSuccess: () => {
+            showToast?.("Invoice marked paid.", "success");
+            setOobInvoice(null);
+          },
+          onError: (err) => showToast?.(err.message, "error"),
+        }
+      );
+    },
+    [markPaidOutOfBandMutation, oobInvoice, showToast]
+  );
 
   return (
     <div>
@@ -501,13 +527,22 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
                         </button>
                       )}
                       {inv.status === "open" && (
-                        <button
-                          type="button"
-                          onClick={() => handleCancel(inv.id)}
-                          className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white transition-colors"
-                        >
-                          Cancel
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setOobInvoice(inv)}
+                            className="px-2 py-1 rounded text-xs bg-green-700 hover:bg-green-600 text-white transition-colors"
+                          >
+                            Mark Paid
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCancel(inv.id)}
+                            className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -517,6 +552,14 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
           </table>
         </div>
       )}
+
+      <MarkInvoicePaidModal
+        isOpen={!!oobInvoice}
+        invoice={oobInvoice}
+        onClose={() => setOobInvoice(null)}
+        onConfirm={handleMarkPaidConfirm}
+        isLoading={markPaidOutOfBandMutation.isPending}
+      />
     </div>
   );
 }

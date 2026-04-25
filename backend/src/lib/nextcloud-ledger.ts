@@ -1,6 +1,7 @@
 const LEDGER_PATH = "/remote.php/webdav/clients/dfwsc-ledger.csv";
 
-const CSV_HEADERS = "Date,Client,Invoice ID,Description,Amount (USD),Fee (USD),Total (USD),Status,Due Date,Paid At";
+const CSV_HEADERS =
+  "Date,Client,Invoice ID,Description,Amount (USD),Fee (USD),Total (USD),Status,Due Date,Paid At,Method,Reference";
 
 export interface LedgerRow {
   date: string;
@@ -13,6 +14,14 @@ export interface LedgerRow {
   status: string;
   dueDate: string | null;
   paidAt: string | null;
+  method: string;
+  reference: string | null;
+}
+
+export interface UpdateLedgerOptions {
+  paidAt?: string | null;
+  method?: string | null;
+  reference?: string | null;
 }
 
 function getConfig() {
@@ -50,6 +59,8 @@ function rowToCsv(row: LedgerRow): string {
     escapeCell(row.status),
     row.dueDate ? escapeCell(row.dueDate.split("T")[0]) : "",
     row.paidAt ? escapeCell(row.paidAt.split("T")[0]) : "",
+    escapeCell(row.method || "stripe"),
+    row.reference ? escapeCell(row.reference) : "",
   ].join(",");
 }
 
@@ -87,9 +98,15 @@ export async function appendLedgerRow(row: LedgerRow): Promise<void> {
   }
 }
 
-export async function updateLedgerRow(invoiceId: string, status: string, paidAt?: string | null): Promise<void> {
+export async function updateLedgerRow(
+  invoiceId: string,
+  status: string,
+  options: UpdateLedgerOptions = {}
+): Promise<void> {
   const cfg = getConfig();
   if (!cfg) return;
+
+  const { paidAt, method, reference } = options;
 
   try {
     const current = await readLedger(cfg.url, cfg.user, cfg.pass);
@@ -103,6 +120,8 @@ export async function updateLedgerRow(invoiceId: string, status: string, paidAt?
       if (cols[2]?.replace(/"/g, "") === invoiceId) {
         cols[7] = escapeCell(status);
         if (paidAt) cols[9] = escapeCell(paidAt.split("T")[0]);
+        if (method) cols[10] = escapeCell(method);
+        if (reference !== undefined && reference !== null) cols[11] = escapeCell(reference);
         updated = true;
         return cols.join(",");
       }

@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { cancelInvoice, createInvoice, getInvoices } from "../api/invoices";
+import {
+  cancelInvoice,
+  createInvoice,
+  getInvoices,
+  markInvoicePaidOutOfBand,
+} from "../api/invoices";
 import { useAuth } from "../contexts/AuthContext";
 
 export function useInvoices(params = {}) {
@@ -26,6 +31,15 @@ export function useCancelInvoice() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id) => cancelInvoice(token, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["invoices"] }),
+  });
+}
+
+export function useMarkInvoicePaidOutOfBand() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }) => markInvoicePaidOutOfBand(token, id, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["invoices"] }),
   });
 }

@@ -9,3 +9,6 @@ export const createInvoice = (token, body) =>
   apiFetch("/invoices", { token, method: "POST", body });
 
 export const cancelInvoice = (token, id) => apiFetch(`/invoices/${id}`, { token, method: "PATCH" });
+
+export const markInvoicePaidOutOfBand = (token, id, body) =>
+  apiFetch(`/invoices/${id}/mark-paid-out-of-band`, { token, method: "POST", body });

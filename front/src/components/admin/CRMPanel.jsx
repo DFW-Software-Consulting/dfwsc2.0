@@ -375,6 +375,7 @@ export default function CRMPanel({ showToast }) {
           client={invoicesClient}
           workspace="dfwsc_services"
           onClose={() => setInvoicesClient(null)}
+          showToast={showToast}
         />
       )}
 
