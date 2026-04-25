@@ -16,7 +16,6 @@ import {
   validateWorkspace,
   type Workspace,
 } from "../lib/validation";
-import { appendLedgerRow, backfillLedger, updateLedgerRow, type LedgerRow } from "../lib/nextcloud-ledger";
 
 interface CreateInvoiceBody {
   clientId: string;
@@ -171,22 +170,6 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
 
       const formatted = formatStripeInvoice(finalized, clientId, client.name);
 
-      // Fire-and-forget — ledger write should never block the response
-      appendLedgerRow({
-        date: new Date().toISOString().split("T")[0],
-        client: client.name,
-        invoiceId: finalized.id,
-        description: description.trim(),
-        amountCents,
-        feeCents: waiveFee ? 0 : feeAmount,
-        totalCents: finalized.amount_due,
-        status: finalized.status ?? "open",
-        dueDate: dueDate ?? null,
-        paidAt: null,
-        method: "stripe",
-        reference: null,
-      }).catch((err) => req.log.warn({ err }, "Nextcloud ledger append failed"));
-
       return res.status(201).send(formatted);
     }
   );
@@ -265,9 +248,6 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
 
       if (invoice.status === "open") {
         const voided = await stripe.invoices.voidInvoice(id);
-        updateLedgerRow(id, "void", {}).catch((err) =>
-          req.log.warn({ err }, "Nextcloud ledger update failed")
-        );
         return res.status(200).send(formatStripeInvoice(voided));
       }
 
@@ -283,8 +263,7 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
   );
   // POST /invoices/:id/mark-paid-out-of-band — record a payment received outside Stripe
   // (PayPal / cash / check). Uses Stripe's paid_out_of_band flow so the invoice flips to
-  // paid in Stripe, the dashboard stays accurate, and the existing invoice.paid webhook
-  // updates the Nextcloud ledger.
+  // paid in Stripe and the dashboard stays accurate.
   app.post<{
     Params: InvoiceParams;
     Body: { method: string; reference?: string; paidAt?: string };
@@ -336,7 +315,6 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
 
       const paid = await stripe.invoices.pay(id, { paid_out_of_band: true });
 
-      // Webhook handles the ledger update via the metadata we just set.
       const cidMeta = paid.metadata?.clientId ?? null;
       let clientName: string | null = null;
       if (cidMeta) {
@@ -346,76 +324,6 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
       return res.status(200).send(formatStripeInvoice(paid, cidMeta, clientName));
     }
   );
-
-  // POST /invoices/backfill-ledger — one-time seed of Nextcloud ledger from all existing Stripe invoices
-  app.post("/invoices/backfill-ledger", { preHandler: requireAdminJwt }, async (req, res) => {
-    try {
-      // Get all dfwsc_services clients that have a Stripe customer
-      const dfwscClients = await db
-        .select({ id: clients.id, name: clients.name, stripeCustomerId: clients.stripeCustomerId })
-        .from(clients)
-        .where(eq(clients.workspace, "dfwsc_services"));
-
-      const clientByCustomerId = new Map(
-        dfwscClients
-          .filter((c) => c.stripeCustomerId)
-          .map((c) => [c.stripeCustomerId!, { id: c.id, name: c.name }])
-      );
-
-      // Paginate through all Stripe invoices
-      const allInvoices: Stripe.Invoice[] = [];
-      let startingAfter: string | undefined;
-      while (true) {
-        const page = await stripe.invoices.list({ limit: 100, starting_after: startingAfter });
-        allInvoices.push(...page.data);
-        if (!page.has_more || page.data.length === 0) break;
-        startingAfter = page.data[page.data.length - 1]?.id;
-        if (!startingAfter) break;
-      }
-
-      // Map to ledger rows — only include invoices belonging to dfwsc_services clients
-      const rows: LedgerRow[] = [];
-      for (const inv of allInvoices) {
-        const custId = typeof inv.customer === "string" ? inv.customer : inv.customer?.id;
-        if (!custId) continue;
-        const client = clientByCustomerId.get(custId);
-        if (!client) continue;
-
-        const baseAmount = inv.metadata?.baseAmount ? parseInt(inv.metadata.baseAmount, 10) : inv.amount_due;
-        const feeAmount = inv.metadata?.feeAmount ? parseInt(inv.metadata.feeAmount, 10) : 0;
-
-        const paidOutOfBand = inv.metadata?.paidOutOfBand === "true";
-        const paidAtOverride = inv.metadata?.paidAtOverride || null;
-        const stripePaidAt = inv.status_transitions?.paid_at
-          ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
-          : null;
-
-        rows.push({
-          date: new Date(inv.created * 1000).toISOString().split("T")[0],
-          client: client.name,
-          invoiceId: inv.id,
-          description: inv.description ?? "",
-          amountCents: baseAmount,
-          feeCents: feeAmount,
-          totalCents: inv.amount_due,
-          status: inv.status ?? "unknown",
-          dueDate: inv.due_date ? new Date(inv.due_date * 1000).toISOString() : null,
-          paidAt: paidOutOfBand && paidAtOverride ? paidAtOverride : stripePaidAt,
-          method: paidOutOfBand ? (inv.metadata?.paymentMethod ?? "stripe") : "stripe",
-          reference: paidOutOfBand ? (inv.metadata?.paymentReference || null) : null,
-        });
-      }
-
-      // Sort oldest first
-      rows.sort((a, b) => a.date.localeCompare(b.date));
-
-      const count = await backfillLedger(rows);
-      return res.status(200).send({ backfilled: count });
-    } catch (err) {
-      req.log.error(err, "Ledger backfill failed");
-      return res.status(500).send({ error: "Ledger backfill failed." });
-    }
-  });
 };
 
 export default invoiceRoutes;

@@ -9,7 +9,7 @@ The DFWSC Payment Portal is a platform for DFW Software Consulting to manage cli
 - **Frontend:** React 18, Vite, React Router 6, TanStack Query v5, TailwindCSS v4.
 - **Backend:** Node.js 20, Fastify 5, TypeScript.
 - **Database:** PostgreSQL 17, Drizzle ORM.
-- **Integrations:** Stripe Connect (Express), Nodemailer (SMTP), Nextcloud WebDAV (invoice ledger).
+- **Integrations:** Stripe Connect (Express), Nodemailer (SMTP).
 - **Environment:** Docker (Multi-stage builds), Nginx (Reverse proxy for frontend).
 
 ## 3. Specialized Documentation
@@ -18,7 +18,6 @@ For detailed rules and implementations, refer to these focused documents:
 - [DATABASE.md](./DATABASE.md) — Schema, Drizzle, and Migrations.
 - [STYLES.md](./STYLES.md) — Tailwind v4, Theme, and UI Patterns.
 - [CRM.md](./CRM.md) — Lead pipeline, client lifecycle, and payment sync job.
-- [NEXTCLOUD.md](./NEXTCLOUD.md) — Invoice ledger integration and WebDAV setup.
 
 ## 4. System Components
 ...

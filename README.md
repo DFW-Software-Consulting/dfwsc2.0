@@ -161,9 +161,8 @@ All API routes are prefixed with `/api/v1`:
 | POST | `/api/v1/groups` | Create client group | Admin (JWT) |
 | PATCH | `/api/v1/groups/:id` | Update group config | Admin (JWT) |
 | GET | `/api/v1/invoices` | List invoices | Admin (JWT) |
-| POST | `/api/v1/invoices` | Create invoice (appends Nextcloud ledger) | Admin (JWT) |
-| PATCH | `/api/v1/invoices/:id` | Cancel invoice (updates Nextcloud ledger) | Admin (JWT) |
-| POST | `/api/v1/invoices/backfill-ledger` | Seed Nextcloud ledger from Stripe | Admin (JWT) |
+| POST | `/api/v1/invoices` | Create invoice | Admin (JWT) |
+| PATCH | `/api/v1/invoices/:id` | Cancel invoice | Admin (JWT) |
 | GET | `/api/v1/invoices/pay/:token` | Fetch invoice by token | Public |
 | POST | `/api/v1/invoices/pay/:token` | Submit invoice payment | Public |
 | GET | `/api/v1/subscriptions` | List subscriptions | Admin (JWT) |
@@ -219,10 +218,6 @@ SETUP_FLAG_PATH=/data/admin-setup-used
 USE_CHECKOUT=true
 DEFAULT_PROCESS_FEE_CENTS=100
 
-# Nextcloud Ledger (optional — ledger sync is skipped if not set)
-NEXTCLOUD_URL=https://cloud.dfwsc.com
-NEXTCLOUD_USER=MessyGinger0804
-NEXTCLOUD_APP_PASSWORD=<app-password-from-nextcloud-settings>
 ```
 
 **Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, enable `ALLOW_ADMIN_SETUP=true`, use `/auth/setup` to create credentials, then confirm with `/auth/confirm-bootstrap`. After setup, set `ALLOW_ADMIN_SETUP=false`. See `.env.example` for detailed documentation.
@@ -286,7 +281,6 @@ Detailed documentation lives in `docs/`:
 | [DATABASE.md](./docs/DATABASE.md) | Schema, Drizzle, migrations |
 | [STRIPE.md](./docs/STRIPE.md) | Stripe Connect, webhooks, payment flows |
 | [CRM.md](./docs/CRM.md) | Lead pipeline, client lifecycle, payment sync |
-| [NEXTCLOUD.md](./docs/NEXTCLOUD.md) | Invoice ledger integration and WebDAV setup |
 | [STYLES.md](./docs/STYLES.md) | Tailwind v4, UI patterns |
 
 ## 🧯 Troubleshooting

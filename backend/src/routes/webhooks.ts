@@ -5,7 +5,6 @@ import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clients, webhookEvents } from "../db/schema";
 import { stripe } from "../lib/stripe";
-import { updateLedgerRow } from "../lib/nextcloud-ledger";
 
 interface StripeInvoiceWithSubscription extends Stripe.Invoice {
   subscription: string | Stripe.Subscription | null;
@@ -160,24 +159,6 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           },
           "Invoice paid - updating payment count."
         );
-
-        // Update ledger — fire-and-forget. If invoice was marked paid out-of-band
-        // (PayPal/cash/check), the metadata carries the method, optional reference,
-        // and an optional caller-supplied paid date that overrides Stripe's "now".
-        const oobMethod = inv.metadata?.paymentMethod || null;
-        const oobReference = inv.metadata?.paymentReference || null;
-        const paidAtOverride = inv.metadata?.paidAtOverride || null;
-        const paidAtIso = paidAtOverride
-          ? paidAtOverride
-          : inv.status_transitions?.paid_at
-            ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
-            : new Date().toISOString();
-
-        updateLedgerRow(inv.id, "paid", {
-          paidAt: paidAtIso,
-          method: oobMethod || "stripe",
-          reference: oobReference,
-        }).catch((err) => fastify.log.warn({ err }, "Nextcloud ledger update failed"));
 
         if (inv.subscription && typeof inv.subscription === "string") {
           const sub = await stripe.subscriptions.retrieve(inv.subscription);

@@ -51,8 +51,8 @@ export default function MarkInvoicePaidModal({ isOpen, invoice, onConfirm, onClo
       size="sm"
     >
       <p className="text-gray-300 mb-4 text-sm">
-        Records the payment in Stripe as <em>paid out of band</em> and updates the ledger. Use this
-        when a client paid by PayPal, cash, or check.
+        Records the payment in Stripe as <em>paid out of band</em>. Use this when a client paid by
+        PayPal, cash, or check.
       </p>
 
       {invoice?.description && (
