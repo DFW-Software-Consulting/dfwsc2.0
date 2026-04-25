@@ -23,6 +23,9 @@ const OPTIONAL_ENV_VARS = [
   "ADMIN_API_KEY",
   "ALLOW_ADMIN_SETUP",
   "ADMIN_SETUP_TOKEN",
+  "NEXTCLOUD_URL",
+  "NEXTCLOUD_USER",
+  "NEXTCLOUD_APP_PASSWORD",
 ];
 
 export function validateEnv(): Record<string, string> {

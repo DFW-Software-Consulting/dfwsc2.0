@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clients, webhookEvents } from "../db/schema";
 import { stripe } from "../lib/stripe";
+import { updateLedgerRow } from "../lib/nextcloud-ledger";
 
 interface StripeInvoiceWithSubscription extends Stripe.Invoice {
   subscription: string | Stripe.Subscription | null;
@@ -159,6 +160,15 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           },
           "Invoice paid - updating payment count."
         );
+
+        // Update ledger — fire-and-forget
+        updateLedgerRow(
+          inv.id,
+          "paid",
+          inv.status_transitions?.paid_at
+            ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
+            : new Date().toISOString()
+        ).catch((err) => fastify.log.warn({ err }, "Nextcloud ledger update failed"));
 
         if (inv.subscription && typeof inv.subscription === "string") {
           const sub = await stripe.subscriptions.retrieve(inv.subscription);
