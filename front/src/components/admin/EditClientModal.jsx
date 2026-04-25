@@ -412,7 +412,7 @@ export default function EditClientModal({
         <Button variant="secondary" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="primary" isLoading={patchClientMutation.isPending} onClick={handleSave}>
+        <Button variant="primary" isLoading={patchClientMutation.isPending} disabled={isDfwscMode && clientLoading} onClick={handleSave}>
           {patchClientMutation.isPending ? "Saving..." : "Save Changes"}
         </Button>
       </div>

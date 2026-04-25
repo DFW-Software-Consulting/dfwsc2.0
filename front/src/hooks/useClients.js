@@ -15,7 +15,7 @@ import { useAuth } from "../contexts/AuthContext";
 export function useClient(id, workspace) {
   const { token } = useAuth();
   return useQuery({
-    queryKey: ["client", id],
+    queryKey: ["client", id, workspace],
     queryFn: () => getClient(token, id, workspace),
     enabled: !!token && !!id,
     select: (data) => data.client,

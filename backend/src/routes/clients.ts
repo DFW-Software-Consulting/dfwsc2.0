@@ -125,9 +125,10 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           return res.status(404).send({ error: "Client not found." });
         }
 
+        const { apiKeyHash, apiKeyLookup, ...safeClient } = client;
         return res.status(200).send({
           client: {
-            ...client,
+            ...safeClient,
             createdAt: client.createdAt?.toISOString(),
             updatedAt: client.updatedAt?.toISOString(),
           },
@@ -346,8 +347,9 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
+      const { apiKeyHash, apiKeyLookup, ...safeUpdatedClient } = updatedClient;
       return res.status(200).send({
-        ...updatedClient,
+        ...safeUpdatedClient,
         createdAt: updatedClient.createdAt?.toISOString(),
         updatedAt: updatedClient.updatedAt?.toISOString(),
       });
