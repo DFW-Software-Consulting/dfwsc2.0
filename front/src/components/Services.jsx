@@ -65,7 +65,7 @@ export default function Services() {
         <h2 className="text-3xl font-bold tracking-tight sm:text-5xl text-gradient">
           Full-stack product delivery without the hand-holding
         </h2>
-        <p className="mt-6 text-lg text-slate-600 dark:text-slate-400">
+        <p className="mt-6 text-lg text-[var(--text-muted)]">
           From prototypes to production-critical systems, we bring the right tools for your budget,
           team, and customers.
         </p>
@@ -75,27 +75,27 @@ export default function Services() {
         {services.map((service) => (
           <article
             key={service.name}
-            className="group relative h-full rounded-[2rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-8 text-left transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:shadow-glow shadow-sm"
+            className="group relative h-full rounded-[2rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-8 text-left transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:shadow-glow shadow-sm"
           >
             <div className="absolute -inset-px rounded-[2rem] bg-gradient-to-br from-brand-500/10 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100 pointer-events-none" />
             
             <div className="relative z-10">
               <div className="flex items-start justify-between gap-4">
-                <h3 className="text-2xl font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors duration-300">
+                <h3 className="text-2xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors duration-300">
                   {service.name}
                 </h3>
                 <span className="rounded-full border border-brand-500/20 bg-brand-500/5 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400">
                   {service.details.length} points
                 </span>
               </div>
-              <p className="mt-4 text-base text-slate-600 dark:text-slate-400 leading-relaxed">
+              <p className="mt-4 text-base text-[var(--text-muted)] leading-relaxed">
                 {service.description}
               </p>
               <ul className="mt-8 grid gap-4 sm:grid-cols-1">
                 {service.details.map((detail) => (
                   <li key={detail} className="flex items-start gap-3 group/item">
                     <span className="mt-1.5 h-1.5 w-1.5 flex-none rounded-full bg-brand-500 group-hover/item:scale-125 transition-transform" />
-                    <span className="text-sm text-slate-600 dark:text-slate-300 group-hover/item:text-slate-900 dark:group-hover/item:text-white transition-colors">
+                    <span className="text-sm text-[var(--text-muted)] group-hover/item:text-[var(--text-main)] transition-colors">
                       {detail}
                     </span>
                   </li>

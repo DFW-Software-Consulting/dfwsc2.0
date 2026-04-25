@@ -28,7 +28,7 @@ export default function Hero() {
               <br />
               <span className="text-gradient-brand">software solutions</span>
             </h1>
-            <p className="mt-8 text-xl text-slate-600 dark:text-slate-400 max-w-2xl mx-auto lg:mx-0 leading-relaxed transition-colors">
+            <p className="mt-8 text-xl text-[var(--text-muted)] max-w-2xl mx-auto lg:mx-0 leading-relaxed transition-colors">
               Scalable backends, intuitive frontends, and cloud-powered platforms. We scope clearly,
               ship fast, and leave you with code you own.
             </p>
@@ -51,10 +51,10 @@ export default function Hero() {
               {stats.map((item) => (
                 <div
                   key={item.value}
-                  className="group rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-6 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.05] hover:border-slate-300 dark:hover:border-white/10 shadow-sm"
+                  className="group rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-6 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.05] hover:border-slate-300 dark:hover:border-white/10 shadow-sm"
                 >
-                  <p className="text-lg font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-300 transition-colors">{item.value}</p>
-                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-snug transition-colors">{item.detail}</p>
+                  <p className="text-lg font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-300 transition-colors">{item.value}</p>
+                  <p className="mt-2 text-sm text-[var(--text-muted)] leading-snug transition-colors">{item.detail}</p>
                 </div>
               ))}
             </div>

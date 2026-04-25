@@ -30,12 +30,12 @@ export default function Values() {
         {values.map((value) => (
           <article
             key={value.title}
-            className="group relative rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-10 text-left transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow shadow-sm"
+            className="group relative rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-10 text-left transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow shadow-sm"
           >
-            <h3 className="text-2xl font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
+            <h3 className="text-2xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
               {value.title}
             </h3>
-            <p className="mt-6 text-base text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+            <p className="mt-6 text-base text-[var(--text-muted)] leading-relaxed transition-colors">
               {value.description}
             </p>
           </article>

@@ -39,7 +39,7 @@ export default function Footer() {
   const year = new Date().getFullYear();
 
   return (
-    <footer className="border-t border-slate-200 dark:border-white/[0.05] bg-white dark:bg-[#020617] pt-20 pb-10 transition-colors duration-300">
+    <footer className="border-t border-slate-200 dark:border-white/[0.05] bg-[var(--bg-main)] pt-20 pb-10 transition-colors duration-300">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="grid gap-16 lg:grid-cols-2 lg:gap-24">
           <div className="flex flex-col items-start gap-8">
@@ -54,7 +54,7 @@ export default function Footer() {
                 className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === 'dark' ? 'invert hue-rotate-180 brightness-125' : ''}`}
               />
             </Link>
-            <p className="text-lg text-slate-600 dark:text-slate-400 leading-relaxed max-w-md transition-colors">
+            <p className="text-lg text-[var(--text-muted)] leading-relaxed max-w-md transition-colors">
               Dallas-Fort Worth based engineers delivering end-to-end product strategy and 
               resilient cloud infrastructure for teams that need shipping momentum.
             </p>
@@ -65,7 +65,7 @@ export default function Footer() {
                   href={link.href}
                   target={link.href.startsWith("http") ? "_blank" : undefined}
                   rel={link.href.startsWith("http") ? "noreferrer" : undefined}
-                  className="group flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] text-slate-400 dark:text-slate-400 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:border-brand-500/30 hover:text-brand-600 dark:hover:text-white hover:-translate-y-1 shadow-sm"
+                  className="group flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] text-slate-400 dark:text-slate-400 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:border-brand-500/30 hover:text-brand-600 dark:hover:text-white hover:-translate-y-1 shadow-sm"
                   aria-label={link.name}
                 >
                   {link.icon}
@@ -90,7 +90,7 @@ export default function Footer() {
                     key={item.label}
                     to={item.to}
                     state={item.state}
-                    className="text-base text-slate-600 dark:text-slate-400 transition-colors hover:text-brand-600 dark:hover:text-brand-300"
+                    className="text-base text-[var(--text-muted)] transition-colors hover:text-brand-600 dark:hover:text-brand-300"
                   >
                     {item.label}
                   </Link>
@@ -106,7 +106,7 @@ export default function Footer() {
                   rel="noreferrer"
                   className="group block"
                 >
-                  <p className="text-base text-slate-700 dark:text-slate-300 group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
+                  <p className="text-base text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
                     Follow our founder Jeremy Ashley on LinkedIn
                   </p>
                   <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-500 group-hover:text-brand-400 transition-colors">
@@ -116,7 +116,7 @@ export default function Footer() {
                     </svg>
                   </span>
                 </a>
-                <div className="rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-4 text-xs text-slate-500 transition-colors">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-4 text-xs text-slate-500 transition-colors">
                   Built with clarity. Own your roadmap.
                 </div>
               </div>
@@ -125,7 +125,7 @@ export default function Footer() {
         </div>
         
         <div className="mt-20 border-t border-slate-200 dark:border-white/5 pt-10 text-center transition-colors">
-          <p className="text-sm text-slate-400 dark:text-slate-600">
+          <p className="text-sm text-[var(--text-muted)] opacity-60">
             © {year} DFW Software Consulting. All rights reserved.
           </p>
         </div>

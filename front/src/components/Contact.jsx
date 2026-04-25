@@ -19,17 +19,17 @@ export default function Contact() {
           <h2 className="text-3xl font-bold tracking-tight sm:text-5xl text-gradient">
             Tell us your goal, timeline, and must-haves
           </h2>
-          <p className="mt-6 text-lg text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+          <p className="mt-6 text-lg text-[var(--text-muted)] leading-relaxed transition-colors">
             We&apos;ll respond within one business day with next steps and a lightweight plan you
-            can approve quickly.
+            can review.
           </p>
         </div>
 
         <div className="grid gap-8 lg:grid-cols-1">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-12 rounded-[2.5rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-10 lg:p-16 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-12 rounded-[2.5rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-10 lg:p-16 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm">
             <div className="max-w-md text-center md:text-left">
-              <h3 className="text-3xl font-bold text-slate-900 dark:text-white transition-colors">Prefer a quick chat?</h3>
-              <p className="mt-4 text-lg text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+              <h3 className="text-3xl font-bold text-[var(--text-main)] transition-colors">Prefer a quick chat?</h3>
+              <p className="mt-4 text-lg text-[var(--text-muted)] leading-relaxed transition-colors">
                 Share a Loom, forward requirements, or drop a quick note. We&apos;ll respond with
                 next steps and a suggested plan.
               </p>
@@ -46,12 +46,12 @@ export default function Contact() {
                 <a
                   key={method.label}
                   href={method.href}
-                  className="group flex flex-col p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.02] transition-all duration-300 hover:bg-slate-50 dark:hover:bg-white/[0.08] hover:border-brand-500/30 shadow-sm"
+                  className="group flex flex-col p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-main)] dark:bg-white/[0.02] transition-all duration-300 hover:bg-slate-50 dark:hover:bg-white/[0.08] hover:border-brand-500/30 shadow-sm"
                 >
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors font-bold">
+                  <span className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)] group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors font-bold">
                     {method.label}
                   </span>
-                  <span className="mt-2 text-xl font-bold text-slate-900 dark:text-white group-hover:text-brand-500 dark:group-hover:text-brand-100 transition-colors">
+                  <span className="mt-2 text-xl font-bold text-[var(--text-main)] group-hover:text-brand-500 dark:group-hover:text-brand-100 transition-colors">
                     {method.value}
                   </span>
                 </a>

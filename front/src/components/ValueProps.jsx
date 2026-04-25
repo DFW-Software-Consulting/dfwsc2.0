@@ -29,7 +29,7 @@ export default function ValueProps() {
         <h2 className="text-3xl font-bold tracking-tight sm:text-5xl text-gradient">
           Strategic partners, not just contractors
         </h2>
-        <p className="mt-6 text-lg text-slate-600 dark:text-slate-400">
+        <p className="mt-6 text-lg text-[var(--text-muted)]">
           We blend senior engineering experience with pragmatic planning so you can move fast
           without creating tech debt.
         </p>
@@ -39,12 +39,12 @@ export default function ValueProps() {
         {promises.map((promise) => (
           <article
             key={promise.title}
-            className="group relative rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-8 text-left transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow shadow-sm"
+            className="group relative rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-8 text-left transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow shadow-sm"
           >
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
+            <h3 className="text-xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
               {promise.title}
             </h3>
-            <p className="mt-4 text-sm text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+            <p className="mt-4 text-sm text-[var(--text-muted)] leading-relaxed transition-colors">
               {promise.description}
             </p>
           </article>

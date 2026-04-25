@@ -24,25 +24,27 @@
   :root {
     color-scheme: light;
     --bg-main: #ffffff;
-    --text-main: #0f172a;
-    --text-muted: #475569;
-    --border-subtle: rgba(0, 0, 0, 0.05);
-    --glass-bg: rgba(255, 255, 255, 0.7);
-    --glass-border: rgba(0, 0, 0, 0.1);
+    --bg-surface: #f1f5f9; /* slate-100 */
+    --text-main: #0f172a; /* slate-900 */
+    --text-muted: #475569; /* slate-600 */
+    --border-subtle: rgba(0, 0, 0, 0.1);
+    --glass-bg: rgba(255, 255, 255, 0.8);
+    --glass-border: rgba(0, 0, 0, 0.05);
   }
 
   .dark {
     color-scheme: dark;
     --bg-main: #020617;
-    --text-main: #f1f5f9;
-    --text-muted: #94a3b8;
+    --bg-surface: #0f172a; /* slate-900 */
+    --text-main: #f8fafc; /* slate-50 */
+    --text-muted: #94a3b8; /* slate-400 */
     --border-subtle: rgba(255, 255, 255, 0.05);
-    --glass-bg: rgba(255, 255, 255, 0.02);
-    --glass-border: rgba(255, 255, 255, 0.05);
+    --glass-bg: rgba(15, 23, 42, 0.8);
+    --glass-border: rgba(255, 255, 255, 0.1);
   }
 
   body {
-    @apply bg-white text-slate-900 dark:bg-[#020617] dark:text-slate-100 antialiased font-sans selection:bg-brand-500/30 transition-colors duration-300;
+    @apply bg-[var(--bg-main)] text-[var(--text-main)] antialiased font-sans selection:bg-brand-500/30 transition-colors duration-300;
   }
 }
 

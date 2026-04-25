@@ -46,10 +46,10 @@ export default function Team() {
           <span className="inline-flex items-center rounded-full border border-brand-500/10 bg-brand-500/5 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-300">
             Meet our team
           </span>
-          <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-6xl text-gradient">
+          <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-[var(--text-main)] sm:text-6xl text-gradient">
             Experts building reliable software outcomes
           </h1>
-          <p className="mt-8 text-xl text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+          <p className="mt-8 text-xl text-[var(--text-muted)] leading-relaxed transition-colors">
             Every engagement is led by seasoned practitioners who have shipped critical systems for
             finance, logistics, and high-growth startups. We stay close to business goals, turning
             strategy into running software.
@@ -69,7 +69,7 @@ export default function Team() {
         {teamMembers.map((member, idx) => (
           <article
             key={member.name}
-            className={`group relative flex flex-col items-center gap-10 rounded-[2.5rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-10 transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] md:flex-row shadow-sm ${
+            className={`group relative flex flex-col items-center gap-10 rounded-[2.5rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-10 transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] md:flex-row shadow-sm ${
               idx % 2 === 1 ? "md:flex-row-reverse" : ""
             }`}
           >
@@ -92,10 +92,10 @@ export default function Team() {
               <span className="text-xs font-bold uppercase tracking-[0.2em] text-brand-600 dark:text-brand-400 transition-colors">
                 {member.role}
               </span>
-              <h2 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-100 transition-colors">
+              <h2 className="mt-2 text-3xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-100 transition-colors">
                 {member.name}
               </h2>
-              <p className="mt-6 text-lg leading-relaxed text-slate-600 dark:text-slate-400 transition-colors">{member.bio}</p>
+              <p className="mt-6 text-lg leading-relaxed text-[var(--text-muted)] transition-colors">{member.bio}</p>
             </div>
           </article>
         ))}
