@@ -17,6 +17,8 @@
     "test:back": "npm run test --prefix backend",
     "db:generate": "npm run db:generate --prefix backend",
     "db:migrate": "npm run db:migrate --prefix backend",
+    "reset:test-data": "docker compose -f docker-compose.base.yml -f docker-compose.dev.yml exec -T api npm run reset:test-data",
+    "reset:test-data:dry": "docker compose -f docker-compose.base.yml -f docker-compose.dev.yml exec -T api npm run reset:test-data -- --dry-run",
     "lint": "biome check backend/src front/src",
     "lint:fix": "biome check --write backend/src front/src",
     "format": "biome format --write backend/src front/src",
