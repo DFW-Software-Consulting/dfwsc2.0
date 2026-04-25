@@ -45,7 +45,7 @@ export default function Pricing() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-24 px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
       <section className="mx-auto max-w-4xl text-center">
-        <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/10 bg-brand-500/5 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-300">
+        <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 dark:text-brand-300">
           Hosting & Maintenance
         </span>
         <h1 className="text-4xl font-extrabold tracking-tight sm:text-6xl text-gradient">
