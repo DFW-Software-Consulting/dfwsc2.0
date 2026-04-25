@@ -68,11 +68,11 @@ export default function Pricing() {
             key={plan.name} 
             className="group relative flex flex-col rounded-[2rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-8 transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow shadow-sm"
           >
-            <div className="mb-6">
+            <div className="mb-6 transition-colors">
               <h2 className="text-xl font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">{plan.name}</h2>
               <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="text-4xl font-black text-slate-900 dark:text-white transition-colors">{plan.price.split(' ')[0]}</span>
-                <span className="text-sm font-medium text-slate-500">/ {plan.price.split(' ')[2]}</span>
+                <span className="text-sm font-medium text-slate-500 dark:text-slate-500 transition-colors">/ {plan.price.split(' ')[2]}</span>
               </div>
               {plan.alt ? (
                 <span className="mt-1 block text-xs font-medium text-brand-600 dark:text-brand-400/80 uppercase tracking-wider transition-colors">

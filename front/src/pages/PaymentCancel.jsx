@@ -6,12 +6,12 @@ export default function PaymentCancel() {
   }, []);
 
   return (
-    <div className="min-h-[90vh] flex items-center justify-center bg-gradient-to-b from-gray-900 to-gray-800">
+    <div className="min-h-[90vh] flex items-center justify-center transition-colors duration-300">
       <div className="text-center max-w-2xl mx-auto px-6">
-        <div className="w-16 h-16 mx-auto mb-6 flex items-center justify-center rounded-full bg-amber-500/20">
+        <div className="w-16 h-16 mx-auto mb-6 flex items-center justify-center rounded-full bg-amber-500/10 border border-amber-500/20">
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="h-10 w-10 text-amber-400"
+            className="h-10 w-10 text-amber-500"
             viewBox="0 0 20 20"
             fill="currentColor"
             aria-hidden="true"
@@ -23,12 +23,12 @@ export default function PaymentCancel() {
             />
           </svg>
         </div>
-        <h1 className="text-3xl font-bold text-white mb-4">Payment Canceled</h1>
-        <p className="text-gray-200 text-lg mb-6">
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">Payment Canceled</h1>
+        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
           Your payment was canceled. If this was a mistake, you can retry the payment or reach out
           for help.
         </p>
-        <p className="text-gray-400">
+        <p className="text-slate-500 dark:text-gray-400 transition-colors">
           Need assistance? Contact the DFWSC team and we&apos;ll get you squared away.
         </p>
       </div>

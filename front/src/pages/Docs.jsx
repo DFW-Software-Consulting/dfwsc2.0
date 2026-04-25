@@ -162,14 +162,14 @@ export default function Docs() {
           Everything you need to accept payments through the DFWSC platform — from your backend
           server to your customer-facing checkout form.
         </p>
-        <div className="mt-8 flex items-center gap-2 text-sm text-slate-500 transition-colors">
+        <div className="mt-8 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-500 transition-colors">
           <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
           Prerequisites: you have already been onboarded and received your API key. 
           If not, {" "}
           <Link
             to="/"
             state={{ scrollTo: "contact" }}
-            className="text-brand-500 dark:text-brand-400 font-bold hover:text-brand-600 dark:hover:text-brand-300 transition-colors"
+            className="text-brand-600 dark:text-brand-400 font-bold hover:text-brand-700 dark:hover:text-brand-300 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 rounded-sm"
           >
             contact us
           </Link>
@@ -181,13 +181,13 @@ export default function Docs() {
         {/* Sidebar — hidden on mobile, shown on lg+ */}
         <aside className="hidden lg:block w-64 flex-none">
           <nav className="sticky top-32 space-y-1" aria-label="Page sections">
-            <h3 className="px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-600 mb-4 transition-colors">On this page</h3>
+            <h3 className="px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-600 mb-4 transition-colors">On this page</h3>
             {sidebarSections.map((s) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => handleSidebarClick(s.id)}
-                className="group flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-500 dark:text-slate-400 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-white/[0.03] hover:text-brand-600 dark:hover:text-white cursor-pointer"
+                className="group flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-600 dark:text-slate-400 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-white/[0.03] hover:text-brand-700 dark:hover:text-white cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-transparent group-hover:bg-brand-500 mr-3 transition-colors" />
                 {s.label}
@@ -203,7 +203,7 @@ export default function Docs() {
               key={s.id}
               type="button"
               onClick={() => handleSidebarClick(s.id)}
-              className="flex-none rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] px-4 py-2 text-xs font-bold text-slate-500 dark:text-slate-400 transition hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-white cursor-pointer whitespace-nowrap uppercase tracking-widest"
+              className="flex-none rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 transition hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-white cursor-pointer whitespace-nowrap uppercase tracking-widest focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
             >
               {s.label}
             </button>

@@ -40,24 +40,22 @@ export default function OnboardClient() {
 
   return (
     <section
-      className="min-h-[90vh] flex items-center justify-center
-                 bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900
-                 text-gray-100 p-4"
+      className="min-h-[90vh] flex items-center justify-center p-4 transition-colors duration-300"
     >
       <div className="w-full max-w-xl mx-auto">
-        <div className="bg-gray-800/60 backdrop-blur-md p-8 rounded-2xl shadow-xl border border-gray-700">
-          <h1 className="text-3xl font-bold text-center mb-4 text-white">Stripe Account Setup</h1>
+        <div className="bg-[var(--bg-main)] dark:bg-white/[0.02] backdrop-blur-md p-8 rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 transition-colors">
+          <h1 className="text-3xl font-bold text-center mb-4 text-slate-900 dark:text-white transition-colors">Stripe Account Setup</h1>
 
-          <p className="text-center text-gray-300 mb-8">
+          <p className="text-center text-slate-600 dark:text-gray-300 mb-8 transition-colors">
             Please enter the onboarding token provided by{" "}
-            <span className="text-blue-400 font-semibold">DFW Software Consulting</span> to set up
+            <span className="text-brand-600 dark:text-brand-400 font-semibold transition-colors">DFW Software Consulting</span> to set up
             your Stripe account.
           </p>
 
           <div className="mb-6">
             <label
               htmlFor="onboardingToken"
-              className="block text-sm font-semibold text-gray-200 mb-2"
+              className="block text-sm font-semibold text-slate-700 dark:text-gray-200 mb-2 transition-colors"
             >
               Onboarding Token
             </label>
@@ -67,9 +65,9 @@ export default function OnboardClient() {
               value={token}
               onChange={(e) => setToken(e.target.value)}
               placeholder="Enter your token"
-              className="block w-full rounded-md border border-gray-600 bg-gray-900/50
-                         px-3 py-2 text-gray-100 placeholder-gray-500 shadow-sm
-                         focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="block w-full rounded-md border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-900/50
+                         px-3 py-2 text-slate-900 dark:text-gray-100 placeholder-slate-400 dark:placeholder-gray-500 shadow-sm
+                         focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-blue-500 transition-all"
             />
           </div>
 
@@ -77,16 +75,16 @@ export default function OnboardClient() {
             type="button"
             onClick={handleSubmit}
             disabled={isPending}
-            className="mt-6 w-full rounded-md bg-blue-600 hover:bg-blue-700
-                       text-white font-semibold py-2 px-4 shadow-lg
-                       transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-400
+            className="mt-6 w-full rounded-full bg-brand-500 hover:bg-brand-600
+                       text-white font-semibold py-2.5 px-4 shadow-glow
+                       transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-400
                        disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isPending ? "Processing..." : "Continue to Stripe Setup"}
           </button>
 
           {message && (
-            <p className={`mt-4 text-center text-sm ${isError ? "text-red-400" : "text-blue-400"}`}>
+            <p className={`mt-4 text-center text-sm font-medium ${isError ? "text-red-500 dark:text-red-400" : "text-brand-600 dark:text-brand-400"} transition-colors`}>
               {message}
             </p>
           )}

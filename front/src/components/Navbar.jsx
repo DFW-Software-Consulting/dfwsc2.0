@@ -18,14 +18,14 @@ export default function Navbar() {
 
   // Unified clickable pill style
   const desktopItemClasses =
-    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-white/5 px-4 py-2 text-sm font-medium text-slate-400 transition-all duration-300 hover:border-white/20 hover:text-white hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 cursor-pointer";
+    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-slate-200 dark:border-white/5 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 transition-all duration-300 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
   const desktopGlow =
     "pointer-events-none absolute inset-0 rounded-full bg-gradient-to-r from-brand-500/0 via-brand-500/5 to-brand-500/0 opacity-0 transition-opacity duration-500 group-hover:opacity-100";
 
   const mobileItemClasses =
-    "group relative overflow-hidden rounded-xl border border-white/5 px-4 py-3 text-left text-slate-300 transition-all duration-200 hover:border-white/20 hover:text-white hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 cursor-pointer";
+    "group relative overflow-hidden rounded-xl border border-slate-200 dark:border-white/5 px-4 py-3 text-left text-slate-600 dark:text-slate-300 transition-all duration-200 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
   const mobileGlow =
-    "pointer-events-none absolute inset-0 rounded-xl bg-white/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-white/5";
+    "pointer-events-none absolute inset-0 rounded-xl bg-brand-500/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-brand-500/5";
 
   useEffect(() => {
     setMenuOpen(false);
@@ -52,11 +52,11 @@ export default function Navbar() {
       onClick={toggleTheme}
       className={`${
         mobile
-          ? "flex items-center gap-3 rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 text-slate-300 transition-all hover:bg-white/[0.08]"
-          : "relative flex h-10 w-10 items-center justify-center rounded-full border border-white/5 transition-all hover:bg-white/[0.05] hover:border-white/20"
-      } cursor-pointer group shadow-sm`}
-      aria-label="Toggle theme"
-      title="Toggle theme"
+          ? "flex items-center gap-3 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] px-4 py-3 text-slate-600 dark:text-slate-300 transition-all hover:bg-slate-100 dark:hover:bg-white/[0.08]"
+          : "relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 dark:border-white/5 transition-all hover:bg-slate-100 dark:hover:bg-white/[0.05] hover:border-slate-300 dark:hover:border-white/20"
+      } cursor-pointer group shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500`}
+      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+      title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
     >
       <div className="relative h-5 w-5">
         {/* Sun icon */}
@@ -97,7 +97,7 @@ export default function Navbar() {
   );
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/[0.08] bg-[var(--bg-main)]/80 backdrop-blur-xl transition-colors duration-300">
+    <header className="sticky top-0 z-50 border-b border-slate-200 dark:border-white/[0.08] bg-[var(--bg-main)]/80 backdrop-blur-xl transition-colors duration-300">
       <div className="relative mx-auto flex h-20 w-full max-w-6xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
         <Link
           to="/"
@@ -149,7 +149,7 @@ export default function Navbar() {
           <Link
             to="/"
             state={{ scrollTo: "contact" }}
-            className="cursor-pointer items-center justify-center gap-2 rounded-full bg-gradient-to-b from-brand-400 to-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition-all duration-300 hover:shadow-glow-strong hover:-translate-y-0.5 active:translate-y-0 active:scale-95 inline-flex"
+            className="cursor-pointer items-center justify-center gap-2 rounded-full bg-gradient-to-b from-brand-400 to-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition-all duration-300 hover:shadow-glow-strong hover:-translate-y-0.5 active:translate-y-0 active:scale-95 inline-flex focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
             title="Start a project"
           >
             Start a project
@@ -161,7 +161,7 @@ export default function Navbar() {
           <button
             type="button"
             onClick={() => setMenuOpen((prev) => !prev)}
-            className="inline-flex items-center justify-center rounded-full border border-white/10 p-2 text-slate-400 transition hover:border-brand-400 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400 cursor-pointer"
+            className="inline-flex items-center justify-center rounded-full border border-slate-200 dark:border-white/10 p-2 text-slate-600 dark:text-slate-400 transition hover:border-brand-400 hover:text-brand-600 dark:hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none"
             aria-expanded={menuOpen}
             aria-label="Toggle navigation"
             title="Toggle navigation"
@@ -188,7 +188,7 @@ export default function Navbar() {
       </div>
 
       {menuOpen && (
-        <div className="border-t border-white/10 bg-[var(--bg-main)]/95 sm:hidden transition-colors duration-300">
+        <div className="border-t border-slate-200 dark:border-white/10 bg-[var(--bg-main)]/95 sm:hidden transition-colors duration-300">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-6 text-sm font-medium">
             {navItems.map((item) => {
               if (item.type === "scroll") {
@@ -225,7 +225,7 @@ export default function Navbar() {
               to="/"
               state={{ scrollTo: "contact" }}
               onClick={() => setMenuOpen(false)}
-              className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-[0_20px_40px_-18px_rgba(11,114,133,0.6)] transition duration-200 hover:-translate-y-0.5 hover:bg-brand-400"
+              className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-glow transition duration-200 hover:-translate-y-0.5 hover:bg-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
               title="Start a project"
             >
               Start a project
