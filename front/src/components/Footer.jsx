@@ -34,10 +34,11 @@ const socialLinks = [
 ];
 
 export default function Footer() {
+  const { theme } = useTheme();
   const year = new Date().getFullYear();
 
   return (
-    <footer className="border-t border-white/[0.05] bg-[#020617] pt-20 pb-10">
+    <footer className="border-t border-slate-200 dark:border-white/[0.05] bg-white dark:bg-[#020617] pt-20 pb-10 transition-colors duration-300">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         <div className="grid gap-16 lg:grid-cols-2 lg:gap-24">
           <div className="flex flex-col items-start gap-8">
@@ -49,10 +50,10 @@ export default function Footer() {
               <img
                 src="/DFWSC-Logo-HorizWordmarkPNG.png"
                 alt="DFW Software Consulting"
-                className="h-8 w-auto relative z-10 brightness-110 grayscale-[0.2] hover:grayscale-0 transition-all duration-300"
+                className={`h-8 w-auto relative z-10 brightness-110 transition-all duration-300 ${theme === 'dark' ? 'grayscale-[0.2] hover:grayscale-0' : 'grayscale-0'}`}
               />
             </Link>
-            <p className="text-lg text-slate-400 leading-relaxed max-w-md">
+            <p className="text-lg text-slate-600 dark:text-slate-400 leading-relaxed max-w-md transition-colors">
               Dallas-Fort Worth based engineers delivering end-to-end product strategy and 
               resilient cloud infrastructure for teams that need shipping momentum.
             </p>
@@ -63,7 +64,7 @@ export default function Footer() {
                   href={link.href}
                   target={link.href.startsWith("http") ? "_blank" : undefined}
                   rel={link.href.startsWith("http") ? "noreferrer" : undefined}
-                  className="group flex h-12 w-12 items-center justify-center rounded-2xl border border-white/5 bg-white/[0.02] text-slate-400 transition-all duration-300 hover:bg-white/[0.08] hover:border-brand-500/30 hover:text-white hover:-translate-y-1"
+                  className="group flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] text-slate-400 dark:text-slate-400 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:border-brand-500/30 hover:text-brand-600 dark:hover:text-white hover:-translate-y-1 shadow-sm"
                   aria-label={link.name}
                 >
                   {link.icon}
@@ -74,7 +75,7 @@ export default function Footer() {
 
           <div className="grid gap-12 sm:grid-cols-2 lg:gap-16">
             <div>
-              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500">Navigation</h3>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 transition-colors">Navigation</h3>
               <nav className="mt-6 flex flex-col gap-4">
                 {[
                   { label: "Home", to: "/" },
@@ -88,7 +89,7 @@ export default function Footer() {
                     key={item.label}
                     to={item.to}
                     state={item.state}
-                    className="text-base text-slate-400 transition-colors hover:text-brand-300"
+                    className="text-base text-slate-600 dark:text-slate-400 transition-colors hover:text-brand-600 dark:hover:text-brand-300"
                   >
                     {item.label}
                   </Link>
@@ -96,7 +97,7 @@ export default function Footer() {
               </nav>
             </div>
             <div>
-              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500">Insights</h3>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 transition-colors">Insights</h3>
               <div className="mt-6 space-y-6">
                 <a
                   href="https://linkedin.byjc.dev"
@@ -104,17 +105,17 @@ export default function Footer() {
                   rel="noreferrer"
                   className="group block"
                 >
-                  <p className="text-base text-slate-300 group-hover:text-brand-200 transition-colors">
+                  <p className="text-base text-slate-700 dark:text-slate-300 group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
                     Follow our founder Jeremy Ashley on LinkedIn
                   </p>
-                  <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-brand-500 group-hover:text-brand-400">
+                  <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-500 group-hover:text-brand-400 transition-colors">
                     LEARN MORE
                     <svg className="h-3 w-3 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                     </svg>
                   </span>
                 </a>
-                <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 text-xs text-slate-500">
+                <div className="rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-4 text-xs text-slate-500 transition-colors">
                   Built with clarity. Own your roadmap.
                 </div>
               </div>
@@ -122,8 +123,8 @@ export default function Footer() {
           </div>
         </div>
         
-        <div className="mt-20 border-t border-white/5 pt-10 text-center">
-          <p className="text-sm text-slate-600">
+        <div className="mt-20 border-t border-slate-200 dark:border-white/5 pt-10 text-center transition-colors">
+          <p className="text-sm text-slate-400 dark:text-slate-600">
             © {year} DFW Software Consulting. All rights reserved.
           </p>
         </div>

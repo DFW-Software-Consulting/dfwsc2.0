@@ -43,22 +43,22 @@ const plans = [
 
 export default function Pricing() {
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-24 px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
+    <div className="mx-auto w-full max-w-6xl space-y-24 px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
       <section className="mx-auto max-w-4xl text-center">
-        <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-300">
+        <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/10 bg-brand-500/5 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-300">
           Hosting & Maintenance
         </span>
         <h1 className="text-4xl font-extrabold tracking-tight sm:text-6xl text-gradient">
           Predictable pricing for platforms you can depend on
         </h1>
-        <p className="mt-8 text-xl text-slate-400 leading-relaxed">
+        <p className="mt-8 text-xl text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
           Every plan includes SSL, global CDN delivery, and DFWSC-managed updates so you can focus
           on customers.
         </p>
       </section>
 
       <Banner
-        className="mt-12 glass rounded-2xl p-4 text-center border-brand-500/20"
+        className="mt-12 glass rounded-2xl p-4 text-center border-brand-500/20 shadow-sm"
         message="🌐 From cloud migrations to compliance-ready hosting, our bench of engineers has your infrastructure on lock."
       />
 
@@ -66,16 +66,16 @@ export default function Pricing() {
         {plans.map((plan) => (
           <article 
             key={plan.name} 
-            className="group relative flex flex-col rounded-[2rem] border border-white/5 bg-white/[0.02] p-8 transition-all duration-500 hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow"
+            className="group relative flex flex-col rounded-[2rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-8 transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow shadow-sm"
           >
             <div className="mb-6">
-              <h2 className="text-xl font-bold text-white group-hover:text-brand-200 transition-colors">{plan.name}</h2>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">{plan.name}</h2>
               <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="text-4xl font-black text-white">{plan.price.split(' ')[0]}</span>
+                <span className="text-4xl font-black text-slate-900 dark:text-white transition-colors">{plan.price.split(' ')[0]}</span>
                 <span className="text-sm font-medium text-slate-500">/ {plan.price.split(' ')[2]}</span>
               </div>
               {plan.alt ? (
-                <span className="mt-1 block text-xs font-medium text-brand-400/80 uppercase tracking-wider">
+                <span className="mt-1 block text-xs font-medium text-brand-600 dark:text-brand-400/80 uppercase tracking-wider transition-colors">
                   {plan.alt}
                 </span>
               ) : (
@@ -83,26 +83,26 @@ export default function Pricing() {
               )}
             </div>
             
-            <div className="mt-auto pt-8 border-t border-white/5">
-              <p className="text-sm text-slate-400 leading-relaxed min-h-[3rem]">{plan.includes}</p>
+            <div className="mt-auto pt-8 border-t border-slate-200 dark:border-white/5">
+              <p className="text-sm text-slate-600 dark:text-slate-400 leading-relaxed min-h-[3rem] transition-colors">{plan.includes}</p>
               <div className="mt-6 flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Ideal for:</span>
-                <span className="text-[11px] font-semibold text-brand-300/90">{plan.idealFor}</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">Ideal for:</span>
+                <span className="text-[11px] font-semibold text-brand-600 dark:text-brand-300/90 transition-colors">{plan.idealFor}</span>
               </div>
             </div>
           </article>
         ))}
       </section>
 
-      <div className="rounded-[2rem] border border-white/5 bg-white/[0.01] p-6 text-center text-sm text-slate-500 backdrop-blur-sm">
+      <div className="rounded-[2rem] border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] p-6 text-center text-sm text-slate-500 backdrop-blur-sm shadow-sm transition-colors">
         All hosting plans include DFWSC-managed uptime, SSL, monitoring, and incident response. 
         Labor for devops and custom feature development is billed separately at $100–$150/hr.
       </div>
 
       <section className="grid gap-8 lg:grid-cols-2">
-        <div className="rounded-[2rem] border border-white/5 bg-white/[0.02] p-10 transition-all duration-300 hover:bg-white/[0.04]">
-          <h2 className="text-3xl font-bold text-white">Project Kickoffs</h2>
-          <p className="mt-6 text-lg text-slate-400 leading-relaxed">
+        <div className="rounded-[2rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-10 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.04] shadow-sm">
+          <h2 className="text-3xl font-bold text-slate-900 dark:text-white transition-colors">Project Kickoffs</h2>
+          <p className="mt-6 text-lg text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
             Need a new build or major feature? We start with a short discovery workshop to define
             scope, handoff plan, and success metrics.
           </p>
@@ -112,20 +112,20 @@ export default function Pricing() {
               "Clear documentation so you can run in-house or keep us on retainer.",
               "Integrations with Stripe, CRMs, and analytics platforms baked in."
             ].map((item, i) => (
-              <li key={i} className="flex items-start gap-4">
-                <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-500/10 border border-brand-500/20">
-                  <span className="h-1.5 w-1.5 rounded-full bg-brand-400" />
+              <li key={i} className="flex items-start gap-4 group">
+                <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-500/10 border border-brand-500/20 group-hover:border-brand-500/40 transition-colors">
+                  <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
                 </div>
-                <span className="text-base text-slate-300">{item}</span>
+                <span className="text-base text-slate-700 dark:text-slate-300 transition-colors">{item}</span>
               </li>
             ))}
           </ul>
         </div>
         
-        <div className="flex flex-col justify-between rounded-[2rem] border border-white/5 bg-gradient-to-br from-brand-600/10 to-transparent p-10 transition-all duration-300 hover:bg-white/[0.04]">
+        <div className="flex flex-col justify-between rounded-[2rem] border border-brand-500/10 bg-gradient-to-br from-brand-600/5 to-transparent dark:from-brand-600/10 dark:to-transparent p-10 transition-all duration-300 hover:from-brand-600/10 dark:hover:bg-white/[0.04] shadow-sm">
           <div>
-            <h2 className="text-3xl font-bold text-white">Let&apos;s pick the right plan</h2>
-            <p className="mt-6 text-lg text-slate-400 leading-relaxed">
+            <h2 className="text-3xl font-bold text-slate-900 dark:text-white transition-colors">Let&apos;s pick the right plan</h2>
+            <p className="mt-6 text-lg text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
               Tell us about the app, traffic expectations, and compliance needs. We&apos;ll
               recommend an environment and share a migration path if you&apos;re moving from an
               existing host.

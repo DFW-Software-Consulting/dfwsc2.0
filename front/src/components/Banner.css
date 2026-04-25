@@ -1,6 +1,6 @@
 .banner {
   background: rgba(11, 114, 133, 0.05);
-  color: #c9e9ef;
+  color: var(--text-main);
   text-align: center;
   padding: 1rem 0;
   overflow: hidden;
@@ -10,8 +10,9 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  border-block: 1px solid rgba(255, 255, 255, 0.05);
+  border-block: 1px solid var(--border-subtle);
   backdrop-blur: 8px;
+  transition: all 0.3s ease;
 }
 
 .banner-track {

@@ -14,11 +14,11 @@ import Team from "./pages/Team.jsx";
 export default function App() {
   return (
     <BrowserRouter>
-      <div className="min-h-screen relative isolate bg-[#020617] selection:bg-brand-500/30 selection:text-white">
+      <div className="min-h-screen relative isolate bg-[var(--bg-main)] selection:bg-brand-500/30 transition-colors duration-300">
         {/* Background glow effects */}
         <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
-          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-500/10 blur-[120px] animate-pulse-slow" />
-          <div className="absolute bottom-[10%] right-[-5%] w-[30%] h-[30%] rounded-full bg-brand-600/10 blur-[100px] animate-pulse-slow" />
+          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-500/10 blur-[120px] animate-pulse-slow opacity-50 dark:opacity-100" />
+          <div className="absolute bottom-[10%] right-[-5%] w-[30%] h-[30%] rounded-full bg-brand-600/10 blur-[100px] animate-pulse-slow opacity-50 dark:opacity-100" />
         </div>
 
         <Navbar />

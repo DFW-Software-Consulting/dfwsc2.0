@@ -39,17 +39,17 @@ export default function Team() {
   }, []);
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
+    <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
       {/* Header */}
       <div className="mb-20 flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
-          <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-300">
+          <span className="inline-flex items-center rounded-full border border-brand-500/10 bg-brand-500/5 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-300">
             Meet our team
           </span>
-          <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-white sm:text-6xl text-gradient">
+          <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-6xl text-gradient">
             Experts building reliable software outcomes
           </h1>
-          <p className="mt-8 text-xl text-slate-400 leading-relaxed">
+          <p className="mt-8 text-xl text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
             Every engagement is led by seasoned practitioners who have shipped critical systems for
             finance, logistics, and high-growth startups. We stay close to business goals, turning
             strategy into running software.
@@ -69,7 +69,7 @@ export default function Team() {
         {teamMembers.map((member, idx) => (
           <article
             key={member.name}
-            className={`group relative flex flex-col items-center gap-10 rounded-[2.5rem] border border-white/5 bg-white/[0.02] p-10 transition-all duration-500 hover:bg-white/[0.04] md:flex-row ${
+            className={`group relative flex flex-col items-center gap-10 rounded-[2.5rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] p-10 transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] md:flex-row shadow-sm ${
               idx % 2 === 1 ? "md:flex-row-reverse" : ""
             }`}
           >
@@ -82,27 +82,27 @@ export default function Team() {
                 <img
                   src={member.image}
                   alt={member.name}
-                  className="relative z-10 h-64 w-64 rounded-2xl border border-white/10 object-cover shadow-2xl transition-all duration-500 grayscale-[0.4] group-hover:grayscale-0 group-hover:scale-[1.02]"
+                  className="relative z-10 h-64 w-64 rounded-2xl border border-slate-200 dark:border-white/10 object-cover shadow-2xl transition-all duration-500 grayscale-[0.4] group-hover:grayscale-0 group-hover:scale-[1.02]"
                 />
               </div>
             </div>
 
             {/* Info */}
             <div className="relative z-10 w-full md:w-2/3 text-center md:text-left">
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-brand-400">
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-brand-600 dark:text-brand-400 transition-colors">
                 {member.role}
               </span>
-              <h2 className="mt-2 text-3xl font-bold text-white group-hover:text-brand-100 transition-colors">
+              <h2 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-100 transition-colors">
                 {member.name}
               </h2>
-              <p className="mt-6 text-lg leading-relaxed text-slate-400">{member.bio}</p>
+              <p className="mt-6 text-lg leading-relaxed text-slate-600 dark:text-slate-400 transition-colors">{member.bio}</p>
             </div>
           </article>
         ))}
       </div>
 
       <Banner
-        className="mt-24 glass rounded-3xl p-6 border-brand-500/20"
+        className="mt-24 glass rounded-3xl p-6 border-brand-500/20 shadow-sm transition-colors"
         message="🤝 Embedded software engineers and web developers partner with you from whiteboard to launch."
       />
     </section>
