@@ -1,4 +1,4 @@
-import { and, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type Stripe from "stripe";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
