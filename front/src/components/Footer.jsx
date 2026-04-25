@@ -51,7 +51,7 @@ export default function Footer() {
               <img
                 src="/DFWSC-Logo-HorizWordmarkPNG.png"
                 alt="DFW Software Consulting"
-                className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === 'dark' ? 'invert brightness-200' : ''}`}
+                className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === 'dark' ? 'invert hue-rotate-180 brightness-125' : ''}`}
               />
             </Link>
             <p className="text-lg text-slate-600 dark:text-slate-400 leading-relaxed max-w-md transition-colors">
