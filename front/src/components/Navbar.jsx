@@ -108,7 +108,7 @@ export default function Navbar() {
           <img
             src="/DFWSC-Logo-HorizWordmarkPNG.png"
             alt="DFW Software Consulting"
-            className={`h-8 w-auto relative z-10 brightness-110 transition-all duration-300 ${theme === 'dark' ? 'grayscale-[0.2] hover:grayscale-0' : 'grayscale-0'}`}
+            className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === 'dark' ? 'invert brightness-200' : ''}`}
           />
         </Link>
 
