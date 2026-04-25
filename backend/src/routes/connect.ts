@@ -133,7 +133,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             name: { type: "string", minLength: 1 },
             email: { type: "string", format: "email" },
             groupId: { type: "string" },
-            workspace: { type: "string", enum: ["dfwsc_services", "client_portal"] },
+            workspace: { type: "string", enum: ["dfwsc_services", "client_portal", "ledger_crm"] },
           },
         },
       },
@@ -148,7 +148,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       if (!isWorkspace(workspace)) {
         return reply
           .code(400)
-          .send({ error: "workspace must be dfwsc_services or client_portal." });
+          .send({ error: "workspace must be dfwsc_services, client_portal, or ledger_crm." });
       }
 
       request.log.info(
@@ -167,6 +167,61 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         }
         if (group.workspace !== workspace) {
           return reply.code(400).send({ error: "groupId workspace does not match workspace." });
+        }
+      }
+
+      if (workspace === "ledger_crm") {
+        const normalizedEmail = email.toLowerCase().trim();
+        const [existingByEmail] = await db
+          .select({ id: clients.id })
+          .from(clients)
+          .where(and(eq(clients.email, normalizedEmail), eq(clients.workspace, workspace)))
+          .limit(1);
+
+        if (existingByEmail) {
+          return reply
+            .code(409)
+            .send({ error: "A client with this email already exists in this workspace." });
+        }
+
+        let stripeCustomerId: string | null = null;
+        try {
+          const stripeCustomer = await stripe.customers.create({
+            email: normalizedEmail,
+            name,
+            metadata: {
+              workspace,
+            },
+          });
+          stripeCustomerId = stripeCustomer.id;
+
+          const [createdClient] = await db
+            .insert(clients)
+            .values({
+              id: stripeCustomerId,
+              workspace,
+              groupId: groupId ?? null,
+              name,
+              email: normalizedEmail,
+              stripeCustomerId,
+              status: "active",
+            })
+            .returning();
+
+          return reply.code(201).send({
+            id: createdClient.id,
+            name: createdClient.name,
+            email: createdClient.email,
+            stripeCustomerId: createdClient.stripeCustomerId,
+            status: createdClient.status,
+            workspace: createdClient.workspace,
+            groupId: createdClient.groupId,
+          });
+        } catch (error) {
+          if (stripeCustomerId) {
+            await stripe.customers.del(stripeCustomerId).catch(() => {});
+          }
+          throw error;
         }
       }
 
@@ -228,6 +283,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       if (!isWorkspace(workspaceParam)) {
         return reply.code(400).send({ error: "workspace is required." });
+      }
+
+      if (workspaceParam === "ledger_crm") {
+        return reply.code(400).send({
+          error: "ledger_crm uses direct billing and does not support Connect onboarding.",
+        });
       }
 
       if (groupId) {

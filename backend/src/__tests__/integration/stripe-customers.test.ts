@@ -8,6 +8,14 @@ vi.mock("../../lib/stripe", () => ({
       retrieve: vi.fn(),
       update: vi.fn(),
     },
+    subscriptions: {
+      list: vi.fn(),
+      update: vi.fn(),
+    },
+    subscriptionSchedules: {
+      list: vi.fn(),
+      update: vi.fn(),
+    },
   },
 }));
 
@@ -26,6 +34,10 @@ const JWT_SECRET = process.env.JWT_SECRET || TEST_JWT_SECRET;
 const mockListCustomers = stripe.customers.list as ReturnType<typeof vi.fn>;
 const mockRetrieveCustomer = stripe.customers.retrieve as ReturnType<typeof vi.fn>;
 const mockUpdateCustomer = stripe.customers.update as ReturnType<typeof vi.fn>;
+const mockListSubscriptions = stripe.subscriptions.list as ReturnType<typeof vi.fn>;
+const mockUpdateSubscription = stripe.subscriptions.update as ReturnType<typeof vi.fn>;
+const mockListSchedules = stripe.subscriptionSchedules.list as ReturnType<typeof vi.fn>;
+const mockUpdateSchedule = stripe.subscriptionSchedules.update as ReturnType<typeof vi.fn>;
 
 describe("Stripe Customers API Integration", () => {
   let app: any;
@@ -48,6 +60,13 @@ describe("Stripe Customers API Integration", () => {
     mockListCustomers.mockReset();
     mockRetrieveCustomer.mockReset();
     mockUpdateCustomer.mockReset();
+    mockListSubscriptions.mockReset();
+    mockUpdateSubscription.mockReset();
+    mockListSchedules.mockReset();
+    mockUpdateSchedule.mockReset();
+
+    mockListSubscriptions.mockResolvedValue({ data: [], has_more: false });
+    mockListSchedules.mockResolvedValue({ data: [], has_more: false });
   });
 
   afterEach(async () => {
@@ -579,7 +598,12 @@ describe("Stripe Customers API Integration", () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ success: true });
+      expect(response.json()).toMatchObject({
+        success: true,
+        subscriptionsLinked: 0,
+        schedulesLinked: 0,
+        linkFailures: 0,
+      });
 
       expect(mockUpdateCustomer).toHaveBeenCalledWith(stripeCustomerId, {
         name: "Local Name",
@@ -607,7 +631,48 @@ describe("Stripe Customers API Integration", () => {
       });
 
       expect(response.statusCode).toBe(400);
-      expect(response.json().error).toMatch(/only available for dfwsc_services/i);
+      expect(response.json().error).toMatch(/only available for direct billing workspaces/i);
+    });
+
+    it("supports ledger_crm workspace for sync", async () => {
+      const localClientId = randomUUID();
+      const stripeCustomerId = "cus_sync_ledger";
+      cleanupIds.push(localClientId);
+
+      await db.insert(clients).values({
+        id: localClientId,
+        name: "Ledger Sync",
+        email: "ledger-sync@example.com",
+        workspace: "ledger_crm",
+        stripeCustomerId,
+        status: "active",
+      });
+
+      mockRetrieveCustomer.mockResolvedValueOnce({
+        id: stripeCustomerId,
+        name: "Ledger Sync",
+        email: "ledger-sync@example.com",
+        phone: null,
+        address: null,
+        metadata: {},
+        created: 123,
+        deleted: false,
+      });
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/stripe/sync-customer",
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          stripeCustomerId,
+          localClientId,
+          workspace: "ledger_crm",
+          resolutions: [{ fieldName: "name", source: "local" }],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ success: true, linkFailures: 0 });
     });
 
     it("returns 400 when required sync fields are missing", async () => {
@@ -692,7 +757,12 @@ describe("Stripe Customers API Integration", () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ success: true });
+      expect(response.json()).toMatchObject({
+        success: true,
+        subscriptionsLinked: 0,
+        schedulesLinked: 0,
+        linkFailures: 0,
+      });
       expect(mockUpdateCustomer).not.toHaveBeenCalled();
     });
 

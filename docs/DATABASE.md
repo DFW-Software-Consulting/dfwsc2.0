@@ -11,7 +11,7 @@ The project uses **PostgreSQL 17** with the **Drizzle ORM**. All schema definiti
 The primary entity for each consultant's client. Covers the full lifecycle from first contact (lead) through active billing to suspension.
 
 - **Keys**: `id` (UUID), `name`, `email`.
-- **Workspace**: `workspace` (`"dfwsc_services"` or `"client_portal"`) - separates internal and external clients.
+- **Workspace**: `workspace` (`"dfwsc_services"`, `"client_portal"`, or `"ledger_crm"`) - separates application domains.
 - **Credentials**: `apiKeyHash` (bcrypt), `apiKeyLookup` (SHA256).
 - **Stripe**: `stripeAccountId` (linked Express account), `stripeCustomerId` (for invoicing — null for leads).
 - **Status**: `status` (`"active"`, `"inactive"`, or `"lead"`). Leads have no Stripe customer. Converting a lead to a client creates the Stripe customer and changes status to `"active"`.
@@ -22,6 +22,7 @@ The primary entity for each consultant's client. Covers the full lifecycle from 
 - **Address**: `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`.
 - **Billing**: `defaultPaymentTermsDays` - default payment terms for invoices.
 - **Notes**: `notes` - free-form text field for admin notes.
+- **Lead Workflow**: `lastContactAt`, `nextAction`, `followUpAt` for CRM follow-up tracking.
 - **CRM / Payment Sync** (added in migration `0007_gorgeous_fallen_one.sql`):
   - `paymentStatus` — cached Stripe subscription status: `active`, `trialing`, `past_due`, `unpaid`, `canceled`, or `none`. Updated every 15 minutes.
   - `paymentStatusSyncedAt` — timestamp of the last sync.

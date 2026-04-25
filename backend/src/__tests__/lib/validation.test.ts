@@ -1,22 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { FastifyReply } from "fastify";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as stripeModule from "../../lib/stripe";
 import {
-  validateWorkspace,
-  validateWorkspaceQuery,
-  validateDateFormat,
-  validateDateRange,
-  validateTaxRate,
-  validateLimit,
-  validateAmountCents,
-  validateRequiredString,
-  validateInterval,
   calculateDaysUntilDue,
   DATE_FORMAT_REGEX,
   DEFAULT_DAYS_UNTIL_DUE,
-  STRIPE_LIST_LIMIT,
   DEFAULT_INVOICE_DUE_DAYS,
+  STRIPE_LIST_LIMIT,
+  validateAmountCents,
+  validateDateFormat,
+  validateDateRange,
+  validateInterval,
+  validateLimit,
+  validateRequiredString,
+  validateTaxRate,
+  validateWorkspace,
+  validateWorkspaceQuery,
 } from "../../lib/validation";
-import type { FastifyReply } from "fastify";
-import * as stripeModule from "../../lib/stripe";
 
 vi.mock("../../lib/stripe", () => ({
   stripe: {
@@ -66,7 +66,7 @@ describe("validateWorkspace", () => {
     expect(result).toBeNull();
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.send).toHaveBeenCalledWith({
-      error: "workspace is required (dfwsc_services|client_portal).",
+      error: "workspace is required (dfwsc_services|client_portal|ledger_crm).",
     });
   });
 
@@ -113,7 +113,7 @@ describe("validateWorkspaceQuery", () => {
     expect(result).toBeNull();
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.send).toHaveBeenCalledWith({
-      error: "workspace query parameter is required (dfwsc_services|client_portal).",
+      error: "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
     });
   });
 

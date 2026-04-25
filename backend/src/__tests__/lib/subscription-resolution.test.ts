@@ -46,11 +46,7 @@ const CLIENT_B = {
   stripeCustomerId: "cus_BBB",
 };
 
-function makeSub(overrides: {
-  id?: string;
-  metadata?: Record<string, string>;
-  customer?: string;
-}) {
+function makeSub(overrides: { id?: string; metadata?: Record<string, string>; customer?: string }) {
   return {
     id: overrides.id ?? "sub_test",
     metadata: overrides.metadata ?? {},
@@ -92,7 +88,11 @@ describe("resolveSubscriptionClients", () => {
   it("resolves subscription by metadata clientId", async () => {
     dbWhereMock.mockResolvedValue([CLIENT_A]);
 
-    const sub = makeSub({ id: "sub_meta", metadata: { clientId: "client-aaa" }, customer: "cus_AAA" });
+    const sub = makeSub({
+      id: "sub_meta",
+      metadata: { clientId: "client-aaa" },
+      customer: "cus_AAA",
+    });
     const result = await resolveSubscriptionClients({
       subscriptions: [sub],
       schedules: [],
@@ -173,7 +173,11 @@ describe("resolveSubscriptionClients", () => {
 
     expect(result.scheduleMap.size).toBe(1);
     expect(result.backfills).toHaveLength(1);
-    expect(result.backfills[0]).toMatchObject({ kind: "schedule", id: "sch_cus", clientId: "client-bbb" });
+    expect(result.backfills[0]).toMatchObject({
+      kind: "schedule",
+      id: "sch_cus",
+      clientId: "client-bbb",
+    });
   });
 
   it("metadata match takes priority over stripe_customer match", async () => {
@@ -206,7 +210,11 @@ describe("resolveSubscriptionClients", () => {
       makeSub({ id: "sub_2", customer: "cus_AAA" }),
       makeSub({ id: "sub_3", customer: "cus_AAA" }),
     ];
-    await resolveSubscriptionClients({ subscriptions: subs, schedules: [], workspace: "client_portal" });
+    await resolveSubscriptionClients({
+      subscriptions: subs,
+      schedules: [],
+      workspace: "client_portal",
+    });
 
     expect(dbWhereMock).toHaveBeenCalledTimes(1);
   });

@@ -25,6 +25,9 @@ function AddLeadModal({ isOpen, onClose, onSubmit, isPending }) {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [lastContactAt, setLastContactAt] = useState("");
+  const [nextAction, setNextAction] = useState("");
+  const [followUpAt, setFollowUpAt] = useState("");
   const [error, setError] = useState("");
 
   const handleSubmit = () => {
@@ -38,6 +41,9 @@ function AddLeadModal({ isOpen, onClose, onSubmit, isPending }) {
       email: email.trim(),
       phone: phone.trim() || undefined,
       notes: notes.trim() || undefined,
+      lastContactAt: lastContactAt || undefined,
+      nextAction: nextAction.trim() || undefined,
+      followUpAt: followUpAt || undefined,
     });
   };
 
@@ -46,6 +52,9 @@ function AddLeadModal({ isOpen, onClose, onSubmit, isPending }) {
     setEmail("");
     setPhone("");
     setNotes("");
+    setLastContactAt("");
+    setNextAction("");
+    setFollowUpAt("");
     setError("");
     onClose();
   };
@@ -101,6 +110,32 @@ function AddLeadModal({ isOpen, onClose, onSubmit, isPending }) {
             disabled={isPending}
           />
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormInput
+            id="lead-last-contact-at"
+            label="Last Contact (optional)"
+            type="datetime-local"
+            value={lastContactAt}
+            onChange={(e) => setLastContactAt(e.target.value)}
+            disabled={isPending}
+          />
+          <FormInput
+            id="lead-follow-up-at"
+            label="Follow-up (optional)"
+            type="datetime-local"
+            value={followUpAt}
+            onChange={(e) => setFollowUpAt(e.target.value)}
+            disabled={isPending}
+          />
+        </div>
+        <FormInput
+          id="lead-next-action"
+          label="Next Action (optional)"
+          value={nextAction}
+          onChange={(e) => setNextAction(e.target.value)}
+          placeholder="e.g. Send proposal and schedule call"
+          disabled={isPending}
+        />
         {error && <p className="text-red-400 text-sm">{error}</p>}
       </div>
       <div className="flex justify-end gap-3 mt-6">
@@ -115,20 +150,20 @@ function AddLeadModal({ isOpen, onClose, onSubmit, isPending }) {
   );
 }
 
-export default function CRMPanel({ showToast }) {
+export default function CRMPanel({ showToast, workspace = "dfwsc_services" }) {
   const {
     data: allClients = [],
     isLoading,
     isError,
     error,
     refetch,
-  } = useClients({ workspace: "dfwsc_services" });
+  } = useClients({ workspace });
 
-  const suspendMutation = useSuspendClient();
-  const reinstateMutation = useReinstateClient();
-  const syncMutation = useSyncPaymentStatus();
-  const createLeadMutation = useCreateLead();
-  const convertMutation = useConvertToClient();
+  const suspendMutation = useSuspendClient(workspace);
+  const reinstateMutation = useReinstateClient(workspace);
+  const syncMutation = useSyncPaymentStatus(workspace);
+  const createLeadMutation = useCreateLead(workspace);
+  const convertMutation = useConvertToClient(workspace);
 
   const [showAddLead, setShowAddLead] = useState(false);
   const [suspendModal, setSuspendModal] = useState({
@@ -232,6 +267,26 @@ export default function CRMPanel({ showToast }) {
       },
     },
     {
+      header: "Follow-up",
+      render: (c) =>
+        c.followUpAt ? (
+          <span className="text-xs text-gray-300">{new Date(c.followUpAt).toLocaleString()}</span>
+        ) : (
+          <span className="text-gray-500 text-xs">—</span>
+        ),
+    },
+    {
+      header: "Next Action",
+      render: (c) =>
+        c.nextAction ? (
+          <span className="text-xs text-gray-300 max-w-[180px] truncate" title={c.nextAction}>
+            {c.nextAction}
+          </span>
+        ) : (
+          <span className="text-gray-500 text-xs">—</span>
+        ),
+    },
+    {
       header: "Actions",
       render: (c) => {
         const isLead = c.status === "lead";
@@ -302,7 +357,9 @@ export default function CRMPanel({ showToast }) {
       {/* Header row */}
       <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
         <div className="flex items-center gap-2">
-          <h4 className="text-md font-semibold text-white">CRM</h4>
+          <h4 className="text-md font-semibold text-white">
+            {workspace === "ledger_crm" ? "Ledger CRM" : "CRM"}
+          </h4>
           <span className="text-xs text-gray-400">
             {leads.length} lead{leads.length !== 1 ? "s" : ""} · {activeClients.length} client
             {activeClients.length !== 1 ? "s" : ""}
@@ -373,7 +430,7 @@ export default function CRMPanel({ showToast }) {
       {invoicesClient && (
         <ClientInvoicesModal
           client={invoicesClient}
-          workspace="dfwsc_services"
+          workspace={workspace}
           onClose={() => setInvoicesClient(null)}
           showToast={showToast}
         />

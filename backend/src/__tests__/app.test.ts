@@ -595,6 +595,45 @@ describe("connect onboarding", () => {
     await server.close();
   });
 
+  it("creates a direct billable ledger client via /accounts", async () => {
+    stripeMock.customers.create.mockResolvedValue({ id: "cus_ledger_1" });
+
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/accounts",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      payload: {
+        name: "Ledger Client",
+        email: "ledger@example.com",
+        workspace: "ledger_crm",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toEqual({
+      id: "cus_ledger_1",
+      name: "Ledger Client",
+      email: "ledger@example.com",
+      stripeCustomerId: "cus_ledger_1",
+      status: "active",
+      workspace: "ledger_crm",
+      groupId: null,
+    });
+    expect(stripeMock.customers.create).toHaveBeenCalledWith({
+      email: "ledger@example.com",
+      name: "Ledger Client",
+      metadata: { workspace: "ledger_crm" },
+    });
+    expect(dataStore.clients.get("cus_ledger_1")?.workspace).toBe("ledger_crm");
+
+    await server.close();
+  });
+
   it("sends onboarding email via /onboard-client/initiate", async () => {
     const server = await createServer();
     const adminToken = makeAdminToken();
@@ -925,7 +964,7 @@ describe("reports", () => {
     });
 
     expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: "Client with connected account not found." });
+    expect(response.json()).toEqual({ error: "Client not found." });
     await server.close();
   });
 
@@ -969,6 +1008,64 @@ describe("reports", () => {
       expect.objectContaining({ limit: 5 }),
       expect.objectContaining({ stripeAccount: "acct_123" })
     );
+    await server.close();
+  });
+
+  it("lists workspace payments for ledger CRM by Stripe customer", async () => {
+    seedClient({
+      id: "ledger_client_1",
+      name: "Ledger A",
+      email: "ledger-a@example.com",
+      workspace: "ledger_crm",
+      stripeCustomerId: "cus_ledger_a",
+      stripeAccountId: null,
+    });
+    seedClient({
+      id: "ledger_client_2",
+      name: "Ledger B",
+      email: "ledger-b@example.com",
+      workspace: "ledger_crm",
+      stripeCustomerId: "cus_ledger_b",
+      stripeAccountId: null,
+    });
+    seedClient({
+      id: "ledger_client_3",
+      name: "Ledger C",
+      email: "ledger-c@example.com",
+      workspace: "ledger_crm",
+      stripeCustomerId: null,
+      stripeAccountId: null,
+    });
+
+    stripeMock.paymentIntents.list
+      .mockResolvedValueOnce({ data: [{ id: "pi_ledger_a" }], has_more: false })
+      .mockResolvedValueOnce({ data: [{ id: "pi_ledger_b" }], has_more: false });
+
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/reports/payments?workspace=ledger_crm",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.workspace).toBe("ledger_crm");
+    expect(body.data).toHaveLength(2);
+    expect(body.data.map((p: { id: string }) => p.id)).toEqual(
+      expect.arrayContaining(["pi_ledger_a", "pi_ledger_b"])
+    );
+    expect(stripeMock.paymentIntents.list).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ customer: "cus_ledger_a" })
+    );
+    expect(stripeMock.paymentIntents.list).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ customer: "cus_ledger_b" })
+    );
+
     await server.close();
   });
 });
@@ -1034,6 +1131,112 @@ describe("webhooks", () => {
 
     expect(response.statusCode).toBe(200);
     expect(dataStore.webhookEvents.has("evt_test")).toBe(true);
+    await server.close();
+  });
+
+  it("updates client payment status from invoice.payment_failed events", async () => {
+    seedClient({
+      id: "ledger_webhook_client",
+      workspace: "ledger_crm",
+      stripeCustomerId: "cus_ledger_webhook",
+      paymentStatus: "active",
+    });
+
+    const payload = JSON.stringify({
+      id: "evt_invoice_failed",
+      type: "invoice.payment_failed",
+      data: {
+        object: {
+          id: "in_failed",
+          customer: "cus_ledger_webhook",
+          metadata: {},
+        },
+      },
+    });
+    const signature = stripeMock.webhooks.generateTestHeaderString({
+      payload,
+      secret: TEST_WEBHOOK_SECRET,
+    });
+
+    const server = await createServer();
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/stripe",
+      payload,
+      headers: {
+        "stripe-signature": signature,
+        "content-type": "application/json",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(dataStore.clients.get("ledger_webhook_client")?.paymentStatus).toBe("past_due");
+    expect(dataStore.clients.get("ledger_webhook_client")?.paymentStatusSyncedAt).toBeInstanceOf(
+      Date
+    );
+
+    await server.close();
+  });
+});
+
+describe("workspace CRM", () => {
+  it("creates a ledger lead via /crm/leads with tracking fields", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/crm/leads",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        workspace: "ledger_crm",
+        name: "Ledger Prospect",
+        email: "prospect@example.com",
+        nextAction: "Call next week",
+        lastContactAt: "2026-04-20T10:00:00.000Z",
+        followUpAt: "2026-04-27T10:00:00.000Z",
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.workspace).toBe("ledger_crm");
+    expect(body.status).toBe("lead");
+    expect(body.nextAction).toBe("Call next week");
+    expect(body.lastContactAt).toBe("2026-04-20T10:00:00.000Z");
+    expect(body.followUpAt).toBe("2026-04-27T10:00:00.000Z");
+
+    await server.close();
+  });
+
+  it("converts a ledger lead to billable client via /crm/leads/:id/convert", async () => {
+    seedClient({
+      id: "ledger_lead_1",
+      name: "Lead One",
+      email: "lead-one@example.com",
+      workspace: "ledger_crm",
+      status: "lead",
+      stripeCustomerId: null,
+    });
+    stripeMock.customers.create.mockResolvedValueOnce({ id: "cus_lead_one" });
+
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/crm/leads/ledger_lead_1/convert",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { workspace: "ledger_crm" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().status).toBe("active");
+    expect(response.json().stripeCustomerId).toBe("cus_lead_one");
+    expect(stripeMock.customers.create).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: expect.objectContaining({ workspace: "ledger_crm" }) })
+    );
+
     await server.close();
   });
 });
@@ -1335,6 +1538,7 @@ describe("DFWSC client creation", () => {
         country: "US",
       },
       metadata: {
+        workspace: "dfwsc_services",
         billingContactName: "John Doe",
         notes: "",
         defaultPaymentTermsDays: "",

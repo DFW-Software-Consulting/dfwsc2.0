@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { convertToClient, createLead, reinstateClient, suspendClient, syncPaymentStatus } from "../api/crm";
 import { useAuth } from "../contexts/AuthContext";
 
-export function useSuspendClient() {
+export function useSuspendClient(_workspace) {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
@@ -11,7 +11,7 @@ export function useSuspendClient() {
   });
 }
 
-export function useReinstateClient() {
+export function useReinstateClient(_workspace) {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
@@ -20,7 +20,7 @@ export function useReinstateClient() {
   });
 }
 
-export function useSyncPaymentStatus() {
+export function useSyncPaymentStatus(_workspace) {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
@@ -29,20 +29,20 @@ export function useSyncPaymentStatus() {
   });
 }
 
-export function useCreateLead() {
+export function useCreateLead(workspace) {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body) => createLead(token, body),
+    mutationFn: (body) => createLead(token, workspace, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }
 
-export function useConvertToClient() {
+export function useConvertToClient(workspace) {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id }) => convertToClient(token, id),
+    mutationFn: ({ id }) => convertToClient(token, workspace, id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }

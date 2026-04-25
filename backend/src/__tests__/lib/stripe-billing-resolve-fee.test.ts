@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { resolveClientFee, getSettings, ensureStripeCustomer } from "../../lib/stripe-billing";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ensureStripeCustomer, getSettings, resolveClientFee } from "../../lib/stripe-billing";
 
 // Mock the db module
 vi.mock("../../db/client", () => ({

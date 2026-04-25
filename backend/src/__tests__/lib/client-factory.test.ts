@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
-import { db } from "../../db/client";
-import { clients, clientGroups, onboardingTokens } from "../../db/schema";
 import { eq } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { db } from "../../db/client";
+import { clientGroups, clients, onboardingTokens } from "../../db/schema";
 import { createClientWithOnboardingToken } from "../../lib/client-factory";
 
 const workspace = "dfwsc_services";

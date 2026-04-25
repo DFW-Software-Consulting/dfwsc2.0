@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, inArray, isNotNull } from "drizzle-orm";
 import type Stripe from "stripe";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
@@ -40,7 +40,12 @@ export async function runPaymentSync(): Promise<number> {
   const syncableClients = await db
     .select({ id: clients.id, stripeCustomerId: clients.stripeCustomerId })
     .from(clients)
-    .where(and(eq(clients.workspace, "dfwsc_services"), isNotNull(clients.stripeCustomerId)));
+    .where(
+      and(
+        inArray(clients.workspace, ["dfwsc_services", "ledger_crm"]),
+        isNotNull(clients.stripeCustomerId)
+      )
+    );
 
   if (syncableClients.length === 0) return 0;
 
@@ -62,7 +67,11 @@ export async function runPaymentSync(): Promise<number> {
     const batch = syncableClients.slice(i, i + 50);
     await Promise.all(
       batch.map((client) => {
-        const subs = subsByCustomer.get(client.stripeCustomerId!) ?? [];
+        const customerId = client.stripeCustomerId;
+        if (!customerId) {
+          return Promise.resolve();
+        }
+        const subs = subsByCustomer.get(customerId) ?? [];
         const status = effectiveStatus(subs);
         return db
           .update(clients)

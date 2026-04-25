@@ -26,6 +26,7 @@ function formatUsd(cents) {
 // ─── Invoices Sub-Tab ────────────────────────────────────────────────────────
 
 function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
+  const workspaceLabel = workspace === "ledger_crm" ? "Ledger" : isDfwscMode ? "DFWSC" : "Portal";
   const { data: clients = [] } = useClients({ workspace });
   const { data: invoices = [], isLoading, isError, error, refetch } = useInvoices({ workspace });
   const { data: products = [], isLoading: productsLoading } = useProducts();
@@ -205,14 +206,10 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
       {/* Create form */}
       <div className="mb-6 p-4 bg-gray-700/30 rounded-lg border border-gray-700">
         <h4 className="text-md font-semibold text-white mb-3 flex items-center gap-2">
-          {isDfwscMode ? (
-            <span className="flex items-center gap-1.5 text-blue-400">
-              <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-              New DFWSC Invoice
-            </span>
-          ) : (
-            "New Portal Invoice"
-          )}
+          <span className="flex items-center gap-1.5 text-blue-400">
+            <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+            {`New ${workspaceLabel} Invoice`}
+          </span>
         </h4>
         <form onSubmit={handleCreate} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -450,9 +447,7 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
             >
               {createInvoiceMutation.isPending
                 ? "Sending..."
-                : isDfwscMode
-                  ? "Send DFWSC Invoice"
-                  : "Send Invoice"}
+                : `Send ${workspaceLabel} Invoice`}
             </button>
           </div>
         </form>
@@ -461,7 +456,7 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
       {/* List */}
       <div className="flex justify-between items-center mb-3">
         <h4 className="text-md font-semibold text-white">
-          {isDfwscMode ? "DFWSC Invoices" : "All Invoices"}
+          {`${workspaceLabel} Invoices`}
         </h4>
         <button
           type="button"
@@ -567,6 +562,7 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
 // ─── Payments Sub-Tab ────────────────────────────────────────────────────────
 
 function PaymentsTab({ showToast, isDfwscMode, workspace }) {
+  const workspaceLabel = workspace === "ledger_crm" ? "Ledger" : isDfwscMode ? "DFWSC" : "Portal";
   const { data: clients = [] } = useClients({ workspace });
   const createPaymentMutation = useCreatePayment();
 
@@ -627,14 +623,10 @@ function PaymentsTab({ showToast, isDfwscMode, workspace }) {
     <div>
       <div className="mb-6 p-4 bg-gray-700/30 rounded-lg border border-gray-700">
         <h4 className="text-md font-semibold text-white mb-3 flex items-center gap-2">
-          {isDfwscMode ? (
-            <span className="flex items-center gap-1.5 text-blue-400">
-              <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-              New DFWSC Payment Link
-            </span>
-          ) : (
-            "New Portal Payment Link"
-          )}
+          <span className="flex items-center gap-1.5 text-blue-400">
+            <span className="w-2 h-2 rounded-full bg-blue-400"></span>
+            {`New ${workspaceLabel} Payment Link`}
+          </span>
         </h4>
         <form onSubmit={handleCreateLink} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
@@ -715,9 +707,7 @@ function PaymentsTab({ showToast, isDfwscMode, workspace }) {
             >
               {createPaymentMutation.isPending
                 ? "Generating…"
-                : isDfwscMode
-                  ? "Generate DFWSC Link"
-                  : "Generate Link"}
+                : `Generate ${workspaceLabel} Link`}
             </button>
           </div>
         </form>
@@ -749,6 +739,7 @@ function PaymentsTab({ showToast, isDfwscMode, workspace }) {
 // ─── Subscriptions Sub-Tab ───────────────────────────────────────────────────
 
 function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
+  const workspaceLabel = workspace === "ledger_crm" ? "Ledger" : isDfwscMode ? "DFWSC" : "Portal";
   const { data: clients = [] } = useClients({ workspace });
   const { data: subs = [], isLoading, isError, error, refetch } = useSubscriptions({ workspace });
   const { data: taxRates = [] } = useTaxRates();
@@ -862,9 +853,7 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
   return (
     <div>
       <div className="mb-6 p-4 bg-gray-700/30 rounded-lg border border-gray-700">
-        <h4 className="text-md font-semibold text-white mb-3">
-          {isDfwscMode ? "New DFWSC Subscription" : "New Portal Subscription"}
-        </h4>
+        <h4 className="text-md font-semibold text-white mb-3">{`New ${workspaceLabel} Subscription`}</h4>
         <form onSubmit={handleCreate} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label htmlFor="sub-client" className="block text-sm text-gray-300 mb-1">
@@ -969,7 +958,7 @@ function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient
       {/* List filtered if in DFWSC mode */}
       <div className="flex justify-between items-center mb-3">
         <h4 className="text-md font-semibold text-white">
-          {isDfwscMode ? "DFWSC Subscriptions" : "All Subscriptions"}
+          {`${workspaceLabel} Subscriptions`}
         </h4>
         <button
           type="button"

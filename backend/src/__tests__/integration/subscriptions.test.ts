@@ -1364,7 +1364,10 @@ describe("Subscriptions API", () => {
     });
 
     afterEach(async () => {
-      await db.delete(clients).where(eq(clients.id, linkClientId)).catch(() => undefined);
+      await db
+        .delete(clients)
+        .where(eq(clients.id, linkClientId))
+        .catch(() => undefined);
     });
 
     it("200 — links an existing Stripe subscription to a client", async () => {
@@ -1429,7 +1432,10 @@ describe("Subscriptions API", () => {
       const newCustomerId = "cus_BACKFILL";
       const sub = makeStripeSub({ id: "sub_bf", customer: newCustomerId, metadata: {} });
       stripeMock.subscriptions.retrieve.mockResolvedValue(sub);
-      stripeMock.subscriptions.update.mockResolvedValue({ ...sub, metadata: { clientId: linkClientId } });
+      stripeMock.subscriptions.update.mockResolvedValue({
+        ...sub,
+        metadata: { clientId: linkClientId },
+      });
 
       await app.inject({
         method: "POST",
@@ -1438,7 +1444,11 @@ describe("Subscriptions API", () => {
         payload: { subscriptionId: "sub_bf", clientId: linkClientId, workspace },
       });
 
-      const [updated] = await db.select().from(clients).where(eq(clients.id, linkClientId)).limit(1);
+      const [updated] = await db
+        .select()
+        .from(clients)
+        .where(eq(clients.id, linkClientId))
+        .limit(1);
       expect(updated?.stripeCustomerId).toBe(newCustomerId);
     });
 

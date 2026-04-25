@@ -28,6 +28,9 @@ vi.mock("../components/admin/CreateClientForm", () => ({
 vi.mock("../components/admin/GroupPanel", () => ({
   default: ({ workspace }) => <div>GroupPanel:{workspace}</div>,
 }));
+vi.mock("../components/admin/CRMPanel", () => ({
+  default: ({ workspace }) => <div>CRMPanel:{workspace}</div>,
+}));
 vi.mock("../components/admin/ImportStripeCustomer", () => ({
   default: ({ workspace }) => <div>ImportStripeCustomer:{workspace}</div>,
 }));
@@ -57,5 +60,22 @@ describe("AdminDashboard workspace behavior", () => {
     expect(screen.queryByRole("button", { name: "Companies" })).not.toBeInTheDocument();
     expect(screen.queryByText("GroupPanel:client_portal")).not.toBeInTheDocument();
     expect(screen.getByText("CreateClientForm:dfwsc_services")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Ledger CRM" }));
+    expect(screen.getByRole("button", { name: "CRM" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Companies" })).not.toBeInTheDocument();
+    expect(screen.getByText("CreateClientForm:ledger_crm")).toBeInTheDocument();
+  });
+
+  it("resets CRM tab to Accounts when switching to Client Portal", async () => {
+    renderWithProviders(<AdminDashboard />, { token: "admin-token" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Ledger CRM" }));
+    await userEvent.click(screen.getByRole("button", { name: "CRM" }));
+    expect(screen.getByText("CRMPanel:ledger_crm")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Client Portal" }));
+    expect(screen.getByText("CreateClientForm:client_portal")).toBeInTheDocument();
+    expect(screen.queryByText("CRMPanel:ledger_crm")).not.toBeInTheDocument();
   });
 });

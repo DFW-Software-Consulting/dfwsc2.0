@@ -12,7 +12,7 @@ import {
 
 export const clientGroups = pgTable("client_groups", {
   id: text("id").primaryKey(),
-  workspace: text("workspace", { enum: ["dfwsc_services", "client_portal"] })
+  workspace: text("workspace", { enum: ["dfwsc_services", "client_portal", "ledger_crm"] })
     .default("client_portal")
     .notNull(),
   name: text("name").notNull(),
@@ -31,7 +31,7 @@ export const clients = pgTable(
   "clients",
   {
     id: text("id").primaryKey(),
-    workspace: text("workspace", { enum: ["dfwsc_services", "client_portal"] })
+    workspace: text("workspace", { enum: ["dfwsc_services", "client_portal", "ledger_crm"] })
       .default("client_portal")
       .notNull(),
     name: text("name").notNull(),
@@ -57,6 +57,9 @@ export const clients = pgTable(
     postalCode: text("postal_code"),
     country: text("country"),
     notes: text("notes"),
+    lastContactAt: timestamp("last_contact_at", { withTimezone: true }),
+    nextAction: text("next_action"),
+    followUpAt: timestamp("follow_up_at", { withTimezone: true }),
     defaultPaymentTermsDays: integer("default_payment_terms_days"),
     paymentStatus: text("payment_status", {
       enum: ["active", "past_due", "canceled", "unpaid", "trialing", "none"],

@@ -10,6 +10,25 @@ interface StripeInvoiceWithSubscription extends Stripe.Invoice {
   subscription: string | Stripe.Subscription | null;
 }
 
+type PaymentStatus = "active" | "past_due" | "canceled" | "unpaid" | "trialing" | "none";
+
+function extractCustomerId(
+  ref: string | Stripe.Customer | Stripe.DeletedCustomer | null
+): string | null {
+  if (!ref) return null;
+  if (typeof ref === "string") return ref;
+  if ("id" in ref && typeof ref.id === "string") return ref.id;
+  return null;
+}
+
+async function setClientPaymentStatusByCustomer(customerId: string, paymentStatus: PaymentStatus) {
+  const now = new Date();
+  await db
+    .update(clients)
+    .set({ paymentStatus, paymentStatusSyncedAt: now, updatedAt: now })
+    .where(eq(clients.stripeCustomerId, customerId));
+}
+
 export default async function webhooksRoute(fastify: FastifyInstance) {
   // Validate required environment variable at route registration time
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -103,6 +122,10 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       }
       case "invoice.payment_succeeded": {
         const inv = event.data.object as Stripe.Invoice;
+        const customerId = extractCustomerId(inv.customer ?? null);
+        if (customerId) {
+          await setClientPaymentStatusByCustomer(customerId, "active");
+        }
         fastify.log.info(
           { invoiceId: inv.id, clientId: inv.metadata?.clientId },
           "Invoice payment succeeded."
@@ -111,6 +134,10 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       }
       case "invoice.payment_failed": {
         const inv = event.data.object as Stripe.Invoice;
+        const customerId = extractCustomerId(inv.customer ?? null);
+        if (customerId) {
+          await setClientPaymentStatusByCustomer(customerId, "past_due");
+        }
         fastify.log.warn(
           { invoiceId: inv.id, clientId: inv.metadata?.clientId },
           "Invoice payment failed."
@@ -119,6 +146,22 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       }
       case "customer.subscription.updated": {
         const sub = event.data.object as Stripe.Subscription;
+        const customerId = extractCustomerId(sub.customer);
+        const nextStatus: PaymentStatus =
+          sub.status === "active"
+            ? "active"
+            : sub.status === "trialing"
+              ? "trialing"
+              : sub.status === "past_due"
+                ? "past_due"
+                : sub.status === "unpaid"
+                  ? "unpaid"
+                  : sub.status === "canceled"
+                    ? "canceled"
+                    : "none";
+        if (customerId) {
+          await setClientPaymentStatusByCustomer(customerId, nextStatus);
+        }
         fastify.log.info(
           { subId: sub.id, status: sub.status, clientId: sub.metadata?.clientId },
           "Subscription updated."
@@ -127,6 +170,10 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       }
       case "customer.subscription.paused": {
         const sub = event.data.object as Stripe.Subscription;
+        const customerId = extractCustomerId(sub.customer);
+        if (customerId) {
+          await setClientPaymentStatusByCustomer(customerId, "past_due");
+        }
         fastify.log.info(
           { subId: sub.id, clientId: sub.metadata?.clientId },
           "Subscription paused."
@@ -135,6 +182,10 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       }
       case "customer.subscription.resumed": {
         const sub = event.data.object as Stripe.Subscription;
+        const customerId = extractCustomerId(sub.customer);
+        if (customerId) {
+          await setClientPaymentStatusByCustomer(customerId, "active");
+        }
         fastify.log.info(
           { subId: sub.id, clientId: sub.metadata?.clientId },
           "Subscription resumed."
@@ -143,6 +194,10 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       }
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
+        const customerId = extractCustomerId(sub.customer);
+        if (customerId) {
+          await setClientPaymentStatusByCustomer(customerId, "canceled");
+        }
         fastify.log.info(
           { subId: sub.id, clientId: sub.metadata?.clientId },
           "Subscription deleted."
@@ -151,6 +206,10 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       }
       case "invoice.paid": {
         const inv = event.data.object as StripeInvoiceWithSubscription;
+        const customerId = extractCustomerId(inv.customer ?? null);
+        if (customerId) {
+          await setClientPaymentStatusByCustomer(customerId, "active");
+        }
         fastify.log.info(
           {
             invoiceId: inv.id,

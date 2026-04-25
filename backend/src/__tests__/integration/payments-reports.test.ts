@@ -293,7 +293,7 @@ describe("Payments Reports API Integration", () => {
         headers: { authorization: `Bearer ${makeAdminToken()}` },
       });
       expect(response.statusCode).toBe(404);
-      expect(response.json().error).toBe("Client with connected account not found.");
+      expect(response.json().error).toBe("Client not found.");
     });
 
     it("returns 404 when client has no stripeAccountId", async () => {
@@ -369,6 +369,76 @@ describe("Payments Reports API Integration", () => {
       expect(body.clientId).toBe(clientId);
       expect(body.data).toHaveLength(1);
       expect(body.hasMore).toBe(false);
+    });
+
+    it("fetches all payments for ledger CRM workspace without clientId or groupId", async () => {
+      const clientId1 = randomUUID();
+      const clientId2 = randomUUID();
+      cleanupIds.push(clientId1, clientId2);
+
+      await db.insert(clients).values({
+        id: clientId1,
+        name: "Ledger Client 1",
+        email: "ledger1@example.com",
+        workspace: "ledger_crm",
+        stripeCustomerId: "cus_ledger_1",
+        status: "active",
+      });
+
+      await db.insert(clients).values({
+        id: clientId2,
+        name: "Ledger Client 2",
+        email: "ledger2@example.com",
+        workspace: "ledger_crm",
+        stripeCustomerId: "cus_ledger_2",
+        status: "active",
+      });
+
+      mockPaymentIntentsList
+        .mockResolvedValueOnce({ data: [{ id: "pi_l1", amount: 1200 }], has_more: false })
+        .mockResolvedValueOnce({ data: [{ id: "pi_l2", amount: 2200 }], has_more: false });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/reports/payments?workspace=ledger_crm",
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.workspace).toBe("ledger_crm");
+      expect(body.data).toHaveLength(2);
+      expect(mockPaymentIntentsList).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ customer: "cus_ledger_1" })
+      );
+      expect(mockPaymentIntentsList).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ customer: "cus_ledger_2" })
+      );
+    });
+
+    it("returns 404 when ledger CRM client has no stripeCustomerId", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Ledger Client",
+        email: "ledger-missing-customer@example.com",
+        workspace: "ledger_crm",
+        stripeCustomerId: null,
+        status: "active",
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/reports/payments?workspace=ledger_crm&clientId=${clientId}`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error).toBe("Client with Stripe customer not found.");
     });
 
     it("respects starting_after and ending_before pagination params", async () => {

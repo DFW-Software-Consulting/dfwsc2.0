@@ -4,7 +4,7 @@ import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { stripe } from "../lib/stripe";
-import { isWorkspace } from "../lib/workspace";
+import { CRM_WORKSPACES, isWorkspace } from "../lib/workspace";
 
 interface ClientPatchBody {
   status?: "active" | "inactive";
@@ -24,6 +24,9 @@ interface ClientPatchBody {
   postalCode?: string | null;
   country?: string | null;
   notes?: string | null;
+  lastContactAt?: string | null;
+  nextAction?: string | null;
+  followUpAt?: string | null;
   defaultPaymentTermsDays?: number | null;
 }
 
@@ -49,9 +52,9 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       const { groupId, workspace } = req.query as { groupId?: string; workspace?: string };
 
       if (!isWorkspace(workspace)) {
-        return res
-          .status(400)
-          .send({ error: "workspace query parameter is required (dfwsc_services|client_portal)." });
+        return res.status(400).send({
+          error: "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
+        });
       }
 
       const query = db
@@ -68,6 +71,9 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           processingFeeCents: clients.processingFeeCents,
           paymentStatus: clients.paymentStatus,
           paymentStatusSyncedAt: clients.paymentStatusSyncedAt,
+          lastContactAt: clients.lastContactAt,
+          nextAction: clients.nextAction,
+          followUpAt: clients.followUpAt,
           suspendedAt: clients.suspendedAt,
           suspensionReason: clients.suspensionReason,
           createdAt: clients.createdAt,
@@ -98,6 +104,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           ...client,
           createdAt: client.createdAt?.toISOString(),
           paymentStatusSyncedAt: client.paymentStatusSyncedAt?.toISOString() ?? null,
+          lastContactAt: client.lastContactAt?.toISOString() ?? null,
+          followUpAt: client.followUpAt?.toISOString() ?? null,
           suspendedAt: client.suspendedAt?.toISOString() ?? null,
         }))
       );
@@ -118,7 +126,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
 
         if (!isWorkspace(workspace)) {
           return res.status(400).send({
-            error: "workspace query parameter is required (dfwsc_services|client_portal).",
+            error:
+              "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
           });
         }
 
@@ -138,6 +147,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
             ...safeClient,
             createdAt: client.createdAt?.toISOString(),
             updatedAt: client.updatedAt?.toISOString(),
+            lastContactAt: client.lastContactAt?.toISOString() ?? null,
+            followUpAt: client.followUpAt?.toISOString() ?? null,
           },
         });
       } catch (error) {
@@ -164,8 +175,19 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         processingFeeCents,
         name,
         email,
+        lastContactAt,
+        nextAction,
+        followUpAt,
         defaultPaymentTermsDays,
       } = body;
+
+      if (lastContactAt != null && Number.isNaN(new Date(lastContactAt).getTime())) {
+        return res.status(400).send({ error: "lastContactAt must be a valid ISO datetime." });
+      }
+
+      if (followUpAt != null && Number.isNaN(new Date(followUpAt).getTime())) {
+        return res.status(400).send({ error: "followUpAt must be a valid ISO datetime." });
+      }
 
       if (status !== undefined && status !== "active" && status !== "inactive") {
         return res.status(400).send({
@@ -287,6 +309,9 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         postalCode?: string | null;
         country?: string | null;
         notes?: string | null;
+        lastContactAt?: Date | null;
+        nextAction?: string | null;
+        followUpAt?: Date | null;
         defaultPaymentTermsDays?: number | null;
       } = { updatedAt: new Date() };
 
@@ -309,6 +334,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       if ("postalCode" in body) setValues.postalCode = body.postalCode;
       if ("country" in body) setValues.country = body.country;
       if ("notes" in body) setValues.notes = body.notes;
+      if ("lastContactAt" in body)
+        setValues.lastContactAt = lastContactAt != null ? new Date(lastContactAt) : null;
+      if ("nextAction" in body) setValues.nextAction = nextAction;
+      if ("followUpAt" in body)
+        setValues.followUpAt = followUpAt != null ? new Date(followUpAt) : null;
       if ("defaultPaymentTermsDays" in body)
         setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
 
@@ -359,6 +389,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         ...safeUpdatedClient,
         createdAt: updatedClient.createdAt?.toISOString(),
         updatedAt: updatedClient.updatedAt?.toISOString(),
+        lastContactAt: updatedClient.lastContactAt?.toISOString() ?? null,
+        followUpAt: updatedClient.followUpAt?.toISOString() ?? null,
       });
     } catch (error) {
       req.log.error(error, "Error updating client");
@@ -389,15 +421,20 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
 
         const [client] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
         if (!client) return res.status(404).send({ error: "Client not found." });
-        if (client.workspace !== "dfwsc_services") {
-          return res
-            .status(400)
-            .send({ error: "Suspend is only available for dfwsc_services clients." });
+        if (!CRM_WORKSPACES.includes(client.workspace as (typeof CRM_WORKSPACES)[number])) {
+          return res.status(400).send({
+            error: "Suspend is only available for crm workspaces (dfwsc_services|ledger_crm).",
+          });
         }
 
         const [updated] = await db
           .update(clients)
-          .set({ status: "inactive", suspendedAt: new Date(), suspensionReason: reason, updatedAt: new Date() })
+          .set({
+            status: "inactive",
+            suspendedAt: new Date(),
+            suspensionReason: reason,
+            updatedAt: new Date(),
+          })
           .where(eq(clients.id, id))
           .returning();
 
@@ -426,15 +463,20 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
 
         const [client] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
         if (!client) return res.status(404).send({ error: "Client not found." });
-        if (client.workspace !== "dfwsc_services") {
-          return res
-            .status(400)
-            .send({ error: "Reinstate is only available for dfwsc_services clients." });
+        if (!CRM_WORKSPACES.includes(client.workspace as (typeof CRM_WORKSPACES)[number])) {
+          return res.status(400).send({
+            error: "Reinstate is only available for crm workspaces (dfwsc_services|ledger_crm).",
+          });
         }
 
         const [updated] = await db
           .update(clients)
-          .set({ status: "active", suspendedAt: null, suspensionReason: null, updatedAt: new Date() })
+          .set({
+            status: "active",
+            suspendedAt: null,
+            suspensionReason: null,
+            updatedAt: new Date(),
+          })
           .where(eq(clients.id, id))
           .returning();
 

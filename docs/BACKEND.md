@@ -43,6 +43,7 @@ All payments resolve platform fees via a 5-level priority chain:
 All client-facing entities include a `workspace` field that separates:
 - **`client_portal`** — External consulting clients
 - **`dfwsc_services`** — Internal DFWSC service clients
+- **`ledger_crm`** — Ledger CRM + direct billing clients
 
 Routes like `/clients` and `/dfwsc-clients` provide filtered access by workspace.
 
@@ -77,11 +78,13 @@ All routes are prefixed with `/api/v1`.
 | POST | `/groups` | Create group | Admin JWT |
 | PATCH | `/groups/:id` | Update group | Admin JWT |
 
-### Lead Pipeline (dfwsc_services only)
+### Lead Pipeline (CRM workspaces)
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| POST | `/dfwsc/leads` | Create lead (no Stripe, UUID id) | Admin JWT |
-| POST | `/dfwsc/leads/:id/convert` | Convert lead → client (creates Stripe customer) | Admin JWT |
+| POST | `/crm/leads` | Create lead (no Stripe, UUID id) | Admin JWT |
+| POST | `/crm/leads/:id/convert` | Convert lead → client (creates Stripe customer) | Admin JWT |
+| POST | `/dfwsc/leads` | Backward-compatible DFWSC lead endpoint | Admin JWT |
+| POST | `/dfwsc/leads/:id/convert` | Backward-compatible DFWSC convert endpoint | Admin JWT |
 
 ### Onboarding
 | Method | Path | Description | Auth |
@@ -128,9 +131,13 @@ For the full CRM reference (lead pipeline, lifecycle, UI), see [CRM.md](./CRM.md
 ### Payment Sync (`lib/payment-sync.ts`)
 Runs immediately on server startup, then every **15 minutes** via `setInterval(...).unref()`.
 
-1. Queries all `dfwsc_services` clients with a `stripeCustomerId`.
+1. Queries all CRM+billing clients (`dfwsc_services` and `ledger_crm`) with a `stripeCustomerId`.
 2. Paginates all Stripe subscriptions (`status: "all"`).
 3. Derives effective payment status per client using priority: `active > trialing > past_due > unpaid > canceled > none`.
 4. Batch-updates `paymentStatus` + `paymentStatusSyncedAt` in the DB (50 rows per batch).
 
 Use `POST /clients/sync-payment-status` to trigger an immediate sync from the admin UI.
+
+## 8. Scope Exclusion
+
+Recruiter tracking is not part of this backend domain model or route surface.

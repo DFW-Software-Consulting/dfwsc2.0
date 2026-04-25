@@ -4,7 +4,12 @@ import { db } from "../db/client";
 import { clients } from "../db/schema";
 import type { Workspace } from "./validation";
 
-export type StripeCustomerRef = string | Stripe.Customer | Stripe.DeletedCustomer | null | undefined;
+export type StripeCustomerRef =
+  | string
+  | Stripe.Customer
+  | Stripe.DeletedCustomer
+  | null
+  | undefined;
 
 type StripeSubLike = Pick<Stripe.Subscription, "id" | "metadata" | "customer">;
 type StripeScheduleLike = Pick<Stripe.SubscriptionSchedule, "id" | "metadata" | "customer">;

@@ -57,6 +57,13 @@
       "when": 1777089390092,
       "tag": "0007_gorgeous_fallen_one",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777100000000,
+      "tag": "0008_ledger_crm_lead_fields",
+      "breakpoints": true
     }
   ]
 }

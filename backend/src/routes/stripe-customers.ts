@@ -6,7 +6,7 @@ import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { createClientWithOnboardingToken } from "../lib/client-factory";
 import { stripe } from "../lib/stripe";
-import { getStripeCustomerId, type StripeCustomerRef } from "../lib/subscription-resolution";
+import { getStripeCustomerId } from "../lib/subscription-resolution";
 import { isWorkspace, type Workspace } from "../lib/workspace";
 
 type StripeCustomer = {
@@ -27,7 +27,6 @@ type StripeCustomer = {
   created: number;
   deleted?: boolean;
 };
-
 
 const NATIVE_FIELDS = [
   "name",
@@ -234,26 +233,25 @@ type ReconcileCacheEntry = { expiresAt: number; result: ReconciliationResult };
 const reconcileCache = new Map<string, ReconcileCacheEntry>();
 
 async function getCachedReconciliation(
-  workspace: string,
+  workspace: Workspace,
   forceRefresh = false
 ): Promise<ReconciliationResult> {
   const now = Date.now();
   const cached = reconcileCache.get(workspace);
   if (!forceRefresh && cached && cached.expiresAt > now) return cached.result;
-  const result = await reconcileDfwscCustomers();
+  const result = await reconcileDirectBillingCustomers(workspace);
   if (RECONCILE_CACHE_TTL_MS > 0) {
     reconcileCache.set(workspace, { expiresAt: now + RECONCILE_CACHE_TTL_MS, result });
   }
   return result;
 }
 
-async function reconcileDfwscCustomers(): Promise<ReconciliationResult> {
+async function reconcileDirectBillingCustomers(
+  workspace: Workspace
+): Promise<ReconciliationResult> {
   const allStripe = await listAllStripeCustomers();
 
-  const allLocalClients = await db
-    .select()
-    .from(clients)
-    .where(eq(clients.workspace, "dfwsc_services"));
+  const allLocalClients = await db.select().from(clients).where(eq(clients.workspace, workspace));
 
   const localByStripeId = new Map<string, LocalClient>();
   const localByEmail = new Map<string, LocalClient>();
@@ -391,7 +389,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
 
         if (!isWorkspace(workspace)) {
           return res.status(400).send({
-            error: "workspace query parameter is required (dfwsc_services|client_portal).",
+            error: "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
           });
         }
 
@@ -418,7 +416,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
           existingStripeIds.map((c) => c.stripeCustomerId).filter(Boolean)
         );
 
-        if (workspace === "dfwsc_services") {
+        if (workspace === "dfwsc_services" || workspace === "ledger_crm") {
           const reconciliation = await getCachedReconciliation(workspace, refresh === "true");
           return res.status(200).send({
             toImport: reconciliation.toImport.map((item) => ({
@@ -472,7 +470,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
         if (!isWorkspace(workspace)) {
           return res
             .status(400)
-            .send({ error: "workspace is required (dfwsc_services|client_portal)." });
+            .send({ error: "workspace is required (dfwsc_services|client_portal|ledger_crm)." });
         }
 
         if (!stripeCustomerId) {
@@ -506,7 +504,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
         }
 
         // DFWSC direct import - create local client with stripeCustomerId, no onboarding needed
-        if (workspace === "dfwsc_services") {
+        if (workspace === "dfwsc_services" || workspace === "ledger_crm") {
           const [existingByStripeId] = await db
             .select()
             .from(clients)
@@ -649,10 +647,10 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
       try {
         const { stripeCustomerId, localClientId, workspace, resolutions } = req.body;
 
-        if (workspace !== "dfwsc_services") {
+        if (workspace !== "dfwsc_services" && workspace !== "ledger_crm") {
           return res
             .status(400)
-            .send({ error: "This endpoint is only available for dfwsc_services workspace." });
+            .send({ error: "This endpoint is only available for direct billing workspaces." });
         }
 
         if (!stripeCustomerId || !localClientId || !resolutions || resolutions.length === 0) {

@@ -1,13 +1,16 @@
 # CRM — Leads, Clients & Payment Tracking
 
-The CRM tab is available in the **DFWSC Services** workspace of the admin dashboard. It manages the full lifecycle of a consulting engagement: from first contact (lead) through active billing (client) to suspension if payment lapses.
+The CRM tab is available in the **DFWSC Services** and **Ledger CRM** workspaces of the admin dashboard. It manages the full lifecycle from first contact (lead) through active billing (client) to suspension if payment lapses.
 
 ---
 
 ## Concepts
 
 ### Lead
-A potential client. Stored in the `clients` table with `status = "lead"`. No Stripe customer is created yet — just contact info. Leads have a UUID primary key generated at creation time.
+A potential client. Stored in the `clients` table with `status = "lead"`. No Stripe customer is created yet. Leads support contact workflow fields:
+- `last_contact_at`
+- `next_action`
+- `follow_up_at`
 
 ### Client
 An active (or suspended) paying client. Has a `stripeCustomerId` set. Created either by:
@@ -33,7 +36,7 @@ Cached from Stripe and stored on the `clients` row. Updated by the background sy
 ### Adding a Lead
 In the CRM tab, click **+ Add Lead**. Only name and email are required — phone and notes are optional. No Stripe call is made.
 
-**Backend:** `POST /api/v1/dfwsc/leads`
+**Backend:** `POST /api/v1/crm/leads` (workspace-scoped)
 
 ```json
 {
@@ -54,7 +57,7 @@ Click **Convert to Client** on any lead row. This:
 
 If the Stripe customer creation succeeds but the DB update fails, the Stripe customer is automatically deleted (rollback).
 
-**Backend:** `POST /api/v1/dfwsc/leads/:id/convert`
+**Backend:** `POST /api/v1/crm/leads/:id/convert` (workspace-scoped)
 
 ---
 
@@ -85,7 +88,7 @@ Click **Reinstate** on any suspended row. Clears `suspendedAt` and `suspensionRe
 
 ### Background Job
 On server startup, and then every **15 minutes**, a background job:
-1. Queries all `dfwsc_services` clients that have a `stripeCustomerId`
+1. Queries all CRM+billing clients (`dfwsc_services` and `ledger_crm`) that have a `stripeCustomerId`
 2. Fetches all Stripe subscriptions in a single paginated pass
 3. Derives the effective payment status per client using priority order: `active > trialing > past_due > unpaid > canceled > none`
 4. Updates `paymentStatus` and `paymentStatusSyncedAt` on each client row
@@ -138,6 +141,15 @@ These columns were added in migration `0007_gorgeous_fallen_one.sql`:
 | `suspension_reason` | `text` | Why they were suspended |
 
 The `status` enum was extended to include `"lead"` (in addition to `"active"` and `"inactive"`).
+
+Lead workflow columns:
+- `last_contact_at` (`timestamptz`)
+- `next_action` (`text`)
+- `follow_up_at` (`timestamptz`)
+
+## Scope Note
+
+Recruiter tracking is explicitly out of scope for this system.
 
 ---
 

@@ -63,6 +63,12 @@ function filterByExpr(rows: any[], expr: any): any[] {
           const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
           return r[colName] === cond.value || r[camel] === cond.value;
         }
+        if (cond.field && cond.values !== undefined) {
+          const colName = resolveColumnName(cond.field);
+          if (!colName) return true;
+          const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+          return cond.values.includes(r[colName]) || cond.values.includes(r[camel]);
+        }
         return true;
       });
     });
@@ -170,15 +176,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
                 );
               }
               if (expr?.all?.length) {
-                const conditions = expr.all;
-                return Array.from(dataStore.clients.values()).filter((c) => {
-                  return conditions.every((cond: any) => {
-                    if (isColumn(cond?.field, "group_id")) return c.groupId === cond?.value;
-                    if (isColumn(cond?.field, "workspace")) return c.workspace === cond?.value;
-                    if (isColumn(cond?.field, "email")) return c.email === cond?.value;
-                    return false;
-                  });
-                });
+                return filterByExpr(Array.from(dataStore.clients.values()), expr);
               }
               const row = dataStore.clients.get(expr?.value);
               return row ? [row] : [];
@@ -264,8 +262,12 @@ export function createAppDbMock(dataStore: AppDataStore) {
             postalCode: payload.postalCode ?? existing?.postalCode ?? null,
             country: payload.country ?? existing?.country ?? null,
             notes: payload.notes ?? existing?.notes ?? null,
+            groupId: payload.groupId ?? existing?.groupId ?? null,
             defaultPaymentTermsDays:
               payload.defaultPaymentTermsDays ?? existing?.defaultPaymentTermsDays ?? null,
+            lastContactAt: payload.lastContactAt ?? existing?.lastContactAt ?? null,
+            nextAction: payload.nextAction ?? existing?.nextAction ?? null,
+            followUpAt: payload.followUpAt ?? existing?.followUpAt ?? null,
             stripeCustomerId: payload.stripeCustomerId ?? existing?.stripeCustomerId ?? null,
             createdAt: existing?.createdAt ?? new Date(),
             updatedAt: new Date(),
@@ -333,49 +335,49 @@ export function createAppDbMock(dataStore: AppDataStore) {
         where: (expr: any) => {
           const applyUpdate = () => {
             if (isTable(table, "clients")) {
-              const row = dataStore.clients.get(expr.value);
-              if (!row) return null;
-              Object.assign(row, values);
-              if (values.apiKey) dataStore.clientsByApiKey.set(values.apiKey, row.id);
-              if (Object.hasOwn(values, "apiKeyHash")) row.apiKeyHash = values.apiKeyHash;
-              return row;
+              const rows = Array.from(dataStore.clients.values());
+              const targets = filterByExpr(rows, expr);
+              for (const row of targets) {
+                Object.assign(row, values);
+                if (values.apiKey) dataStore.clientsByApiKey.set(values.apiKey, row.id);
+                if (Object.hasOwn(values, "apiKeyHash")) row.apiKeyHash = values.apiKeyHash;
+              }
+              return targets;
             }
             if (isTable(table, "client_groups")) {
-              const row = dataStore.clientGroups.get(expr.value);
-              if (!row) return null;
-              Object.assign(row, values);
-              return row;
+              const rows = Array.from(dataStore.clientGroups.values());
+              const targets = filterByExpr(rows, expr);
+              for (const row of targets) Object.assign(row, values);
+              return targets;
             }
             if (isTable(table, "onboarding_tokens")) {
-              const row = dataStore.onboardingTokens.get(expr.value);
-              if (!row) return null;
-              Object.assign(row, values);
-              return row;
+              const rows = Array.from(dataStore.onboardingTokens.values());
+              const targets = filterByExpr(rows, expr);
+              for (const row of targets) Object.assign(row, values);
+              return targets;
             }
             if (isTable(table, "webhook_events")) {
-              const row = dataStore.webhookEvents.get(expr.value);
-              if (!row) return null;
-              Object.assign(row, values);
-              return row;
+              const rows = Array.from(dataStore.webhookEvents.values());
+              const targets = filterByExpr(rows, expr);
+              for (const row of targets) Object.assign(row, values);
+              return targets;
             }
             if (isTable(table, "admins")) {
-              const row = dataStore.admins.get(expr.value);
-              if (!row) return null;
-              Object.assign(row, values);
-              return row;
+              const rows = Array.from(dataStore.admins.values());
+              const targets = filterByExpr(rows, expr);
+              for (const row of targets) Object.assign(row, values);
+              return targets;
             }
-            return null;
+            return [];
           };
           const resultPromise = Promise.resolve(applyUpdate());
           return {
             returning: async () => {
-              const row = await resultPromise;
-              return row ? [row] : [];
+              const rows = await resultPromise;
+              return rows;
             },
             then: (resolve: any, reject: any) =>
-              resultPromise
-                .then((row) => (row ? { rowCount: 1 } : { rowCount: 0 }))
-                .then(resolve, reject),
+              resultPromise.then((rows) => ({ rowCount: rows.length })).then(resolve, reject),
             catch: (reject: any) => resultPromise.catch(reject),
             finally: (cb: any) => resultPromise.finally(cb),
           };

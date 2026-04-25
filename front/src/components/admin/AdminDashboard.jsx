@@ -43,7 +43,8 @@ export default function AdminDashboard() {
   const [showDfwscClientSuccess, setShowDfwscClientSuccess] = useState(false);
 
   const isDfwscMode = workspace === "dfwsc_services";
-  const visibleTabs = isDfwscMode
+  const isCrmWorkspace = workspace === "dfwsc_services" || workspace === "ledger_crm";
+  const visibleTabs = isCrmWorkspace
     ? TABS.filter((tab) => tab.id !== "groups" && tab.id !== "reports")
     : TABS.filter((tab) => tab.id !== "crm");
 
@@ -91,7 +92,7 @@ export default function AdminDashboard() {
     setShowDfwscClientSuccess(false);
     setPreselectedClient(null);
     setActiveTab((prev) => {
-      if (nextWorkspace === "dfwsc_services" && (prev === "groups" || prev === "reports"))
+      if ((nextWorkspace === "dfwsc_services" || nextWorkspace === "ledger_crm") && (prev === "groups" || prev === "reports"))
         return "clients";
       if (nextWorkspace === "client_portal" && prev === "crm") return "clients";
       return prev;
@@ -174,7 +175,7 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      <div className="bg-gray-800/80 p-1 rounded-xl border border-gray-700 flex max-w-sm mx-auto mb-6 shadow-inner">
+      <div className="bg-gray-800/80 p-1 rounded-xl border border-gray-700 flex max-w-2xl mx-auto mb-6 shadow-inner gap-1">
         <button
           type="button"
           onClick={() => handleWorkspaceChange("dfwsc_services")}
@@ -188,9 +189,20 @@ export default function AdminDashboard() {
         </button>
         <button
           type="button"
+          onClick={() => handleWorkspaceChange("ledger_crm")}
+          className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all duration-200 ${
+            workspace === "ledger_crm"
+              ? "bg-emerald-600 text-white shadow-lg scale-[1.02]"
+              : "text-gray-400 hover:text-gray-200"
+          }`}
+        >
+          Ledger CRM
+        </button>
+        <button
+          type="button"
           onClick={() => handleWorkspaceChange("client_portal")}
           className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all duration-200 ${
-            !isDfwscMode
+            workspace === "client_portal"
               ? "bg-indigo-600 text-white shadow-lg scale-[1.02]"
               : "text-gray-400 hover:text-gray-200"
           }`}
@@ -249,7 +261,7 @@ export default function AdminDashboard() {
             <CreateClientForm
               showToast={showToast}
               workspace={workspace}
-              onSuccess={isDfwscMode ? handleDfwscClientCreated : undefined}
+              onSuccess={isCrmWorkspace ? handleDfwscClientCreated : undefined}
             />
           ) : isDfwscMode ? (
             <ImportStripeCustomerDfwsc showToast={showToast} />
@@ -259,7 +271,11 @@ export default function AdminDashboard() {
 
           <div className="mb-6">
             <h4 className="text-md font-semibold text-white mb-3">
-              {isDfwscMode ? "DFWSC Client List" : "Portal Client List"}
+              {workspace === "dfwsc_services"
+                ? "DFWSC Client List"
+                : workspace === "ledger_crm"
+                  ? "Ledger Client List"
+                  : "Portal Client List"}
             </h4>
             <ClientList showToast={showToast} workspace={workspace} />
           </div>
@@ -281,13 +297,13 @@ export default function AdminDashboard() {
         <BillingPanel
           showToast={showToast}
           workspace={workspace}
-          isDfwscMode={isDfwscMode}
+          isDfwscMode={workspace === "dfwsc_services"}
           initialSubTab={billingSubTab}
           preselectedClient={preselectedClient}
         />
       )}
 
-      {/* DFWSC Client Success - Post-Create Next Steps */}
+      {/* CRM Client Success - Post-Create Next Steps */}
       {showDfwscClientSuccess && preselectedClient && activeTab !== "clients" && (
         <div className="mb-6 p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
           <h4 className="text-lg font-semibold text-green-400 mb-4">
@@ -323,8 +339,8 @@ export default function AdminDashboard() {
       )}
 
       {/* CRM tab */}
-      {activeTab === "crm" && isDfwscMode && (
-        <CRMPanel showToast={showToast} />
+      {activeTab === "crm" && isCrmWorkspace && (
+        <CRMPanel showToast={showToast} workspace={workspace} />
       )}
 
       {/* Settings tab */}

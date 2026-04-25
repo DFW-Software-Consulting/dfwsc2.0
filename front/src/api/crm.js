@@ -9,8 +9,8 @@ export const reinstateClient = (token, id) =>
 export const syncPaymentStatus = (token) =>
   apiFetch("/clients/sync-payment-status", { token, method: "POST" });
 
-export const createLead = (token, body) =>
-  apiFetch("/dfwsc/leads", { token, method: "POST", body });
+export const createLead = (token, workspace, body) =>
+  apiFetch("/crm/leads", { token, method: "POST", body: { ...body, workspace } });
 
-export const convertToClient = (token, id) =>
-  apiFetch(`/dfwsc/leads/${id}/convert`, { token, method: "POST" });
+export const convertToClient = (token, workspace, id) =>
+  apiFetch(`/crm/leads/${id}/convert`, { token, method: "POST", body: { workspace } });

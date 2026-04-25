@@ -55,11 +55,12 @@ function formatStripeInvoice(
       ? new Date(inv.status_transitions.paid_at * 1000).toISOString()
       : null,
     createdAt: new Date(inv.created * 1000).toISOString(),
-    paymentMethod: inv.metadata?.paidOutOfBand === "true"
-      ? (inv.metadata?.paymentMethod ?? null)
-      : inv.status === "paid"
-        ? "stripe"
-        : null,
+    paymentMethod:
+      inv.metadata?.paidOutOfBand === "true"
+        ? (inv.metadata?.paymentMethod ?? null)
+        : inv.status === "paid"
+          ? "stripe"
+          : null,
     paymentReference: inv.metadata?.paymentReference || null,
   };
 }
@@ -267,63 +268,59 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
   app.post<{
     Params: InvoiceParams;
     Body: { method: string; reference?: string; paidAt?: string };
-  }>(
-    "/invoices/:id/mark-paid-out-of-band",
-    { preHandler: requireAdminJwt },
-    async (req, res) => {
-      const { id } = req.params;
-      const { method, reference, paidAt } = req.body ?? {};
+  }>("/invoices/:id/mark-paid-out-of-band", { preHandler: requireAdminJwt }, async (req, res) => {
+    const { id } = req.params;
+    const { method, reference, paidAt } = req.body ?? {};
 
-      const validMethods = ["paypal", "cash", "check", "other"];
-      if (!method || !validMethods.includes(method)) {
-        return res.status(400).send({
-          error: `method must be one of: ${validMethods.join(", ")}.`,
-        });
-      }
-
-      let invoice: Stripe.Invoice;
-      try {
-        invoice = await stripe.invoices.retrieve(id);
-      } catch {
-        return res.status(404).send({ error: "Invoice not found." });
-      }
-
-      if (invoice.status !== "open") {
-        return res.status(422).send({
-          error: `Invoice cannot be marked paid (status: ${invoice.status}).`,
-        });
-      }
-
-      let paidAtIso: string | null = null;
-      if (paidAt) {
-        const d = new Date(paidAt);
-        if (Number.isNaN(d.getTime())) {
-          return res.status(400).send({ error: "paidAt must be a valid ISO date." });
-        }
-        paidAtIso = d.toISOString();
-      }
-
-      await stripe.invoices.update(id, {
-        metadata: {
-          ...(invoice.metadata ?? {}),
-          paidOutOfBand: "true",
-          paymentMethod: method,
-          paymentReference: reference ?? "",
-          paidAtOverride: paidAtIso ?? "",
-        },
+    const validMethods = ["paypal", "cash", "check", "other"];
+    if (!method || !validMethods.includes(method)) {
+      return res.status(400).send({
+        error: `method must be one of: ${validMethods.join(", ")}.`,
       });
-
-      const paid = await stripe.invoices.pay(id, { paid_out_of_band: true });
-
-      const cidMeta = paid.metadata?.clientId ?? null;
-      let clientName: string | null = null;
-      if (cidMeta) {
-        const [c] = await db.select().from(clients).where(eq(clients.id, cidMeta)).limit(1);
-        clientName = c?.name ?? null;
-      }
-      return res.status(200).send(formatStripeInvoice(paid, cidMeta, clientName));
     }
-  );
+
+    let invoice: Stripe.Invoice;
+    try {
+      invoice = await stripe.invoices.retrieve(id);
+    } catch {
+      return res.status(404).send({ error: "Invoice not found." });
+    }
+
+    if (invoice.status !== "open") {
+      return res.status(422).send({
+        error: `Invoice cannot be marked paid (status: ${invoice.status}).`,
+      });
+    }
+
+    let paidAtIso: string | null = null;
+    if (paidAt) {
+      const d = new Date(paidAt);
+      if (Number.isNaN(d.getTime())) {
+        return res.status(400).send({ error: "paidAt must be a valid ISO date." });
+      }
+      paidAtIso = d.toISOString();
+    }
+
+    await stripe.invoices.update(id, {
+      metadata: {
+        ...(invoice.metadata ?? {}),
+        paidOutOfBand: "true",
+        paymentMethod: method,
+        paymentReference: reference ?? "",
+        paidAtOverride: paidAtIso ?? "",
+      },
+    });
+
+    const paid = await stripe.invoices.pay(id, { paid_out_of_band: true });
+
+    const cidMeta = paid.metadata?.clientId ?? null;
+    let clientName: string | null = null;
+    if (cidMeta) {
+      const [c] = await db.select().from(clients).where(eq(clients.id, cidMeta)).limit(1);
+      clientName = c?.name ?? null;
+    }
+    return res.status(200).send(formatStripeInvoice(paid, cidMeta, clientName));
+  });
 };
 
 export default invoiceRoutes;
