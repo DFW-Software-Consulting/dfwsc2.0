@@ -66,13 +66,22 @@ All routes are prefixed with `/api/v1`.
 ### Clients & Groups
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| GET | `/clients` | List clients | Admin JWT |
-| POST | `/accounts` | Create client | Admin JWT |
+| GET | `/clients` | List clients (includes CRM columns) | Admin JWT |
+| POST | `/accounts` | Create client (Stripe customer immediately) | Admin JWT |
 | PATCH | `/clients/:id` | Update client | Admin JWT |
+| POST | `/clients/sync-payment-status` | Trigger immediate Stripe subscription sync | Admin JWT |
+| POST | `/clients/:id/suspend` | Suspend client (set inactive + log reason) | Admin JWT |
+| POST | `/clients/:id/reinstate` | Reinstate suspended client | Admin JWT |
 | GET | `/dfwsc-clients` | List DFWSC workspace clients | Admin JWT |
 | GET | `/groups` | List groups | Admin JWT |
 | POST | `/groups` | Create group | Admin JWT |
 | PATCH | `/groups/:id` | Update group | Admin JWT |
+
+### Lead Pipeline (dfwsc_services only)
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/dfwsc/leads` | Create lead (no Stripe, UUID id) | Admin JWT |
+| POST | `/dfwsc/leads/:id/convert` | Convert lead → client (creates Stripe customer) | Admin JWT |
 
 ### Onboarding
 | Method | Path | Description | Auth |
@@ -89,8 +98,9 @@ All routes are prefixed with `/api/v1`.
 | POST | `/payments/create` | Create payment | API Key |
 | GET | `/reports/payments` | List payments | Admin JWT |
 | GET | `/invoices` | List invoices | Admin JWT |
-| POST | `/invoices` | Create invoice | Admin JWT |
-| PATCH | `/invoices/:id` | Cancel invoice | Admin JWT |
+| POST | `/invoices` | Create invoice (appends Nextcloud ledger row) | Admin JWT |
+| PATCH | `/invoices/:id` | Cancel/void invoice (updates Nextcloud ledger) | Admin JWT |
+| POST | `/invoices/backfill-ledger` | Seed Nextcloud ledger from all Stripe invoices | Admin JWT |
 | GET | `/invoices/pay/:token` | Get invoice by token | Public |
 | POST | `/invoices/pay/:token` | Submit invoice payment | Public |
 | GET | `/subscriptions` | List subscriptions | Admin JWT |
@@ -112,4 +122,26 @@ All routes are prefixed with `/api/v1`.
 | GET | `/settings` | Get system settings | Admin JWT |
 | POST | `/webhooks/stripe` | Stripe webhooks | Stripe Signature |
 
-For complete endpoint details, see `API_DOCS.md`.
+For the full CRM reference (lead pipeline, lifecycle, UI), see [CRM.md](./CRM.md).
+For the Nextcloud ledger reference (columns, triggers, backfill), see [NEXTCLOUD.md](./NEXTCLOUD.md).
+
+## 7. Background Jobs
+
+### Payment Sync (`lib/payment-sync.ts`)
+Runs immediately on server startup, then every **15 minutes** via `setInterval(...).unref()`.
+
+1. Queries all `dfwsc_services` clients with a `stripeCustomerId`.
+2. Paginates all Stripe subscriptions (`status: "all"`).
+3. Derives effective payment status per client using priority: `active > trialing > past_due > unpaid > canceled > none`.
+4. Batch-updates `paymentStatus` + `paymentStatusSyncedAt` in the DB (50 rows per batch).
+
+Use `POST /clients/sync-payment-status` to trigger an immediate sync from the admin UI.
+
+### Nextcloud Ledger Sync (`lib/nextcloud-ledger.ts`)
+Fire-and-forget writes to a CSV file at `https://cloud.dfwsc.com/remote.php/webdav/clients/dfwsc-ledger.csv` via WebDAV Basic auth.
+
+- **New invoice** → row appended.
+- **Invoice voided** → status column updated in place.
+- **`invoice.paid` webhook** → status + Paid At columns updated in place.
+
+If `NEXTCLOUD_URL`, `NEXTCLOUD_USER`, or `NEXTCLOUD_APP_PASSWORD` are not set, all ledger operations are silently skipped.
