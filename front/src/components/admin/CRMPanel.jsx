@@ -7,6 +7,7 @@ import {
   useSuspendClient,
   useSyncPaymentStatus,
 } from "../../hooks/useCRM";
+import ClientInvoicesModal from "./ClientInvoicesModal";
 import SuspendModal from "./SuspendModal";
 import AdminTable from "./shared/AdminTable";
 import BaseModal from "./shared/BaseModal";
@@ -32,24 +33,64 @@ function AddLeadModal({ isOpen, onClose, onSubmit, isPending }) {
       return;
     }
     setError("");
-    onSubmit({ name: name.trim(), email: email.trim(), phone: phone.trim() || undefined, notes: notes.trim() || undefined });
+    onSubmit({
+      name: name.trim(),
+      email: email.trim(),
+      phone: phone.trim() || undefined,
+      notes: notes.trim() || undefined,
+    });
   };
 
   const handleClose = () => {
-    setName(""); setEmail(""); setPhone(""); setNotes(""); setError("");
+    setName("");
+    setEmail("");
+    setPhone("");
+    setNotes("");
+    setError("");
     onClose();
   };
 
   return (
-    <BaseModal isOpen={isOpen} onClose={handleClose} title="Add New Lead" titleId="add-lead-title" size="md">
+    <BaseModal
+      isOpen={isOpen}
+      onClose={handleClose}
+      title="Add New Lead"
+      titleId="add-lead-title"
+      size="md"
+    >
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormInput id="lead-name" label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Jane Smith" disabled={isPending} />
-          <FormInput id="lead-email" label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. jane@company.com" disabled={isPending} />
+          <FormInput
+            id="lead-name"
+            label="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Jane Smith"
+            disabled={isPending}
+          />
+          <FormInput
+            id="lead-email"
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="e.g. jane@company.com"
+            disabled={isPending}
+          />
         </div>
-        <FormInput id="lead-phone" label="Phone (optional)" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. +1 (555) 123-4567" disabled={isPending} />
+        <FormInput
+          id="lead-phone"
+          label="Phone (optional)"
+          type="tel"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="e.g. +1 (555) 123-4567"
+          disabled={isPending}
+        />
         <div>
-          <label htmlFor="lead-notes" className="block text-sm font-medium text-gray-300 mb-1">Notes (optional)</label>
+          <label htmlFor="lead-notes" className="block text-sm font-medium text-gray-300 mb-1">
+            Notes (optional)
+          </label>
           <textarea
             id="lead-notes"
             value={notes}
@@ -63,15 +104,25 @@ function AddLeadModal({ isOpen, onClose, onSubmit, isPending }) {
         {error && <p className="text-red-400 text-sm">{error}</p>}
       </div>
       <div className="flex justify-end gap-3 mt-6">
-        <Button variant="secondary" onClick={handleClose} disabled={isPending}>Cancel</Button>
-        <Button variant="primary" onClick={handleSubmit} isLoading={isPending} disabled={isPending}>Save Lead</Button>
+        <Button variant="secondary" onClick={handleClose} disabled={isPending}>
+          Cancel
+        </Button>
+        <Button variant="primary" onClick={handleSubmit} isLoading={isPending} disabled={isPending}>
+          Save Lead
+        </Button>
       </div>
     </BaseModal>
   );
 }
 
 export default function CRMPanel({ showToast }) {
-  const { data: allClients = [], isLoading, isError, error, refetch } = useClients({ workspace: "dfwsc_services" });
+  const {
+    data: allClients = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useClients({ workspace: "dfwsc_services" });
 
   const suspendMutation = useSuspendClient();
   const reinstateMutation = useReinstateClient();
@@ -80,7 +131,12 @@ export default function CRMPanel({ showToast }) {
   const convertMutation = useConvertToClient();
 
   const [showAddLead, setShowAddLead] = useState(false);
-  const [suspendModal, setSuspendModal] = useState({ isOpen: false, clientId: null, clientName: "" });
+  const [suspendModal, setSuspendModal] = useState({
+    isOpen: false,
+    clientId: null,
+    clientName: "",
+  });
+  const [invoicesClient, setInvoicesClient] = useState(null);
   const [filter, setFilter] = useState("all"); // "all" | "leads" | "clients"
 
   const leads = allClients.filter((c) => c.status === "lead");
@@ -89,47 +145,70 @@ export default function CRMPanel({ showToast }) {
 
   const handleSyncNow = useCallback(() => {
     syncMutation.mutate(undefined, {
-      onSuccess: ({ synced }) => showToast?.(`Synced ${synced} client${synced !== 1 ? "s" : ""}`, "success"),
+      onSuccess: ({ synced }) =>
+        showToast?.(`Synced ${synced} client${synced !== 1 ? "s" : ""}`, "success"),
       onError: (err) => showToast?.(`Sync failed: ${err.message}`, "error"),
     });
   }, [syncMutation, showToast]);
 
-  const handleAddLead = useCallback((body) => {
-    createLeadMutation.mutate(body, {
-      onSuccess: (data) => {
-        showToast?.(`Lead "${data.name}" added`, "success");
-        setShowAddLead(false);
-      },
-      onError: (err) => showToast?.(`Error: ${err.message}`, "error"),
-    });
-  }, [createLeadMutation, showToast]);
+  const handleAddLead = useCallback(
+    (body) => {
+      createLeadMutation.mutate(body, {
+        onSuccess: (data) => {
+          showToast?.(`Lead "${data.name}" added`, "success");
+          setShowAddLead(false);
+        },
+        onError: (err) => showToast?.(`Error: ${err.message}`, "error"),
+      });
+    },
+    [createLeadMutation, showToast]
+  );
 
-  const handleConvert = useCallback((client) => {
-    convertMutation.mutate({ id: client.id }, {
-      onSuccess: () => showToast?.(`${client.name} is now a client — Stripe ID created`, "success"),
-      onError: (err) => showToast?.(`Convert failed: ${err.message}`, "error"),
-    });
-  }, [convertMutation, showToast]);
+  const handleConvert = useCallback(
+    (client) => {
+      convertMutation.mutate(
+        { id: client.id },
+        {
+          onSuccess: () =>
+            showToast?.(`${client.name} is now a client — Stripe ID created`, "success"),
+          onError: (err) => showToast?.(`Convert failed: ${err.message}`, "error"),
+        }
+      );
+    },
+    [convertMutation, showToast]
+  );
 
   const handleSuspendClick = useCallback((client) => {
     setSuspendModal({ isOpen: true, clientId: client.id, clientName: client.name });
   }, []);
 
-  const handleSuspendConfirm = useCallback((reason) => {
-    const { clientId } = suspendModal;
-    setSuspendModal({ isOpen: false, clientId: null, clientName: "" });
-    suspendMutation.mutate({ id: clientId, reason }, {
-      onSuccess: () => showToast?.("Client suspended", "success"),
-      onError: (err) => showToast?.(`Error: ${err.message}`, "error"),
-    });
-  }, [suspendModal, suspendMutation, showToast]);
+  const handleSuspendConfirm = useCallback(
+    (reason) => {
+      const { clientId } = suspendModal;
+      setSuspendModal({ isOpen: false, clientId: null, clientName: "" });
+      suspendMutation.mutate(
+        { id: clientId, reason },
+        {
+          onSuccess: () => showToast?.("Client suspended", "success"),
+          onError: (err) => showToast?.(`Error: ${err.message}`, "error"),
+        }
+      );
+    },
+    [suspendModal, suspendMutation, showToast]
+  );
 
-  const handleReinstate = useCallback((client) => {
-    reinstateMutation.mutate({ id: client.id }, {
-      onSuccess: () => showToast?.("Client reinstated", "success"),
-      onError: (err) => showToast?.(`Error: ${err.message}`, "error"),
-    });
-  }, [reinstateMutation, showToast]);
+  const handleReinstate = useCallback(
+    (client) => {
+      reinstateMutation.mutate(
+        { id: client.id },
+        {
+          onSuccess: () => showToast?.("Client reinstated", "success"),
+          onError: (err) => showToast?.(`Error: ${err.message}`, "error"),
+        }
+      );
+    },
+    [reinstateMutation, showToast]
+  );
 
   const columns = [
     { header: "Name", key: "name" },
@@ -159,31 +238,60 @@ export default function CRMPanel({ showToast }) {
         const isSuspended = !!c.suspendedAt;
         const isConverting = convertMutation.isPending && convertMutation.variables?.id === c.id;
         const isSuspending = suspendMutation.isPending && suspendMutation.variables?.id === c.id;
-        const isReinstating = reinstateMutation.isPending && reinstateMutation.variables?.id === c.id;
+        const isReinstating =
+          reinstateMutation.isPending && reinstateMutation.variables?.id === c.id;
 
         if (isLead) {
           return (
-            <Button size="sm" variant="primary" disabled={isConverting} isLoading={isConverting} onClick={() => handleConvert(c)}>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={isConverting}
+              isLoading={isConverting}
+              onClick={() => handleConvert(c)}
+            >
               Convert to Client
             </Button>
           );
         }
 
-        return isSuspended ? (
-          <div className="flex flex-col gap-1">
-            <Button size="sm" variant="success" disabled={isReinstating} isLoading={isReinstating} onClick={() => handleReinstate(c)}>
-              Reinstate
+        return (
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setInvoicesClient(c)}>
+              Invoices
             </Button>
-            {c.suspensionReason && (
-              <span className="text-xs text-gray-400 max-w-[160px] truncate" title={c.suspensionReason}>
-                {c.suspensionReason}
-              </span>
+            {isSuspended ? (
+              <div className="flex flex-col gap-1">
+                <Button
+                  size="sm"
+                  variant="success"
+                  disabled={isReinstating}
+                  isLoading={isReinstating}
+                  onClick={() => handleReinstate(c)}
+                >
+                  Reinstate
+                </Button>
+                {c.suspensionReason && (
+                  <span
+                    className="text-xs text-gray-400 max-w-[160px] truncate"
+                    title={c.suspensionReason}
+                  >
+                    {c.suspensionReason}
+                  </span>
+                )}
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={isSuspending}
+                isLoading={isSuspending}
+                onClick={() => handleSuspendClick(c)}
+              >
+                Suspend
+              </Button>
             )}
           </div>
-        ) : (
-          <Button size="sm" variant="danger" disabled={isSuspending} isLoading={isSuspending} onClick={() => handleSuspendClick(c)}>
-            Suspend
-          </Button>
         );
       },
     },
@@ -196,12 +304,21 @@ export default function CRMPanel({ showToast }) {
         <div className="flex items-center gap-2">
           <h4 className="text-md font-semibold text-white">CRM</h4>
           <span className="text-xs text-gray-400">
-            {leads.length} lead{leads.length !== 1 ? "s" : ""} · {activeClients.length} client{activeClients.length !== 1 ? "s" : ""}
+            {leads.length} lead{leads.length !== 1 ? "s" : ""} · {activeClients.length} client
+            {activeClients.length !== 1 ? "s" : ""}
           </span>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="primary" onClick={() => setShowAddLead(true)}>+ Add Lead</Button>
-          <Button size="sm" variant="secondary" disabled={syncMutation.isPending} isLoading={syncMutation.isPending} onClick={handleSyncNow}>
+          <Button size="sm" variant="primary" onClick={() => setShowAddLead(true)}>
+            + Add Lead
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={syncMutation.isPending}
+            isLoading={syncMutation.isPending}
+            onClick={handleSyncNow}
+          >
             Sync Now
           </Button>
         </div>
@@ -209,13 +326,19 @@ export default function CRMPanel({ showToast }) {
 
       {/* Filter tabs */}
       <div className="flex gap-4 mb-4 border-b border-gray-700">
-        {[["all", "All"], ["leads", "Leads"], ["clients", "Clients"]].map(([val, label]) => (
+        {[
+          ["all", "All"],
+          ["leads", "Leads"],
+          ["clients", "Clients"],
+        ].map(([val, label]) => (
           <button
             key={val}
             type="button"
             onClick={() => setFilter(val)}
             className={`pb-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              filter === val ? "border-blue-500 text-blue-400" : "border-transparent text-gray-400 hover:text-gray-200"
+              filter === val
+                ? "border-blue-500 text-blue-400"
+                : "border-transparent text-gray-400 hover:text-gray-200"
             }`}
           >
             {label}
@@ -230,7 +353,13 @@ export default function CRMPanel({ showToast }) {
         isError={isError}
         error={error}
         onRetry={refetch}
-        emptyMessage={filter === "leads" ? "No leads yet — add one above" : filter === "clients" ? "No clients yet" : "No records yet"}
+        emptyMessage={
+          filter === "leads"
+            ? "No leads yet — add one above"
+            : filter === "clients"
+              ? "No clients yet"
+              : "No records yet"
+        }
         loadingMessage="Loading CRM data..."
       />
 
@@ -240,6 +369,14 @@ export default function CRMPanel({ showToast }) {
         onSubmit={handleAddLead}
         isPending={createLeadMutation.isPending}
       />
+
+      {invoicesClient && (
+        <ClientInvoicesModal
+          client={invoicesClient}
+          workspace="dfwsc_services"
+          onClose={() => setInvoicesClient(null)}
+        />
+      )}
 
       <SuspendModal
         isOpen={suspendModal.isOpen}
