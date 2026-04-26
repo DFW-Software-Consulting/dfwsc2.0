@@ -123,8 +123,10 @@ All routes are prefixed with `/api/v1`.
 |--------|------|-------------|------|
 | GET | `/settings` | Get system settings | Admin JWT |
 | POST | `/webhooks/stripe` | Stripe webhooks | Stripe Signature |
+| POST | `/integrations/nextcloud/webhook` | Nextcloud OpenRegister webhook | SHA256 signature |
 
 For the full CRM reference (lead pipeline, lifecycle, UI), see [CRM.md](./CRM.md).
+For Nextcloud OpenRegister integration details, see [NEXTCLOUD.md](./NEXTCLOUD.md).
 
 ## 7. Background Jobs
 
@@ -137,6 +139,16 @@ Runs immediately on server startup, then every **15 minutes** via `setInterval(.
 4. Batch-updates `paymentStatus` + `paymentStatusSyncedAt` in the DB (50 rows per batch).
 
 Use `POST /clients/sync-payment-status` to trigger an immediate sync from the admin UI.
+
+### Nextcloud OpenRegister Sync (`lib/nextcloud-sync.ts`)
+
+Bi-directional client profile sync with a Nextcloud instance running the OpenRegister app. Three mechanisms:
+
+- **Outbound push** (`syncClientProfileToNextcloud`): POSTs new clients or PUTs updates to OpenRegister. Tracks sync state in `profile_sync_state`.
+- **Inbound webhook** (`POST /integrations/nextcloud/webhook`): Receives push events from Nextcloud, verifies SHA256 signature via `X-Nextcloud-Webhooks` header.
+- **Inbound polling** (`lib/nextcloud-poll.ts`): Runs every `NEXTCLOUD_POLL_INTERVAL_MS` (default 60s). Fetches individual objects by ID (GET list endpoint is broken in OpenRegister). Started on server boot via `startNextcloudPolling()`.
+
+See [NEXTCLOUD.md](./NEXTCLOUD.md) for full details.
 
 ## 8. Scope Exclusion
 

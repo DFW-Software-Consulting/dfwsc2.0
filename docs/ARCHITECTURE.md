@@ -9,7 +9,7 @@ The DFWSC Payment Portal is a platform for DFW Software Consulting to manage cli
 - **Frontend:** React 18, Vite, React Router 6, TanStack Query v5, TailwindCSS v4.
 - **Backend:** Node.js 20, Fastify 5, TypeScript.
 - **Database:** PostgreSQL 17, Drizzle ORM.
-- **Integrations:** Stripe Connect (Express), Nodemailer (SMTP).
+- **Integrations:** Stripe Connect (Express), Nodemailer (SMTP), Nextcloud OpenRegister (client profile sync).
 - **Environment:** Docker (Multi-stage builds), Nginx (Reverse proxy for frontend).
 
 ## 3. Specialized Documentation
@@ -18,6 +18,7 @@ For detailed rules and implementations, refer to these focused documents:
 - [DATABASE.md](./DATABASE.md) — Schema, Drizzle, and Migrations.
 - [STYLES.md](./STYLES.md) — Tailwind v4, Theme, and UI Patterns.
 - [CRM.md](./CRM.md) — Lead pipeline, client lifecycle, and payment sync job.
+- [NEXTCLOUD.md](./NEXTCLOUD.md) — Nextcloud OpenRegister bi-directional client profile sync.
 
 ## 4. System Components
 ...
@@ -67,6 +68,7 @@ sequenceDiagram
 - **`subscriptions`**: Recurring payment configurations.
 - **`invoices`**: Individual billing records linked to clients or subscriptions.
 - **`webhook_events`**: Idempotency log for Stripe webhooks.
+- **`profile_sync_state`**: Tracks bi-directional sync state between DFWSC clients and Nextcloud OpenRegister objects. See [NEXTCLOUD.md](./NEXTCLOUD.md).
 
 ## 6. Security & Authentication
 - **Admin Access:** JWT-based authentication (`POST /api/v1/auth/login`).

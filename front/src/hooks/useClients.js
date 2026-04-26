@@ -7,6 +7,7 @@ import {
   getStripeCustomers,
   importStripeCustomer,
   patchClient,
+  retryClientSync,
   syncStripeCustomer,
 } from "../api/clients";
 import { resendOnboardingLink } from "../api/onboarding";
@@ -114,5 +115,14 @@ export function useSyncStripeCustomer() {
   return useMutation({
     mutationFn: (body) => syncStripeCustomer(token, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["stripe-customers"] }),
+  });
+}
+
+export function useRetryClientSync() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => retryClientSync(token, id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }

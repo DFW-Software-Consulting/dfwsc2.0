@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { getSyncStateMap, syncClientProfileToNextcloud } from "../lib/nextcloud-sync";
 import { stripe } from "../lib/stripe";
 import { CRM_WORKSPACES, isWorkspace } from "../lib/workspace";
 
@@ -98,6 +99,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         : await query.where(eq(clients.workspace, workspace));
 
       const scopedList = clientList.filter((client) => client.workspace === workspace);
+      const syncStateMap = await getSyncStateMap(scopedList.map((client) => client.id));
 
       return res.status(200).send(
         scopedList.map((client) => ({
@@ -107,6 +109,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           lastContactAt: client.lastContactAt?.toISOString() ?? null,
           followUpAt: client.followUpAt?.toISOString() ?? null,
           suspendedAt: client.suspendedAt?.toISOString() ?? null,
+          syncStatus: syncStateMap.get(client.id)?.syncStatus ?? "synced",
+          syncError: syncStateMap.get(client.id)?.syncError ?? null,
+          syncAttempts: syncStateMap.get(client.id)?.syncAttempts ?? 0,
+          lastSyncAttemptAt: syncStateMap.get(client.id)?.lastSyncAttemptAt ?? null,
+          lastSyncedAt: syncStateMap.get(client.id)?.lastSyncedAt ?? null,
         }))
       );
     } catch (error) {
@@ -142,6 +149,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         }
 
         const { apiKeyHash, apiKeyLookup, ...safeClient } = client;
+        const syncStateMap = await getSyncStateMap([client.id]);
+        const syncState = syncStateMap.get(client.id);
         return res.status(200).send({
           client: {
             ...safeClient,
@@ -149,6 +158,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
             updatedAt: client.updatedAt?.toISOString(),
             lastContactAt: client.lastContactAt?.toISOString() ?? null,
             followUpAt: client.followUpAt?.toISOString() ?? null,
+            syncStatus: syncState?.syncStatus ?? "synced",
+            syncError: syncState?.syncError ?? null,
+            syncAttempts: syncState?.syncAttempts ?? 0,
+            lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+            lastSyncedAt: syncState?.lastSyncedAt ?? null,
           },
         });
       } catch (error) {
@@ -384,6 +398,12 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
+      await syncClientProfileToNextcloud(updatedClient.id).catch((syncErr) => {
+        req.log.warn(syncErr, "Client profile sync failed after patch.");
+      });
+      const syncStateMap = await getSyncStateMap([updatedClient.id]);
+      const syncState = syncStateMap.get(updatedClient.id);
+
       const { apiKeyHash, apiKeyLookup, ...safeUpdatedClient } = updatedClient;
       return res.status(200).send({
         ...safeUpdatedClient,
@@ -391,6 +411,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         updatedAt: updatedClient.updatedAt?.toISOString(),
         lastContactAt: updatedClient.lastContactAt?.toISOString() ?? null,
         followUpAt: updatedClient.followUpAt?.toISOString() ?? null,
+        syncStatus: syncState?.syncStatus ?? "synced",
+        syncError: syncState?.syncError ?? null,
+        syncAttempts: syncState?.syncAttempts ?? 0,
+        lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+        lastSyncedAt: syncState?.lastSyncedAt ?? null,
       });
     } catch (error) {
       req.log.error(error, "Error updating client");
@@ -438,6 +463,12 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           .where(eq(clients.id, id))
           .returning();
 
+        await syncClientProfileToNextcloud(updated.id).catch((syncErr) => {
+          req.log.warn(syncErr, "Client profile sync failed after suspend.");
+        });
+        const syncStateMap = await getSyncStateMap([updated.id]);
+        const syncState = syncStateMap.get(updated.id);
+
         const { apiKeyHash, apiKeyLookup, ...safe } = updated;
         return res.status(200).send({
           ...safe,
@@ -445,6 +476,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           updatedAt: updated.updatedAt?.toISOString(),
           suspendedAt: updated.suspendedAt?.toISOString() ?? null,
           paymentStatusSyncedAt: updated.paymentStatusSyncedAt?.toISOString() ?? null,
+          syncStatus: syncState?.syncStatus ?? "synced",
+          syncError: syncState?.syncError ?? null,
+          syncAttempts: syncState?.syncAttempts ?? 0,
+          lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+          lastSyncedAt: syncState?.lastSyncedAt ?? null,
         });
       } catch (error) {
         req.log.error(error, "Error suspending client");
@@ -480,6 +516,12 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           .where(eq(clients.id, id))
           .returning();
 
+        await syncClientProfileToNextcloud(updated.id).catch((syncErr) => {
+          req.log.warn(syncErr, "Client profile sync failed after reinstate.");
+        });
+        const syncStateMap = await getSyncStateMap([updated.id]);
+        const syncState = syncStateMap.get(updated.id);
+
         const { apiKeyHash, apiKeyLookup, ...safe } = updated;
         return res.status(200).send({
           ...safe,
@@ -487,10 +529,33 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           updatedAt: updated.updatedAt?.toISOString(),
           suspendedAt: null,
           paymentStatusSyncedAt: updated.paymentStatusSyncedAt?.toISOString() ?? null,
+          syncStatus: syncState?.syncStatus ?? "synced",
+          syncError: syncState?.syncError ?? null,
+          syncAttempts: syncState?.syncAttempts ?? 0,
+          lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+          lastSyncedAt: syncState?.lastSyncedAt ?? null,
         });
       } catch (error) {
         req.log.error(error, "Error reinstating client");
         return res.status(500).send({ error: "Internal server error" });
+      }
+    }
+  );
+
+  app.post<{ Params: ClientParams }>(
+    "/clients/:id/retry-sync",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      try {
+        const { id } = req.params;
+        const [client] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
+        if (!client) return res.status(404).send({ error: "Client not found." });
+
+        const sync = await syncClientProfileToNextcloud(id);
+        return res.status(200).send({ ok: true, sync });
+      } catch (error) {
+        req.log.error(error, "Error retrying profile sync");
+        return res.status(500).send({ error: "Retry sync failed." });
       }
     }
   );

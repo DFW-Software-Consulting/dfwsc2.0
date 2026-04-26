@@ -1,5 +1,10 @@
 import { useCallback, useState } from "react";
-import { useClients, usePatchClientStatus, useResendOnboarding } from "../../hooks/useClients";
+import {
+  useClients,
+  usePatchClientStatus,
+  useResendOnboarding,
+  useRetryClientSync,
+} from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import logger from "../../utils/logger";
 import ConfirmModal from "./ConfirmModal";
@@ -21,12 +26,23 @@ function formatFee(client, groups) {
   return "Default";
 }
 
+function renderSyncBadge(client) {
+  if (client.syncStatus === "failed") {
+    return <span className="text-xs font-semibold text-red-300">Failed</span>;
+  }
+  if (client.syncStatus === "pending") {
+    return <span className="text-xs font-semibold text-yellow-300">Pending</span>;
+  }
+  return <span className="text-xs font-semibold text-emerald-300">Synced</span>;
+}
+
 export default function ClientList({ showToast, workspace = "client_portal" }) {
   const isDfwscMode = workspace === "dfwsc_services";
   const { data: clients = [], isLoading, isError, error, refetch } = useClients({ workspace });
   const { data: groups = [] } = useGroups(workspace);
   const patchClientStatusMutation = usePatchClientStatus();
   const resendMutation = useResendOnboarding();
+  const retrySyncMutation = useRetryClientSync();
 
   const [editingClient, setEditingClient] = useState(null);
   const [confirmModal, setConfirmModal] = useState({
@@ -135,6 +151,10 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
       header: "Fee",
       render: (client) => formatFee(client, groups),
     },
+    {
+      header: "Sync",
+      render: (client) => renderSyncBadge(client),
+    },
     ...(isDfwscMode
       ? [
           {
@@ -154,8 +174,27 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
         const isTogglingStatus =
           patchClientStatusMutation.isPending &&
           patchClientStatusMutation.variables?.id === client.id;
+        const isRetryingSync =
+          retrySyncMutation.isPending && retrySyncMutation.variables === client.id;
         return (
           <div className="flex gap-2">
+            {client.syncStatus === "failed" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                title={client.syncError || "Retry sync"}
+                isLoading={isRetryingSync}
+                onClick={() =>
+                  retrySyncMutation.mutate(client.id, {
+                    onSuccess: () => showToast?.("Client sync retried.", "success"),
+                    onError: (err) => showToast?.(`Retry failed: ${err.message}`, "error"),
+                  })
+                }
+              >
+                Retry Sync
+              </Button>
+            )}
             {!isDfwscMode && (
               <Button
                 size="sm"

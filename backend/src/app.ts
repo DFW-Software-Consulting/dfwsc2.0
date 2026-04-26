@@ -10,6 +10,7 @@ import connectRoutes from "./routes/connect";
 import dfwscClientRoutes from "./routes/dfwsc-clients";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
+import integrationRoutes from "./routes/integrations";
 import invoiceRoutes from "./routes/invoices";
 import paymentsRoutes from "./routes/payments";
 import productRoutes from "./routes/products";
@@ -140,6 +141,7 @@ export async function buildServer() {
   server.register(productRoutes, { prefix: "/api/v1" });
   server.register(stripeCustomerRoutes, { prefix: "/api/v1" });
   server.register(settingsRoutes, { prefix: "/api/v1" });
+  server.register(integrationRoutes, { prefix: "/api/v1" });
 
   server.setNotFoundHandler((_request, reply) => {
     reply.code(404).send({ error: "Not Found" });

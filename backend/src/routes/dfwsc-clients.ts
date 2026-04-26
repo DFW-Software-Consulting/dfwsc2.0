@@ -5,6 +5,7 @@ import validator from "validator";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { getSyncStateMap, syncClientProfileToNextcloud } from "../lib/nextcloud-sync";
 import { stripe } from "../lib/stripe-billing";
 import { isCrmWorkspace, type Workspace } from "../lib/workspace";
 
@@ -236,6 +237,13 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
           return res.status(500).send({ error: "Failed to create client." });
         }
         const createdClient = result.createdClient;
+
+        await syncClientProfileToNextcloud(createdClient.id).catch((syncErr) => {
+          req.log.warn(syncErr, "Client profile sync failed after DFWSC client create.");
+        });
+        const syncStateMap = await getSyncStateMap([createdClient.id]);
+        const syncState = syncStateMap.get(createdClient.id);
+
         return res.status(201).send({
           id: createdClient.id,
           name: createdClient.name,
@@ -253,6 +261,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
           stripeCustomerId: createdClient.stripeCustomerId,
           status: createdClient.status,
           createdAt: createdClient.createdAt?.toISOString(),
+          syncStatus: syncState?.syncStatus ?? "synced",
+          syncError: syncState?.syncError ?? null,
+          syncAttempts: syncState?.syncAttempts ?? 0,
+          lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+          lastSyncedAt: syncState?.lastSyncedAt ?? null,
         });
       } catch (error) {
         req.log.error(error, "Error creating DFWSC client");
@@ -290,6 +303,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
         return res.status(500).send({ error: "Failed to create lead." });
       }
       const lead = leadResult.lead;
+      await syncClientProfileToNextcloud(lead.id).catch((syncErr) => {
+        req.log.warn(syncErr, "Client profile sync failed after lead create.");
+      });
+      const syncStateMap = await getSyncStateMap([lead.id]);
+      const syncState = syncStateMap.get(lead.id);
       return res.status(201).send({
         id: lead.id,
         workspace: lead.workspace,
@@ -302,6 +320,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
         followUpAt: lead.followUpAt?.toISOString() ?? null,
         status: lead.status,
         createdAt: lead.createdAt?.toISOString(),
+        syncStatus: syncState?.syncStatus ?? "synced",
+        syncError: syncState?.syncError ?? null,
+        syncAttempts: syncState?.syncAttempts ?? 0,
+        lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+        lastSyncedAt: syncState?.lastSyncedAt ?? null,
       });
     } catch (error) {
       req.log.error(error, "Error creating lead");
@@ -333,6 +356,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
           return res.status(500).send({ error: "Failed to create lead." });
         }
         const lead = leadResult.lead;
+        await syncClientProfileToNextcloud(lead.id).catch((syncErr) => {
+          req.log.warn(syncErr, "Client profile sync failed after DFWSC lead create.");
+        });
+        const syncStateMap = await getSyncStateMap([lead.id]);
+        const syncState = syncStateMap.get(lead.id);
         return res.status(201).send({
           id: lead.id,
           workspace: lead.workspace,
@@ -345,6 +373,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
           followUpAt: lead.followUpAt?.toISOString() ?? null,
           status: lead.status,
           createdAt: lead.createdAt?.toISOString(),
+          syncStatus: syncState?.syncStatus ?? "synced",
+          syncError: syncState?.syncError ?? null,
+          syncAttempts: syncState?.syncAttempts ?? 0,
+          lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+          lastSyncedAt: syncState?.lastSyncedAt ?? null,
         });
       } catch (error) {
         req.log.error(error, "Error creating DFWSC lead");
@@ -376,6 +409,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
           return res.status(500).send({ error: "Failed to convert lead." });
         }
         const updated = convertResult.updated;
+        await syncClientProfileToNextcloud(updated.id).catch((syncErr) => {
+          req.log.warn(syncErr, "Client profile sync failed after lead conversion.");
+        });
+        const syncStateMap = await getSyncStateMap([updated.id]);
+        const syncState = syncStateMap.get(updated.id);
         const { apiKeyHash, apiKeyLookup, ...safe } = updated;
         return res.status(200).send({
           ...safe,
@@ -385,6 +423,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
           followUpAt: updated.followUpAt?.toISOString() ?? null,
           suspendedAt: null,
           paymentStatusSyncedAt: null,
+          syncStatus: syncState?.syncStatus ?? "synced",
+          syncError: syncState?.syncError ?? null,
+          syncAttempts: syncState?.syncAttempts ?? 0,
+          lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+          lastSyncedAt: syncState?.lastSyncedAt ?? null,
         });
       } catch (error) {
         req.log.error(error, "Error converting lead to client");
@@ -407,6 +450,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
           return res.status(500).send({ error: "Failed to convert lead." });
         }
         const updated = convertResult.updated;
+        await syncClientProfileToNextcloud(updated.id).catch((syncErr) => {
+          req.log.warn(syncErr, "Client profile sync failed after DFWSC lead conversion.");
+        });
+        const syncStateMap = await getSyncStateMap([updated.id]);
+        const syncState = syncStateMap.get(updated.id);
         const { apiKeyHash, apiKeyLookup, ...safe } = updated;
         return res.status(200).send({
           ...safe,
@@ -416,6 +464,11 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
           followUpAt: updated.followUpAt?.toISOString() ?? null,
           suspendedAt: null,
           paymentStatusSyncedAt: null,
+          syncStatus: syncState?.syncStatus ?? "synced",
+          syncError: syncState?.syncError ?? null,
+          syncAttempts: syncState?.syncAttempts ?? 0,
+          lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+          lastSyncedAt: syncState?.lastSyncedAt ?? null,
         });
       } catch (error) {
         req.log.error(error, "Error converting DFWSC lead to client");

@@ -52,6 +52,12 @@ Manages the lifecycle of Stripe Connect onboarding sessions.
 - An **idempotency table** used to de-duplicate Stripe webhook notifications.
 - **Fields**: `id`, `stripeEventId` (unique), `type`, `payload` (JSONB), `processedAt`, `createdAt`.
 
+### `profile_sync_state`
+Tracks bi-directional sync state between DFWSC clients and Nextcloud OpenRegister objects.
+- **Primary key**: `clientId` (FK → `clients.id`, cascade delete).
+- **Fields**: `externalSource` (default `"nextcloud"`), `externalId` (OpenRegister UUID), `syncStatus` (`"synced"`, `"pending"`, or `"failed"`), `syncError`, `syncAttempts`, `lastSyncAttemptAt`, `lastSyncedAt`, `createdAt`, `updatedAt`.
+- See [NEXTCLOUD.md](./NEXTCLOUD.md) for full integration details.
+
 ### `admins`
 Stores administrator accounts for the admin dashboard.
 - **Fields**: `id`, `username` (unique), `passwordHash`, `role` (default: `"admin"`), `active`, `setupConfirmed`, `lastLoginAt`, `createdAt`, `updatedAt`.

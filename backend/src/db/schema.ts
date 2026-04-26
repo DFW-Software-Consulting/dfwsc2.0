@@ -100,6 +100,23 @@ export const onboardingTokens = pgTable("onboarding_tokens", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+export const profileSyncState = pgTable("profile_sync_state", {
+  clientId: text("client_id")
+    .primaryKey()
+    .references(() => clients.id, { onDelete: "cascade" }),
+  externalSource: text("external_source").default("nextcloud").notNull(),
+  externalId: text("external_id"),
+  syncStatus: text("sync_status", { enum: ["synced", "pending", "failed"] })
+    .default("pending")
+    .notNull(),
+  syncError: text("sync_error"),
+  syncAttempts: integer("sync_attempts").default(0).notNull(),
+  lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
+
 export const admins = pgTable("admins", {
   id: text("id").primaryKey(),
   username: text("username").unique().notNull(),

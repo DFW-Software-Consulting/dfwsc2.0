@@ -64,6 +64,13 @@
       "when": 1777100000000,
       "tag": "0008_ledger_crm_lead_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777111111111,
+      "tag": "0009_pipelinq_sync_state",
+      "breakpoints": true
     }
   ]
 }

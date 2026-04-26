@@ -615,7 +615,7 @@ describe("connect onboarding", () => {
     });
 
     expect(response.statusCode).toBe(201);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       id: "cus_ledger_1",
       name: "Ledger Client",
       email: "ledger@example.com",

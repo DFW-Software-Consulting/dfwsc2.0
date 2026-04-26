@@ -8,6 +8,7 @@ import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { createClientWithOnboardingToken } from "../lib/client-factory";
 import { sendMail } from "../lib/mailer";
+import { getSyncStateMap, syncClientProfileToNextcloud } from "../lib/nextcloud-sync";
 import { rateLimit } from "../lib/rate-limit";
 import { getSettings, stripe } from "../lib/stripe-billing";
 import { isWorkspace, type Workspace } from "../lib/workspace";
@@ -208,6 +209,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             })
             .returning();
 
+          await syncClientProfileToNextcloud(createdClient.id).catch((syncErr) => {
+            request.log.warn(syncErr, "Client profile sync failed after ledger client create.");
+          });
+          const syncStateMap = await getSyncStateMap([createdClient.id]);
+          const syncState = syncStateMap.get(createdClient.id);
+
           return reply.code(201).send({
             id: createdClient.id,
             name: createdClient.name,
@@ -216,6 +223,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             status: createdClient.status,
             workspace: createdClient.workspace,
             groupId: createdClient.groupId,
+            syncStatus: syncState?.syncStatus ?? "synced",
+            syncError: syncState?.syncError ?? null,
+            syncAttempts: syncState?.syncAttempts ?? 0,
+            lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
+            lastSyncedAt: syncState?.lastSyncedAt ?? null,
           });
         } catch (error) {
           if (stripeCustomerId) {
@@ -231,6 +243,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         workspace,
         groupId,
       });
+
+      if (workspace === "dfwsc_services") {
+        await syncClientProfileToNextcloud(clientId).catch((syncErr) => {
+          request.log.warn(syncErr, "Client profile sync failed after onboarding client create.");
+        });
+      }
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
       if (!frontendOrigin) {
