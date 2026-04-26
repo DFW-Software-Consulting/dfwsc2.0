@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useClient } from "../../hooks/useClients";
 import { useInvoices } from "../../hooks/useInvoices";
-import { useSuspendClient, useReinstateClient } from "../../hooks/useCRM";
+import { useConvertToClient, useSuspendClient, useReinstateClient } from "../../hooks/useCRM";
 import { useSubscriptions } from "../../hooks/useSubscriptions";
 import Button from "./shared/Button";
 import StatusBadge from "./shared/StatusBadge";
@@ -53,11 +53,13 @@ export default function ClientProfile({
 
   const suspendMutation = useSuspendClient(workspace);
   const reinstateMutation = useReinstateClient(workspace);
+  const convertMutation = useConvertToClient(workspace);
 
   const [invoiceFilter, setInvoiceFilter] = useState("all");
 
   const paymentHealth = resolvePaymentHealth(client);
   const isSuspended = client.status === "inactive" || Boolean(client.suspendedAt);
+  const isLead = client.status === "lead";
   const activeSubscription = useMemo(() => {
     return subscriptions.find((sub) => sub.status !== "cancelled") ?? subscriptions[0] ?? null;
   }, [subscriptions]);
@@ -108,6 +110,20 @@ export default function ClientProfile({
     );
   };
 
+  const handleConvertLead = () => {
+    if (!client || !isLead) return;
+    const confirmed = window.confirm(`Convert ${client.name} from lead to client?`);
+    if (!confirmed) return;
+
+    convertMutation.mutate(
+      { id: client.id },
+      {
+        onSuccess: () => showToast?.("Lead converted to client.", "success"),
+        onError: (err) => showToast?.(err.message, "error"),
+      }
+    );
+  };
+
   if (clientLoading) {
     return <p className="text-sm text-gray-400">Loading client profile...</p>;
   }
@@ -135,11 +151,20 @@ export default function ClientProfile({
       <div className="rounded-lg border border-gray-700 bg-gray-800/30 p-4">
         <h4 className="text-lg font-semibold text-white">{client.name}</h4>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <p className="text-sm text-gray-300">Lifecycle: <span className="text-gray-100"><StatusBadge status={client.status} /></span></p>
           <p className="text-sm text-gray-300">Email: <span className="text-gray-100">{client.email || "-"}</span></p>
           <p className="text-sm text-gray-300">Phone: <span className="text-gray-100">{client.phone || "-"}</span></p>
           <p className="text-sm text-gray-300">Address: <span className="text-gray-100">{[client.addressLine1, client.addressLine2, client.city, client.state, client.postalCode, client.country].filter(Boolean).join(", ") || "-"}</span></p>
         </div>
       </div>
+
+      {isLead && (
+        <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 p-3">
+          <p className="text-sm text-purple-200">
+            This record is a lead. Convert to client when ready to start billing.
+          </p>
+        </div>
+      )}
 
       <div className="rounded-lg border border-gray-700 bg-gray-800/30 p-4">
         <h5 className="text-sm font-semibold uppercase tracking-wide text-gray-300">Subscription</h5>
@@ -157,31 +182,39 @@ export default function ClientProfile({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="primary" onClick={() => onCreateInvoice?.(client)}>
-          Create Invoice
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => onCreateSubscription?.(client)}>
-          Create Subscription
-        </Button>
-        {isSuspended ? (
-          <Button
-            size="sm"
-            variant="success"
-            onClick={handleReinstate}
-            isLoading={reinstateMutation.isPending}
-          >
-            Reinstate
+        {isLead ? (
+          <Button size="sm" variant="primary" onClick={handleConvertLead} isLoading={convertMutation.isPending}>
+            Convert to Client
           </Button>
         ) : (
-          <Button
-            size="sm"
-            variant="danger"
-            onClick={handleSuspend}
-            isLoading={suspendMutation.isPending}
-            disabled={!canSuspend(paymentHealth) || reinstateMutation.isPending}
-          >
-            Suspend
-          </Button>
+          <>
+            <Button size="sm" variant="primary" onClick={() => onCreateInvoice?.(client)}>
+              Create Invoice
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => onCreateSubscription?.(client)}>
+              Create Subscription
+            </Button>
+            {isSuspended ? (
+              <Button
+                size="sm"
+                variant="success"
+                onClick={handleReinstate}
+                isLoading={reinstateMutation.isPending}
+              >
+                Reinstate
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={handleSuspend}
+                isLoading={suspendMutation.isPending}
+                disabled={!canSuspend(paymentHealth) || reinstateMutation.isPending}
+              >
+                Suspend
+              </Button>
+            )}
+          </>
         )}
       </div>
 

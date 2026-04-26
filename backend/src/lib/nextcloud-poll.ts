@@ -50,28 +50,52 @@ export async function pollNextcloudChanges(): Promise<number> {
 
   if (syncedRows.length === 0) return 0;
 
-  const base = process.env.NEXTCLOUD_BASE_URL!.replace(/\/$/, "");
-  const registerId = process.env.NEXTCLOUD_REGISTER_ID!;
-  const schemaId = process.env.NEXTCLOUD_CLIENT_SCHEMA_ID!;
+  const base = (process.env.NEXTCLOUD_BASE_URL ?? "").replace(/\/$/, "");
+  const registerId = process.env.NEXTCLOUD_REGISTER_ID ?? "";
+  const clientSchemaId = process.env.NEXTCLOUD_CLIENT_SCHEMA_ID ?? "";
+  if (!base || !registerId || !clientSchemaId) return 0;
+  const leadSchemaId = process.env.NEXTCLOUD_LEAD_SCHEMA_ID ?? clientSchemaId;
 
   let processed = 0;
 
   for (const row of syncedRows) {
     if (!row.externalId) continue;
 
-    const url = `${base}/index.php/apps/openregister/api/objects/${registerId}/${schemaId}/${encodeURIComponent(row.externalId)}`;
+    const [existingClient] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.id, row.clientId))
+      .limit(1);
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: "GET",
-        headers: nextcloudAuthHeaders(),
-      });
-    } catch {
-      continue;
+    if (!existingClient) continue;
+    if (!isCrmWorkspace(existingClient.workspace)) continue;
+
+    const primarySchemaId = existingClient.status === "lead" ? leadSchemaId : clientSchemaId;
+    const schemaCandidates =
+      leadSchemaId === clientSchemaId
+        ? [primarySchemaId]
+        : [primarySchemaId, primarySchemaId === leadSchemaId ? clientSchemaId : leadSchemaId];
+
+    let response: Response | null = null;
+    for (const schemaId of schemaCandidates) {
+      const url = `${base}/index.php/apps/openregister/api/objects/${registerId}/${schemaId}/${encodeURIComponent(row.externalId)}`;
+
+      try {
+        response = await fetch(url, {
+          method: "GET",
+          headers: nextcloudAuthHeaders(),
+        });
+      } catch {
+        response = null;
+        continue;
+      }
+
+      if (response.ok) {
+        break;
+      }
     }
 
-    if (!response.ok) continue;
+    if (!response?.ok) continue;
 
     const raw = await response.text();
     if (!raw) continue;
@@ -85,7 +109,6 @@ export async function pollNextcloudChanges(): Promise<number> {
 
     const name = typeof record.name === "string" ? record.name : null;
     const email = typeof record.email === "string" ? record.email.toLowerCase().trim() : null;
-    const workspace = "dfwsc_services";
     const contactName =
       typeof record._dfwsc_contact_name === "string" ? record._dfwsc_contact_name : null;
     const phone = typeof record.phone === "string" ? record.phone : null;
@@ -95,15 +118,6 @@ export async function pollNextcloudChanges(): Promise<number> {
       statusRaw === "lead" ? "lead" : statusRaw === "inactive" ? "inactive" : "active";
 
     if (!name || !email) continue;
-
-    const [existingClient] = await db
-      .select()
-      .from(clients)
-      .where(eq(clients.id, row.clientId))
-      .limit(1);
-
-    if (!existingClient) continue;
-    if (!isCrmWorkspace(existingClient.workspace)) continue;
 
     const now = new Date();
     await db

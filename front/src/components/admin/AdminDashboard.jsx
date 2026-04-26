@@ -39,10 +39,30 @@ function paymentHealthForClient(client) {
 
 function DfwscClientsPanel({ onSelectClient, onAddClient }) {
   const { data: clients = [], isLoading, isError, error } = useClients({ workspace: "dfwsc_services" });
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const lifecycleCounts = useMemo(() => {
+    return clients.reduce(
+      (acc, client) => {
+        if (client.status === "lead") {
+          acc.lead += 1;
+        } else if (client.status === "inactive") {
+          acc.inactive += 1;
+        } else {
+          acc.client += 1;
+        }
+        acc.total += 1;
+        return acc;
+      },
+      { total: 0, lead: 0, client: 0, inactive: 0 }
+    );
+  }, [clients]);
 
   const rows = useMemo(() => {
-    return [...clients].sort((a, b) => a.name.localeCompare(b.name));
-  }, [clients]);
+    const scoped =
+      statusFilter === "all" ? clients : clients.filter((client) => client.status === statusFilter);
+    return [...scoped].sort((a, b) => a.name.localeCompare(b.name));
+  }, [clients, statusFilter]);
 
   return (
     <div className="space-y-4">
@@ -54,6 +74,45 @@ function DfwscClientsPanel({ onSelectClient, onAddClient }) {
           className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
         >
           Add Client
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setStatusFilter("all")}
+          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+            statusFilter === "all" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"
+          }`}
+        >
+          All ({lifecycleCounts.total})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter("lead")}
+          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+            statusFilter === "lead" ? "bg-purple-700 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"
+          }`}
+        >
+          Leads ({lifecycleCounts.lead})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter("active")}
+          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+            statusFilter === "active" ? "bg-emerald-700 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"
+          }`}
+        >
+          Clients ({lifecycleCounts.client})
+        </button>
+        <button
+          type="button"
+          onClick={() => setStatusFilter("inactive")}
+          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
+            statusFilter === "inactive" ? "bg-rose-700 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"
+          }`}
+        >
+          Inactive ({lifecycleCounts.inactive})
         </button>
       </div>
 

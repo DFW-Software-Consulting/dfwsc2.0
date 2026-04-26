@@ -229,6 +229,18 @@ export function isNextcloudConfigured(): boolean {
   );
 }
 
+function getClientSchemaId(): string {
+  return process.env.NEXTCLOUD_CLIENT_SCHEMA_ID ?? "";
+}
+
+function getLeadSchemaId(): string {
+  return process.env.NEXTCLOUD_LEAD_SCHEMA_ID ?? getClientSchemaId();
+}
+
+function getProfileSchemaIdForStatus(status: string): string {
+  return status === "lead" ? getLeadSchemaId() : getClientSchemaId();
+}
+
 export function isNextcloudLedgerConfigured(): boolean {
   return Boolean(isNextcloudConfigured() && process.env.NEXTCLOUD_LEDGER_SCHEMA_ID);
 }
@@ -239,17 +251,15 @@ function mapClientStatusToExternal(status: string): "lead" | "client" | "inactiv
   return "client";
 }
 
-function buildCreateUrl(): string {
+function buildCreateUrl(schemaId: string): string {
   const base = process.env.NEXTCLOUD_BASE_URL?.replace(/\/$/, "") ?? "";
   const registerId = process.env.NEXTCLOUD_REGISTER_ID ?? "";
-  const schemaId = process.env.NEXTCLOUD_CLIENT_SCHEMA_ID ?? "";
   return `${base}/index.php/apps/openregister/api/objects/${registerId}/${schemaId}`;
 }
 
-function buildUpdateUrl(externalId: string): string {
+function buildUpdateUrl(externalId: string, schemaId: string): string {
   const base = process.env.NEXTCLOUD_BASE_URL?.replace(/\/$/, "") ?? "";
   const registerId = process.env.NEXTCLOUD_REGISTER_ID ?? "";
-  const schemaId = process.env.NEXTCLOUD_CLIENT_SCHEMA_ID ?? "";
   return `${base}/index.php/apps/openregister/api/objects/${registerId}/${schemaId}/${encodeURIComponent(externalId)}`;
 }
 
@@ -396,14 +406,16 @@ async function markInvoiceSyncPending(stripeInvoiceId: string, clientId: string)
 }
 
 async function pushProfileToNextcloud(
-  payload: NextcloudProfilePayload
+  payload: NextcloudProfilePayload,
+  schemaId: string
 ): Promise<{ externalId: string | null }> {
   if (!isNextcloudConfigured()) {
     throw new Error("Nextcloud credentials are not configured.");
   }
 
-  const hasExternalId = Boolean(payload.externalId);
-  const url = hasExternalId ? buildUpdateUrl(payload.externalId!) : buildCreateUrl();
+  const externalId = payload.externalId ?? null;
+  const hasExternalId = externalId !== null;
+  const url = externalId ? buildUpdateUrl(externalId, schemaId) : buildCreateUrl(schemaId);
   const method = hasExternalId ? "PUT" : "POST";
   const body = toOpenRegisterPayload(payload);
 
@@ -414,6 +426,30 @@ async function pushProfileToNextcloud(
   });
 
   const raw = await response.text();
+
+  if (!response.ok && hasExternalId && response.status === 404) {
+    const createResponse = await fetch(buildCreateUrl(schemaId), {
+      method: "POST",
+      headers: nextcloudAuthHeaders(),
+      body: JSON.stringify(body),
+    });
+    const createRaw = await createResponse.text();
+    if (!createResponse.ok) {
+      throw new Error(
+        `Nextcloud sync failed (${createResponse.status}): ${createRaw.slice(0, 1000)}`
+      );
+    }
+    if (!createRaw) {
+      return { externalId: null };
+    }
+    try {
+      const parsed = JSON.parse(createRaw) as { id?: string };
+      return { externalId: parsed.id ?? null };
+    } catch {
+      return { externalId: null };
+    }
+  }
+
   if (!response.ok) {
     throw new Error(`Nextcloud sync failed (${response.status}): ${raw.slice(0, 1000)}`);
   }
@@ -438,8 +474,9 @@ async function pushInvoiceToNextcloud(
     throw new Error("Nextcloud ledger credentials are not configured.");
   }
 
-  const hasExternalId = Boolean(payload.externalId);
-  const url = hasExternalId ? buildLedgerUpdateUrl(payload.externalId!) : buildLedgerCreateUrl();
+  const externalId = payload.externalId ?? null;
+  const hasExternalId = externalId !== null;
+  const url = externalId ? buildLedgerUpdateUrl(externalId) : buildLedgerCreateUrl();
   const method = hasExternalId ? "PUT" : "POST";
   const body = toOpenRegisterLedgerPayload(payload);
 
@@ -502,9 +539,10 @@ export async function syncClientProfileToNextcloud(clientId: string): Promise<Sy
     phone: client.phone ?? null,
     notes: client.notes ?? null,
   };
+  const schemaId = getProfileSchemaIdForStatus(client.status);
 
   try {
-    const pushed = await pushProfileToNextcloud(payload);
+    const pushed = await pushProfileToNextcloud(payload, schemaId);
     const now = new Date();
     await saveSyncState(clientId, {
       syncStatus: "synced",

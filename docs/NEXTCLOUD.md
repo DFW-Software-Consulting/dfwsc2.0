@@ -89,6 +89,7 @@ All Nextcloud env vars are **optional**. If any required combination is missing,
 | `NEXTCLOUD_WEBHOOK_SECRET` | Yes* | — | Shared secret for webhook SHA256 verification |
 | `NEXTCLOUD_REGISTER_ID` | Yes* | — | OpenRegister register ID (e.g. `1`) |
 | `NEXTCLOUD_CLIENT_SCHEMA_ID` | Yes* | — | OpenRegister client schema ID (e.g. `1`) |
+| `NEXTCLOUD_LEAD_SCHEMA_ID` | No | `NEXTCLOUD_CLIENT_SCHEMA_ID` | OpenRegister lead schema ID (used when `clients.status = lead`) |
 | `NEXTCLOUD_LEDGER_SCHEMA_ID` | No | — | OpenRegister ledger schema ID for invoice objects |
 | `NEXTCLOUD_SYNC_MODE` | No | `direct` | Set to `disabled` to disable polling and outbound sync |
 | `NEXTCLOUD_POLL_INTERVAL_MS` | No | `60000` | Polling interval in milliseconds |
@@ -111,9 +112,10 @@ curl "https://cloud.dfwsc.com/index.php/apps/pipelinq/api/settings" \
 2. If the client's workspace is not a CRM workspace (`dfwsc_services` or `ledger_crm`), the sync is skipped (returns `synced` status).
 3. The sync state is marked `pending`, then the profile is pushed to OpenRegister.
 4. **First sync** (no `externalId`): Sends `POST` to create a new object. Stores the returned `id` as `externalId`.
-5. **Subsequent syncs** (has `externalId`): Sends `PUT` to update the existing object.
-6. On success, the state is set to `synced` with `lastSyncedAt` timestamp.
-7. On failure, the state is set to `failed` with `syncError` recorded.
+5. **Schema routing**: Leads use `NEXTCLOUD_LEAD_SCHEMA_ID` (or `NEXTCLOUD_CLIENT_SCHEMA_ID` if unset). Non-leads use `NEXTCLOUD_CLIENT_SCHEMA_ID`.
+6. **Subsequent syncs** (has `externalId`): Sends `PUT` to update the existing object. If the object is not found in the target schema, retries with `POST` to create it there.
+7. On success, the state is set to `synced` with `lastSyncedAt` timestamp.
+8. On failure, the state is set to `failed` with `syncError` recorded.
 
 ### File
 
@@ -159,7 +161,7 @@ Runs on a configurable interval (`NEXTCLOUD_POLL_INTERVAL_MS`, default 60 second
 **Since the OpenRegister GET list endpoint is broken (returns 500)**, polling does **not** list all objects. Instead:
 
 1. Queries `profile_sync_state` for all rows with `syncStatus = "synced"` that have an `externalId`.
-2. For each, fetches the individual object via `GET /objects/{reg}/{schema}/{externalId}`.
+2. For each, fetches the individual object via `GET /objects/{reg}/{schema}/{externalId}` using status-based schema routing (lead vs client).
 3. Updates the DFWSC client record with any changes from OpenRegister.
 4. Silently skips objects that return errors (the next cycle will retry).
 
