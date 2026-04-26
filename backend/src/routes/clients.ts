@@ -54,7 +54,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
 
       if (!isWorkspace(workspace)) {
         return res.status(400).send({
-          error: "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
+          error: "workspace query parameter is required (dfwsc_services|client_portal).",
         });
       }
 
@@ -134,7 +134,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         if (!isWorkspace(workspace)) {
           return res.status(400).send({
             error:
-              "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
+              "workspace query parameter is required (dfwsc_services|client_portal).",
           });
         }
 
@@ -448,7 +448,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         if (!client) return res.status(404).send({ error: "Client not found." });
         if (!CRM_WORKSPACES.includes(client.workspace as (typeof CRM_WORKSPACES)[number])) {
           return res.status(400).send({
-            error: "Suspend is only available for crm workspaces (dfwsc_services|ledger_crm).",
+            error: "Suspend is only available for crm workspaces (dfwsc_services).",
           });
         }
 
@@ -501,7 +501,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         if (!client) return res.status(404).send({ error: "Client not found." });
         if (!CRM_WORKSPACES.includes(client.workspace as (typeof CRM_WORKSPACES)[number])) {
           return res.status(400).send({
-            error: "Reinstate is only available for crm workspaces (dfwsc_services|ledger_crm).",
+            error: "Reinstate is only available for crm workspaces (dfwsc_services).",
           });
         }
 

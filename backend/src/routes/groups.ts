@@ -58,7 +58,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
     if (!isWorkspace(workspace)) {
       return res
         .status(400)
-        .send({ error: "workspace is required (dfwsc_services|client_portal|ledger_crm)." });
+        .send({ error: "workspace is required (dfwsc_services|client_portal)." });
     }
 
     const id = nanoid();
@@ -80,7 +80,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
     const { workspace } = req.query as { workspace?: string };
     if (!isWorkspace(workspace)) {
       return res.status(400).send({
-        error: "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
+        error: "workspace query parameter is required (dfwsc_services|client_portal).",
       });
     }
 

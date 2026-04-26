@@ -14,22 +14,33 @@ vi.mock("../hooks/useSetupStatus", () => ({
   }),
 }));
 
+vi.mock("../hooks/useClients", () => ({
+  useClients: () => ({
+    data: [
+      {
+        id: "cus_1",
+        name: "Acme",
+        email: "billing@acme.com",
+        status: "active",
+        paymentStatus: "active",
+      },
+    ],
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
 vi.mock("../components/admin/AdminLogin", () => ({ default: () => <div>AdminLogin</div> }));
 vi.mock("../components/admin/AdminSetup", () => ({ default: () => <div>AdminSetup</div> }));
 vi.mock("../components/admin/BillingPanel", () => ({
   default: ({ workspace }) => <div>BillingPanel:{workspace}</div>,
 }));
-vi.mock("../components/admin/ClientList", () => ({
-  default: ({ workspace }) => <div>ClientList:{workspace}</div>,
-}));
-vi.mock("../components/admin/CreateClientForm", () => ({
-  default: ({ workspace }) => <div>CreateClientForm:{workspace}</div>,
+vi.mock("../components/admin/InvoicesDuePanel", () => ({
+  default: () => <div>InvoicesDuePanel</div>,
 }));
 vi.mock("../components/admin/GroupPanel", () => ({
   default: ({ workspace }) => <div>GroupPanel:{workspace}</div>,
-}));
-vi.mock("../components/admin/CRMPanel", () => ({
-  default: ({ workspace }) => <div>CRMPanel:{workspace}</div>,
 }));
 vi.mock("../components/admin/ImportStripeCustomer", () => ({
   default: ({ workspace }) => <div>ImportStripeCustomer:{workspace}</div>,
@@ -37,45 +48,30 @@ vi.mock("../components/admin/ImportStripeCustomer", () => ({
 vi.mock("../components/admin/PaymentReports", () => ({
   default: ({ workspace }) => <div>PaymentReports:{workspace}</div>,
 }));
+vi.mock("../components/admin/ClientList", () => ({
+  default: ({ workspace }) => <div>ClientList:{workspace}</div>,
+}));
+vi.mock("../components/admin/ClientProfile", () => ({
+  default: ({ clientId }) => <div>ClientProfile:{clientId}</div>,
+}));
+vi.mock("../components/admin/AddClientModal", () => ({ default: () => null }));
 vi.mock("../components/admin/SettingsPanel", () => ({ default: () => <div>SettingsPanel</div> }));
 vi.mock("../components/admin/Toast", () => ({ default: () => null }));
 
 describe("AdminDashboard workspace behavior", () => {
-  it("hides Companies in DFWSC and shows it in Client Portal", async () => {
+  it("defaults to Due in DFWSC and switches to portal tabs", async () => {
     renderWithProviders(<AdminDashboard />, { token: "admin-token" });
 
+    expect(screen.getByRole("button", { name: "Due" })).toBeInTheDocument();
+    expect(screen.getByText("InvoicesDuePanel")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Companies" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Accounts" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reports" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Billing" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Client Portal" }));
     expect(screen.getByRole("button", { name: "Companies" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reports" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Accounts" })).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "Companies" }));
     expect(screen.getByText("GroupPanel:client_portal")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "DFWSC Services" }));
-    expect(screen.queryByRole("button", { name: "Companies" })).not.toBeInTheDocument();
-    expect(screen.queryByText("GroupPanel:client_portal")).not.toBeInTheDocument();
-    expect(screen.getByText("CreateClientForm:dfwsc_services")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Ledger CRM" }));
-    expect(screen.getByRole("button", { name: "CRM" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Companies" })).not.toBeInTheDocument();
-    expect(screen.getByText("CreateClientForm:ledger_crm")).toBeInTheDocument();
-  });
-
-  it("resets CRM tab to Accounts when switching to Client Portal", async () => {
-    renderWithProviders(<AdminDashboard />, { token: "admin-token" });
-
-    await userEvent.click(screen.getByRole("button", { name: "Ledger CRM" }));
-    await userEvent.click(screen.getByRole("button", { name: "CRM" }));
-    expect(screen.getByText("CRMPanel:ledger_crm")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Client Portal" }));
-    expect(screen.getByText("CreateClientForm:client_portal")).toBeInTheDocument();
-    expect(screen.queryByText("CRMPanel:ledger_crm")).not.toBeInTheDocument();
   });
 });

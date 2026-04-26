@@ -42,7 +42,7 @@ export async function runPaymentSync(): Promise<number> {
     .from(clients)
     .where(
       and(
-        inArray(clients.workspace, ["dfwsc_services", "ledger_crm"]),
+        inArray(clients.workspace, ["dfwsc_services"]),
         isNotNull(clients.stripeCustomerId)
       )
     );

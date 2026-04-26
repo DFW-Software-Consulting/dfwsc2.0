@@ -17,20 +17,20 @@ vi.mock("../hooks/useGroups", () => ({
 }));
 
 describe("CreateClientForm", () => {
-  it("submits ledger CRM account creation through direct client mutation", async () => {
+  it("submits client portal account creation through shared mutation", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<CreateClientForm workspace="ledger_crm" />);
+    renderWithProviders(<CreateClientForm workspace="client_portal" />);
 
-    await user.type(screen.getByLabelText("Account Name"), "Ledger Co");
-    await user.type(screen.getByLabelText("Account Email"), "ledger@example.com");
+    await user.type(screen.getByLabelText("Account Name"), "Portal Co");
+    await user.type(screen.getByLabelText("Account Email"), "portal@example.com");
     await user.click(screen.getByRole("button", { name: "Create Client" }));
 
     expect(createClientMutate).toHaveBeenCalledTimes(1);
     expect(createClientMutate).toHaveBeenCalledWith(
       {
-        name: "Ledger Co",
-        email: "ledger@example.com",
-        workspace: "ledger_crm",
+        name: "Portal Co",
+        email: "portal@example.com",
+        workspace: "client_portal",
       },
       expect.objectContaining({
         onSuccess: expect.any(Function),

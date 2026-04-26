@@ -14,8 +14,8 @@ describe("crm api", () => {
   it("posts workspace-scoped create lead requests", async () => {
     apiFetch.mockResolvedValueOnce({ id: "lead_1" });
 
-    await createLead("token_1", "ledger_crm", {
-      name: "Ledger Lead",
+    await createLead("token_1", "dfwsc_services", {
+      name: "DFWSC Lead",
       email: "lead@example.com",
       nextAction: "Follow up",
     });
@@ -24,8 +24,8 @@ describe("crm api", () => {
       token: "token_1",
       method: "POST",
       body: {
-        workspace: "ledger_crm",
-        name: "Ledger Lead",
+        workspace: "dfwsc_services",
+        name: "DFWSC Lead",
         email: "lead@example.com",
         nextAction: "Follow up",
       },
@@ -35,12 +35,12 @@ describe("crm api", () => {
   it("posts workspace-scoped convert requests", async () => {
     apiFetch.mockResolvedValueOnce({ id: "client_1", status: "active" });
 
-    await convertToClient("token_2", "ledger_crm", "lead_42");
+    await convertToClient("token_2", "dfwsc_services", "lead_42");
 
     expect(apiFetch).toHaveBeenCalledWith("/crm/leads/lead_42/convert", {
       token: "token_2",
       method: "POST",
-      body: { workspace: "ledger_crm" },
+      body: { workspace: "dfwsc_services" },
     });
   });
 });

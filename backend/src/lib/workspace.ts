@@ -1,6 +1,6 @@
-export const WORKSPACES = ["dfwsc_services", "client_portal", "ledger_crm"] as const;
+export const WORKSPACES = ["dfwsc_services", "client_portal"] as const;
 
-export const CRM_WORKSPACES = ["dfwsc_services", "ledger_crm"] as const;
+export const CRM_WORKSPACES = ["dfwsc_services"] as const;
 
 export type Workspace = (typeof WORKSPACES)[number];
 

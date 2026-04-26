@@ -14,7 +14,12 @@ const integrationRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       const secret = req.headers["x-nextcloud-webhooks"];
       const provided = Array.isArray(secret) ? secret[0] : secret;
-      const rawBody = req.rawBody ?? JSON.stringify(req.body);
+      const rawBody =
+        typeof req.rawBody === "string"
+          ? req.rawBody
+          : Buffer.isBuffer(req.rawBody)
+            ? req.rawBody.toString("utf8")
+            : JSON.stringify(req.body);
 
       if (!isValidNextcloudWebhook(provided, rawBody)) {
         return res.status(401).send({ error: "Invalid Nextcloud webhook signature." });

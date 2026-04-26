@@ -5,6 +5,7 @@ import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { sendInvoiceEmail } from "../lib/mailer";
+import { syncInvoiceToNextcloud, toNextcloudLedgerInvoiceInput } from "../lib/nextcloud-sync";
 import { stripe } from "../lib/stripe";
 import { ensureStripeCustomer, resolveClientFee } from "../lib/stripe-billing";
 import {
@@ -63,6 +64,34 @@ function formatStripeInvoice(
           : null,
     paymentReference: inv.metadata?.paymentReference || null,
   };
+}
+
+async function resolveInvoiceClient(invoice: Stripe.Invoice) {
+  const metadataClientId = invoice.metadata?.clientId;
+  if (metadataClientId) {
+    const [clientById] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.id, metadataClientId))
+      .limit(1);
+    if (clientById) return clientById;
+  }
+
+  const customerId =
+    typeof invoice.customer === "string"
+      ? invoice.customer
+      : invoice.customer?.id && !invoice.customer.deleted
+        ? invoice.customer.id
+        : null;
+
+  if (!customerId) return null;
+
+  const [clientByCustomer] = await db
+    .select()
+    .from(clients)
+    .where(eq(clients.stripeCustomerId, customerId))
+    .limit(1);
+  return clientByCustomer ?? null;
 }
 
 const invoiceRoutes: FastifyPluginAsync = async (app) => {
@@ -169,6 +198,30 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
         req.log.warn({ err, clientId, invoiceId: finalized.id }, "Failed to send invoice email");
       });
 
+      try {
+        const ledgerSyncState = await syncInvoiceToNextcloud(
+          toNextcloudLedgerInvoiceInput(finalized, {
+            id: client.id,
+            name: client.name,
+            email: client.email,
+            workspace: client.workspace,
+          })
+        );
+
+        if (ledgerSyncState.syncStatus === "failed") {
+          req.log.warn(
+            {
+              invoiceId: finalized.id,
+              clientId: client.id,
+              error: ledgerSyncState.syncError,
+            },
+            "Failed to sync invoice to Nextcloud ledger"
+          );
+        }
+      } catch (err) {
+        req.log.warn({ err, invoiceId: finalized.id, clientId: client.id }, "Invoice ledger sync skipped");
+      }
+
       const formatted = formatStripeInvoice(finalized, clientId, client.name);
 
       return res.status(201).send(formatted);
@@ -249,6 +302,31 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
 
       if (invoice.status === "open") {
         const voided = await stripe.invoices.voidInvoice(id);
+        try {
+          const client = await resolveInvoiceClient(voided);
+          if (client) {
+            const ledgerSyncState = await syncInvoiceToNextcloud(
+              toNextcloudLedgerInvoiceInput(voided, {
+                id: client.id,
+                name: client.name,
+                email: client.email,
+                workspace: client.workspace,
+              })
+            );
+            if (ledgerSyncState.syncStatus === "failed") {
+              req.log.warn(
+                {
+                  invoiceId: voided.id,
+                  clientId: client.id,
+                  error: ledgerSyncState.syncError,
+                },
+                "Failed to sync voided invoice to Nextcloud ledger"
+              );
+            }
+          }
+        } catch (err) {
+          req.log.warn({ err, invoiceId: voided.id }, "Voided invoice ledger sync skipped");
+        }
         return res.status(200).send(formatStripeInvoice(voided));
       }
 
@@ -312,6 +390,32 @@ const invoiceRoutes: FastifyPluginAsync = async (app) => {
     });
 
     const paid = await stripe.invoices.pay(id, { paid_out_of_band: true });
+
+    try {
+      const syncClient = await resolveInvoiceClient(paid);
+      if (syncClient) {
+        const ledgerSyncState = await syncInvoiceToNextcloud(
+          toNextcloudLedgerInvoiceInput(paid, {
+            id: syncClient.id,
+            name: syncClient.name,
+            email: syncClient.email,
+            workspace: syncClient.workspace,
+          })
+        );
+        if (ledgerSyncState.syncStatus === "failed") {
+          req.log.warn(
+            {
+              invoiceId: paid.id,
+              clientId: syncClient.id,
+              error: ledgerSyncState.syncError,
+            },
+            "Failed to sync out-of-band paid invoice to Nextcloud ledger"
+          );
+        }
+      }
+    } catch (err) {
+      req.log.warn({ err, invoiceId: paid.id }, "Out-of-band invoice ledger sync skipped");
+    }
 
     const cidMeta = paid.metadata?.clientId ?? null;
     let clientName: string | null = null;

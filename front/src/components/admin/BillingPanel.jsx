@@ -26,7 +26,7 @@ function formatUsd(cents) {
 // ─── Invoices Sub-Tab ────────────────────────────────────────────────────────
 
 function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
-  const workspaceLabel = workspace === "ledger_crm" ? "Ledger" : isDfwscMode ? "DFWSC" : "Portal";
+  const workspaceLabel = isDfwscMode ? "DFWSC" : "Portal";
   const { data: clients = [] } = useClients({ workspace });
   const { data: invoices = [], isLoading, isError, error, refetch } = useInvoices({ workspace });
   const { data: products = [], isLoading: productsLoading } = useProducts();
@@ -562,7 +562,7 @@ function InvoicesTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
 // ─── Payments Sub-Tab ────────────────────────────────────────────────────────
 
 function PaymentsTab({ showToast, isDfwscMode, workspace }) {
-  const workspaceLabel = workspace === "ledger_crm" ? "Ledger" : isDfwscMode ? "DFWSC" : "Portal";
+  const workspaceLabel = isDfwscMode ? "DFWSC" : "Portal";
   const { data: clients = [] } = useClients({ workspace });
   const createPaymentMutation = useCreatePayment();
 
@@ -739,7 +739,7 @@ function PaymentsTab({ showToast, isDfwscMode, workspace }) {
 // ─── Subscriptions Sub-Tab ───────────────────────────────────────────────────
 
 function SubscriptionsTab({ showToast, isDfwscMode, workspace, preselectedClient }) {
-  const workspaceLabel = workspace === "ledger_crm" ? "Ledger" : isDfwscMode ? "DFWSC" : "Portal";
+  const workspaceLabel = isDfwscMode ? "DFWSC" : "Portal";
   const { data: clients = [] } = useClients({ workspace });
   const { data: subs = [], isLoading, isError, error, refetch } = useSubscriptions({ workspace });
   const { data: taxRates = [] } = useTaxRates();

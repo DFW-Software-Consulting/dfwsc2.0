@@ -389,7 +389,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
 
         if (!isWorkspace(workspace)) {
           return res.status(400).send({
-            error: "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
+            error: "workspace query parameter is required (dfwsc_services|client_portal).",
           });
         }
 
@@ -416,7 +416,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
           existingStripeIds.map((c) => c.stripeCustomerId).filter(Boolean)
         );
 
-        if (workspace === "dfwsc_services" || workspace === "ledger_crm") {
+        if (workspace === "dfwsc_services") {
           const reconciliation = await getCachedReconciliation(workspace, refresh === "true");
           return res.status(200).send({
             toImport: reconciliation.toImport.map((item) => ({
@@ -470,7 +470,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
         if (!isWorkspace(workspace)) {
           return res
             .status(400)
-            .send({ error: "workspace is required (dfwsc_services|client_portal|ledger_crm)." });
+            .send({ error: "workspace is required (dfwsc_services|client_portal)." });
         }
 
         if (!stripeCustomerId) {
@@ -504,7 +504,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
         }
 
         // DFWSC direct import - create local client with stripeCustomerId, no onboarding needed
-        if (workspace === "dfwsc_services" || workspace === "ledger_crm") {
+        if (workspace === "dfwsc_services") {
           const [existingByStripeId] = await db
             .select()
             .from(clients)
@@ -647,7 +647,7 @@ const stripeCustomerRoutes: FastifyPluginAsync = async (app) => {
       try {
         const { stripeCustomerId, localClientId, workspace, resolutions } = req.body;
 
-        if (workspace !== "dfwsc_services" && workspace !== "ledger_crm") {
+        if (workspace !== "dfwsc_services") {
           return res
             .status(400)
             .send({ error: "This endpoint is only available for direct billing workspaces." });

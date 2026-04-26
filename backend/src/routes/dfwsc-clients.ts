@@ -130,7 +130,7 @@ async function createDirectBillableClient(workspace: Workspace, body: DfwscClien
   }
 }
 
-async function createLead(workspace: "dfwsc_services" | "ledger_crm", body: LeadBody) {
+async function createLead(workspace: "dfwsc_services", body: LeadBody) {
   const normalizedEmail = body.email.toLowerCase().trim();
   const [existing] = await db
     .select({ id: clients.id })
@@ -161,7 +161,7 @@ async function createLead(workspace: "dfwsc_services" | "ledger_crm", body: Lead
   return { lead };
 }
 
-async function convertLead(workspace: "dfwsc_services" | "ledger_crm", id: string) {
+async function convertLead(workspace: "dfwsc_services", id: string) {
   const [lead] = await db
     .select()
     .from(clients)
@@ -285,7 +285,7 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
       if (!workspace || !isCrmWorkspace(workspace)) {
         return res
           .status(400)
-          .send({ error: "workspace is required (dfwsc_services|ledger_crm)." });
+          .send({ error: "workspace is required (dfwsc_services)." });
       }
       if (!name || !email) {
         return res.status(400).send({ error: "name and email are required." });
@@ -397,7 +397,7 @@ const dfwscClientRoutes: FastifyPluginAsync = async (app) => {
         if (!workspace || !isCrmWorkspace(workspace)) {
           return res
             .status(400)
-            .send({ error: "workspace is required (dfwsc_services|ledger_crm)." });
+            .send({ error: "workspace is required (dfwsc_services)." });
         }
 
         const convertResult = await convertLead(workspace, id);

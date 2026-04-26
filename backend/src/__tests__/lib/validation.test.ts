@@ -66,7 +66,7 @@ describe("validateWorkspace", () => {
     expect(result).toBeNull();
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.send).toHaveBeenCalledWith({
-      error: "workspace is required (dfwsc_services|client_portal|ledger_crm).",
+      error: "workspace is required (dfwsc_services|client_portal).",
     });
   });
 
@@ -113,7 +113,7 @@ describe("validateWorkspaceQuery", () => {
     expect(result).toBeNull();
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.send).toHaveBeenCalledWith({
-      error: "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
+      error: "workspace query parameter is required (dfwsc_services|client_portal).",
     });
   });
 

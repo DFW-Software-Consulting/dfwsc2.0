@@ -4,6 +4,7 @@ import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clients, webhookEvents } from "../db/schema";
+import { syncInvoiceToNextcloud, toNextcloudLedgerInvoiceInput } from "../lib/nextcloud-sync";
 import { stripe } from "../lib/stripe";
 
 interface StripeInvoiceWithSubscription extends Stripe.Invoice {
@@ -27,6 +28,57 @@ async function setClientPaymentStatusByCustomer(customerId: string, paymentStatu
     .update(clients)
     .set({ paymentStatus, paymentStatusSyncedAt: now, updatedAt: now })
     .where(eq(clients.stripeCustomerId, customerId));
+}
+
+async function resolveInvoiceClient(inv: Stripe.Invoice) {
+  const metadataClientId = inv.metadata?.clientId;
+  if (metadataClientId) {
+    const [clientById] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.id, metadataClientId))
+      .limit(1);
+    if (clientById) return clientById;
+  }
+
+  const customerId = extractCustomerId(inv.customer ?? null);
+  if (!customerId) return null;
+
+  const [clientByCustomer] = await db
+    .select()
+    .from(clients)
+    .where(eq(clients.stripeCustomerId, customerId))
+    .limit(1);
+  return clientByCustomer ?? null;
+}
+
+async function syncInvoiceToNextcloudLedger(fastify: FastifyInstance, inv: Stripe.Invoice) {
+  try {
+    const client = await resolveInvoiceClient(inv);
+    if (!client) return;
+
+    const syncState = await syncInvoiceToNextcloud(
+      toNextcloudLedgerInvoiceInput(inv, {
+        id: client.id,
+        name: client.name,
+        email: client.email,
+        workspace: client.workspace,
+      })
+    );
+
+    if (syncState.syncStatus === "failed") {
+      fastify.log.warn(
+        {
+          invoiceId: inv.id,
+          clientId: client.id,
+          error: syncState.syncError,
+        },
+        "Failed to sync Stripe invoice state to Nextcloud ledger"
+      );
+    }
+  } catch (err) {
+    fastify.log.warn({ err, invoiceId: inv.id }, "Skipping Nextcloud ledger sync for invoice event");
+  }
 }
 
 export default async function webhooksRoute(fastify: FastifyInstance) {
@@ -126,6 +178,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         if (customerId) {
           await setClientPaymentStatusByCustomer(customerId, "active");
         }
+        await syncInvoiceToNextcloudLedger(fastify, inv);
         fastify.log.info(
           { invoiceId: inv.id, clientId: inv.metadata?.clientId },
           "Invoice payment succeeded."
@@ -138,6 +191,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         if (customerId) {
           await setClientPaymentStatusByCustomer(customerId, "past_due");
         }
+        await syncInvoiceToNextcloudLedger(fastify, inv);
         fastify.log.warn(
           { invoiceId: inv.id, clientId: inv.metadata?.clientId },
           "Invoice payment failed."
@@ -210,6 +264,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         if (customerId) {
           await setClientPaymentStatusByCustomer(customerId, "active");
         }
+        await syncInvoiceToNextcloudLedger(fastify, inv);
         fastify.log.info(
           {
             invoiceId: inv.id,

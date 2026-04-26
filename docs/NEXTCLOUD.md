@@ -1,6 +1,6 @@
-# Nextcloud OpenRegister Integration — Bi-Directional Client Profile Sync
+# Nextcloud OpenRegister Integration — Client + Ledger Sync
 
-The DFWSC portal syncs client profiles bi-directionally with a Nextcloud instance running the **OpenRegister** app. This allows leads and clients to be created or updated from either system.
+The DFWSC portal syncs client profiles bi-directionally with a Nextcloud instance running the **OpenRegister** app. It also pushes Stripe invoice state to a dedicated OpenRegister ledger schema.
 
 ---
 
@@ -15,7 +15,7 @@ DFWSC Portal  ←——→  Nextcloud OpenRegister
      └── profile_sync_state ┘  (tracks externalId + sync status)
 ```
 
-Three mechanisms keep data in sync:
+Three mechanisms keep profile data in sync:
 
 | Direction | Mechanism | Trigger |
 |-----------|-----------|---------|
@@ -89,6 +89,7 @@ All Nextcloud env vars are **optional**. If any required combination is missing,
 | `NEXTCLOUD_WEBHOOK_SECRET` | Yes* | — | Shared secret for webhook SHA256 verification |
 | `NEXTCLOUD_REGISTER_ID` | Yes* | — | OpenRegister register ID (e.g. `1`) |
 | `NEXTCLOUD_CLIENT_SCHEMA_ID` | Yes* | — | OpenRegister client schema ID (e.g. `1`) |
+| `NEXTCLOUD_LEDGER_SCHEMA_ID` | No | — | OpenRegister ledger schema ID for invoice objects |
 | `NEXTCLOUD_SYNC_MODE` | No | `direct` | Set to `disabled` to disable polling and outbound sync |
 | `NEXTCLOUD_POLL_INTERVAL_MS` | No | `60000` | Polling interval in milliseconds |
 
@@ -117,6 +118,20 @@ curl "https://cloud.dfwsc.com/index.php/apps/pipelinq/api/settings" \
 ### File
 
 `backend/src/lib/nextcloud-sync.ts` — `pushProfileToNextcloud()`, `syncClientProfileToNextcloud()`
+
+### Invoice Ledger Sync (Stripe/DFWSC → Nextcloud)
+
+If `NEXTCLOUD_LEDGER_SCHEMA_ID` is configured, invoice objects are pushed to a separate OpenRegister schema.
+
+Triggers:
+
+1. `POST /api/v1/invoices` (invoice creation)
+2. `PATCH /api/v1/invoices/:id` when an open invoice is voided
+3. `POST /api/v1/invoices/:id/mark-paid-out-of-band`
+4. Stripe webhook events: `invoice.payment_succeeded`, `invoice.payment_failed`, `invoice.paid`
+5. Subscription creation path when a first invoice is generated
+
+The ledger payload includes invoice identifiers, client identifiers, amounts, tax, status, due/paid timestamps, hosted URL, payment metadata, and serialized line items.
 
 ---
 
@@ -175,6 +190,24 @@ Tracks the sync state between DFWSC clients and their OpenRegister counterparts.
 | `created_at` | `timestamptz` | Row creation time |
 | `updated_at` | `timestamptz` | Row update time |
 
+### `invoice_sync_state` Table
+
+Tracks the sync state between Stripe invoices and Nextcloud ledger objects.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `stripe_invoice_id` | `text` (PK) | Stripe invoice ID (`in_...`) |
+| `client_id` | `text` (FK → `clients.id`) | Local client reference |
+| `external_source` | `text` (default `"nextcloud"`) | Source system identifier |
+| `external_id` | `text` | OpenRegister ledger object UUID |
+| `sync_status` | `text` | `"synced"`, `"pending"`, or `"failed"` |
+| `sync_error` | `text` | Error message on failure (truncated to 1000 chars) |
+| `sync_attempts` | `integer` | Number of sync attempts |
+| `last_sync_attempt_at` | `timestamptz` | Most recent attempt timestamp |
+| `last_synced_at` | `timestamptz` | Most recent successful sync timestamp |
+| `created_at` | `timestamptz` | Row creation time |
+| `updated_at` | `timestamptz` | Row update time |
+
 ---
 
 ## Sync Status Flow
@@ -212,6 +245,8 @@ Tracks the sync state between DFWSC clients and their OpenRegister counterparts.
 | File | Purpose |
 |------|---------|
 | `backend/src/lib/nextcloud-sync.ts` | Core sync logic: `syncClientProfileToNextcloud()`, `upsertClientFromNextcloudWebhook()`, `isValidNextcloudWebhook()`, `getSyncStateMap()` |
+| `backend/src/routes/invoices.ts` | Invoice creation/update routes that push Stripe invoice changes to Nextcloud ledger |
+| `backend/src/routes/webhooks.ts` | Stripe webhook invoice events that push payment status updates to Nextcloud ledger |
 | `backend/src/lib/nextcloud-poll.ts` | Polling scheduler: `startNextcloudPolling()`, `stopNextcloudPolling()`, `pollNextcloudChanges()` |
 | `backend/src/routes/integrations.ts` | Webhook route: `POST /api/v1/integrations/nextcloud/webhook` |
 | `backend/src/db/schema.ts` | `profileSyncState` table definition |

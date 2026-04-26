@@ -19,7 +19,7 @@ export const DATE_FORMAT_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 export function validateWorkspace(workspace: unknown, res: FastifyReply): Workspace | null {
   if (!isWorkspace(workspace)) {
     res.status(400).send({
-      error: "workspace is required (dfwsc_services|client_portal|ledger_crm).",
+      error: "workspace is required (dfwsc_services|client_portal).",
     });
     return null;
   }
@@ -33,7 +33,7 @@ export function validateWorkspace(workspace: unknown, res: FastifyReply): Worksp
 export function validateWorkspaceQuery(workspace: unknown, res: FastifyReply): Workspace | null {
   if (!isWorkspace(workspace)) {
     res.status(400).send({
-      error: "workspace query parameter is required (dfwsc_services|client_portal|ledger_crm).",
+      error: "workspace query parameter is required (dfwsc_services|client_portal).",
     });
     return null;
   }

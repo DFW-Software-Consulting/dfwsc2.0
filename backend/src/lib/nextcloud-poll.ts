@@ -85,8 +85,7 @@ export async function pollNextcloudChanges(): Promise<number> {
 
     const name = typeof record.name === "string" ? record.name : null;
     const email = typeof record.email === "string" ? record.email.toLowerCase().trim() : null;
-    const workspace =
-      record._dfwsc_workspace === "dfwsc_services" ? "dfwsc_services" : "ledger_crm";
+    const workspace = "dfwsc_services";
     const contactName =
       typeof record._dfwsc_contact_name === "string" ? record._dfwsc_contact_name : null;
     const phone = typeof record.phone === "string" ? record.phone : null;

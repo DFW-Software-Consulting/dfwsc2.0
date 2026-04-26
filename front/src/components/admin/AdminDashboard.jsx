@@ -1,28 +1,108 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
-import { useSetupStatus } from "../../hooks/useSetupStatus";
+import { useClients } from "../../hooks/useClients";
 import AdminLogin from "./AdminLogin";
+import AddClientModal from "./AddClientModal";
 import AdminSetup from "./AdminSetup";
 import BillingPanel from "./BillingPanel";
-import CRMPanel from "./CRMPanel";
 import ClientList from "./ClientList";
-import CreateClientForm from "./CreateClientForm";
+import ClientProfile from "./ClientProfile";
 import GroupPanel from "./GroupPanel";
 import ImportStripeCustomer from "./ImportStripeCustomer";
-import ImportStripeCustomerDfwsc from "./ImportStripeCustomerDfwsc";
+import InvoicesDuePanel from "./InvoicesDuePanel";
 import PaymentReports from "./PaymentReports";
 import SettingsPanel from "./SettingsPanel";
 import Toast from "./Toast";
+import StatusBadge from "./shared/StatusBadge";
+import { useSetupStatus } from "../../hooks/useSetupStatus";
 
-const TABS = [
+const DFWSC_TABS = [
+  { id: "due", label: "Due" },
+  { id: "clients", label: "Clients" },
+  { id: "invoices", label: "Invoices" },
+  { id: "settings", label: "Settings" },
+];
+
+const PORTAL_TABS = [
   { id: "clients", label: "Accounts" },
   { id: "groups", label: "Companies" },
   { id: "reports", label: "Reports" },
-  { id: "billing", label: "Billing" },
-  { id: "crm", label: "CRM" },
+  { id: "invoices", label: "Invoices" },
   { id: "settings", label: "Settings" },
 ];
+
+function paymentHealthForClient(client) {
+  if (client.status === "inactive" || client.suspendedAt) return "canceled";
+  return client.paymentStatus ?? "none";
+}
+
+function DfwscClientsPanel({ onSelectClient, onAddClient }) {
+  const { data: clients = [], isLoading, isError, error } = useClients({ workspace: "dfwsc_services" });
+
+  const rows = useMemo(() => {
+    return [...clients].sort((a, b) => a.name.localeCompare(b.name));
+  }, [clients]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="text-md font-semibold text-white">Clients</h4>
+        <button
+          type="button"
+          onClick={onAddClient}
+          className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          Add Client
+        </button>
+      </div>
+
+      {isLoading && <p className="text-sm text-gray-400">Loading clients...</p>}
+      {isError && <p className="text-sm text-red-400">{error?.message}</p>}
+
+      {!isLoading && !isError && rows.length === 0 && (
+        <p className="text-sm text-gray-400">No clients yet.</p>
+      )}
+
+      {rows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-700">
+            <thead>
+              <tr>
+                {["Client", "Email", "Health", "Status"].map((h) => (
+                  <th
+                    key={h}
+                    className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {rows.map((client) => (
+                <tr
+                  key={client.id}
+                  className="cursor-pointer hover:bg-gray-700/40"
+                  onClick={() => onSelectClient(client.id)}
+                >
+                  <td className="px-3 py-2 text-sm text-blue-400">{client.name}</td>
+                  <td className="px-3 py-2 text-sm text-gray-200">{client.email}</td>
+                  <td className="px-3 py-2 text-sm">
+                    <StatusBadge status={paymentHealthForClient(client)} />
+                  </td>
+                  <td className="px-3 py-2 text-sm">
+                    <StatusBadge status={client.status} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function AdminDashboard() {
   const { isLoggedIn, logout } = useAuth();
@@ -34,19 +114,18 @@ export default function AdminDashboard() {
     error: statusError,
   } = useSetupStatus();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState("clients");
-  const [clientSubTab, setClientSubTab] = useState("create"); // 'create' or 'import'
+
   const [workspace, setWorkspace] = useState("dfwsc_services");
-  const [toast, setToast] = useState({ show: false, message: "", type: "" });
+  const [activeTab, setActiveTab] = useState("due");
+  const [selectedClientId, setSelectedClientId] = useState(null);
+  const [previousTab, setPreviousTab] = useState("due");
+  const [showAddClientModal, setShowAddClientModal] = useState(false);
   const [billingSubTab, setBillingSubTab] = useState("invoices");
   const [preselectedClient, setPreselectedClient] = useState(null);
-  const [showDfwscClientSuccess, setShowDfwscClientSuccess] = useState(false);
+  const [toast, setToast] = useState({ show: false, message: "", type: "" });
 
   const isDfwscMode = workspace === "dfwsc_services";
-  const isCrmWorkspace = workspace === "dfwsc_services" || workspace === "ledger_crm";
-  const visibleTabs = isCrmWorkspace
-    ? TABS.filter((tab) => tab.id !== "groups" && tab.id !== "reports")
-    : TABS.filter((tab) => tab.id !== "crm");
+  const tabs = isDfwscMode ? DFWSC_TABS : PORTAL_TABS;
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
@@ -62,44 +141,44 @@ export default function AdminDashboard() {
 
   const handleLogout = useCallback(() => {
     logout();
-    setActiveTab("clients");
+    setActiveTab("due");
+    setSelectedClientId(null);
   }, [logout]);
 
-  const handleDfwscClientCreated = useCallback((client) => {
-    setPreselectedClient(client);
-    setShowDfwscClientSuccess(true);
-    setActiveTab("billing");
-  }, []);
+  const openClientProfile = useCallback(
+    (clientId) => {
+      setPreviousTab(activeTab);
+      setSelectedClientId(clientId);
+    },
+    [activeTab]
+  );
 
-  const handleBackToClients = useCallback(() => {
-    setShowDfwscClientSuccess(false);
-    setPreselectedClient(null);
-    setActiveTab("clients");
-  }, []);
-
-  const handleCreateInvoice = useCallback(() => {
-    setBillingSubTab("invoices");
-    setActiveTab("billing");
-  }, []);
-
-  const handleCreateSubscription = useCallback(() => {
-    setBillingSubTab("subscriptions");
-    setActiveTab("billing");
-  }, []);
+  const closeClientProfile = useCallback(() => {
+    setSelectedClientId(null);
+    setActiveTab(previousTab);
+  }, [previousTab]);
 
   const handleWorkspaceChange = useCallback((nextWorkspace) => {
     setWorkspace(nextWorkspace);
-    setShowDfwscClientSuccess(false);
+    setSelectedClientId(null);
+    setShowAddClientModal(false);
     setPreselectedClient(null);
-    setActiveTab((prev) => {
-      if ((nextWorkspace === "dfwsc_services" || nextWorkspace === "ledger_crm") && (prev === "groups" || prev === "reports"))
-        return "clients";
-      if (nextWorkspace === "client_portal" && prev === "crm") return "clients";
-      return prev;
-    });
+    setActiveTab(nextWorkspace === "dfwsc_services" ? "due" : "clients");
   }, []);
 
-  // ─── Unauthenticated state ───────────────────────────────────────────────
+  const handleCreateInvoiceFromProfile = useCallback((client) => {
+    setPreselectedClient(client);
+    setBillingSubTab("invoices");
+    setSelectedClientId(null);
+    setActiveTab("invoices");
+  }, []);
+
+  const handleCreateSubscriptionFromProfile = useCallback((client) => {
+    setPreselectedClient(client);
+    setBillingSubTab("subscriptions");
+    setSelectedClientId(null);
+    setActiveTab("invoices");
+  }, []);
 
   if (!isLoggedIn) {
     if (statusLoading) {
@@ -122,7 +201,6 @@ export default function AdminDashboard() {
       );
     }
 
-    // Default to Login if status is unknown/undetermined (e.g., API unreachable)
     const showLogin = !bootstrapPending && !requiresSetup && adminConfigured;
     const showSetup = bootstrapPending || requiresSetup;
 
@@ -159,11 +237,8 @@ export default function AdminDashboard() {
     );
   }
 
-  // ─── Authenticated state ─────────────────────────────────────────────────
-
   return (
     <div>
-      {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-lg font-semibold text-white">Welcome, Admin!</h3>
         <button
@@ -175,28 +250,15 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      <div className="bg-gray-800/80 p-1 rounded-xl border border-gray-700 flex max-w-2xl mx-auto mb-6 shadow-inner gap-1">
+      <div className="bg-gray-800/80 p-1 rounded-xl border border-gray-700 flex max-w-xl mx-auto mb-6 shadow-inner gap-1">
         <button
           type="button"
           onClick={() => handleWorkspaceChange("dfwsc_services")}
           className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all duration-200 ${
-            isDfwscMode
-              ? "bg-blue-600 text-white shadow-lg scale-[1.02]"
-              : "text-gray-400 hover:text-gray-200"
+            isDfwscMode ? "bg-blue-600 text-white shadow-lg scale-[1.02]" : "text-gray-400 hover:text-gray-200"
           }`}
         >
           DFWSC Services
-        </button>
-        <button
-          type="button"
-          onClick={() => handleWorkspaceChange("ledger_crm")}
-          className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all duration-200 ${
-            workspace === "ledger_crm"
-              ? "bg-emerald-600 text-white shadow-lg scale-[1.02]"
-              : "text-gray-400 hover:text-gray-200"
-          }`}
-        >
-          Ledger CRM
         </button>
         <button
           type="button"
@@ -211,140 +273,85 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-gray-700 mb-6">
-        {visibleTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              activeTab === tab.id
-                ? "border-blue-500 text-blue-400"
-                : "border-transparent text-gray-400 hover:text-gray-200"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Clients tab */}
-      {activeTab === "clients" && (
-        <>
-          <div className="flex gap-4 mb-4">
+      {!selectedClientId && (
+        <div className="flex border-b border-gray-700 mb-6">
+          {tabs.map((tab) => (
             <button
+              key={tab.id}
               type="button"
-              onClick={() => setClientSubTab("create")}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                clientSubTab === "create"
-                  ? "bg-blue-600 text-white shadow-lg"
-                  : "bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white"
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                activeTab === tab.id
+                  ? "border-blue-500 text-blue-400"
+                  : "border-transparent text-gray-400 hover:text-gray-200"
               }`}
             >
-              + New Client
+              {tab.label}
             </button>
-            <button
-              type="button"
-              onClick={() => setClientSubTab("import")}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
-                clientSubTab === "import"
-                  ? "bg-blue-600 text-white shadow-lg"
-                  : "bg-gray-700 text-gray-300 hover:bg-gray-600 hover:text-white"
-              }`}
-            >
-              📥 Import from Stripe
-            </button>
-          </div>
-
-          {clientSubTab === "create" ? (
-            <CreateClientForm
-              showToast={showToast}
-              workspace={workspace}
-              onSuccess={isCrmWorkspace ? handleDfwscClientCreated : undefined}
-            />
-          ) : isDfwscMode ? (
-            <ImportStripeCustomerDfwsc showToast={showToast} />
-          ) : (
-            <ImportStripeCustomer showToast={showToast} workspace={workspace} />
-          )}
-
-          <div className="mb-6">
-            <h4 className="text-md font-semibold text-white mb-3">
-              {workspace === "dfwsc_services"
-                ? "DFWSC Client List"
-                : workspace === "ledger_crm"
-                  ? "Ledger Client List"
-                  : "Portal Client List"}
-            </h4>
-            <ClientList showToast={showToast} workspace={workspace} />
-          </div>
-        </>
+          ))}
+        </div>
       )}
 
-      {/* Groups tab */}
-      {activeTab === "groups" && !isDfwscMode && (
-        <GroupPanel showToast={showToast} workspace={workspace} />
+      {isDfwscMode && selectedClientId && (
+        <ClientProfile
+          clientId={selectedClientId}
+          workspace="dfwsc_services"
+          onBack={closeClientProfile}
+          onCreateInvoice={handleCreateInvoiceFromProfile}
+          onCreateSubscription={handleCreateSubscriptionFromProfile}
+          showToast={showToast}
+        />
       )}
 
-      {/* Reports tab */}
-      {activeTab === "reports" && !isDfwscMode && (
-        <PaymentReports showToast={showToast} workspace={workspace} />
+      {isDfwscMode && !selectedClientId && activeTab === "due" && (
+        <InvoicesDuePanel showToast={showToast} onSelectClient={openClientProfile} />
       )}
 
-      {/* Billing tab */}
-      {activeTab === "billing" && (
+      {isDfwscMode && !selectedClientId && activeTab === "clients" && (
+        <DfwscClientsPanel
+          onSelectClient={openClientProfile}
+          onAddClient={() => setShowAddClientModal(true)}
+        />
+      )}
+
+      {activeTab === "invoices" && (
         <BillingPanel
           showToast={showToast}
           workspace={workspace}
-          isDfwscMode={workspace === "dfwsc_services"}
+          isDfwscMode={isDfwscMode}
           initialSubTab={billingSubTab}
           preselectedClient={preselectedClient}
         />
       )}
 
-      {/* CRM Client Success - Post-Create Next Steps */}
-      {showDfwscClientSuccess && preselectedClient && activeTab !== "clients" && (
-        <div className="mb-6 p-4 bg-green-900/20 border border-green-500/30 rounded-lg">
-          <h4 className="text-lg font-semibold text-green-400 mb-4">
-            Client Created: {preselectedClient.name}
-          </h4>
-          <p className="text-gray-300 mb-4">
-            Would you like to create a billing record for this client?
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={handleCreateInvoice}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors font-medium"
-            >
-              Create One-Time Invoice
-            </button>
-            <button
-              type="button"
-              onClick={handleCreateSubscription}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors font-medium"
-            >
-              Create Subscription
-            </button>
-            <button
-              type="button"
-              onClick={handleBackToClients}
-              className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-md transition-colors font-medium"
-            >
-              Back to Clients
-            </button>
+      {!isDfwscMode && activeTab === "clients" && (
+        <>
+          <div className="flex gap-4 mb-4">
+            <ImportStripeCustomer showToast={showToast} workspace={workspace} />
           </div>
-        </div>
+          <ClientList showToast={showToast} workspace={workspace} />
+        </>
       )}
 
-      {/* CRM tab */}
-      {activeTab === "crm" && isCrmWorkspace && (
-        <CRMPanel showToast={showToast} workspace={workspace} />
+      {!isDfwscMode && activeTab === "groups" && (
+        <GroupPanel showToast={showToast} workspace={workspace} />
       )}
 
-      {/* Settings tab */}
+      {!isDfwscMode && activeTab === "reports" && (
+        <PaymentReports showToast={showToast} workspace={workspace} />
+      )}
+
       {activeTab === "settings" && <SettingsPanel showToast={showToast} />}
+
+      <AddClientModal
+        isOpen={showAddClientModal}
+        onClose={() => setShowAddClientModal(false)}
+        onCreated={(client) => {
+          setPreselectedClient(client);
+          setShowAddClientModal(false);
+        }}
+        showToast={showToast}
+      />
 
       <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
     </div>

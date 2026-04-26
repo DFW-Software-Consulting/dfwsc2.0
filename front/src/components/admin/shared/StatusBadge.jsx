@@ -16,16 +16,30 @@ const COLOR_MAP = {
   onboarded: "bg-blue-800 text-blue-200",
   past_due: "bg-orange-800 text-orange-200",
   unpaid: "bg-orange-800 text-orange-200",
+  none: "bg-gray-700 text-gray-200",
   trialing: "bg-blue-800 text-blue-200",
   lead: "bg-purple-800 text-purple-200",
 };
 
+const LABEL_MAP = {
+  active: "Current",
+  trialing: "Current",
+  past_due: "Overdue",
+  unpaid: "Overdue",
+  canceled: "Canceled",
+  none: "No Subscription",
+};
+
 export default function StatusBadge({ status }) {
+  const normalizedStatus = typeof status === "string" ? status : "unknown";
+  const label = LABEL_MAP[normalizedStatus] ??
+    (normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1));
+
   return (
     <span
-      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${COLOR_MAP[status] ?? "bg-gray-700 text-gray-200"}`}
+      className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${COLOR_MAP[normalizedStatus] ?? "bg-gray-700 text-gray-200"}`}
     >
-      {status.charAt(0).toUpperCase() + status.slice(1)}
+      {label}
     </span>
   );
 }

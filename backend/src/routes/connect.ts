@@ -134,7 +134,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             name: { type: "string", minLength: 1 },
             email: { type: "string", format: "email" },
             groupId: { type: "string" },
-            workspace: { type: "string", enum: ["dfwsc_services", "client_portal", "ledger_crm"] },
+            workspace: { type: "string", enum: ["dfwsc_services", "client_portal"] },
           },
         },
       },
@@ -149,7 +149,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       if (!isWorkspace(workspace)) {
         return reply
           .code(400)
-          .send({ error: "workspace must be dfwsc_services, client_portal, or ledger_crm." });
+          .send({ error: "workspace must be dfwsc_services or client_portal." });
       }
 
       request.log.info(
@@ -171,7 +171,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         }
       }
 
-      if (workspace === "ledger_crm") {
+      if (workspace === "dfwsc_services") {
         const normalizedEmail = email.toLowerCase().trim();
         const [existingByEmail] = await db
           .select({ id: clients.id })
@@ -210,7 +210,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             .returning();
 
           await syncClientProfileToNextcloud(createdClient.id).catch((syncErr) => {
-            request.log.warn(syncErr, "Client profile sync failed after ledger client create.");
+            request.log.warn(syncErr, "Client profile sync failed after DFWSC client create.");
           });
           const syncStateMap = await getSyncStateMap([createdClient.id]);
           const syncState = syncStateMap.get(createdClient.id);
@@ -243,12 +243,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         workspace,
         groupId,
       });
-
-      if (workspace === "dfwsc_services") {
-        await syncClientProfileToNextcloud(clientId).catch((syncErr) => {
-          request.log.warn(syncErr, "Client profile sync failed after onboarding client create.");
-        });
-      }
 
       const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
       if (!frontendOrigin) {
@@ -303,9 +297,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: "workspace is required." });
       }
 
-      if (workspaceParam === "ledger_crm") {
+      if (workspaceParam === "dfwsc_services") {
         return reply.code(400).send({
-          error: "ledger_crm uses direct billing and does not support Connect onboarding.",
+          error: "dfwsc_services uses direct billing and does not support Connect onboarding.",
         });
       }
 

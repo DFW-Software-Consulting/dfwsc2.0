@@ -97,7 +97,7 @@ describe("Payments Reports API Integration", () => {
         name: "Test Client",
         email: "test@example.com",
         workspace: "dfwsc_services",
-        stripeAccountId: "acct_test",
+        stripeCustomerId: "cus_test",
         status: "active",
       });
 
@@ -131,7 +131,7 @@ describe("Payments Reports API Integration", () => {
         email: "client1@example.com",
         workspace: "dfwsc_services",
         groupId,
-        stripeAccountId: "acct_1",
+        stripeCustomerId: "cus_1",
         status: "active",
       });
 
@@ -141,7 +141,7 @@ describe("Payments Reports API Integration", () => {
         email: "client2@example.com",
         workspace: "dfwsc_services",
         groupId,
-        stripeAccountId: "acct_2",
+        stripeCustomerId: "cus_2",
         status: "active",
       });
 
@@ -159,6 +159,14 @@ describe("Payments Reports API Integration", () => {
       const body = response.json();
       expect(body.groupId).toBe(groupId);
       expect(body.data).toHaveLength(2);
+      expect(mockPaymentIntentsList).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ customer: "cus_1" })
+      );
+      expect(mockPaymentIntentsList).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ customer: "cus_2" })
+      );
     });
 
     it("returns 404 when group does not exist", async () => {
@@ -210,7 +218,7 @@ describe("Payments Reports API Integration", () => {
         email: "test@example.com",
         workspace: "dfwsc_services",
         groupId,
-        stripeAccountId: null,
+        stripeCustomerId: null,
         status: "active",
       });
 
@@ -234,7 +242,7 @@ describe("Payments Reports API Integration", () => {
         name: "Client 1",
         email: "client1@example.com",
         workspace: "dfwsc_services",
-        stripeAccountId: "acct_1",
+        stripeCustomerId: "cus_1",
         status: "active",
       });
 
@@ -243,7 +251,7 @@ describe("Payments Reports API Integration", () => {
         name: "Client 2",
         email: "client2@example.com",
         workspace: "dfwsc_services",
-        stripeAccountId: "acct_2",
+        stripeCustomerId: "cus_2",
         status: "active",
       });
 
@@ -261,6 +269,14 @@ describe("Payments Reports API Integration", () => {
       const body = response.json();
       expect(body.workspace).toBe("dfwsc_services");
       expect(body.data).toHaveLength(2);
+      expect(mockPaymentIntentsList).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ customer: "cus_1" })
+      );
+      expect(mockPaymentIntentsList).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ customer: "cus_2" })
+      );
     });
 
     it("returns empty array for DFWSC workspace with no connected clients", async () => {
@@ -272,7 +288,7 @@ describe("Payments Reports API Integration", () => {
         name: "Test Client",
         email: "test@example.com",
         workspace: "dfwsc_services",
-        stripeAccountId: null,
+        stripeCustomerId: null,
         status: "active",
       });
 
@@ -296,7 +312,7 @@ describe("Payments Reports API Integration", () => {
       expect(response.json().error).toBe("Client not found.");
     });
 
-    it("returns 404 when client has no stripeAccountId", async () => {
+    it("returns 404 when DFWSC client has no stripeCustomerId", async () => {
       const clientId = randomUUID();
       cleanupIds.push(clientId);
 
@@ -305,7 +321,7 @@ describe("Payments Reports API Integration", () => {
         name: "Test Client",
         email: "test@example.com",
         workspace: "dfwsc_services",
-        stripeAccountId: null,
+        stripeCustomerId: null,
         status: "active",
       });
 
@@ -315,7 +331,7 @@ describe("Payments Reports API Integration", () => {
         headers: { authorization: `Bearer ${makeAdminToken()}` },
       });
       expect(response.statusCode).toBe(404);
-      expect(response.json().error).toBe("Client with connected account not found.");
+      expect(response.json().error).toBe("Client with Stripe customer not found.");
     });
 
     it("returns 400 when client does not belong to workspace", async () => {
@@ -349,7 +365,7 @@ describe("Payments Reports API Integration", () => {
         name: "Test Client",
         email: "test@example.com",
         workspace: "dfwsc_services",
-        stripeAccountId: "acct_test",
+        stripeCustomerId: "cus_test",
         status: "active",
       });
 
@@ -369,76 +385,43 @@ describe("Payments Reports API Integration", () => {
       expect(body.clientId).toBe(clientId);
       expect(body.data).toHaveLength(1);
       expect(body.hasMore).toBe(false);
+      expect(mockPaymentIntentsList).toHaveBeenCalledWith(
+        expect.objectContaining({ customer: "cus_test" })
+      );
     });
 
-    it("fetches all payments for ledger CRM workspace without clientId or groupId", async () => {
-      const clientId1 = randomUUID();
-      const clientId2 = randomUUID();
-      cleanupIds.push(clientId1, clientId2);
-
-      await db.insert(clients).values({
-        id: clientId1,
-        name: "Ledger Client 1",
-        email: "ledger1@example.com",
-        workspace: "ledger_crm",
-        stripeCustomerId: "cus_ledger_1",
-        status: "active",
-      });
-
-      await db.insert(clients).values({
-        id: clientId2,
-        name: "Ledger Client 2",
-        email: "ledger2@example.com",
-        workspace: "ledger_crm",
-        stripeCustomerId: "cus_ledger_2",
-        status: "active",
-      });
-
-      mockPaymentIntentsList
-        .mockResolvedValueOnce({ data: [{ id: "pi_l1", amount: 1200 }], has_more: false })
-        .mockResolvedValueOnce({ data: [{ id: "pi_l2", amount: 2200 }], has_more: false });
-
+    it("returns 400 when workspace is invalid", async () => {
       const response = await app.inject({
         method: "GET",
         url: "/api/v1/reports/payments?workspace=ledger_crm",
         headers: { authorization: `Bearer ${makeAdminToken()}` },
       });
 
-      expect(response.statusCode).toBe(200);
-      const body = response.json();
-      expect(body.workspace).toBe("ledger_crm");
-      expect(body.data).toHaveLength(2);
-      expect(mockPaymentIntentsList).toHaveBeenNthCalledWith(
-        1,
-        expect.objectContaining({ customer: "cus_ledger_1" })
-      );
-      expect(mockPaymentIntentsList).toHaveBeenNthCalledWith(
-        2,
-        expect.objectContaining({ customer: "cus_ledger_2" })
-      );
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/workspace query parameter is required/i);
     });
 
-    it("returns 404 when ledger CRM client has no stripeCustomerId", async () => {
+    it("returns 404 when client_portal client has no stripeAccountId", async () => {
       const clientId = randomUUID();
       cleanupIds.push(clientId);
 
       await db.insert(clients).values({
         id: clientId,
-        name: "Ledger Client",
-        email: "ledger-missing-customer@example.com",
-        workspace: "ledger_crm",
+        name: "Portal Client",
+        email: "portal-missing-account@example.com",
+        workspace: "client_portal",
         stripeCustomerId: null,
         status: "active",
       });
 
       const response = await app.inject({
         method: "GET",
-        url: `/api/v1/reports/payments?workspace=ledger_crm&clientId=${clientId}`,
+        url: `/api/v1/reports/payments?workspace=client_portal&clientId=${clientId}`,
         headers: { authorization: `Bearer ${makeAdminToken()}` },
       });
 
       expect(response.statusCode).toBe(404);
-      expect(response.json().error).toBe("Client with Stripe customer not found.");
+      expect(response.json().error).toBe("Client with connected account not found.");
     });
 
     it("respects starting_after and ending_before pagination params", async () => {
@@ -450,7 +433,7 @@ describe("Payments Reports API Integration", () => {
         name: "Test Client",
         email: "test@example.com",
         workspace: "dfwsc_services",
-        stripeAccountId: "acct_test",
+        stripeCustomerId: "cus_test",
         status: "active",
       });
 
@@ -467,8 +450,7 @@ describe("Payments Reports API Integration", () => {
 
       expect(response.statusCode).toBe(200);
       expect(mockPaymentIntentsList).toHaveBeenCalledWith(
-        expect.objectContaining({ starting_after: "pi_1" }),
-        expect.anything()
+        expect.objectContaining({ starting_after: "pi_1", customer: "cus_test" })
       );
     });
   });

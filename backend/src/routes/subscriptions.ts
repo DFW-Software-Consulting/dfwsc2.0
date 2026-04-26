@@ -5,6 +5,7 @@ import { db } from "../db/client";
 import { clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { sendInvoiceEmail } from "../lib/mailer";
+import { syncInvoiceToNextcloud, toNextcloudLedgerInvoiceInput } from "../lib/nextcloud-sync";
 import { stripe } from "../lib/stripe";
 import {
   type CalendarInterval,
@@ -592,6 +593,35 @@ const subscriptionRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const hostedInvoiceUrl = firstInvoice?.hosted_invoice_url ?? null;
+
+      if (firstInvoice) {
+        try {
+          const ledgerSyncState = await syncInvoiceToNextcloud(
+            toNextcloudLedgerInvoiceInput(firstInvoice, {
+              id: client.id,
+              name: client.name,
+              email: client.email,
+              workspace: client.workspace,
+            })
+          );
+
+          if (ledgerSyncState.syncStatus === "failed") {
+            req.log.warn(
+              {
+                invoiceId: firstInvoice.id,
+                clientId,
+                error: ledgerSyncState.syncError,
+              },
+              "Failed to sync initial subscription invoice to Nextcloud ledger"
+            );
+          }
+        } catch (err) {
+          req.log.warn(
+            { err, invoiceId: firstInvoice.id, clientId },
+            "Initial subscription invoice ledger sync skipped"
+          );
+        }
+      }
 
       await sendInvoiceEmail({
         to: client.email,

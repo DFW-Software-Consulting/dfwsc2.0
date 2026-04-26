@@ -634,7 +634,7 @@ describe("Stripe Customers API Integration", () => {
       expect(response.json().error).toMatch(/only available for direct billing workspaces/i);
     });
 
-    it("supports ledger_crm workspace for sync", async () => {
+    it("rejects legacy ledger_crm workspace for sync", async () => {
       const localClientId = randomUUID();
       const stripeCustomerId = "cus_sync_ledger";
       cleanupIds.push(localClientId);
@@ -643,7 +643,7 @@ describe("Stripe Customers API Integration", () => {
         id: localClientId,
         name: "Ledger Sync",
         email: "ledger-sync@example.com",
-        workspace: "ledger_crm",
+        workspace: "dfwsc_services",
         stripeCustomerId,
         status: "active",
       });
@@ -671,8 +671,8 @@ describe("Stripe Customers API Integration", () => {
         },
       });
 
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toMatchObject({ success: true, linkFailures: 0 });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/only available for direct billing workspaces/i);
     });
 
     it("returns 400 when required sync fields are missing", async () => {

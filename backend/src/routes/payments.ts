@@ -331,7 +331,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     if (!validWorkspace) return;
 
     // For CRM billing workspaces, allow fetching all payments across all clients in the workspace
-    const allowAllClients = workspace === "dfwsc_services" || workspace === "ledger_crm";
+    const allowAllClients = workspace === "dfwsc_services";
 
     if (!clientId && !groupId && !allowAllClients) {
       return reply.code(400).send({ error: "clientId or groupId query parameter is required." });
@@ -374,7 +374,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       const maxConcurrency = 3;
       const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
 
-      if (workspace === "ledger_crm") {
+      if (workspace === "dfwsc_services") {
         const billable = groupClients.filter(
           (c): c is typeof c & { stripeCustomerId: string } => c.stripeCustomerId !== null
         );
@@ -428,7 +428,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       const maxConcurrency = 3;
       const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
 
-      if (workspace === "ledger_crm") {
+      if (workspace === "dfwsc_services") {
         const billable = allClients.filter(
           (c): c is typeof c & { stripeCustomerId: string } => c.stripeCustomerId !== null
         );
@@ -485,7 +485,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     }
 
     let paymentIntents: Awaited<ReturnType<typeof stripe.paymentIntents.list>>;
-    if (workspace === "ledger_crm") {
+    if (workspace === "dfwsc_services") {
       if (!client.stripeCustomerId) {
         return reply.code(404).send({ error: "Client with Stripe customer not found." });
       }
