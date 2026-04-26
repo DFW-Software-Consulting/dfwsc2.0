@@ -28,16 +28,27 @@ export default function InvoicesDuePanel({ showToast, onSelectClient }) {
   const cancelInvoiceMutation = useCancelInvoice();
   const markPaidMutation = useMarkInvoicePaidOutOfBand();
   const [oobInvoice, setOobInvoice] = useState(null);
+  const [filter, setFilter] = useState("all");
 
   const dueInvoices = useMemo(() => {
-    return invoices
-      .filter((inv) => inv.status === "open" || isPastDue(inv))
-      .sort((a, b) => {
-        const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
-        const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
-        return aDue - bDue;
-      });
+    return invoices.filter((inv) => inv.status === "open");
   }, [invoices]);
+
+  const visibleInvoices = useMemo(() => {
+    const filtered = dueInvoices.filter((invoice) => {
+      const dueTs = invoice.dueDate ? new Date(invoice.dueDate).getTime() : null;
+
+      if (filter === "past_due") return isPastDue(invoice);
+      if (filter === "no_due_date") return dueTs == null;
+      return true;
+    });
+
+    return filtered.sort((a, b) => {
+      const aDue = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      const bDue = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      return aDue - bDue;
+    });
+  }, [dueInvoices, filter]);
 
   const handleMarkPaid = (body) => {
     if (!oobInvoice) return;
@@ -54,6 +65,9 @@ export default function InvoicesDuePanel({ showToast, onSelectClient }) {
   };
 
   const handleCancel = (invoiceId) => {
+    const confirmed = window.confirm("Cancel this invoice? This action cannot be undone.");
+    if (!confirmed) return;
+
     cancelInvoiceMutation.mutate(invoiceId, {
       onSuccess: () => showToast?.("Invoice canceled.", "success"),
       onError: (err) => showToast?.(err.message, "error"),
@@ -64,23 +78,34 @@ export default function InvoicesDuePanel({ showToast, onSelectClient }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h4 className="text-md font-semibold text-white">Invoices Due</h4>
-        <button
-          type="button"
-          onClick={() => refetch()}
-          className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="rounded-md border border-gray-600 bg-gray-900/60 px-2 py-1 text-xs text-gray-100"
+          >
+            <option value="all">All Open</option>
+            <option value="past_due">Past Due</option>
+            <option value="no_due_date">No Due Date</option>
+          </select>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {isLoading && <p className="text-sm text-gray-400">Loading due invoices...</p>}
       {isError && <p className="text-sm text-red-400">{error?.message}</p>}
 
-      {!isLoading && !isError && dueInvoices.length === 0 && (
+      {!isLoading && !isError && visibleInvoices.length === 0 && (
         <p className="text-sm text-gray-400">No open or past-due invoices.</p>
       )}
 
-      {dueInvoices.length > 0 && (
+      {visibleInvoices.length > 0 && (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-700">
             <thead>
@@ -96,8 +121,11 @@ export default function InvoicesDuePanel({ showToast, onSelectClient }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
-              {dueInvoices.map((invoice) => (
-                <tr key={invoice.id} className="hover:bg-gray-700/40">
+              {visibleInvoices.map((invoice) => (
+                <tr
+                  key={invoice.id}
+                  className={`hover:bg-gray-700/40 ${isPastDue(invoice) ? "bg-red-900/10" : ""}`}
+                >
                   <td className="px-3 py-2 text-sm">
                     <button
                       type="button"
@@ -129,6 +157,7 @@ export default function InvoicesDuePanel({ showToast, onSelectClient }) {
                       <button
                         type="button"
                         onClick={() => setOobInvoice(invoice)}
+                        disabled={markPaidMutation.isPending || cancelInvoiceMutation.isPending}
                         className="px-2 py-1 rounded text-xs bg-green-700 hover:bg-green-600 text-white"
                       >
                         Mark Paid
@@ -136,6 +165,7 @@ export default function InvoicesDuePanel({ showToast, onSelectClient }) {
                       <button
                         type="button"
                         onClick={() => handleCancel(invoice.id)}
+                        disabled={markPaidMutation.isPending || cancelInvoiceMutation.isPending}
                         className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white"
                       >
                         Cancel

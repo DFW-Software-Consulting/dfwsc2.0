@@ -31,6 +31,11 @@ function canSuspend(health) {
   return ["past_due", "unpaid", "canceled"].includes(health);
 }
 
+function isInvoicePastDue(invoice) {
+  if (!invoice?.dueDate || invoice.status !== "open") return false;
+  return new Date(invoice.dueDate).getTime() < Date.now();
+}
+
 export default function ClientProfile({
   clientId,
   workspace = "dfwsc_services",
@@ -52,19 +57,36 @@ export default function ClientProfile({
   const [invoiceFilter, setInvoiceFilter] = useState("all");
 
   const paymentHealth = resolvePaymentHealth(client);
+  const isSuspended = client.status === "inactive" || Boolean(client.suspendedAt);
   const activeSubscription = useMemo(() => {
     return subscriptions.find((sub) => sub.status !== "cancelled") ?? subscriptions[0] ?? null;
   }, [subscriptions]);
 
   const filteredInvoices = useMemo(() => {
     if (invoiceFilter === "all") return invoices;
+    if (invoiceFilter === "past_due") return invoices.filter((invoice) => isInvoicePastDue(invoice));
     return invoices.filter((invoice) => invoice.status === invoiceFilter);
   }, [invoiceFilter, invoices]);
 
+  const sortedInvoices = useMemo(() => {
+    return [...filteredInvoices].sort((a, b) => {
+      const aTime = new Date(a.createdAt || a.dueDate || 0).getTime();
+      const bTime = new Date(b.createdAt || b.dueDate || 0).getTime();
+      return bTime - aTime;
+    });
+  }, [filteredInvoices]);
+
   const handleSuspend = () => {
     if (!client) return;
+    if (!canSuspend(paymentHealth)) {
+      showToast?.("Suspend is only available when payment health is overdue, unpaid, or canceled.", "error");
+      return;
+    }
+    const confirmed = window.confirm(`Suspend ${client.name}? This marks the account inactive.`);
+    if (!confirmed) return;
+
     suspendMutation.mutate(
-      { id: client.id, reason: "Suspended from client profile" },
+      { id: client.id, reason: `Suspended from client profile (${paymentHealth})` },
       {
         onSuccess: () => showToast?.("Client suspended.", "success"),
         onError: (err) => showToast?.(err.message, "error"),
@@ -74,6 +96,9 @@ export default function ClientProfile({
 
   const handleReinstate = () => {
     if (!client) return;
+    const confirmed = window.confirm(`Reinstate ${client.name}? This restores the account to active.`);
+    if (!confirmed) return;
+
     reinstateMutation.mutate(
       { id: client.id },
       {
@@ -138,7 +163,7 @@ export default function ClientProfile({
         <Button size="sm" variant="secondary" onClick={() => onCreateSubscription?.(client)}>
           Create Subscription
         </Button>
-        {client.suspendedAt ? (
+        {isSuspended ? (
           <Button
             size="sm"
             variant="success"
@@ -153,12 +178,23 @@ export default function ClientProfile({
             variant="danger"
             onClick={handleSuspend}
             isLoading={suspendMutation.isPending}
-            disabled={!canSuspend(paymentHealth)}
+            disabled={!canSuspend(paymentHealth) || reinstateMutation.isPending}
           >
             Suspend
           </Button>
         )}
       </div>
+
+      {isSuspended && (
+        <div className="rounded-lg border border-red-700/50 bg-red-900/20 p-3">
+          <p className="text-sm text-red-300">
+            Suspended {client.suspendedAt ? `on ${formatDate(client.suspendedAt)}` : ""}
+          </p>
+          {client.suspensionReason && (
+            <p className="mt-1 text-xs text-red-200/90">Reason: {client.suspensionReason}</p>
+          )}
+        </div>
+      )}
 
       <div className="rounded-lg border border-gray-700 bg-gray-800/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -169,6 +205,7 @@ export default function ClientProfile({
             className="rounded-md border border-gray-600 bg-gray-900/60 px-2 py-1 text-xs text-gray-100"
           >
             <option value="all">All</option>
+            <option value="past_due">Past Due</option>
             <option value="open">Open</option>
             <option value="paid">Paid</option>
             <option value="void">Canceled</option>
@@ -177,14 +214,14 @@ export default function ClientProfile({
 
         {invoicesLoading ? (
           <p className="text-sm text-gray-400 mt-3">Loading invoices...</p>
-        ) : filteredInvoices.length === 0 ? (
+        ) : sortedInvoices.length === 0 ? (
           <p className="text-sm text-gray-400 mt-3">No invoices for this filter.</p>
         ) : (
           <div className="overflow-x-auto mt-3">
             <table className="min-w-full divide-y divide-gray-700">
               <thead>
                 <tr>
-                  {["Description", "Amount", "Due", "Status"].map((h) => (
+                  {["Description", "Amount", "Due", "Status", "Actions"].map((h) => (
                     <th
                       key={h}
                       className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
@@ -195,12 +232,27 @@ export default function ClientProfile({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800">
-                {filteredInvoices.map((invoice) => (
+                {sortedInvoices.map((invoice) => (
                   <tr key={invoice.id}>
                     <td className="px-3 py-2 text-sm text-gray-200">{invoice.description || "-"}</td>
                     <td className="px-3 py-2 text-sm text-gray-200">{formatUsd(invoice.amountCents)}</td>
                     <td className="px-3 py-2 text-sm text-gray-300">{formatDate(invoice.dueDate)}</td>
-                    <td className="px-3 py-2 text-sm"><StatusBadge status={invoice.status} /></td>
+                    <td className="px-3 py-2 text-sm">
+                      <StatusBadge status={isInvoicePastDue(invoice) ? "past_due" : invoice.status} />
+                    </td>
+                    <td className="px-3 py-2 text-sm">
+                      {invoice.hostedUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => window.open(invoice.hostedUrl, "_blank")}
+                          className="text-blue-400 hover:text-blue-300"
+                        >
+                          Open
+                        </button>
+                      ) : (
+                        <span className="text-gray-500">-</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
