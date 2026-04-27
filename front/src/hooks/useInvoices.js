@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelInvoice,
   createInvoice,
+  getLedgerInvoices,
   getInvoices,
   markInvoicePaidOutOfBand,
 } from "../api/invoices";
@@ -23,6 +24,15 @@ export function useCreateInvoice() {
   return useMutation({
     mutationFn: (body) => createInvoice(token, body),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["invoices"] }),
+  });
+}
+
+export function useLedgerInvoices(params = {}, enabled = false) {
+  const { token } = useAuth();
+  return useQuery({
+    queryKey: ["ledger-invoices", params],
+    queryFn: () => getLedgerInvoices(token, params),
+    enabled: !!token && enabled,
   });
 }
 

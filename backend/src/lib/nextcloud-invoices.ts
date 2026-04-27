@@ -2,6 +2,10 @@ import { db } from "../db/client";
 import { invoices, clients } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { stripe } from "./stripe";
+
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 function isNextcloudConfigured(): boolean {
   return !!(process.env.NEXTCLOUD_BASE_URL && process.env.NEXTCLOUD_USERNAME && process.env.NEXTCLOUD_APP_PASSWORD);
@@ -14,6 +18,7 @@ async function createNextcloudInvoice(invoice: {
   status: string;
   clientName: string;
   clientEmail: string;
+  stripeInvoiceId?: string;
 }): Promise<{ success: boolean; externalId?: string; error?: string }> {
   if (!isNextcloudConfigured()) {
     return { success: false, error: "Nextcloud not configured" };
@@ -34,6 +39,7 @@ async function createNextcloudInvoice(invoice: {
     client_name: invoice.clientName,
     client_email: invoice.clientEmail,
     _dfwsc_invoice_id: invoice.id,
+    _dfwsc_stripe_invoice_id: invoice.stripeInvoiceId,
   };
 
   try {
@@ -180,41 +186,174 @@ export async function createInvoiceForClient(clientId: string, data: {
     return { invoiceId: "", error: "Client not found" };
   }
 
+  if (!client.stripeCustomerId) {
+    return { invoiceId: "", error: "Client is missing Stripe customer ID" };
+  }
+
   const invoiceId = `inv_${uuidv4().slice(0, 12)}`;
   const now = new Date();
+  const effectiveDueDate = data.dueDate || new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  await db.insert(invoices).values({
-    id: invoiceId,
-    clientId: client.id,
-    invoiceNumber: data.invoiceNumber,
-    amountCents: data.amountCents,
-    status: "open",
-    dueDate: data.dueDate || new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-    notes: data.notes || null,
-    createdAt: now,
-    updatedAt: now,
-  });
+  let stripeInvoiceId: string | undefined;
+  let stripeError: string | undefined;
 
-  const syncResult = await createNextcloudInvoice({
-    id: invoiceId,
-    invoiceNumber: data.invoiceNumber,
-    amountCents: data.amountCents,
-    status: "open",
-    clientName: client.name,
-    clientEmail: client.email,
-  });
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await stripe.invoiceItems.create({
+        customer: client.stripeCustomerId,
+        amount: data.amountCents,
+        currency: "usd",
+        description: data.notes || data.invoiceNumber,
+        metadata: {
+          clientId: client.id,
+          invoiceId,
+          invoiceNumber: data.invoiceNumber,
+        },
+      });
 
-  if (syncResult.success && syncResult.externalId) {
-    await db
-      .update(invoices)
-      .set({ nextcloudId: syncResult.externalId })
-      .where(eq(invoices.id, invoiceId));
+      const stripeInvoice = await stripe.invoices.create({
+        customer: client.stripeCustomerId,
+        collection_method: "send_invoice",
+        due_date: Math.floor(effectiveDueDate.getTime() / 1000),
+        auto_advance: true,
+        metadata: {
+          clientId: client.id,
+          invoiceId,
+          invoiceNumber: data.invoiceNumber,
+        },
+      });
+
+      stripeInvoiceId = stripeInvoice.id;
+      break;
+    } catch (err) {
+      stripeError = String(err);
+      if (attempt < MAX_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+      }
+    }
+  }
+
+  if (!stripeInvoiceId) {
+    return {
+      invoiceId: "",
+      synced: false,
+      error: stripeError || "Failed to create Stripe invoice",
+    };
+  }
+
+  let syncResult: { success: boolean; externalId?: string; error?: string } = {
+    success: false,
+    error: "Unknown sync error",
+  };
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    syncResult = await createNextcloudInvoice({
+      id: invoiceId,
+      invoiceNumber: data.invoiceNumber,
+      amountCents: data.amountCents,
+      status: "open",
+      clientName: client.name,
+      clientEmail: client.email,
+      stripeInvoiceId,
+    });
+
+    if (syncResult.success) break;
+
+    if (attempt < MAX_RETRIES) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+    }
+  }
+
+  if (!syncResult.success) {
+    try {
+      await stripe.invoices.voidInvoice(stripeInvoiceId);
+    } catch {
+      // best effort rollback
+    }
+    return {
+      invoiceId: "",
+      synced: false,
+      error: syncResult.error || "Failed to sync invoice to Nextcloud Ledger",
+    };
   }
 
   return {
-    invoiceId,
-    synced: syncResult.success,
+    invoiceId: syncResult.externalId || invoiceId,
+    synced: true,
     externalId: syncResult.externalId,
-    error: syncResult.error,
   };
+}
+
+export async function getLedgerInvoicesForClient(clientId: string): Promise<{
+  invoices: Array<{
+    id: string;
+    clientId: string;
+    invoiceNumber: string;
+    amountCents: number;
+    status: string;
+    dueDate: string | null;
+    createdAt: string | null;
+    description: string;
+    hostedUrl: string | null;
+    nextcloudId: string;
+    stripeInvoiceId: string | null;
+  }>;
+  error?: string;
+}> {
+  const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+  if (!client) {
+    return { invoices: [], error: "Client not found" };
+  }
+
+  if (!isNextcloudConfigured()) {
+    return { invoices: [], error: "Nextcloud not configured" };
+  }
+
+  const baseUrl = process.env.NEXTCLOUD_BASE_URL!.replace(/\/$/, "");
+  const registerId = process.env.NEXTCLOUD_REGISTER_ID || "1";
+  const schemaId = process.env.NEXTCLOUD_LEDGER_SCHEMA_ID || "1";
+
+  try {
+    const res = await fetch(`${baseUrl}/index.php/apps/openregister/api/objects/${registerId}/${schemaId}`, {
+      method: "GET",
+      headers: {
+        "OCS-APIREQUEST": "true",
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      return { invoices: [], error: `Nextcloud API error: ${res.status} ${text}` };
+    }
+
+    const body = await res.json();
+    const rows = Array.isArray(body)
+      ? body
+      : Array.isArray(body?.results)
+        ? body.results
+        : Array.isArray(body?.data)
+          ? body.data
+          : [];
+
+    const filtered = rows.filter((row) => row?.client_email === client.email || row?._dfwsc_client_id === client.id);
+
+    const mapped = filtered.map((row) => ({
+      id: row?._dfwsc_invoice_id || row?.id || `ledger_${uuidv4().slice(0, 12)}`,
+      clientId: client.id,
+      invoiceNumber: row?.name || row?.invoice_number || "-",
+      amountCents: Number(row?.amount_cents ?? 0),
+      status: String(row?.status || "open"),
+      dueDate: row?.due_date || null,
+      createdAt: row?.created || row?.createdAt || null,
+      description: row?.description || row?.notes || row?.name || "",
+      hostedUrl: row?.hosted_url || row?.hostedUrl || null,
+      nextcloudId: String(row?.id || ""),
+      stripeInvoiceId: row?._dfwsc_stripe_invoice_id || null,
+    }));
+
+    return { invoices: mapped };
+  } catch (err) {
+    return { invoices: [], error: String(err) };
+  }
 }

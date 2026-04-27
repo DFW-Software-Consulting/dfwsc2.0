@@ -1,14 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
 import { requireAdminJwt } from "../lib/auth";
-import { createInvoiceForClient } from "../lib/nextcloud-invoices";
+import { createInvoiceForClient, getLedgerInvoicesForClient } from "../lib/nextcloud-invoices";
 import { db } from "../db/client";
 import { invoices, clients } from "../db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, isNotNull } from "drizzle-orm";
 
 interface CreateInvoiceBody {
   clientId: string;
   amountCents: number;
-  invoiceNumber: string;
+  invoiceNumber?: string;
+  description?: string;
   dueDate?: string;
   notes?: string;
 }
@@ -33,9 +34,7 @@ const invoicesRoute: FastifyPluginAsync = async (app) => {
         return res.status(400).send({ error: "amountCents must be a positive integer" });
       }
 
-      if (!invoiceNumber || invoiceNumber.trim().length === 0) {
-        return res.status(400).send({ error: "invoiceNumber is required" });
-      }
+      const normalizedInvoiceNumber = invoiceNumber?.trim() || `INV-${Date.now()}`;
 
       try {
         const [client] = await db
@@ -50,25 +49,48 @@ const invoicesRoute: FastifyPluginAsync = async (app) => {
 
         const result = await createInvoiceForClient(clientId, {
           amountCents,
-          invoiceNumber: invoiceNumber.trim(),
+          invoiceNumber: normalizedInvoiceNumber,
           dueDate: dueDate ? new Date(dueDate) : undefined,
-          notes: notes?.trim(),
+          notes: notes?.trim() || description?.trim(),
         });
 
         if (result.error && !result.invoiceId) {
-          return res.status(500).send({ error: result.error });
+          return res.status(502).send({ error: result.error });
         }
 
         return res.status(201).send({
           id: result.invoiceId,
           clientId,
-          invoiceNumber: invoiceNumber.trim(),
+          invoiceNumber: normalizedInvoiceNumber,
           amountCents,
-          status: result.synced ? "synced" : "local_only",
+          status: "synced",
           nextcloudId: result.externalId,
         });
       } catch (error) {
         req.log.error(error, "Error creating invoice");
+        return res.status(500).send({ error: "Internal server error" });
+      }
+    }
+  );
+
+  app.get(
+    "/invoices/ledger",
+    { preHandler: requireAdminJwt },
+    async (req, res) => {
+      try {
+        const { clientId } = req.query as { clientId?: string };
+        if (!clientId) {
+          return res.status(400).send({ error: "clientId is required" });
+        }
+
+        const result = await getLedgerInvoicesForClient(clientId);
+        if (result.error) {
+          return res.status(502).send({ error: result.error });
+        }
+
+        return res.status(200).send(result.invoices);
+      } catch (error) {
+        req.log.error(error, "Error pulling invoices from Nextcloud Ledger");
         return res.status(500).send({ error: "Internal server error" });
       }
     }
@@ -80,7 +102,7 @@ const invoicesRoute: FastifyPluginAsync = async (app) => {
     { preHandler: requireAdminJwt },
     async (req, res) => {
       try {
-        const { clientId } = req.query as { clientId?: string };
+        const { clientId, syncedOnly } = req.query as { clientId?: string; syncedOnly?: string };
 
         let query = db
           .select({
@@ -99,9 +121,11 @@ const invoicesRoute: FastifyPluginAsync = async (app) => {
           .from(invoices)
           .orderBy(desc(invoices.createdAt));
 
-        const invoiceList = clientId
-          ? await query.where(eq(invoices.clientId, clientId))
-          : await query;
+        let condition = clientId ? eq(invoices.clientId, clientId) : undefined;
+        if (syncedOnly === "true") {
+          condition = condition ? and(condition, isNotNull(invoices.nextcloudId)) : isNotNull(invoices.nextcloudId);
+        }
+        const invoiceList = condition ? await query.where(condition) : await query;
 
         const clientIds = [...new Set(invoiceList.map((i) => i.clientId))];
         const clientRows = clientIds.length > 0

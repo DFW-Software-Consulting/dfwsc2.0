@@ -5,6 +5,11 @@ export const getInvoices = (token, params = {}) => {
   return apiFetch(`/invoices${qs ? `?${qs}` : ""}`, { token });
 };
 
+export const getLedgerInvoices = (token, params = {}) => {
+  const qs = new URLSearchParams(params).toString();
+  return apiFetch(`/invoices/ledger${qs ? `?${qs}` : ""}`, { token });
+};
+
 export const createInvoice = (token, body) =>
   apiFetch("/invoices", { token, method: "POST", body });
 
