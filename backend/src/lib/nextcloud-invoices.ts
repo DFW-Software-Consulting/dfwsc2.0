@@ -11,6 +11,12 @@ function isNextcloudConfigured(): boolean {
   return !!(process.env.NEXTCLOUD_BASE_URL && process.env.NEXTCLOUD_USERNAME && process.env.NEXTCLOUD_APP_PASSWORD);
 }
 
+function getNextcloudAuth(): string {
+  const user = process.env.NEXTCLOUD_USERNAME!;
+  const pass = process.env.NEXTCLOUD_APP_PASSWORD!;
+  return Buffer.from(`${user}:${pass}`).toString("base64");
+}
+
 async function createNextcloudInvoice(invoice: {
   id: string;
   invoiceNumber: string;
@@ -50,6 +56,7 @@ async function createNextcloudInvoice(invoice: {
         headers: {
           "OCS-APIREQUEST": "true",
           "Content-Type": "application/json",
+          Authorization: `Basic ${getNextcloudAuth()}`,
         },
         body: JSON.stringify(payload),
       }
@@ -107,6 +114,7 @@ async function updateNextcloudInvoice(invoice: {
         headers: {
           "OCS-APIREQUEST": "true",
           "Content-Type": "application/json",
+          Authorization: `Basic ${getNextcloudAuth()}`,
         },
         body: JSON.stringify(payload),
       }

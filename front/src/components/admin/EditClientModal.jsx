@@ -15,7 +15,7 @@ export default function EditClientModal({
   showToast,
   workspace = "client_portal",
 }) {
-  const isDfwscMode = workspace === "dfwsc_services";
+  const isDfwscMode = workspace === "dfwsc";
   const { data: groups = [] } = useGroups(workspace);
   const { data: fullClient, isLoading: clientLoading } = useClient(client.id, workspace);
   const patchClientMutation = usePatchClient();

@@ -10,7 +10,7 @@ import FormInput from "./shared/FormInput";
 const NAME_MAX_LENGTH = 100;
 
 export default function CreateClientForm({ showToast, workspace = "client_portal", onSuccess }) {
-  const isDfwscMode = workspace === "dfwsc_services";
+  const isDfwscMode = workspace === "dfwsc";
   const isPortalMode = workspace === "client_portal";
   const { data: groups = [] } = useGroups(workspace);
   const [name, setName] = useState("");

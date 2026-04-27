@@ -3,7 +3,6 @@ import {
   useClients,
   usePatchClientStatus,
   useResendOnboarding,
-  useRetryClientSync,
 } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import logger from "../../utils/logger";
@@ -37,12 +36,11 @@ function renderSyncBadge(client) {
 }
 
 export default function ClientList({ showToast, workspace = "client_portal" }) {
-  const isDfwscMode = workspace === "dfwsc_services";
+  const isDfwscMode = workspace === "dfwsc";
   const { data: clients = [], isLoading, isError, error, refetch } = useClients({ workspace });
   const { data: groups = [] } = useGroups(workspace);
   const patchClientStatusMutation = usePatchClientStatus();
   const resendMutation = useResendOnboarding();
-  const retrySyncMutation = useRetryClientSync();
 
   const [editingClient, setEditingClient] = useState(null);
   const [confirmModal, setConfirmModal] = useState({
@@ -174,27 +172,8 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
         const isTogglingStatus =
           patchClientStatusMutation.isPending &&
           patchClientStatusMutation.variables?.id === client.id;
-        const isRetryingSync =
-          retrySyncMutation.isPending && retrySyncMutation.variables === client.id;
         return (
           <div className="flex gap-2">
-            {client.syncStatus === "failed" && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="bg-amber-600 hover:bg-amber-700 text-white"
-                title={client.syncError || "Retry sync"}
-                isLoading={isRetryingSync}
-                onClick={() =>
-                  retrySyncMutation.mutate(client.id, {
-                    onSuccess: () => showToast?.("Client sync retried.", "success"),
-                    onError: (err) => showToast?.(`Retry failed: ${err.message}`, "error"),
-                  })
-                }
-              >
-                Retry Sync
-              </Button>
-            )}
             {!isDfwscMode && (
               <Button
                 size="sm"

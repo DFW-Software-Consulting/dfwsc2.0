@@ -9,7 +9,6 @@ import BillingPanel from "./BillingPanel";
 import ClientList from "./ClientList";
 import ClientProfile from "./ClientProfile";
 import GroupPanel from "./GroupPanel";
-import ImportStripeCustomer from "./ImportStripeCustomer";
 import InvoicesDuePanel from "./InvoicesDuePanel";
 import PaymentReports from "./PaymentReports";
 import SettingsPanel from "./SettingsPanel";
@@ -33,7 +32,7 @@ const PORTAL_TABS = [
 ];
 
 function DfwscClientsPanel({ onSelectClient, onAddClient }) {
-  const { data: clients = [], isLoading, isError, error } = useClients({ workspace: "dfwsc_services" });
+  const { data: clients = [], isLoading, isError, error } = useClients({ workspace: "dfwsc" });
   const [statusFilter, setStatusFilter] = useState("all");
 
   const lifecycleCounts = useMemo(() => {
@@ -155,7 +154,7 @@ export default function AdminDashboard() {
   } = useSetupStatus();
   const queryClient = useQueryClient();
 
-  const [workspace, setWorkspace] = useState("dfwsc_services");
+  const [workspace, setWorkspace] = useState("dfwsc");
   const [activeTab, setActiveTab] = useState("due");
   const [selectedClientId, setSelectedClientId] = useState(null);
   const [previousTab, setPreviousTab] = useState("due");
@@ -164,7 +163,7 @@ export default function AdminDashboard() {
   const [preselectedClient, setPreselectedClient] = useState(null);
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
 
-  const isDfwscMode = workspace === "dfwsc_services";
+  const isDfwscMode = workspace === "dfwsc";
   const tabs = isDfwscMode ? DFWSC_TABS : PORTAL_TABS;
 
   const showToast = useCallback((message, type = "info") => {
@@ -203,19 +202,12 @@ export default function AdminDashboard() {
     setSelectedClientId(null);
     setShowAddClientModal(false);
     setPreselectedClient(null);
-    setActiveTab(nextWorkspace === "dfwsc_services" ? "due" : "clients");
+    setActiveTab(nextWorkspace === "dfwsc" ? "due" : "clients");
   }, []);
 
   const handleCreateInvoiceFromProfile = useCallback((client) => {
     setPreselectedClient(client);
     setBillingSubTab("invoices");
-    setSelectedClientId(null);
-    setActiveTab("invoices");
-  }, []);
-
-  const handleCreateSubscriptionFromProfile = useCallback((client) => {
-    setPreselectedClient(client);
-    setBillingSubTab("subscriptions");
     setSelectedClientId(null);
     setActiveTab("invoices");
   }, []);
@@ -293,7 +285,7 @@ export default function AdminDashboard() {
       <div className="bg-gray-800/80 p-1 rounded-xl border border-gray-700 flex max-w-xl mx-auto mb-6 shadow-inner gap-1">
         <button
           type="button"
-          onClick={() => handleWorkspaceChange("dfwsc_services")}
+          onClick={() => handleWorkspaceChange("dfwsc")}
           className={`flex-1 py-2 px-4 rounded-lg text-sm font-bold transition-all duration-200 ${
             isDfwscMode ? "bg-blue-600 text-white shadow-lg scale-[1.02]" : "text-gray-400 hover:text-gray-200"
           }`}
@@ -335,10 +327,9 @@ export default function AdminDashboard() {
       {isDfwscMode && selectedClientId && (
         <ClientProfile
           clientId={selectedClientId}
-          workspace="dfwsc_services"
+          workspace="dfwsc"
           onBack={closeClientProfile}
           onCreateInvoice={handleCreateInvoiceFromProfile}
-          onCreateSubscription={handleCreateSubscriptionFromProfile}
           showToast={showToast}
         />
       )}
@@ -365,12 +356,7 @@ export default function AdminDashboard() {
       )}
 
       {!isDfwscMode && activeTab === "clients" && (
-        <>
-          <div className="flex gap-4 mb-4">
-            <ImportStripeCustomer showToast={showToast} workspace={workspace} />
-          </div>
-          <ClientList showToast={showToast} workspace={workspace} />
-        </>
+        <ClientList showToast={showToast} workspace={workspace} />
       )}
 
       {!isDfwscMode && activeTab === "groups" && (

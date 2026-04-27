@@ -52,6 +52,7 @@ async function createNextcloudContact(client: {
           headers: {
             "OCS-APIREQUEST": "true",
             "Content-Type": "application/json",
+            Authorization: `Basic ${getNextcloudAuth()}`,
           },
           body: JSON.stringify(payload),
         }
@@ -115,6 +116,7 @@ async function updateNextcloudContact(client: {
         headers: {
           "OCS-APIREQUEST": "true",
           "Content-Type": "application/json",
+          Authorization: `Basic ${getNextcloudAuth()}`,
         },
         body: JSON.stringify(payload),
       }

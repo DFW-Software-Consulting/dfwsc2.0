@@ -156,6 +156,38 @@ const invoicesRoute: FastifyPluginAsync = async (app) => {
     }
   );
 
+  // POST /api/v1/invoices/:id/mark-paid-out-of-band
+  app.post<{
+    Params: InvoiceParams;
+    Body: { notes?: string };
+  }>("/invoices/:id/mark-paid-out-of-band", { preHandler: requireAdminJwt }, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { notes } = req.body ?? {};
+
+      const [existing] = await db
+        .select()
+        .from(invoices)
+        .where(eq(invoices.id, id))
+        .limit(1);
+
+      if (!existing) {
+        return res.status(404).send({ error: "Invoice not found" });
+      }
+
+      const paidAt = new Date();
+      await db
+        .update(invoices)
+        .set({ status: "paid", paidAt, updatedAt: paidAt, ...(notes ? { notes } : {}) })
+        .where(eq(invoices.id, id));
+
+      return res.status(200).send({ id, status: "paid", paidAt });
+    } catch (error) {
+      req.log.error(error, "Error marking invoice paid out of band");
+      return res.status(500).send({ error: "Internal server error" });
+    }
+  });
+
   // PATCH /api/v1/invoices/:id - Update invoice (mark paid, void, etc.)
   app.patch<{
     Params: InvoiceParams;

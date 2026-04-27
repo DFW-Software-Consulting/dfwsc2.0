@@ -23,7 +23,7 @@ function isPastDue(invoice) {
 
 export default function InvoicesDuePanel({ showToast, onSelectClient }) {
   const { data: invoices = [], isLoading, isError, error, refetch } = useInvoices({
-    workspace: "dfwsc_services",
+    workspace: "dfwsc",
   });
   const cancelInvoiceMutation = useCancelInvoice();
   const markPaidMutation = useMarkInvoicePaidOutOfBand();

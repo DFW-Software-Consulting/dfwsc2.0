@@ -4,11 +4,7 @@ import {
   createDfwscClient,
   getClient,
   getClients,
-  getStripeCustomers,
-  importStripeCustomer,
   patchClient,
-  retryClientSync,
-  syncStripeCustomer,
 } from "../api/clients";
 import { resendOnboardingLink } from "../api/onboarding";
 import { useAuth } from "../contexts/AuthContext";
@@ -33,31 +29,11 @@ export function useClients(params = {}) {
   });
 }
 
-export function useStripeCustomers(starting_after, workspace) {
-  const { token } = useAuth();
-  const effectiveWorkspace = workspace ?? "client_portal";
-  return useQuery({
-    queryKey: ["stripe-customers", starting_after, effectiveWorkspace],
-    queryFn: () => getStripeCustomers(token, { starting_after, workspace: effectiveWorkspace }),
-    enabled: !!token,
-  });
-}
-
 export function useCreateClient() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body) => createClient(token, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
-  });
-}
-
-export function useImportStripeCustomer() {
-  const { token } = useAuth();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ stripeCustomerId, groupId, workspace }) =>
-      importStripeCustomer(token, stripeCustomerId, groupId, workspace),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }
@@ -109,20 +85,3 @@ export function useDfwscClient() {
   });
 }
 
-export function useSyncStripeCustomer() {
-  const { token } = useAuth();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body) => syncStripeCustomer(token, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["stripe-customers"] }),
-  });
-}
-
-export function useRetryClientSync() {
-  const { token } = useAuth();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id) => retryClientSync(token, id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
-  });
-}

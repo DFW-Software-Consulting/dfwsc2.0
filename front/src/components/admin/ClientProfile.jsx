@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useClient } from "../../hooks/useClients";
 import { useCreateInvoice, useLedgerInvoices } from "../../hooks/useInvoices";
-import { useSubscriptions } from "../../hooks/useSubscriptions";
 import Button from "./shared/Button";
 import StatusBadge from "./shared/StatusBadge";
 
@@ -26,7 +25,7 @@ function isInvoicePastDue(invoice) {
 
 export default function ClientProfile({
   clientId,
-  workspace = "dfwsc_services",
+  workspace = "dfwsc",
   onBack,
   onCreateInvoice,
   onCreateSubscription,
@@ -40,10 +39,6 @@ export default function ClientProfile({
     refetch: pullLedgerInvoices,
   } = useLedgerInvoices({ clientId }, false);
   const createInvoiceMutation = useCreateInvoice();
-  const { data: subscriptions = [], isLoading: subscriptionsLoading } = useSubscriptions({
-    workspace,
-    clientId,
-  });
 
   const [invoiceFilter, setInvoiceFilter] = useState("all");
   const [showQuickInvoiceForm, setShowQuickInvoiceForm] = useState(false);
@@ -56,10 +51,6 @@ export default function ClientProfile({
   useEffect(() => {
     pullLedgerInvoices();
   }, [pullLedgerInvoices]);
-
-  const activeSubscription = useMemo(() => {
-    return subscriptions.find((sub) => sub.status !== "cancelled") ?? subscriptions[0] ?? null;
-  }, [subscriptions]);
 
   const filteredInvoices = useMemo(() => {
     if (invoiceFilter === "all") return invoices;
@@ -192,21 +183,6 @@ export default function ClientProfile({
         </div>
       </div>
 
-      <div className="rounded-lg border border-gray-700 bg-gray-800/30 p-4">
-        <h5 className="text-sm font-semibold uppercase tracking-wide text-gray-300">Subscription</h5>
-        {subscriptionsLoading ? (
-          <p className="text-sm text-gray-400 mt-2">Loading subscription...</p>
-        ) : !activeSubscription ? (
-          <p className="text-sm text-gray-400 mt-2">No subscription.</p>
-        ) : (
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <p className="text-sm text-gray-300">Plan: <span className="text-gray-100">{activeSubscription.description || "-"}</span></p>
-            <p className="text-sm text-gray-300">Amount: <span className="text-gray-100">{formatUsd(activeSubscription.amountPerPaymentCents)}</span></p>
-            <p className="text-sm text-gray-300">Next Billing: <span className="text-gray-100">{formatDate(activeSubscription.nextPaymentDate)}</span></p>
-          </div>
-        )}
-      </div>
-
       <div className="flex flex-wrap gap-2">
         <Button
           size="sm"
@@ -217,9 +193,6 @@ export default function ClientProfile({
           }}
         >
           {showQuickInvoiceForm ? "Close Invoice Form" : "Create Invoice"}
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => onCreateSubscription?.(client)}>
-          Create Subscription
         </Button>
         <Button size="sm" variant="ghost" onClick={() => onCreateInvoice?.(client)}>
           Advanced Billing

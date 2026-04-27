@@ -15,32 +15,7 @@ export const getClients = (token, { groupId, workspace } = {}) => {
 export const patchClient = (token, id, body) =>
   apiFetch(`/clients/${id}`, { token, method: "PATCH", body });
 
-export const retryClientSync = (token, id) =>
-  apiFetch(`/clients/${id}/retry-sync`, { token, method: "POST" });
-
 export const createClient = (token, body) => apiFetch("/accounts", { token, method: "POST", body });
 
 export const createDfwscClient = (token, body) =>
-  apiFetch("/dfwsc/clients", { token, method: "POST", body });
-
-export const getStripeCustomers = (token, { starting_after, workspace } = {}) => {
-  const qs = new URLSearchParams();
-  if (starting_after) qs.set("starting_after", starting_after);
-  if (workspace) qs.set("workspace", workspace);
-  const params = qs.toString();
-  return apiFetch(`/stripe/customers${params ? `?${params}` : ""}`, { token });
-};
-
-export const importStripeCustomer = (token, stripeCustomerId, groupId, workspace) =>
-  apiFetch("/stripe/import-customer", {
-    token,
-    method: "POST",
-    body: { stripeCustomerId, groupId, workspace },
-  });
-
-export const syncStripeCustomer = (token, body) =>
-  apiFetch("/stripe/sync-customer", {
-    token,
-    method: "POST",
-    body,
-  });
+  apiFetch("/crm/clients", { token, method: "POST", body });
