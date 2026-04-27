@@ -7,16 +7,11 @@ import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
 import connectRoutes from "./routes/connect";
-import dfwscClientRoutes from "./routes/dfwsc-clients";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
-import integrationRoutes from "./routes/integrations";
-import invoiceRoutes from "./routes/invoices";
 import paymentsRoutes from "./routes/payments";
 import productRoutes from "./routes/products";
 import settingsRoutes from "./routes/settings";
-import stripeCustomerRoutes from "./routes/stripe-customers";
-import subscriptionRoutes from "./routes/subscriptions";
 import webhooksRoute from "./routes/webhooks";
 
 export async function buildServer() {
@@ -134,14 +129,9 @@ export async function buildServer() {
   server.register(paymentsRoutes, { prefix: "/api/v1" });
   server.register(webhooksRoute, { prefix: "/api/v1" });
   server.register(clientRoutes, { prefix: "/api/v1" });
-  server.register(dfwscClientRoutes, { prefix: "/api/v1" });
   server.register(groupRoutes, { prefix: "/api/v1" });
-  server.register(invoiceRoutes, { prefix: "/api/v1" });
-  server.register(subscriptionRoutes, { prefix: "/api/v1" });
   server.register(productRoutes, { prefix: "/api/v1" });
-  server.register(stripeCustomerRoutes, { prefix: "/api/v1" });
   server.register(settingsRoutes, { prefix: "/api/v1" });
-  server.register(integrationRoutes, { prefix: "/api/v1" });
 
   server.setNotFoundHandler((_request, reply) => {
     reply.code(404).send({ error: "Not Found" });

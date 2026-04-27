@@ -3,9 +3,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
-import { getSyncStateMap, syncClientProfileToNextcloud } from "../lib/nextcloud-sync";
-import { stripe } from "../lib/stripe";
-import { CRM_WORKSPACES, isWorkspace } from "../lib/workspace";
+import { isWorkspace } from "../lib/workspace";
 
 interface ClientPatchBody {
   status?: "active" | "inactive";
@@ -25,9 +23,6 @@ interface ClientPatchBody {
   postalCode?: string | null;
   country?: string | null;
   notes?: string | null;
-  lastContactAt?: string | null;
-  nextAction?: string | null;
-  followUpAt?: string | null;
   defaultPaymentTermsDays?: number | null;
 }
 
@@ -54,7 +49,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
 
       if (!isWorkspace(workspace)) {
         return res.status(400).send({
-          error: "workspace query parameter is required (dfwsc_services|client_portal).",
+          error: "workspace query parameter is required (client_portal).",
         });
       }
 
@@ -64,19 +59,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           name: clients.name,
           email: clients.email,
           stripeAccountId: clients.stripeAccountId,
-          stripeCustomerId: clients.stripeCustomerId,
           status: clients.status,
           workspace: clients.workspace,
           groupId: clients.groupId,
           processingFeePercent: clients.processingFeePercent,
           processingFeeCents: clients.processingFeeCents,
-          paymentStatus: clients.paymentStatus,
-          paymentStatusSyncedAt: clients.paymentStatusSyncedAt,
-          lastContactAt: clients.lastContactAt,
-          nextAction: clients.nextAction,
-          followUpAt: clients.followUpAt,
-          suspendedAt: clients.suspendedAt,
-          suspensionReason: clients.suspensionReason,
           createdAt: clients.createdAt,
         })
         .from(clients);
@@ -99,21 +86,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         : await query.where(eq(clients.workspace, workspace));
 
       const scopedList = clientList.filter((client) => client.workspace === workspace);
-      const syncStateMap = await getSyncStateMap(scopedList.map((client) => client.id));
 
       return res.status(200).send(
         scopedList.map((client) => ({
           ...client,
           createdAt: client.createdAt?.toISOString(),
-          paymentStatusSyncedAt: client.paymentStatusSyncedAt?.toISOString() ?? null,
-          lastContactAt: client.lastContactAt?.toISOString() ?? null,
-          followUpAt: client.followUpAt?.toISOString() ?? null,
-          suspendedAt: client.suspendedAt?.toISOString() ?? null,
-          syncStatus: syncStateMap.get(client.id)?.syncStatus ?? "synced",
-          syncError: syncStateMap.get(client.id)?.syncError ?? null,
-          syncAttempts: syncStateMap.get(client.id)?.syncAttempts ?? 0,
-          lastSyncAttemptAt: syncStateMap.get(client.id)?.lastSyncAttemptAt ?? null,
-          lastSyncedAt: syncStateMap.get(client.id)?.lastSyncedAt ?? null,
         }))
       );
     } catch (error) {
@@ -134,7 +111,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         if (!isWorkspace(workspace)) {
           return res.status(400).send({
             error:
-              "workspace query parameter is required (dfwsc_services|client_portal).",
+              "workspace query parameter is required (client_portal).",
           });
         }
 
@@ -149,20 +126,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         }
 
         const { apiKeyHash, apiKeyLookup, ...safeClient } = client;
-        const syncStateMap = await getSyncStateMap([client.id]);
-        const syncState = syncStateMap.get(client.id);
         return res.status(200).send({
           client: {
             ...safeClient,
             createdAt: client.createdAt?.toISOString(),
             updatedAt: client.updatedAt?.toISOString(),
-            lastContactAt: client.lastContactAt?.toISOString() ?? null,
-            followUpAt: client.followUpAt?.toISOString() ?? null,
-            syncStatus: syncState?.syncStatus ?? "synced",
-            syncError: syncState?.syncError ?? null,
-            syncAttempts: syncState?.syncAttempts ?? 0,
-            lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
-            lastSyncedAt: syncState?.lastSyncedAt ?? null,
           },
         });
       } catch (error) {
@@ -189,19 +157,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         processingFeeCents,
         name,
         email,
-        lastContactAt,
-        nextAction,
-        followUpAt,
         defaultPaymentTermsDays,
       } = body;
-
-      if (lastContactAt != null && Number.isNaN(new Date(lastContactAt).getTime())) {
-        return res.status(400).send({ error: "lastContactAt must be a valid ISO datetime." });
-      }
-
-      if (followUpAt != null && Number.isNaN(new Date(followUpAt).getTime())) {
-        return res.status(400).send({ error: "followUpAt must be a valid ISO datetime." });
-      }
 
       if (status !== undefined && status !== "active" && status !== "inactive") {
         return res.status(400).send({
@@ -323,9 +280,6 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         postalCode?: string | null;
         country?: string | null;
         notes?: string | null;
-        lastContactAt?: Date | null;
-        nextAction?: string | null;
-        followUpAt?: Date | null;
         defaultPaymentTermsDays?: number | null;
       } = { updatedAt: new Date() };
 
@@ -348,11 +302,6 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       if ("postalCode" in body) setValues.postalCode = body.postalCode;
       if ("country" in body) setValues.country = body.country;
       if ("notes" in body) setValues.notes = body.notes;
-      if ("lastContactAt" in body)
-        setValues.lastContactAt = lastContactAt != null ? new Date(lastContactAt) : null;
-      if ("nextAction" in body) setValues.nextAction = nextAction;
-      if ("followUpAt" in body)
-        setValues.followUpAt = followUpAt != null ? new Date(followUpAt) : null;
       if ("defaultPaymentTermsDays" in body)
         setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
 
@@ -368,197 +317,17 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
 
       const updatedClient = updatedClients[0];
 
-      // Auto-sync profile changes to Stripe for dfwsc_services clients
-      if (updatedClient.workspace === "dfwsc_services" && updatedClient.stripeCustomerId) {
-        const stripeNative: Record<string, unknown> = {};
-        const stripeAddress: Record<string, unknown> = {};
-        const stripeMeta: Record<string, string> = {};
-
-        if ("name" in body && body.name) stripeNative.name = body.name;
-        if ("email" in body && body.email) stripeNative.email = body.email;
-        if ("phone" in body) stripeNative.phone = body.phone ?? "";
-        if ("addressLine1" in body) stripeAddress.line1 = body.addressLine1 ?? "";
-        if ("addressLine2" in body) stripeAddress.line2 = body.addressLine2 ?? "";
-        if ("city" in body) stripeAddress.city = body.city ?? "";
-        if ("state" in body) stripeAddress.state = body.state ?? "";
-        if ("postalCode" in body) stripeAddress.postal_code = body.postalCode ?? "";
-        if ("country" in body) stripeAddress.country = body.country ?? "";
-        if ("billingContactName" in body)
-          stripeMeta.billingContactName = body.billingContactName ?? "";
-        if ("notes" in body) stripeMeta.notes = body.notes ?? "";
-        if ("defaultPaymentTermsDays" in body)
-          stripeMeta.defaultPaymentTermsDays =
-            body.defaultPaymentTermsDays != null ? String(body.defaultPaymentTermsDays) : "";
-
-        const stripePayload: Record<string, unknown> = { ...stripeNative };
-        if (Object.keys(stripeAddress).length) stripePayload.address = stripeAddress;
-        if (Object.keys(stripeMeta).length) stripePayload.metadata = stripeMeta;
-        if (Object.keys(stripePayload).length) {
-          await stripe.customers.update(updatedClient.stripeCustomerId, stripePayload);
-        }
-      }
-
-      await syncClientProfileToNextcloud(updatedClient.id).catch((syncErr) => {
-        req.log.warn(syncErr, "Client profile sync failed after patch.");
-      });
-      const syncStateMap = await getSyncStateMap([updatedClient.id]);
-      const syncState = syncStateMap.get(updatedClient.id);
-
       const { apiKeyHash, apiKeyLookup, ...safeUpdatedClient } = updatedClient;
       return res.status(200).send({
         ...safeUpdatedClient,
         createdAt: updatedClient.createdAt?.toISOString(),
         updatedAt: updatedClient.updatedAt?.toISOString(),
-        lastContactAt: updatedClient.lastContactAt?.toISOString() ?? null,
-        followUpAt: updatedClient.followUpAt?.toISOString() ?? null,
-        syncStatus: syncState?.syncStatus ?? "synced",
-        syncError: syncState?.syncError ?? null,
-        syncAttempts: syncState?.syncAttempts ?? 0,
-        lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
-        lastSyncedAt: syncState?.lastSyncedAt ?? null,
       });
     } catch (error) {
       req.log.error(error, "Error updating client");
       return res.status(500).send({ error: "Internal server error" });
     }
   });
-  // POST /clients/sync-payment-status — manual trigger for the background sync job
-  // Must be registered BEFORE /clients/:id to avoid Fastify treating "sync-payment-status" as an :id param
-  app.post("/clients/sync-payment-status", { preHandler: requireAdminJwt }, async (req, res) => {
-    try {
-      const { runPaymentSync } = await import("../lib/payment-sync");
-      const synced = await runPaymentSync();
-      return res.status(200).send({ synced });
-    } catch (err) {
-      req.log.error(err, "Manual payment sync failed");
-      return res.status(500).send({ error: "Payment sync failed." });
-    }
-  });
-
-  // POST /clients/:id/suspend
-  app.post<{ Params: ClientParams; Body: { reason?: string } }>(
-    "/clients/:id/suspend",
-    { preHandler: requireAdminJwt },
-    async (req, res) => {
-      try {
-        const { id } = req.params;
-        const reason = req.body?.reason?.trim() || null;
-
-        const [client] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
-        if (!client) return res.status(404).send({ error: "Client not found." });
-        if (!CRM_WORKSPACES.includes(client.workspace as (typeof CRM_WORKSPACES)[number])) {
-          return res.status(400).send({
-            error: "Suspend is only available for crm workspaces (dfwsc_services).",
-          });
-        }
-
-        const [updated] = await db
-          .update(clients)
-          .set({
-            status: "inactive",
-            suspendedAt: new Date(),
-            suspensionReason: reason,
-            updatedAt: new Date(),
-          })
-          .where(eq(clients.id, id))
-          .returning();
-
-        await syncClientProfileToNextcloud(updated.id).catch((syncErr) => {
-          req.log.warn(syncErr, "Client profile sync failed after suspend.");
-        });
-        const syncStateMap = await getSyncStateMap([updated.id]);
-        const syncState = syncStateMap.get(updated.id);
-
-        const { apiKeyHash, apiKeyLookup, ...safe } = updated;
-        return res.status(200).send({
-          ...safe,
-          createdAt: updated.createdAt?.toISOString(),
-          updatedAt: updated.updatedAt?.toISOString(),
-          suspendedAt: updated.suspendedAt?.toISOString() ?? null,
-          paymentStatusSyncedAt: updated.paymentStatusSyncedAt?.toISOString() ?? null,
-          syncStatus: syncState?.syncStatus ?? "synced",
-          syncError: syncState?.syncError ?? null,
-          syncAttempts: syncState?.syncAttempts ?? 0,
-          lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
-          lastSyncedAt: syncState?.lastSyncedAt ?? null,
-        });
-      } catch (error) {
-        req.log.error(error, "Error suspending client");
-        return res.status(500).send({ error: "Internal server error" });
-      }
-    }
-  );
-
-  // POST /clients/:id/reinstate
-  app.post<{ Params: ClientParams }>(
-    "/clients/:id/reinstate",
-    { preHandler: requireAdminJwt },
-    async (req, res) => {
-      try {
-        const { id } = req.params;
-
-        const [client] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
-        if (!client) return res.status(404).send({ error: "Client not found." });
-        if (!CRM_WORKSPACES.includes(client.workspace as (typeof CRM_WORKSPACES)[number])) {
-          return res.status(400).send({
-            error: "Reinstate is only available for crm workspaces (dfwsc_services).",
-          });
-        }
-
-        const [updated] = await db
-          .update(clients)
-          .set({
-            status: "active",
-            suspendedAt: null,
-            suspensionReason: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(clients.id, id))
-          .returning();
-
-        await syncClientProfileToNextcloud(updated.id).catch((syncErr) => {
-          req.log.warn(syncErr, "Client profile sync failed after reinstate.");
-        });
-        const syncStateMap = await getSyncStateMap([updated.id]);
-        const syncState = syncStateMap.get(updated.id);
-
-        const { apiKeyHash, apiKeyLookup, ...safe } = updated;
-        return res.status(200).send({
-          ...safe,
-          createdAt: updated.createdAt?.toISOString(),
-          updatedAt: updated.updatedAt?.toISOString(),
-          suspendedAt: null,
-          paymentStatusSyncedAt: updated.paymentStatusSyncedAt?.toISOString() ?? null,
-          syncStatus: syncState?.syncStatus ?? "synced",
-          syncError: syncState?.syncError ?? null,
-          syncAttempts: syncState?.syncAttempts ?? 0,
-          lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
-          lastSyncedAt: syncState?.lastSyncedAt ?? null,
-        });
-      } catch (error) {
-        req.log.error(error, "Error reinstating client");
-        return res.status(500).send({ error: "Internal server error" });
-      }
-    }
-  );
-
-  app.post<{ Params: ClientParams }>(
-    "/clients/:id/retry-sync",
-    { preHandler: requireAdminJwt },
-    async (req, res) => {
-      try {
-        const { id } = req.params;
-        const [client] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
-        if (!client) return res.status(404).send({ error: "Client not found." });
-
-        const sync = await syncClientProfileToNextcloud(id);
-        return res.status(200).send({ ok: true, sync });
-      } catch (error) {
-        req.log.error(error, "Error retrying profile sync");
-        return res.status(500).send({ error: "Retry sync failed." });
-      }
-    }
-  );
 };
 
 export default clientRoutes;

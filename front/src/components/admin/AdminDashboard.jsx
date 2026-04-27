@@ -32,11 +32,6 @@ const PORTAL_TABS = [
   { id: "settings", label: "Settings" },
 ];
 
-function paymentHealthForClient(client) {
-  if (client.status === "inactive" || client.suspendedAt) return "canceled";
-  return client.paymentStatus ?? "none";
-}
-
 function DfwscClientsPanel({ onSelectClient, onAddClient }) {
   const { data: clients = [], isLoading, isError, error } = useClients({ workspace: "dfwsc_services" });
   const [statusFilter, setStatusFilter] = useState("all");
@@ -44,9 +39,7 @@ function DfwscClientsPanel({ onSelectClient, onAddClient }) {
   const lifecycleCounts = useMemo(() => {
     return clients.reduce(
       (acc, client) => {
-        if (client.status === "lead") {
-          acc.lead += 1;
-        } else if (client.status === "inactive") {
+        if (client.status === "inactive") {
           acc.inactive += 1;
         } else {
           acc.client += 1;
@@ -54,7 +47,7 @@ function DfwscClientsPanel({ onSelectClient, onAddClient }) {
         acc.total += 1;
         return acc;
       },
-      { total: 0, lead: 0, client: 0, inactive: 0 }
+      { total: 0, client: 0, inactive: 0 }
     );
   }, [clients]);
 
@@ -89,15 +82,6 @@ function DfwscClientsPanel({ onSelectClient, onAddClient }) {
         </button>
         <button
           type="button"
-          onClick={() => setStatusFilter("lead")}
-          className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
-            statusFilter === "lead" ? "bg-purple-700 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"
-          }`}
-        >
-          Leads ({lifecycleCounts.lead})
-        </button>
-        <button
-          type="button"
           onClick={() => setStatusFilter("active")}
           className={`rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
             statusFilter === "active" ? "bg-emerald-700 text-white" : "bg-gray-700 text-gray-200 hover:bg-gray-600"
@@ -128,7 +112,7 @@ function DfwscClientsPanel({ onSelectClient, onAddClient }) {
           <table className="min-w-full divide-y divide-gray-700">
             <thead>
               <tr>
-                {["Client", "Email", "Health", "Status"].map((h) => (
+                {["Client", "Email", "Status"].map((h) => (
                   <th
                     key={h}
                     className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
@@ -147,9 +131,6 @@ function DfwscClientsPanel({ onSelectClient, onAddClient }) {
                 >
                   <td className="px-3 py-2 text-sm text-blue-400">{client.name}</td>
                   <td className="px-3 py-2 text-sm text-gray-200">{client.email}</td>
-                  <td className="px-3 py-2 text-sm">
-                    <StatusBadge status={paymentHealthForClient(client)} />
-                  </td>
                   <td className="px-3 py-2 text-sm">
                     <StatusBadge status={client.status} />
                   </td>

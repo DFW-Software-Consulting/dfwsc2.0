@@ -1,29 +1,25 @@
 import { useState } from "react";
 import { useDfwscClient } from "../../hooks/useClients";
-import { useCreateLead } from "../../hooks/useCRM";
 import BaseModal from "./shared/BaseModal";
 import Button from "./shared/Button";
 import FormInput from "./shared/FormInput";
 
 export default function AddClientModal({ isOpen, onClose, onCreated, showToast }) {
   const createClientMutation = useDfwscClient();
-  const createLeadMutation = useCreateLead("dfwsc_services");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [recordType, setRecordType] = useState("client");
   const [error, setError] = useState("");
 
   const reset = () => {
     setName("");
     setEmail("");
     setPhone("");
-    setRecordType("client");
     setError("");
   };
 
   const handleClose = () => {
-    if (createClientMutation.isPending || createLeadMutation.isPending) return;
+    if (createClientMutation.isPending) return;
     reset();
     onClose();
   };
@@ -41,12 +37,9 @@ export default function AddClientModal({ isOpen, onClose, onCreated, showToast }
       phone: phone.trim() || undefined,
     };
 
-    const mutation = recordType === "lead" ? createLeadMutation : createClientMutation;
-
-    mutation.mutate(payload, {
+    createClientMutation.mutate(payload, {
       onSuccess: (record) => {
-        const label = recordType === "lead" ? "Lead" : "Client";
-        showToast?.(`${label} ${record.name} created.`, "success");
+        showToast?.(`Client ${record.name} created.`, "success");
         onCreated?.(record);
         handleClose();
       },
@@ -57,7 +50,7 @@ export default function AddClientModal({ isOpen, onClose, onCreated, showToast }
     });
   };
 
-  const isSaving = createClientMutation.isPending || createLeadMutation.isPending;
+  const isSaving = createClientMutation.isPending;
 
   return (
     <BaseModal isOpen={isOpen} onClose={handleClose} title="Add Client" titleId="add-client" size="md">
@@ -88,21 +81,6 @@ export default function AddClientModal({ isOpen, onClose, onCreated, showToast }
           placeholder="+1 (555) 555-0100"
           disabled={isSaving}
         />
-        <div>
-          <label htmlFor="add-client-record-type" className="mb-1 block text-sm font-medium text-gray-300">
-            Create As
-          </label>
-          <select
-            id="add-client-record-type"
-            value={recordType}
-            onChange={(e) => setRecordType(e.target.value)}
-            className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={isSaving}
-          >
-            <option value="client">Client</option>
-            <option value="lead">Lead</option>
-          </select>
-        </div>
         {error && <p className="text-sm text-red-400">{error}</p>}
       </div>
 
@@ -111,7 +89,7 @@ export default function AddClientModal({ isOpen, onClose, onCreated, showToast }
           Cancel
         </Button>
         <Button variant="primary" onClick={handleSubmit} isLoading={isSaving}>
-          {recordType === "lead" ? "Create Lead" : "Create Client"}
+          Create Client
         </Button>
       </div>
     </BaseModal>

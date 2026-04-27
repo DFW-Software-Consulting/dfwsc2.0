@@ -15,7 +15,6 @@ interface CreateClientWithOnboardingTokenOptions {
   name: string;
   email: string;
   workspace: Workspace;
-  stripeCustomerId?: string;
   groupId?: string;
 }
 
@@ -29,7 +28,6 @@ export async function createClientWithOnboardingToken({
   name,
   email,
   workspace,
-  stripeCustomerId,
   groupId,
 }: CreateClientWithOnboardingTokenOptions): Promise<ClientWithToken> {
   if (!name || typeof name !== "string" || name.trim().length === 0) {
@@ -70,7 +68,6 @@ export async function createClientWithOnboardingToken({
     email,
     apiKeyHash,
     apiKeyLookup,
-    ...(stripeCustomerId ? { stripeCustomerId } : {}),
     ...(groupId ? { groupId } : {}),
   });
 

@@ -8,7 +8,6 @@ import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { createClientWithOnboardingToken } from "../lib/client-factory";
 import { sendMail } from "../lib/mailer";
-import { getSyncStateMap, syncClientProfileToNextcloud } from "../lib/nextcloud-sync";
 import { rateLimit } from "../lib/rate-limit";
 import { getSettings, stripe } from "../lib/stripe-billing";
 import { isWorkspace, type Workspace } from "../lib/workspace";
@@ -134,7 +133,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             name: { type: "string", minLength: 1 },
             email: { type: "string", format: "email" },
             groupId: { type: "string" },
-            workspace: { type: "string", enum: ["dfwsc_services", "client_portal"] },
+            workspace: { type: "string", enum: ["client_portal"] },
           },
         },
       },
@@ -149,7 +148,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       if (!isWorkspace(workspace)) {
         return reply
           .code(400)
-          .send({ error: "workspace must be dfwsc_services or client_portal." });
+          .send({ error: "workspace must be client_portal." });
       }
 
       request.log.info(
@@ -168,72 +167,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         }
         if (group.workspace !== workspace) {
           return reply.code(400).send({ error: "groupId workspace does not match workspace." });
-        }
-      }
-
-      if (workspace === "dfwsc_services") {
-        const normalizedEmail = email.toLowerCase().trim();
-        const [existingByEmail] = await db
-          .select({ id: clients.id })
-          .from(clients)
-          .where(and(eq(clients.email, normalizedEmail), eq(clients.workspace, workspace)))
-          .limit(1);
-
-        if (existingByEmail) {
-          return reply
-            .code(409)
-            .send({ error: "A client with this email already exists in this workspace." });
-        }
-
-        let stripeCustomerId: string | null = null;
-        try {
-          const stripeCustomer = await stripe.customers.create({
-            email: normalizedEmail,
-            name,
-            metadata: {
-              workspace,
-            },
-          });
-          stripeCustomerId = stripeCustomer.id;
-
-          const [createdClient] = await db
-            .insert(clients)
-            .values({
-              id: stripeCustomerId,
-              workspace,
-              groupId: groupId ?? null,
-              name,
-              email: normalizedEmail,
-              stripeCustomerId,
-              status: "active",
-            })
-            .returning();
-
-          await syncClientProfileToNextcloud(createdClient.id).catch((syncErr) => {
-            request.log.warn(syncErr, "Client profile sync failed after DFWSC client create.");
-          });
-          const syncStateMap = await getSyncStateMap([createdClient.id]);
-          const syncState = syncStateMap.get(createdClient.id);
-
-          return reply.code(201).send({
-            id: createdClient.id,
-            name: createdClient.name,
-            email: createdClient.email,
-            stripeCustomerId: createdClient.stripeCustomerId,
-            status: createdClient.status,
-            workspace: createdClient.workspace,
-            groupId: createdClient.groupId,
-            syncStatus: syncState?.syncStatus ?? "synced",
-            syncError: syncState?.syncError ?? null,
-            syncAttempts: syncState?.syncAttempts ?? 0,
-            lastSyncAttemptAt: syncState?.lastSyncAttemptAt ?? null,
-            lastSyncedAt: syncState?.lastSyncedAt ?? null,
-          });
-        } catch (error) {
-          if (stripeCustomerId) {
-            await stripe.customers.del(stripeCustomerId).catch(() => {});
-          }
-          throw error;
         }
       }
 
@@ -295,12 +228,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       if (!isWorkspace(workspaceParam)) {
         return reply.code(400).send({ error: "workspace is required." });
-      }
-
-      if (workspaceParam === "dfwsc_services") {
-        return reply.code(400).send({
-          error: "dfwsc_services uses direct billing and does not support Connect onboarding.",
-        });
       }
 
       if (groupId) {

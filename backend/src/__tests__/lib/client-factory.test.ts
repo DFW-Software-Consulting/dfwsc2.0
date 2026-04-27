@@ -5,7 +5,7 @@ import { db } from "../../db/client";
 import { clientGroups, clients, onboardingTokens } from "../../db/schema";
 import { createClientWithOnboardingToken } from "../../lib/client-factory";
 
-const workspace = "dfwsc_services";
+const workspace = "client_portal";
 const cleanupIds: { clients: string[]; groups: string[] } = { clients: [], groups: [] };
 
 let hashCallCount = 0;
@@ -55,21 +55,6 @@ describe("createClientWithOnboardingToken", () => {
     expect(result.clientId).toBeDefined();
     expect(result.apiKey).toBeDefined();
     expect(result.token).toBeDefined();
-    cleanupIds.clients.push(result.clientId);
-  });
-
-  it("creates client with stripeCustomerId", async () => {
-    const email = `test-${randomUUID()}@example.com`;
-    const result = await createClientWithOnboardingToken({
-      name: "Test Client",
-      email,
-      workspace,
-      stripeCustomerId: "cus_123456",
-    });
-
-    expect(result.clientId).toBeDefined();
-    const [client] = await db.select().from(clients).where(eq(clients.id, result.clientId));
-    expect(client?.stripeCustomerId).toBe("cus_123456");
     cleanupIds.clients.push(result.clientId);
   });
 
@@ -191,34 +176,12 @@ describe("createClientWithOnboardingToken", () => {
     await expect(
       createClientWithOnboardingToken({
         name: "Test Client",
-        email: "test@example.com",
+        email: `test-${randomUUID()}@example.com`,
         workspace,
         groupId: randomUUID(),
       })
     ).rejects.toMatchObject({
       message: "Invalid groupId.",
-      statusCode: 400,
-    });
-  });
-
-  it("throws error when groupId workspace does not match", async () => {
-    const groupId = randomUUID();
-    await db.insert(clientGroups).values({
-      id: groupId,
-      name: "Test Group",
-      workspace: "client_portal",
-    });
-    cleanupIds.groups.push(groupId);
-
-    await expect(
-      createClientWithOnboardingToken({
-        name: "Test Client",
-        email: "test@example.com",
-        workspace,
-        groupId,
-      })
-    ).rejects.toMatchObject({
-      message: "groupId workspace does not match client workspace.",
       statusCode: 400,
     });
   });

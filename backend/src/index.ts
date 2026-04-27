@@ -21,8 +21,6 @@ async function start() {
     }
     await bootstrapAdminIfNeeded(server);
     await verifyDatabaseSchema();
-    const { startPaymentSyncJob } = await import("./lib/payment-sync");
-    startPaymentSyncJob();
     await server.listen({ port: Number(process.env.PORT) || 4242, host: "0.0.0.0" });
   } catch (err) {
     server.log.error(err);

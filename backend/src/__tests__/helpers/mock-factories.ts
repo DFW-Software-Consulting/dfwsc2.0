@@ -252,7 +252,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
             apiKeyHash,
             status: payload.status ?? existing?.status ?? "active",
             stripeAccountId: payload.stripeAccountId ?? existing?.stripeAccountId ?? null,
-            workspace: payload.workspace ?? existing?.workspace ?? "dfwsc_services",
+            workspace: payload.workspace ?? existing?.workspace ?? "client_portal",
             phone: payload.phone ?? existing?.phone ?? null,
             billingContactName: payload.billingContactName ?? existing?.billingContactName ?? null,
             addressLine1: payload.addressLine1 ?? existing?.addressLine1 ?? null,
@@ -268,7 +268,6 @@ export function createAppDbMock(dataStore: AppDataStore) {
             lastContactAt: payload.lastContactAt ?? existing?.lastContactAt ?? null,
             nextAction: payload.nextAction ?? existing?.nextAction ?? null,
             followUpAt: payload.followUpAt ?? existing?.followUpAt ?? null,
-            stripeCustomerId: payload.stripeCustomerId ?? existing?.stripeCustomerId ?? null,
             createdAt: existing?.createdAt ?? new Date(),
             updatedAt: new Date(),
           };
@@ -308,7 +307,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
             id: payload.id,
             name: payload.name,
             status: payload.status ?? "active",
-            workspace: payload.workspace ?? "dfwsc_services",
+            workspace: payload.workspace ?? "client_portal",
             createdAt: payload.createdAt ?? new Date(),
             updatedAt: payload.updatedAt ?? new Date(),
           };

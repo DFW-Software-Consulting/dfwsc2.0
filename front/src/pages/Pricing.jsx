@@ -110,7 +110,7 @@ export default function Pricing() {
             {[
               "2–6 week MVP timelines with weekly previews and async updates.",
               "Clear documentation so you can run in-house or keep us on retainer.",
-              "Integrations with Stripe, CRMs, and analytics platforms baked in."
+              "Integrations with Stripe and analytics platforms baked in."
             ].map((item, i) => (
               <li key={i} className="flex items-start gap-4 group">
                 <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-500/10 border border-brand-500/20 group-hover:border-brand-500/40 transition-colors">

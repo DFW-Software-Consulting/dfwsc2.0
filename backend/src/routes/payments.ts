@@ -13,10 +13,6 @@ interface RequestWithClient extends FastifyRequest {
   client?: typeof clients.$inferSelect;
 }
 
-/**
- * Flexible auth: Try API key first, then try Admin JWT.
- * Distinguishes auth failures (returned 401) from system errors (thrown).
- */
 async function requireClientOrAdmin(request: FastifyRequest, reply: FastifyReply) {
   const apiKeyHeader = request.headers["x-api-key"];
 
@@ -94,7 +90,6 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
 }
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
-  // Compute useCheckout flag at route registration time
   const useCheckout = (process.env.USE_CHECKOUT ?? "false").toLowerCase() === "true";
   fastify.post(
     "/payments/create",
@@ -131,7 +126,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       let client = (request as RequestWithClient).client;
 
-      // If no client resolved from API key, but user is Admin, resolve from body.clientId or metadata.clientId
       if (!client) {
         const validWorkspace = validateWorkspace(workspace, reply);
         if (!validWorkspace) return;
@@ -177,8 +171,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           return reply.code(400).send({ error: (e as Error).message });
         }
 
-        // FEE ON TOP: The customer pays base + fee.
-        // If waived, customer only pays base.
         const totalAmount = waiveFee ? amount : amount + feeAmount;
 
         const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
@@ -209,7 +201,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           });
         }
 
-        // Direct payment to Platform account
         const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams, {
           idempotencyKey,
         });
@@ -223,7 +214,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: "lineItems are required when USE_CHECKOUT=true." });
       }
 
-      // For Checkout, we need to calculate total base amount from line items if 'amount' isn't provided
       let baseAmount = amount ?? 0;
       const hasExplicitAmount = typeof amount === "number" && amount > 0;
       if (!hasExplicitAmount) {
@@ -258,7 +248,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(500).send({ error: "FRONTEND_ORIGIN is not configured." });
       }
 
-      // FEE ON TOP for Checkout: add a "Processing Fee" line item
       const checkoutLineItems = [...lineItems];
       if (feeAmount > 0) {
         checkoutLineItems.push({
@@ -308,7 +297,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(201).send({ url: session.url });
       }
 
-      // Direct payment
       const session = await stripe.checkout.sessions.create(sessionParams, {
         idempotencyKey,
       });
@@ -330,10 +318,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     const validWorkspace = validateWorkspaceQuery(workspace, reply);
     if (!validWorkspace) return;
 
-    // For CRM billing workspaces, allow fetching all payments across all clients in the workspace
-    const allowAllClients = workspace === "dfwsc_services";
-
-    if (!clientId && !groupId && !allowAllClients) {
+    if (!clientId && !groupId) {
       return reply.code(400).send({ error: "clientId or groupId query parameter is required." });
     }
 
@@ -350,7 +335,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     if (starting_after) listParams.starting_after = starting_after;
     if (ending_before) listParams.ending_before = ending_before;
 
-    // Group report: aggregate across all clients in the group
     if (groupId) {
       const [group] = await db
         .select()
@@ -358,119 +342,35 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         .where(eq(clientGroups.id, groupId))
         .limit(1);
       if (!group) {
-        return reply.code(404).send({ error: "Group not found." });
+        return reply.code(400).send({ error: "Invalid groupId." });
       }
-      if (group.workspace !== workspace) {
-        return reply
-          .code(400)
-          .send({ error: "groupId does not belong to the selected workspace." });
-      }
-
       const groupClients = await db
         .select()
         .from(clients)
-        .where(and(eq(clients.groupId, groupId), eq(clients.workspace, workspace)));
+        .where(and(eq(clients.groupId, groupId), eq(clients.workspace, validWorkspace)));
 
+      const connected = groupClients.filter(
+        (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null
+      );
+      if (connected.length === 0) {
+        return reply.send({ groupId, data: [], hasMore: false });
+      }
       const maxConcurrency = 3;
       const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
-
-      if (workspace === "dfwsc_services") {
-        const billable = groupClients.filter(
-          (c): c is typeof c & { stripeCustomerId: string } => c.stripeCustomerId !== null
+      for (let i = 0; i < connected.length; i += maxConcurrency) {
+        const batch = connected.slice(i, i + maxConcurrency);
+        const batchResults = await Promise.all(
+          batch.map(async (c) => {
+            const pi = await stripe.paymentIntents.list(listParams, {
+              stripeAccount: c.stripeAccountId,
+            });
+            return pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name }));
+          })
         );
-        if (billable.length === 0) {
-          return reply.send({ groupId, data: [], hasMore: false });
-        }
-
-        for (let i = 0; i < billable.length; i += maxConcurrency) {
-          const batch = billable.slice(i, i + maxConcurrency);
-          const batchResults = await Promise.all(
-            batch.map(async (c) => {
-              const pi = await stripe.paymentIntents.list({
-                ...listParams,
-                customer: c.stripeCustomerId,
-              });
-              return pi.data.map((p) => ({ ...p, clientId: c.id }));
-            })
-          );
-          results.push(...batchResults);
-        }
-      } else {
-        const connected = groupClients.filter(
-          (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null
-        );
-        if (connected.length === 0) {
-          return reply.send({ groupId, data: [], hasMore: false });
-        }
-
-        for (let i = 0; i < connected.length; i += maxConcurrency) {
-          const batch = connected.slice(i, i + maxConcurrency);
-          const batchResults = await Promise.all(
-            batch.map(async (c) => {
-              const pi = await stripe.paymentIntents.list(listParams, {
-                stripeAccount: c.stripeAccountId,
-              });
-              return pi.data.map((p) => ({ ...p, clientId: c.id }));
-            })
-          );
-          results.push(...batchResults);
-        }
+        results.push(...batchResults);
       }
-
       const merged = results.flat();
       return reply.send({ groupId, data: merged, hasMore: false });
-    }
-
-    // DFWSC: Fetch all payments across all clients in the workspace
-    if (!clientId && !groupId && allowAllClients) {
-      const allClients = await db.select().from(clients).where(eq(clients.workspace, workspace));
-
-      const maxConcurrency = 3;
-      const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
-
-      if (workspace === "dfwsc_services") {
-        const billable = allClients.filter(
-          (c): c is typeof c & { stripeCustomerId: string } => c.stripeCustomerId !== null
-        );
-        if (billable.length === 0) {
-          return reply.send({ workspace, data: [], hasMore: false });
-        }
-        for (let i = 0; i < billable.length; i += maxConcurrency) {
-          const batch = billable.slice(i, i + maxConcurrency);
-          const batchResults = await Promise.all(
-            batch.map(async (c) => {
-              const pi = await stripe.paymentIntents.list({
-                ...listParams,
-                customer: c.stripeCustomerId,
-              });
-              return pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name }));
-            })
-          );
-          results.push(...batchResults);
-        }
-      } else {
-        const connected = allClients.filter(
-          (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null
-        );
-        if (connected.length === 0) {
-          return reply.send({ workspace, data: [], hasMore: false });
-        }
-        for (let i = 0; i < connected.length; i += maxConcurrency) {
-          const batch = connected.slice(i, i + maxConcurrency);
-          const batchResults = await Promise.all(
-            batch.map(async (c) => {
-              const pi = await stripe.paymentIntents.list(listParams, {
-                stripeAccount: c.stripeAccountId,
-              });
-              return pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name }));
-            })
-          );
-          results.push(...batchResults);
-        }
-      }
-
-      const merged = results.flat();
-      return reply.send({ workspace, data: merged, hasMore: false });
     }
 
     if (!clientId) {
@@ -484,23 +384,12 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       return reply.code(400).send({ error: "clientId does not belong to the selected workspace." });
     }
 
-    let paymentIntents: Awaited<ReturnType<typeof stripe.paymentIntents.list>>;
-    if (workspace === "dfwsc_services") {
-      if (!client.stripeCustomerId) {
-        return reply.code(404).send({ error: "Client with Stripe customer not found." });
-      }
-      paymentIntents = await stripe.paymentIntents.list({
-        ...listParams,
-        customer: client.stripeCustomerId,
-      });
-    } else {
-      if (!client.stripeAccountId) {
-        return reply.code(404).send({ error: "Client with connected account not found." });
-      }
-      paymentIntents = await stripe.paymentIntents.list(listParams, {
-        stripeAccount: client.stripeAccountId,
-      });
+    if (!client.stripeAccountId) {
+      return reply.code(404).send({ error: "Client with connected account not found." });
     }
+    const paymentIntents = await stripe.paymentIntents.list(listParams, {
+      stripeAccount: client.stripeAccountId,
+    });
 
     return reply.send({
       clientId,

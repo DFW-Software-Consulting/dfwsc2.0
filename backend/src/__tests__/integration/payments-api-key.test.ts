@@ -58,7 +58,7 @@ describe("Payments API Key Authentication Integration", () => {
     await db.insert(clients).values({
       id: clientId,
       name: "Test Client",
-      email: "test@example.com",
+      email: `payments-${randomUUID()}@example.com`,
       apiKeyHash: apiKeyHash,
       status: "active",
     });

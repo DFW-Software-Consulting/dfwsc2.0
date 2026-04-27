@@ -1,33 +1,17 @@
-import { vi } from "vitest";
-
-// Mock Stripe before importing anything else
-vi.mock("../../lib/stripe", () => ({
-  stripe: {
-    customers: {
-      list: vi.fn(),
-      retrieve: vi.fn(),
-      update: vi.fn(),
-    },
-  },
-}));
-
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clientGroups, clients } from "../../db/schema";
-import { stripe } from "../../lib/stripe";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
-
-const mockUpdateCustomer = stripe.customers.update as ReturnType<typeof vi.fn>;
 
 describe("Clients API Integration", () => {
   let app: any;
   let cleanupIds: string[] = [];
   let cleanupGroupIds: string[] = [];
-  const workspace = "dfwsc_services";
+  const workspace = "client_portal";
 
   beforeAll(async () => {
     ensureBaseEnv();
@@ -57,7 +41,7 @@ describe("Clients API Integration", () => {
     it("returns 401 if not authenticated", async () => {
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/clients?workspace=dfwsc_services",
+        url: "/api/v1/clients?workspace=client_portal",
       });
       expect(response.statusCode).toBe(401);
     });
@@ -80,28 +64,6 @@ describe("Clients API Integration", () => {
       });
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/workspace query parameter is required/i);
-    });
-
-    it("returns 400 when groupId does not belong to workspace", async () => {
-      const groupId = randomUUID();
-      cleanupGroupIds.push(groupId);
-
-      // Create a group in client_portal workspace
-      await db.insert(clientGroups).values({
-        id: groupId,
-        name: "Test Group",
-        workspace: "client_portal",
-        status: "active",
-      });
-
-      const response = await app.inject({
-        method: "GET",
-        url: `/api/v1/clients?workspace=dfwsc_services&groupId=${groupId}`,
-        headers: { authorization: `Bearer ${makeAdminToken()}` },
-      });
-
-      expect(response.statusCode).toBe(400);
-      expect(response.json().error).toBe("groupId does not belong to the selected workspace.");
     });
 
     it("returns only clients in the requested workspace", async () => {
@@ -443,41 +405,6 @@ describe("Clients API Integration", () => {
 
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toBe("Group not found.");
-    });
-
-    it("returns 400 when groupId workspace does not match client workspace", async () => {
-      const clientId = randomUUID();
-      const groupId = randomUUID();
-      cleanupIds.push(clientId);
-      cleanupGroupIds.push(groupId);
-
-      await db.insert(clients).values({
-        id: clientId,
-        name: "Test Client",
-        email: "test@example.com",
-        workspace,
-        status: "active",
-      });
-
-      await db.insert(clientGroups).values({
-        id: groupId,
-        name: "Test Group",
-        workspace: "client_portal",
-        status: "active",
-      });
-
-      const response = await app.inject({
-        method: "PATCH",
-        url: `/api/v1/clients/${clientId}`,
-        headers: {
-          authorization: `Bearer ${makeAdminToken()}`,
-          "content-type": "application/json",
-        },
-        payload: { groupId },
-      });
-
-      expect(response.statusCode).toBe(400);
-      expect(response.json().error).toBe("groupId workspace does not match client workspace.");
     });
 
     it("successfully updates client status", async () => {
@@ -871,64 +798,6 @@ describe("Clients API Integration", () => {
       expect(body.city).toBe("Dallas");
       expect(body.defaultPaymentTermsDays).toBe(30);
     });
-
-    it("calls stripe.customers.update when client has stripeCustomerId", async () => {
-      const clientId = randomUUID();
-      cleanupIds.push(clientId);
-      const stripeCustomerId = "cus_test_mock";
-
-      await db.insert(clients).values({
-        id: clientId,
-        name: "Stripe Client",
-        email: "stripe@example.com",
-        workspace,
-        status: "active",
-        stripeCustomerId,
-      });
-
-      const response = await app.inject({
-        method: "PATCH",
-        url: `/api/v1/clients/${clientId}`,
-        headers: {
-          authorization: `Bearer ${makeAdminToken()}`,
-          "content-type": "application/json",
-        },
-        payload: { name: "Updated Name", phone: "+1 (555) 999-0000" },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(mockUpdateCustomer).toHaveBeenCalledWith(
-        stripeCustomerId,
-        expect.objectContaining({ name: "Updated Name", phone: "+1 (555) 999-0000" })
-      );
-    });
-
-    it("does not call stripe.customers.update when client has no stripeCustomerId", async () => {
-      const clientId = randomUUID();
-      cleanupIds.push(clientId);
-
-      await db.insert(clients).values({
-        id: clientId,
-        name: "No Stripe Client",
-        email: "nostripe@example.com",
-        workspace,
-        status: "active",
-      });
-
-      mockUpdateCustomer.mockClear();
-
-      await app.inject({
-        method: "PATCH",
-        url: `/api/v1/clients/${clientId}`,
-        headers: {
-          authorization: `Bearer ${makeAdminToken()}`,
-          "content-type": "application/json",
-        },
-        payload: { name: "New Name" },
-      });
-
-      expect(mockUpdateCustomer).not.toHaveBeenCalled();
-    });
   });
 
   describe("GET /api/v1/clients/:id", () => {
@@ -958,26 +827,6 @@ describe("Clients API Integration", () => {
       });
       expect(response.statusCode).toBe(404);
       expect(response.json().error).toBe("Client not found.");
-    });
-
-    it("returns 404 when client exists in a different workspace", async () => {
-      const clientId = randomUUID();
-      cleanupIds.push(clientId);
-
-      await db.insert(clients).values({
-        id: clientId,
-        name: "Portal Client",
-        email: "portal@example.com",
-        workspace: "client_portal",
-        status: "active",
-      });
-
-      const response = await app.inject({
-        method: "GET",
-        url: `/api/v1/clients/${clientId}?workspace=${workspace}`,
-        headers: { authorization: `Bearer ${makeAdminToken()}` },
-      });
-      expect(response.statusCode).toBe(404);
     });
 
     it("returns all client fields on success", async () => {

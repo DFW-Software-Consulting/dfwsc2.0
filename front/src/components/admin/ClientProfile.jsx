@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { useClient } from "../../hooks/useClients";
 import { useInvoices } from "../../hooks/useInvoices";
-import { useConvertToClient, useSuspendClient, useReinstateClient } from "../../hooks/useCRM";
 import { useSubscriptions } from "../../hooks/useSubscriptions";
 import Button from "./shared/Button";
 import StatusBadge from "./shared/StatusBadge";
@@ -18,17 +17,6 @@ function formatDate(iso) {
     day: "numeric",
     year: "numeric",
   });
-}
-
-function resolvePaymentHealth(client) {
-  if (!client) return "none";
-  if (client.status === "inactive" || client.suspendedAt) return "canceled";
-  if (!client.paymentStatus) return "none";
-  return client.paymentStatus;
-}
-
-function canSuspend(health) {
-  return ["past_due", "unpaid", "canceled"].includes(health);
 }
 
 function isInvoicePastDue(invoice) {
@@ -51,15 +39,8 @@ export default function ClientProfile({
     clientId,
   });
 
-  const suspendMutation = useSuspendClient(workspace);
-  const reinstateMutation = useReinstateClient(workspace);
-  const convertMutation = useConvertToClient(workspace);
-
   const [invoiceFilter, setInvoiceFilter] = useState("all");
 
-  const paymentHealth = resolvePaymentHealth(client);
-  const isSuspended = client.status === "inactive" || Boolean(client.suspendedAt);
-  const isLead = client.status === "lead";
   const activeSubscription = useMemo(() => {
     return subscriptions.find((sub) => sub.status !== "cancelled") ?? subscriptions[0] ?? null;
   }, [subscriptions]);
@@ -77,52 +58,6 @@ export default function ClientProfile({
       return bTime - aTime;
     });
   }, [filteredInvoices]);
-
-  const handleSuspend = () => {
-    if (!client) return;
-    if (!canSuspend(paymentHealth)) {
-      showToast?.("Suspend is only available when payment health is overdue, unpaid, or canceled.", "error");
-      return;
-    }
-    const confirmed = window.confirm(`Suspend ${client.name}? This marks the account inactive.`);
-    if (!confirmed) return;
-
-    suspendMutation.mutate(
-      { id: client.id, reason: `Suspended from client profile (${paymentHealth})` },
-      {
-        onSuccess: () => showToast?.("Client suspended.", "success"),
-        onError: (err) => showToast?.(err.message, "error"),
-      }
-    );
-  };
-
-  const handleReinstate = () => {
-    if (!client) return;
-    const confirmed = window.confirm(`Reinstate ${client.name}? This restores the account to active.`);
-    if (!confirmed) return;
-
-    reinstateMutation.mutate(
-      { id: client.id },
-      {
-        onSuccess: () => showToast?.("Client reinstated.", "success"),
-        onError: (err) => showToast?.(err.message, "error"),
-      }
-    );
-  };
-
-  const handleConvertLead = () => {
-    if (!client || !isLead) return;
-    const confirmed = window.confirm(`Convert ${client.name} from lead to client?`);
-    if (!confirmed) return;
-
-    convertMutation.mutate(
-      { id: client.id },
-      {
-        onSuccess: () => showToast?.("Lead converted to client.", "success"),
-        onError: (err) => showToast?.(err.message, "error"),
-      }
-    );
-  };
 
   if (clientLoading) {
     return <p className="text-sm text-gray-400">Loading client profile...</p>;
@@ -142,10 +77,6 @@ export default function ClientProfile({
         >
           Back
         </button>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-300">Payment Health</span>
-          <StatusBadge status={paymentHealth} />
-        </div>
       </div>
 
       <div className="rounded-lg border border-gray-700 bg-gray-800/30 p-4">
@@ -157,14 +88,6 @@ export default function ClientProfile({
           <p className="text-sm text-gray-300">Address: <span className="text-gray-100">{[client.addressLine1, client.addressLine2, client.city, client.state, client.postalCode, client.country].filter(Boolean).join(", ") || "-"}</span></p>
         </div>
       </div>
-
-      {isLead && (
-        <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 p-3">
-          <p className="text-sm text-purple-200">
-            This record is a lead. Convert to client when ready to start billing.
-          </p>
-        </div>
-      )}
 
       <div className="rounded-lg border border-gray-700 bg-gray-800/30 p-4">
         <h5 className="text-sm font-semibold uppercase tracking-wide text-gray-300">Subscription</h5>
@@ -182,52 +105,13 @@ export default function ClientProfile({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {isLead ? (
-          <Button size="sm" variant="primary" onClick={handleConvertLead} isLoading={convertMutation.isPending}>
-            Convert to Client
-          </Button>
-        ) : (
-          <>
-            <Button size="sm" variant="primary" onClick={() => onCreateInvoice?.(client)}>
-              Create Invoice
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => onCreateSubscription?.(client)}>
-              Create Subscription
-            </Button>
-            {isSuspended ? (
-              <Button
-                size="sm"
-                variant="success"
-                onClick={handleReinstate}
-                isLoading={reinstateMutation.isPending}
-              >
-                Reinstate
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={handleSuspend}
-                isLoading={suspendMutation.isPending}
-                disabled={!canSuspend(paymentHealth) || reinstateMutation.isPending}
-              >
-                Suspend
-              </Button>
-            )}
-          </>
-        )}
+        <Button size="sm" variant="primary" onClick={() => onCreateInvoice?.(client)}>
+          Create Invoice
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => onCreateSubscription?.(client)}>
+          Create Subscription
+        </Button>
       </div>
-
-      {isSuspended && (
-        <div className="rounded-lg border border-red-700/50 bg-red-900/20 p-3">
-          <p className="text-sm text-red-300">
-            Suspended {client.suspendedAt ? `on ${formatDate(client.suspendedAt)}` : ""}
-          </p>
-          {client.suspensionReason && (
-            <p className="mt-1 text-xs text-red-200/90">Reason: {client.suspensionReason}</p>
-          )}
-        </div>
-      )}
 
       <div className="rounded-lg border border-gray-700 bg-gray-800/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

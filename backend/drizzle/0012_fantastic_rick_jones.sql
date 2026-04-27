@@ -1,0 +1,1 @@
+ALTER TABLE "clients" DROP COLUMN "stripe_customer_id";

@@ -44,12 +44,11 @@ describe("validation constants", () => {
 });
 
 describe("validateWorkspace", () => {
-  it("should return workspace for valid dfwsc_services", () => {
+it("should return workspace for valid client_portal", () => {
     const res = mockReply();
-    const result = validateWorkspace("dfwsc_services", res);
-    expect(result).toBe("dfwsc_services");
+    const result = validateWorkspace("client_portal", res);
+    expect(result).toBe("client_portal");
     expect(res.status).not.toHaveBeenCalled();
-    expect(res.send).not.toHaveBeenCalled();
   });
 
   it("should return workspace for valid client_portal", () => {
@@ -66,7 +65,7 @@ describe("validateWorkspace", () => {
     expect(result).toBeNull();
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.send).toHaveBeenCalledWith({
-      error: "workspace is required (dfwsc_services|client_portal).",
+      error: "workspace is required (client_portal).",
     });
   });
 
@@ -93,13 +92,6 @@ describe("validateWorkspace", () => {
 });
 
 describe("validateWorkspaceQuery", () => {
-  it("should return workspace for valid query", () => {
-    const res = mockReply();
-    const result = validateWorkspaceQuery("dfwsc_services", res);
-    expect(result).toBe("dfwsc_services");
-    expect(res.status).not.toHaveBeenCalled();
-  });
-
   it("should return workspace for client_portal", () => {
     const res = mockReply();
     const result = validateWorkspaceQuery("client_portal", res);
@@ -113,7 +105,7 @@ describe("validateWorkspaceQuery", () => {
     expect(result).toBeNull();
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.send).toHaveBeenCalledWith({
-      error: "workspace query parameter is required (dfwsc_services|client_portal).",
+      error: "workspace query parameter is required (client_portal).",
     });
   });
 

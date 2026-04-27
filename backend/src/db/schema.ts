@@ -12,7 +12,7 @@ import {
 
 export const clientGroups = pgTable("client_groups", {
   id: text("id").primaryKey(),
-  workspace: text("workspace", { enum: ["dfwsc_services", "client_portal", "ledger_crm"] })
+  workspace: text("workspace", { enum: ["client_portal"] })
     .default("client_portal")
     .notNull(),
   name: text("name").notNull(),
@@ -31,7 +31,7 @@ export const clients = pgTable(
   "clients",
   {
     id: text("id").primaryKey(),
-    workspace: text("workspace", { enum: ["dfwsc_services", "client_portal", "ledger_crm"] })
+    workspace: text("workspace", { enum: ["client_portal"] })
       .default("client_portal")
       .notNull(),
     name: text("name").notNull(),
@@ -39,8 +39,7 @@ export const clients = pgTable(
     apiKeyHash: text("api_key_hash").unique(),
     apiKeyLookup: text("api_key_lookup").unique(),
     stripeAccountId: text("stripe_account_id"),
-    stripeCustomerId: text("stripe_customer_id"),
-    status: text("status", { enum: ["active", "inactive", "lead"] })
+    status: text("status", { enum: ["active", "inactive"] })
       .default("active")
       .notNull(),
     groupId: text("group_id").references(() => clientGroups.id),
@@ -57,16 +56,7 @@ export const clients = pgTable(
     postalCode: text("postal_code"),
     country: text("country"),
     notes: text("notes"),
-    lastContactAt: timestamp("last_contact_at", { withTimezone: true }),
-    nextAction: text("next_action"),
-    followUpAt: timestamp("follow_up_at", { withTimezone: true }),
     defaultPaymentTermsDays: integer("default_payment_terms_days"),
-    paymentStatus: text("payment_status", {
-      enum: ["active", "past_due", "canceled", "unpaid", "trialing", "none"],
-    }).default("none"),
-    paymentStatusSyncedAt: timestamp("payment_status_synced_at", { withTimezone: true }),
-    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
-    suspensionReason: text("suspension_reason"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
@@ -99,50 +89,6 @@ export const onboardingTokens = pgTable("onboarding_tokens", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
-
-export const profileSyncState = pgTable("profile_sync_state", {
-  clientId: text("client_id")
-    .primaryKey()
-    .references(() => clients.id, { onDelete: "cascade" }),
-  externalSource: text("external_source").default("nextcloud").notNull(),
-  externalId: text("external_id"),
-  syncStatus: text("sync_status", { enum: ["synced", "pending", "failed"] })
-    .default("pending")
-    .notNull(),
-  syncError: text("sync_error"),
-  syncAttempts: integer("sync_attempts").default(0).notNull(),
-  lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
-  lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
-
-export const invoiceSyncState = pgTable(
-  "invoice_sync_state",
-  {
-    stripeInvoiceId: text("stripe_invoice_id").primaryKey(),
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id, { onDelete: "cascade" }),
-    externalSource: text("external_source").default("nextcloud").notNull(),
-    externalId: text("external_id"),
-    syncStatus: text("sync_status", { enum: ["synced", "pending", "failed"] })
-      .default("pending")
-      .notNull(),
-    syncError: text("sync_error"),
-    syncAttempts: integer("sync_attempts").default(0).notNull(),
-    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
-    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => ({
-    invoiceSyncStateClientIdIdx: index("invoice_sync_state_client_id_idx").on(table.clientId),
-    invoiceSyncStateExternalIdIdx: index("invoice_sync_state_external_id_idx").on(
-      table.externalId
-    ),
-  })
-);
 
 export const admins = pgTable("admins", {
   id: text("id").primaryKey(),

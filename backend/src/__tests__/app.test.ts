@@ -101,7 +101,6 @@ vi.mock("../lib/stripe-billing", () => ({
     return Number(process.env.DEFAULT_PROCESS_FEE_CENTS ?? 0);
   }),
   ensureStripeCustomer: vi.fn(async (client: any) => {
-    if (client.stripeCustomerId) return client.stripeCustomerId;
     return `cus_${client.id}`;
   }),
   toStripeInterval: vi.fn((interval: string) => {
@@ -610,26 +609,17 @@ describe("connect onboarding", () => {
       payload: {
         name: "Ledger Client",
         email: "ledger@example.com",
-        workspace: "dfwsc_services",
+        workspace: "client_portal",
       },
     });
 
     expect(response.statusCode).toBe(201);
-    expect(response.json()).toMatchObject({
-      id: "cus_ledger_1",
-      name: "Ledger Client",
-      email: "ledger@example.com",
-      stripeCustomerId: "cus_ledger_1",
-      status: "active",
-      workspace: "dfwsc_services",
-      groupId: null,
-    });
-    expect(stripeMock.customers.create).toHaveBeenCalledWith({
-      email: "ledger@example.com",
-      name: "Ledger Client",
-      metadata: { workspace: "dfwsc_services" },
-    });
-    expect(dataStore.clients.get("cus_ledger_1")?.workspace).toBe("dfwsc_services");
+    const json = response.json();
+    expect(json.name).toBe("Ledger Client");
+    expect(json.clientId).toBeDefined();
+    expect(json.apiKey).toBeDefined();
+    expect(json.onboardingToken).toBeDefined();
+    expect(json.workspace).toBe("client_portal");
 
     await server.close();
   });
@@ -957,7 +947,7 @@ describe("reports", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/v1/reports/payments?clientId=unknown&workspace=dfwsc_services",
+      url: "/api/v1/reports/payments?clientId=unknown&workspace=client_portal",
       headers: {
         authorization: `Bearer ${adminToken}`,
       },
@@ -976,7 +966,7 @@ describe("reports", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/v1/reports/payments?clientId=client_invalid_limit&limit=200&workspace=dfwsc_services",
+      url: "/api/v1/reports/payments?clientId=client_invalid_limit&limit=200&workspace=client_portal",
       headers: {
         authorization: `Bearer ${adminToken}`,
       },
@@ -993,11 +983,11 @@ describe("reports", () => {
     const server = await createServer();
     const adminToken = makeAdminToken();
 
-    seedClient({ id: "client_1", stripeCustomerId: "cus_123", workspace: "dfwsc_services" });
+    seedClient({ id: "client_1", workspace: "client_portal", stripeAccountId: "acct_test_1" });
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/v1/reports/payments?clientId=client_1&limit=5&workspace=dfwsc_services",
+      url: "/api/v1/reports/payments?clientId=client_1&limit=5&workspace=client_portal",
       headers: {
         authorization: `Bearer ${adminToken}`,
       },
@@ -1005,35 +995,37 @@ describe("reports", () => {
 
     expect(response.statusCode).toBe(200);
     expect(stripeMock.paymentIntents.list).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: 5, customer: "cus_123" })
+      expect.objectContaining({ limit: 5 }),
+      expect.objectContaining({ stripeAccount: "acct_test_1" })
     );
     await server.close();
   });
 
-  it("lists workspace payments for DFWSC by Stripe customer", async () => {
+  it("lists workspace payments for group clients by connected account", async () => {
+    seedClientGroup(dataStore, { id: "grp_payments", name: "Payments Group", workspace: "client_portal" });
     seedClient({
       id: "dfwsc_client_1",
       name: "DFWSC A",
       email: "dfwsc-a@example.com",
-      workspace: "dfwsc_services",
-      stripeCustomerId: "cus_ledger_a",
-      stripeAccountId: null,
+      workspace: "client_portal",
+      stripeAccountId: "acct_ledger_a",
+      groupId: "grp_payments",
     });
     seedClient({
       id: "dfwsc_client_2",
       name: "DFWSC B",
       email: "dfwsc-b@example.com",
-      workspace: "dfwsc_services",
-      stripeCustomerId: "cus_ledger_b",
-      stripeAccountId: null,
+      workspace: "client_portal",
+      stripeAccountId: "acct_ledger_b",
+      groupId: "grp_payments",
     });
     seedClient({
       id: "dfwsc_client_3",
       name: "DFWSC C",
       email: "dfwsc-c@example.com",
-      workspace: "dfwsc_services",
-      stripeCustomerId: null,
+      workspace: "client_portal",
       stripeAccountId: null,
+      groupId: null,
     });
 
     stripeMock.paymentIntents.list
@@ -1045,24 +1037,26 @@ describe("reports", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/v1/reports/payments?workspace=dfwsc_services",
+      url: "/api/v1/reports/payments?groupId=grp_payments&workspace=client_portal",
       headers: { authorization: `Bearer ${adminToken}` },
     });
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.workspace).toBe("dfwsc_services");
+    expect(body.groupId).toBe("grp_payments");
     expect(body.data).toHaveLength(2);
     expect(body.data.map((p: { id: string }) => p.id)).toEqual(
       expect.arrayContaining(["pi_ledger_a", "pi_ledger_b"])
     );
     expect(stripeMock.paymentIntents.list).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ customer: "cus_ledger_a" })
+      expect.anything(),
+      expect.objectContaining({ stripeAccount: "acct_ledger_a" })
     );
     expect(stripeMock.paymentIntents.list).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ customer: "cus_ledger_b" })
+      expect.anything(),
+      expect.objectContaining({ stripeAccount: "acct_ledger_b" })
     );
 
     await server.close();
@@ -1133,12 +1127,11 @@ describe("webhooks", () => {
     await server.close();
   });
 
-  it("updates client payment status from invoice.payment_failed events", async () => {
+  it("stores invoice.payment_failed events", async () => {
     seedClient({
       id: "ledger_webhook_client",
-      workspace: "dfwsc_services",
-      stripeCustomerId: "cus_ledger_webhook",
-      paymentStatus: "active",
+      workspace: "client_portal",
+      stripeAccountId: "acct_webhook_test",
     });
 
     const payload = JSON.stringify({
@@ -1169,72 +1162,7 @@ describe("webhooks", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(dataStore.clients.get("ledger_webhook_client")?.paymentStatus).toBe("past_due");
-    expect(dataStore.clients.get("ledger_webhook_client")?.paymentStatusSyncedAt).toBeInstanceOf(
-      Date
-    );
-
-    await server.close();
-  });
-});
-
-describe("workspace CRM", () => {
-  it("creates a DFWSC lead via /crm/leads with tracking fields", async () => {
-    const server = await createServer();
-    const adminToken = makeAdminToken();
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/crm/leads",
-      headers: { authorization: `Bearer ${adminToken}` },
-      payload: {
-        workspace: "dfwsc_services",
-        name: "Ledger Prospect",
-        email: "prospect@example.com",
-        nextAction: "Call next week",
-        lastContactAt: "2026-04-20T10:00:00.000Z",
-        followUpAt: "2026-04-27T10:00:00.000Z",
-      },
-    });
-
-    expect(response.statusCode).toBe(201);
-    const body = response.json();
-    expect(body.workspace).toBe("dfwsc_services");
-    expect(body.status).toBe("lead");
-    expect(body.nextAction).toBe("Call next week");
-    expect(body.lastContactAt).toBe("2026-04-20T10:00:00.000Z");
-    expect(body.followUpAt).toBe("2026-04-27T10:00:00.000Z");
-
-    await server.close();
-  });
-
-  it("converts a DFWSC lead to billable client via /crm/leads/:id/convert", async () => {
-    seedClient({
-      id: "ledger_lead_1",
-      name: "Lead One",
-      email: "lead-one@example.com",
-      workspace: "dfwsc_services",
-      status: "lead",
-      stripeCustomerId: null,
-    });
-    stripeMock.customers.create.mockResolvedValueOnce({ id: "cus_lead_one" });
-
-    const server = await createServer();
-    const adminToken = makeAdminToken();
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/crm/leads/ledger_lead_1/convert",
-      headers: { authorization: `Bearer ${adminToken}` },
-      payload: { workspace: "dfwsc_services" },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json().status).toBe("active");
-    expect(response.json().stripeCustomerId).toBe("cus_lead_one");
-    expect(stripeMock.customers.create).toHaveBeenCalledWith(
-      expect.objectContaining({ metadata: expect.objectContaining({ workspace: "dfwsc_services" }) })
-    );
+    expect(dataStore.webhookEvents.has("evt_invoice_failed")).toBe(true);
 
     await server.close();
   });
@@ -1297,7 +1225,7 @@ describe("client groups", () => {
       method: "POST",
       url: "/api/v1/groups",
       headers: { authorization: `Bearer ${adminToken}` },
-      payload: { name: "Acme Properties", workspace: "dfwsc_services" },
+      payload: { name: "Acme Properties", workspace: "client_portal" },
     });
 
     expect(response.statusCode).toBe(201);
@@ -1316,7 +1244,7 @@ describe("client groups", () => {
       method: "POST",
       url: "/api/v1/groups",
       headers: { authorization: `Bearer ${adminToken}` },
-      payload: { workspace: "dfwsc_services" },
+      payload: { workspace: "client_portal" },
     });
 
     expect(response.statusCode).toBe(400);
@@ -1325,14 +1253,14 @@ describe("client groups", () => {
   });
 
   it("lists groups", async () => {
-    seedClientGroup(dataStore, { id: "grp_1", name: "Group One", workspace: "dfwsc_services" });
+    seedClientGroup(dataStore, { id: "grp_1", name: "Group One", workspace: "client_portal" });
 
     const server = await createServer();
     const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/v1/groups?workspace=dfwsc_services",
+      url: "/api/v1/groups?workspace=client_portal",
       headers: { authorization: `Bearer ${adminToken}` },
     });
 
@@ -1344,7 +1272,7 @@ describe("client groups", () => {
   });
 
   it("updates a group name and status", async () => {
-    seedClientGroup(dataStore, { id: "grp_2", name: "Old Name", workspace: "dfwsc_services" });
+    seedClientGroup(dataStore, { id: "grp_2", name: "Old Name", workspace: "client_portal" });
 
     const server = await createServer();
     const adminToken = makeAdminToken();
@@ -1371,7 +1299,7 @@ describe("client groups", () => {
       method: "PATCH",
       url: "/api/v1/groups/does_not_exist",
       headers: { authorization: `Bearer ${adminToken}` },
-      payload: { name: "Whatever", workspace: "dfwsc_services" },
+      payload: { name: "Whatever", workspace: "client_portal" },
     });
 
     expect(response.statusCode).toBe(404);
@@ -1379,19 +1307,19 @@ describe("client groups", () => {
   });
 
   it("filters GET /clients by groupId", async () => {
-    seedClientGroup(dataStore, { id: "grp_3", name: "PropCo", workspace: "dfwsc_services" });
-    seedClient({ id: "c_a", stripeAccountId: "acct_a", workspace: "dfwsc_services" });
-    seedClient({ id: "c_b", stripeAccountId: "acct_b", workspace: "dfwsc_services" });
+    seedClientGroup(dataStore, { id: "grp_3", name: "PropCo", workspace: "client_portal" });
+    seedClient({ id: "c_a", stripeAccountId: "acct_a", workspace: "client_portal" });
+    seedClient({ id: "c_b", stripeAccountId: "acct_b", workspace: "client_portal" });
     dataStore.clients.get("c_a").groupId = "grp_3";
     dataStore.clients.get("c_b").groupId = "grp_3";
-    seedClient({ id: "c_other", stripeAccountId: "acct_other", workspace: "dfwsc_services" });
+    seedClient({ id: "c_other", stripeAccountId: "acct_other", workspace: "client_portal" });
 
     const server = await createServer();
     const adminToken = makeAdminToken();
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/v1/clients?groupId=grp_3&workspace=dfwsc_services",
+      url: "/api/v1/clients?groupId=grp_3&workspace=client_portal",
       headers: { authorization: `Bearer ${adminToken}` },
     });
 
@@ -1403,8 +1331,8 @@ describe("client groups", () => {
   });
 
   it("assigns a groupId to a client via PATCH /clients/:id", async () => {
-    seedClientGroup(dataStore, { id: "grp_4", name: "MegaCo", workspace: "dfwsc_services" });
-    seedClient({ id: "c_patch", stripeAccountId: "acct_p", workspace: "dfwsc_services" });
+    seedClientGroup(dataStore, { id: "grp_4", name: "MegaCo", workspace: "client_portal" });
+    seedClient({ id: "c_patch", stripeAccountId: "acct_p", workspace: "client_portal" });
 
     const server = await createServer();
     const adminToken = makeAdminToken();
@@ -1422,7 +1350,7 @@ describe("client groups", () => {
   });
 
   it("rejects assigning a non-existent groupId to a client", async () => {
-    seedClient({ id: "c_bad_grp", stripeAccountId: "acct_bg", workspace: "dfwsc_services" });
+    seedClient({ id: "c_bad_grp", stripeAccountId: "acct_bg", workspace: "client_portal" });
 
     const server = await createServer();
     const adminToken = makeAdminToken();
@@ -1440,11 +1368,9 @@ describe("client groups", () => {
   });
 
   it("aggregates payments for a group via GET /reports/payments?groupId=", async () => {
-    seedClientGroup(dataStore, { id: "grp_5", name: "PropGroup", workspace: "dfwsc_services" });
-    seedClient({ id: "gc_1", stripeCustomerId: "cus_gc1", workspace: "dfwsc_services" });
-    seedClient({ id: "gc_2", stripeCustomerId: "cus_gc2", workspace: "dfwsc_services" });
-    dataStore.clients.get("gc_1").groupId = "grp_5";
-    dataStore.clients.get("gc_2").groupId = "grp_5";
+    seedClientGroup(dataStore, { id: "grp_5", name: "PropGroup", workspace: "client_portal" });
+    seedClient({ id: "gc_1", stripeAccountId: "acct_gc1", workspace: "client_portal", groupId: "grp_5" });
+    seedClient({ id: "gc_2", stripeAccountId: "acct_gc2", workspace: "client_portal", groupId: "grp_5" });
 
     stripeMock.paymentIntents.list
       .mockResolvedValueOnce({ data: [{ id: "pi_gc1" }], has_more: false })
@@ -1455,7 +1381,7 @@ describe("client groups", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/v1/reports/payments?groupId=grp_5&workspace=dfwsc_services",
+      url: "/api/v1/reports/payments?groupId=grp_5&workspace=client_portal",
       headers: { authorization: `Bearer ${adminToken}` },
     });
 
@@ -1466,11 +1392,13 @@ describe("client groups", () => {
     expect(body.data.map((p: any) => p.id)).toEqual(expect.arrayContaining(["pi_gc1", "pi_gc2"]));
     expect(stripeMock.paymentIntents.list).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ customer: "cus_gc1" })
+      expect.anything(),
+      expect.objectContaining({ stripeAccount: "acct_gc1" })
     );
     expect(stripeMock.paymentIntents.list).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ customer: "cus_gc2" })
+      expect.anything(),
+      expect.objectContaining({ stripeAccount: "acct_gc2" })
     );
     await server.close();
   });
@@ -1481,185 +1409,14 @@ describe("client groups", () => {
 
     const response = await server.inject({
       method: "GET",
-      url: "/api/v1/reports/payments?groupId=no_such_group&workspace=dfwsc_services",
+      url: "/api/v1/reports/payments?groupId=no_such_group&workspace=client_portal",
       headers: { authorization: `Bearer ${adminToken}` },
     });
 
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: "Group not found." });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "Invalid groupId." });
     await server.close();
   });
 });
 
-describe("DFWSC client creation", () => {
-  it("creates a client with Stripe Customer and returns stripeCustomerId", async () => {
-    const server = await createServer();
-    const adminToken = makeAdminToken();
 
-    stripeMock.customers.create.mockResolvedValueOnce({
-      id: "cus_dfwsc123",
-      email: "test@example.com",
-      name: "Test Client",
-    });
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/dfwsc/clients",
-      headers: { authorization: `Bearer ${adminToken}` },
-      payload: {
-        name: "Test Client",
-        email: "test@example.com",
-        phone: "+1234567890",
-        billingContactName: "John Doe",
-        addressLine1: "123 Main St",
-        city: "Austin",
-        state: "TX",
-        postalCode: "78701",
-        country: "US",
-      },
-    });
-
-    expect(response.statusCode).toBe(201);
-    const body = response.json();
-    expect(body.name).toBe("Test Client");
-    expect(body.email).toBe("test@example.com");
-    expect(body.stripeCustomerId).toBe("cus_dfwsc123");
-    expect(body.status).toBe("active");
-    expect(body.phone).toBe("+1234567890");
-    expect(body.billingContactName).toBe("John Doe");
-    expect(body.addressLine1).toBe("123 Main St");
-    expect(body.city).toBe("Austin");
-    expect(body.state).toBe("TX");
-    expect(body.postalCode).toBe("78701");
-    expect(body.country).toBe("US");
-    expect(stripeMock.customers.create).toHaveBeenCalledWith({
-      email: "test@example.com",
-      name: "Test Client",
-      phone: "+1234567890",
-      address: {
-        line1: "123 Main St",
-        line2: undefined,
-        city: "Austin",
-        state: "TX",
-        postal_code: "78701",
-        country: "US",
-      },
-      metadata: {
-        workspace: "dfwsc_services",
-        billingContactName: "John Doe",
-        notes: "",
-        defaultPaymentTermsDays: "",
-      },
-    });
-    await server.close();
-  });
-
-  it("creates a client with only required fields (name, email)", async () => {
-    const server = await createServer();
-    const adminToken = makeAdminToken();
-
-    stripeMock.customers.create.mockResolvedValueOnce({
-      id: "cus_minimal",
-      email: "minimal@example.com",
-      name: "Minimal Client",
-    });
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/dfwsc/clients",
-      headers: { authorization: `Bearer ${adminToken}` },
-      payload: {
-        name: "Minimal Client",
-        email: "minimal@example.com",
-      },
-    });
-
-    expect(response.statusCode).toBe(201);
-    const body = response.json();
-    expect(body.name).toBe("Minimal Client");
-    expect(body.email).toBe("minimal@example.com");
-    expect(body.stripeCustomerId).toBe("cus_minimal");
-    expect(body.phone).toBeNull();
-    expect(body.addressLine1).toBeNull();
-    await server.close();
-  });
-
-  it("rejects duplicate email", async () => {
-    seedClient({
-      id: "existing_client",
-      email: "existing@example.com",
-      workspace: "dfwsc_services",
-    });
-
-    const server = await createServer();
-    const adminToken = makeAdminToken();
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/dfwsc/clients",
-      headers: { authorization: `Bearer ${adminToken}` },
-      payload: {
-        name: "Duplicate Client",
-        email: "existing@example.com",
-      },
-    });
-
-    expect(response.statusCode).toBe(409);
-    expect(response.json().error).toBe(
-      "A client with this email already exists in this workspace."
-    );
-    await server.close();
-  });
-
-  it("rejects missing name", async () => {
-    const server = await createServer();
-    const adminToken = makeAdminToken();
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/dfwsc/clients",
-      headers: { authorization: `Bearer ${adminToken}` },
-      payload: {
-        email: "test@example.com",
-      },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.json().error).toBe("name and email are required.");
-    await server.close();
-  });
-
-  it("rejects missing email", async () => {
-    const server = await createServer();
-    const adminToken = makeAdminToken();
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/dfwsc/clients",
-      headers: { authorization: `Bearer ${adminToken}` },
-      payload: {
-        name: "Test Client",
-      },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.json().error).toBe("name and email are required.");
-    await server.close();
-  });
-
-  it("rejects unauthenticated request", async () => {
-    const server = await createServer();
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/dfwsc/clients",
-      payload: {
-        name: "Test Client",
-        email: "test@example.com",
-      },
-    });
-
-    expect(response.statusCode).toBe(401);
-    await server.close();
-  });
-});

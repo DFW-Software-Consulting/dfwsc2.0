@@ -78,6 +78,20 @@
       "when": 1777174560144,
       "tag": "0010_demonic_expediter",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777251529991,
+      "tag": "0011_hot_cardiac",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777252664380,
+      "tag": "0012_fantastic_rick_jones",
+      "breakpoints": true
     }
   ]
 }

@@ -1,15 +1,8 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type Stripe from "stripe";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
 import type { Workspace } from "./validation";
-
-export type StripeCustomerRef =
-  | string
-  | Stripe.Customer
-  | Stripe.DeletedCustomer
-  | null
-  | undefined;
 
 type StripeSubLike = Pick<Stripe.Subscription, "id" | "metadata" | "customer">;
 type StripeScheduleLike = Pick<Stripe.SubscriptionSchedule, "id" | "metadata" | "customer">;
@@ -18,7 +11,7 @@ export type ResolvedStripeClient = {
   clientId: string;
   clientName: string;
   clientEmail: string;
-  matchedBy: "metadata" | "stripe_customer";
+  matchedBy: "metadata";
 };
 
 export type MetadataBackfill = {
@@ -27,11 +20,6 @@ export type MetadataBackfill = {
   clientId: string;
   existingMetadata: Record<string, string>;
 };
-
-export function getStripeCustomerId(customer: StripeCustomerRef): string | null {
-  if (!customer) return null;
-  return typeof customer === "string" ? customer : customer.id;
-}
 
 export async function resolveSubscriptionClients({
   subscriptions,
@@ -52,53 +40,18 @@ export async function resolveSubscriptionClients({
     ...new Set(allObjects.map((obj) => obj.metadata?.clientId).filter(Boolean) as string[]),
   ];
 
-  const stripeCustomerIds = [
-    ...new Set(
-      allObjects.map((obj) => getStripeCustomerId(obj.customer)).filter(Boolean) as string[]
-    ),
-  ];
-
   let scopedClients: Array<typeof clients.$inferSelect> = [];
 
-  if (metadataClientIds.length > 0 || stripeCustomerIds.length > 0) {
-    let clientRows: Array<typeof clients.$inferSelect> = [];
-    if (metadataClientIds.length > 0 && stripeCustomerIds.length > 0) {
-      clientRows = await db
-        .select()
-        .from(clients)
-        .where(
-          and(
-            eq(clients.workspace, workspace),
-            or(
-              inArray(clients.id, metadataClientIds),
-              inArray(clients.stripeCustomerId, stripeCustomerIds)
-            )
-          )
-        );
-    } else if (metadataClientIds.length > 0) {
-      clientRows = await db
-        .select()
-        .from(clients)
-        .where(and(eq(clients.workspace, workspace), inArray(clients.id, metadataClientIds)));
-    } else if (stripeCustomerIds.length > 0) {
-      clientRows = await db
-        .select()
-        .from(clients)
-        .where(
-          and(
-            eq(clients.workspace, workspace),
-            inArray(clients.stripeCustomerId, stripeCustomerIds)
-          )
-        );
-    }
+  if (metadataClientIds.length > 0) {
+    const clientRows = await db
+      .select()
+      .from(clients)
+      .where(and(eq(clients.workspace, workspace), inArray(clients.id, metadataClientIds)));
 
     scopedClients = clientRows;
   }
 
   const byId = new Map(scopedClients.map((c) => [c.id, c]));
-  const byStripeCustomer = new Map(
-    scopedClients.filter((c) => !!c.stripeCustomerId).map((c) => [c.stripeCustomerId as string, c])
-  );
 
   const backfills: MetadataBackfill[] = [];
 
@@ -107,7 +60,6 @@ export async function resolveSubscriptionClients({
     kind: "subscription" | "schedule"
   ): ResolvedStripeClient | null => {
     const metadataClientId = obj.metadata?.clientId?.trim();
-    const customerId = getStripeCustomerId(obj.customer);
 
     if (metadataClientId && byId.has(metadataClientId)) {
       const client = byId.get(metadataClientId);
@@ -117,23 +69,6 @@ export async function resolveSubscriptionClients({
         clientName: client.name,
         clientEmail: client.email,
         matchedBy: "metadata",
-      };
-    }
-
-    if (customerId && byStripeCustomer.has(customerId)) {
-      const client = byStripeCustomer.get(customerId);
-      if (!client) return null;
-      backfills.push({
-        kind,
-        id: obj.id,
-        clientId: client.id,
-        existingMetadata: obj.metadata ?? {},
-      });
-      return {
-        clientId: client.id,
-        clientName: client.name,
-        clientEmail: client.email,
-        matchedBy: "stripe_customer",
       };
     }
 

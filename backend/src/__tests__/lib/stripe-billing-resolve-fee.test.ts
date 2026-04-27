@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ensureStripeCustomer, getSettings, resolveClientFee } from "../../lib/stripe-billing";
+import { getSettings, resolveClientFee } from "../../lib/stripe-billing";
 
 // Mock the db module
 vi.mock("../../db/client", () => ({
@@ -182,42 +182,5 @@ describe("getSettings", () => {
       default_fee_cents: "200",
       default_fee_percent: "3.5",
     });
-  });
-});
-
-describe("ensureStripeCustomer", () => {
-  it("returns existing stripeCustomerId when available", async () => {
-    const client = {
-      id: "client_1",
-      email: "test@example.com",
-      name: "Test Client",
-      stripeCustomerId: "cus_existing",
-    } as any;
-
-    const result = await ensureStripeCustomer(client);
-    expect(result).toBe("cus_existing");
-    expect(stripe.customers.create).not.toHaveBeenCalled();
-  });
-
-  it("creates new customer when stripeCustomerId is null", async () => {
-    const client = {
-      id: "client_1",
-      email: "test@example.com",
-      name: "Test Client",
-      stripeCustomerId: null,
-    } as any;
-
-    (stripe.customers.create as any).mockResolvedValue({ id: "cus_new" });
-
-    const result = await ensureStripeCustomer(client);
-    expect(result).toBe("cus_new");
-    expect(stripe.customers.create).toHaveBeenCalledWith(
-      {
-        email: "test@example.com",
-        name: "Test Client",
-        metadata: { clientId: "client_1" },
-      },
-      { idempotencyKey: "customer-client_1" }
-    );
   });
 });

@@ -138,7 +138,7 @@ describe("GET /api/v1/reports/payments — group with no connected clients", () 
       id: groupId,
       name: "Empty Connected Group",
       status: "active",
-      workspace: "dfwsc_services",
+      workspace: "client_portal",
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -151,7 +151,7 @@ describe("GET /api/v1/reports/payments — group with no connected clients", () 
       email: "unconnected@example.com",
       status: "active",
       groupId,
-      workspace: "dfwsc_services",
+      workspace: "client_portal",
     });
   });
 
@@ -166,7 +166,7 @@ describe("GET /api/v1/reports/payments — group with no connected clients", () 
 
     const response = await app.inject({
       method: "GET",
-      url: `/api/v1/reports/payments?groupId=${groupId}&workspace=dfwsc_services`,
+      url: `/api/v1/reports/payments?groupId=${groupId}&workspace=client_portal`,
       headers: { authorization: `Bearer ${token}` },
     });
 

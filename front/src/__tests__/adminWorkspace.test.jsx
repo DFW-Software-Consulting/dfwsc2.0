@@ -22,7 +22,6 @@ vi.mock("../hooks/useClients", () => ({
         name: "Acme",
         email: "billing@acme.com",
         status: "active",
-        paymentStatus: "active",
       },
     ],
     isLoading: false,
