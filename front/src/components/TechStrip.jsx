@@ -17,7 +17,7 @@ export default function TechStrip() {
           <h2 className="text-3xl font-bold text-slate-900 dark:text-white sm:text-5xl text-gradient">
             Pragmatic stacks matched to your goals
           </h2>
-          <p className="mt-6 text-lg text-slate-600 dark:text-slate-400">
+          <p className="mt-6 text-lg text-slate-700 dark:text-slate-300">
             We lean on proven frameworks, not hype. Each project combines maintainable code with
             infrastructure that&apos;s easy to monitor and scale.
           </p>

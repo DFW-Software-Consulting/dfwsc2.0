@@ -18,12 +18,12 @@ export default function Navbar() {
 
   // Unified clickable pill style
   const desktopItemClasses =
-    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-slate-200 dark:border-white/5 px-4 py-2 text-sm font-medium text-[var(--text-muted)] dark:text-slate-400 transition-all duration-300 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
+    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-slate-200 dark:border-white/5 px-4 py-2 text-sm font-medium text-[var(--text-muted)] dark:text-slate-300 transition-all duration-300 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
   const desktopGlow =
     "pointer-events-none absolute inset-0 rounded-full bg-gradient-to-r from-brand-500/0 via-brand-500/5 to-brand-500/0 opacity-0 transition-opacity duration-500 group-hover:opacity-100";
 
   const mobileItemClasses =
-    "group relative overflow-hidden rounded-xl border border-slate-200 dark:border-white/5 px-4 py-3 text-left text-[var(--text-muted)] dark:text-slate-300 transition-all duration-200 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-700 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
+    "group relative overflow-hidden rounded-xl border border-slate-200 dark:border-white/5 px-4 py-3 text-left text-[var(--text-muted)] dark:text-slate-200 transition-all duration-200 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
   const mobileGlow =
     "pointer-events-none absolute inset-0 rounded-xl bg-brand-500/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-brand-500/5";
 

@@ -26,7 +26,7 @@ export default function CaseStudies() {
         <h2 className="text-3xl font-bold tracking-tight sm:text-5xl text-gradient">
           Real outcomes for growing teams
         </h2>
-        <p className="mt-6 text-lg text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+        <p className="mt-6 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
           We build with your operators, customers, and compliance needs in mind — from manufacturing
           floors to finance teams.
         </p>
@@ -41,11 +41,11 @@ export default function CaseStudies() {
             <h3 className="text-xl font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors leading-tight">
               {project.name}
             </h3>
-            <p className="mt-4 text-sm text-slate-600 dark:text-slate-400 leading-relaxed flex-grow">
+            <p className="mt-4 text-sm text-slate-700 dark:text-slate-300 leading-relaxed flex-grow">
               {project.result}
             </p>
             <div className="mt-8 pt-6 border-t border-slate-200 dark:border-white/5">
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 block mb-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 block mb-2">
                 Tech Stack
               </span>
               <p className="text-xs font-medium text-slate-700 dark:text-slate-300 transition-colors">

@@ -158,11 +158,11 @@ export default function Docs() {
         <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-6xl text-gradient transition-colors">
           Connect Your App
         </h1>
-        <p className="mt-8 max-w-2xl text-xl text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+        <p className="mt-8 max-w-2xl text-xl text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
           Everything you need to accept payments through the DFWSC platform — from your backend
           server to your customer-facing checkout form.
         </p>
-        <div className="mt-8 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-500 transition-colors">
+        <div className="mt-8 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 transition-colors">
           <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
           Prerequisites: you have already been onboarded and received your API key. 
           If not, {" "}
@@ -181,13 +181,13 @@ export default function Docs() {
         {/* Sidebar — hidden on mobile, shown on lg+ */}
         <aside className="hidden lg:block w-64 flex-none">
           <nav className="sticky top-32 space-y-1" aria-label="Page sections">
-            <h3 className="px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-600 mb-4 transition-colors">On this page</h3>
+            <h3 className="px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 mb-4 transition-colors">On this page</h3>
             {sidebarSections.map((s) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => handleSidebarClick(s.id)}
-                className="group flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-600 dark:text-slate-400 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-white/[0.03] hover:text-brand-700 dark:hover:text-white cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+                className="group flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-700 dark:text-slate-300 transition-all duration-200 hover:bg-slate-100 dark:hover:bg-white/[0.03] hover:text-brand-700 dark:hover:text-white cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-transparent group-hover:bg-brand-500 mr-3 transition-colors" />
                 {s.label}
@@ -203,7 +203,7 @@ export default function Docs() {
               key={s.id}
               type="button"
               onClick={() => handleSidebarClick(s.id)}
-              className="flex-none rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 transition hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-white cursor-pointer whitespace-nowrap uppercase tracking-widest focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+              className="flex-none rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 transition hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:text-slate-900 dark:hover:text-white cursor-pointer whitespace-nowrap uppercase tracking-widest focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
             >
               {s.label}
             </button>
@@ -217,7 +217,7 @@ export default function Docs() {
             <SectionAnchor id="what-you-have" />
             <SectionBadge>Credentials</SectionBadge>
             <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">What You Have</h2>
-            <p className="mt-4 text-lg text-slate-600 dark:text-slate-400 transition-colors">After onboarding you should have received:</p>
+            <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 transition-colors">After onboarding you should have received:</p>
             <div className="mt-8 grid gap-4">
               {[
                 { label: "API Key", desc: "A long string of letters and numbers. Authenticates every request. Keep it secret — treat it like a password and never expose it in frontend code." },
@@ -225,7 +225,7 @@ export default function Docs() {
               ].map((item) => (
                 <div key={item.label} className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm">
                   <h3 className="font-bold text-slate-900 dark:text-white text-lg transition-colors">{item.label}</h3>
-                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">{item.desc}</p>
+                  <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">{item.desc}</p>
                 </div>
               ))}
             </div>
@@ -273,7 +273,7 @@ export default function Docs() {
             <SectionAnchor id="quick-start" />
             <SectionBadge>Quick Start</SectionBadge>
             <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Test Your API Key</h2>
-            <p className="mt-4 text-lg text-slate-600 dark:text-slate-400 transition-colors">
+            <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 transition-colors">
               Run this curl command to confirm your key works. A successful response includes a clientSecret.
             </p>
             <CodeBlock language="bash">{`curl -X POST https://<your-api-base-url>/api/v1/payments/create \\
@@ -288,7 +288,7 @@ export default function Docs() {
             <SectionAnchor id="step-1" />
             <SectionBadge>Backend</SectionBadge>
             <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Step 1 — Create a Payment</h2>
-            <p className="mt-4 text-lg text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+            <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
               Call this from your <strong className="text-slate-900 dark:text-white underline decoration-brand-500/50 transition-colors">server</strong>, never from the browser.
             </p>
             
@@ -296,9 +296,9 @@ export default function Docs() {
               POST /api/v1/payments/create
             </div>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-6 transition-colors">Required Headers</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Required Headers</h3>
             <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.01] transition-colors">
-              <table className="w-full text-sm text-slate-600 dark:text-slate-400 transition-colors">
+              <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
                     <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Header</th>
@@ -322,14 +322,14 @@ export default function Docs() {
 
             <div className="mt-12 p-8 rounded-[2rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] transition-colors">
               <h3 className="text-xl font-bold text-slate-900 dark:text-white transition-colors">What is an Idempotency Key?</h3>
-              <p className="mt-4 text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+              <p className="mt-4 text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
                 Every request needs a unique <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-200/50 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">Idempotency-Key</code>. 
                 It prevents double-charges if a network error causes a retry. If you send the same key twice, 
                 the second request returns the same result — no duplicate charge.
               </p>
             </div>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-6 transition-colors">Request Body</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Request Body</h3>
             <CodeBlock language="json">{`{
   "amount": 5000,
   "currency": "usd",
@@ -341,7 +341,7 @@ export default function Docs() {
 }`}</CodeBlock>
 
             <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.01] transition-colors shadow-sm">
-              <table className="w-full text-sm text-slate-600 dark:text-slate-400 transition-colors">
+              <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
                     <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Field</th>
@@ -359,7 +359,7 @@ export default function Docs() {
                     <tr key={field} className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]">
                       <td className="px-6 py-4 font-mono text-brand-600 dark:text-brand-300">{field}</td>
                       <td className="px-6 py-4">
-                        <span className={`text-[10px] font-black px-2 py-1 rounded-full transition-colors ${req === "Yes" ? "bg-brand-500/20 text-brand-600 dark:text-brand-400" : "bg-slate-100 dark:bg-white/5 text-slate-400 dark:text-slate-500"}`}>
+                        <span className={`text-[10px] font-black px-2 py-1 rounded-full transition-colors ${req === "Yes" ? "bg-brand-500/20 text-brand-600 dark:text-brand-400" : "bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400"}`}>
                           {req.toUpperCase()}
                         </span>
                       </td>
@@ -376,15 +376,15 @@ export default function Docs() {
             <SectionAnchor id="step-2" />
             <SectionBadge>Frontend</SectionBadge>
             <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Step 2 — Show the Payment Form</h2>
-            <p className="mt-4 text-lg text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+            <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
               Use Stripe.js to collect and submit the card. Stripe handles PCI compliance — you
               never touch raw card numbers.
             </p>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-6 transition-colors">Add Stripe.js to your page</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Add Stripe.js to your page</h3>
             <CodeBlock language="html">{`<script src="https://js.stripe.com/v3/"></script>`}</CodeBlock>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-6 transition-colors">Mount the payment form</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Mount the payment form</h3>
             <div className="space-y-4">
               <CodeBlock language="javascript">{`const stripe = Stripe('<your-stripe-publishable-key>');
 
@@ -400,7 +400,7 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
 </form>`}</CodeBlock>
             </div>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-6 transition-colors">Handle form submission</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Handle form submission</h3>
             <CodeBlock language="javascript">{`document.getElementById('payment-form')
   .addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -418,7 +418,7 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
     }
   });`}</CodeBlock>
             
-            <div className="mt-8 p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] text-sm text-slate-600 dark:text-slate-400 transition-colors shadow-sm">
+            <div className="mt-8 p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] text-sm text-slate-700 dark:text-slate-300 transition-colors shadow-sm">
               <span className="font-bold text-slate-900 dark:text-white uppercase text-[10px] tracking-widest block mb-2 transition-colors">Pro Tip:</span>
               Your <strong>Stripe publishable key</strong> (pk_live_... or pk_test_...) 
               is different from your DFWSC API key. Find it in your Stripe dashboard under 
@@ -459,13 +459,13 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
             <SectionAnchor id="error-handling" />
             <SectionBadge>Errors</SectionBadge>
             <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Error Handling</h2>
-            <p className="mt-4 text-lg text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+            <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
               Errors return a JSON body with an <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">error</code> field.
             </p>
             <CodeBlock language="json">{`{ "error": "Description of what went wrong" }`}</CodeBlock>
             
             <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.01] transition-colors shadow-sm">
-              <table className="w-full text-sm text-slate-600 dark:text-slate-400 transition-colors">
+              <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
                     <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Status</th>
@@ -500,7 +500,7 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
               ].map((rule) => (
                 <div key={rule.title} className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm">
                   <h3 className="font-bold text-slate-900 dark:text-white text-base transition-colors">{rule.title}</h3>
-                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">{rule.desc}</p>
+                  <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">{rule.desc}</p>
                 </div>
               ))}
             </div>
@@ -511,7 +511,7 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
             <SectionAnchor id="need-help" />
             <div className="rounded-[2.5rem] bg-gradient-to-br from-brand-600/5 to-transparent dark:from-brand-600/20 dark:to-transparent border border-slate-200 dark:border-white/5 p-12 text-center shadow-sm">
               <h2 className="text-3xl font-bold text-slate-900 dark:text-white transition-colors">Need custom integration help?</h2>
-              <p className="mt-6 text-lg text-slate-600 dark:text-slate-400 max-w-2xl mx-auto transition-colors">
+              <p className="mt-6 text-lg text-slate-700 dark:text-slate-300 max-w-2xl mx-auto transition-colors">
                 Our engineers are available for embedded support, custom API builds, and 
                 architecture reviews. Let&apos;s talk about your next milestone.
               </p>

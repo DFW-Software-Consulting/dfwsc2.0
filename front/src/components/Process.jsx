@@ -32,7 +32,7 @@ export default function Process() {
         <h2 className="text-3xl font-bold tracking-tight sm:text-5xl text-gradient">
           A clear playbook from kickoff to scale
         </h2>
-        <p className="mt-6 text-lg text-slate-600 dark:text-slate-400">
+        <p className="mt-6 text-lg text-slate-700 dark:text-slate-300">
           Each phase is scoped with milestones, ownership, and a definition of done so you always
           know what happens next.
         </p>
@@ -53,7 +53,7 @@ export default function Process() {
             <h3 className="text-2xl font-bold text-slate-900 dark:text-white group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
               {step.title}
             </h3>
-            <p className="mt-4 text-base text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+            <p className="mt-4 text-base text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
               {step.description}
             </p>
           </article>

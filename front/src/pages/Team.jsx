@@ -43,7 +43,7 @@ export default function Team() {
       {/* Header */}
       <div className="mb-20 flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
-          <span className="inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 dark:text-brand-300">
+          <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-800 dark:text-brand-200">
             Meet our team
           </span>
           <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-[var(--text-main)] sm:text-6xl text-gradient">

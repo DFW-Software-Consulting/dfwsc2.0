@@ -65,7 +65,7 @@ export default function Footer() {
                   href={link.href}
                   target={link.href.startsWith("http") ? "_blank" : undefined}
                   rel={link.href.startsWith("http") ? "noreferrer" : undefined}
-                  className="group flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] text-slate-400 dark:text-slate-400 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:border-brand-500/30 hover:text-brand-600 dark:hover:text-white hover:-translate-y-1 shadow-sm"
+                  className="group flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] text-slate-500 dark:text-slate-300 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:border-brand-500/30 hover:text-brand-600 dark:hover:text-white hover:-translate-y-1 shadow-sm"
                   aria-label={link.name}
                 >
                   {link.icon}
@@ -76,7 +76,7 @@ export default function Footer() {
 
           <div className="grid gap-12 sm:grid-cols-2 lg:gap-16">
             <div>
-              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 transition-colors">Navigation</h3>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 transition-colors">Navigation</h3>
               <nav className="mt-6 flex flex-col gap-4">
                 {[
                   { label: "Home", to: "/" },
@@ -98,7 +98,7 @@ export default function Footer() {
               </nav>
             </div>
             <div>
-              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500 transition-colors">Insights</h3>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 transition-colors">Insights</h3>
               <div className="mt-6 space-y-6">
                 <a
                   href="https://linkedin.byjc.dev"
@@ -125,7 +125,7 @@ export default function Footer() {
         </div>
         
         <div className="mt-20 border-t border-slate-200 dark:border-white/5 pt-10 text-center transition-colors">
-          <p className="text-sm text-[var(--text-muted)] opacity-60">
+          <p className="text-sm text-[var(--text-muted)]">
             © {year} DFW Software Consulting. All rights reserved.
           </p>
         </div>

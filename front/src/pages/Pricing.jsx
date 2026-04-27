@@ -45,7 +45,7 @@ export default function Pricing() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-24 px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
       <section className="mx-auto max-w-4xl text-center">
-        <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 dark:text-brand-300">
+        <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-800 dark:text-brand-300">
           Hosting & Maintenance
         </span>
         <h1 className="text-4xl font-extrabold tracking-tight sm:text-6xl text-gradient">
@@ -86,7 +86,7 @@ export default function Pricing() {
             <div className="mt-auto pt-8 border-t border-slate-200 dark:border-white/5">
               <p className="text-sm text-[var(--text-muted)] leading-relaxed min-h-[3rem] transition-colors">{plan.includes}</p>
               <div className="mt-6 flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] opacity-60">Ideal for:</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">Ideal for:</span>
                 <span className="text-[11px] font-semibold text-brand-600 dark:text-brand-300/90 transition-colors">{plan.idealFor}</span>
               </div>
             </div>

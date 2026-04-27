@@ -59,7 +59,7 @@ export default function Services() {
   return (
     <section id="services" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
       <div className="mx-auto max-w-3xl text-center mb-16">
-        <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 dark:text-brand-300">
+        <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-800 dark:text-brand-300">
           What we do
         </span>
         <h2 className="text-3xl font-bold tracking-tight sm:text-5xl text-gradient">
@@ -84,7 +84,7 @@ export default function Services() {
                 <h3 className="text-2xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors duration-300">
                   {service.name}
                 </h3>
-                <span className="rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-brand-700 dark:text-brand-400">
+                <span className="rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-brand-800 dark:text-brand-400">
                   {service.details.length} points
                 </span>
               </div>
