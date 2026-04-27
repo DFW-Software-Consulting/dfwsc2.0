@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
-import { apiFetch } from "./client";
+import { apiFetch } from "../api/client";
 
 export function useCrmClients() {
   const { token } = useAuth();

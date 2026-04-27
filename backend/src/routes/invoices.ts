@@ -24,7 +24,7 @@ const invoicesRoute: FastifyPluginAsync = async (app) => {
     "/invoices",
     { preHandler: requireAdminJwt },
     async (req, res) => {
-      const { clientId, amountCents, invoiceNumber, dueDate, notes } = req.body;
+      const { clientId, amountCents, invoiceNumber, description, dueDate, notes } = req.body;
 
       if (!clientId) {
         return res.status(400).send({ error: "clientId is required" });
@@ -51,7 +51,7 @@ const invoicesRoute: FastifyPluginAsync = async (app) => {
           amountCents,
           invoiceNumber: normalizedInvoiceNumber,
           dueDate: dueDate ? new Date(dueDate) : undefined,
-          notes: notes?.trim() || description?.trim(),
+          notes: (notes || description)?.trim(),
         });
 
         if (result.error && !result.invoiceId) {

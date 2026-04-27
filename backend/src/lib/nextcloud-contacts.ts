@@ -228,7 +228,7 @@ export async function createDfwscClient(data: {
 
   if (!syncResult.success) {
     try {
-      await stripe.customers.delete(stripeCustomerId);
+      await stripe.customers.del(stripeCustomerId);
     } catch {
       console.error("Failed to delete Stripe customer during rollback:", stripeCustomerId);
     }

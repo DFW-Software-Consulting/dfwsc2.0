@@ -183,11 +183,11 @@ export async function createInvoiceForClient(clientId: string, data: {
     .limit(1);
 
   if (!client) {
-    return { invoiceId: "", error: "Client not found" };
+    return { invoiceId: "", synced: false, error: "Client not found" };
   }
 
   if (!client.stripeCustomerId) {
-    return { invoiceId: "", error: "Client is missing Stripe customer ID" };
+    return { invoiceId: "", synced: false, error: "Client is missing Stripe customer ID" };
   }
 
   const invoiceId = `inv_${uuidv4().slice(0, 12)}`;
@@ -336,9 +336,9 @@ export async function getLedgerInvoicesForClient(clientId: string): Promise<{
           ? body.data
           : [];
 
-    const filtered = rows.filter((row) => row?.client_email === client.email || row?._dfwsc_client_id === client.id);
+    const filtered = rows.filter((row: any) => row?.client_email === client.email || row?._dfwsc_client_id === client.id);
 
-    const mapped = filtered.map((row) => ({
+    const mapped = filtered.map((row: any) => ({
       id: row?._dfwsc_invoice_id || row?.id || `ledger_${uuidv4().slice(0, 12)}`,
       clientId: client.id,
       invoiceNumber: row?.name || row?.invoice_number || "-",

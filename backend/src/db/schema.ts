@@ -40,7 +40,7 @@ export const clients = pgTable(
     apiKeyLookup: text("api_key_lookup").unique(),
     stripeAccountId: text("stripe_account_id"),
     stripeCustomerId: text("stripe_customer_id"),
-    status: text("status", { enum: ["active", "inactive"] })
+    status: text("status", { enum: ["active", "inactive", "pending", "failed"] })
       .default("active")
       .notNull(),
     groupId: text("group_id").references(() => clientGroups.id),
