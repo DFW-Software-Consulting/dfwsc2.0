@@ -12,7 +12,7 @@ import {
 
 export const clientGroups = pgTable("client_groups", {
   id: text("id").primaryKey(),
-  workspace: text("workspace", { enum: ["client_portal"] })
+  workspace: text("workspace", { enum: ["client_portal", "dfwsc"] })
     .default("client_portal")
     .notNull(),
   name: text("name").notNull(),
@@ -31,7 +31,7 @@ export const clients = pgTable(
   "clients",
   {
     id: text("id").primaryKey(),
-    workspace: text("workspace", { enum: ["client_portal"] })
+    workspace: text("workspace", { enum: ["client_portal", "dfwsc"] })
       .default("client_portal")
       .notNull(),
     name: text("name").notNull(),
@@ -39,6 +39,7 @@ export const clients = pgTable(
     apiKeyHash: text("api_key_hash").unique(),
     apiKeyLookup: text("api_key_lookup").unique(),
     stripeAccountId: text("stripe_account_id"),
+    stripeCustomerId: text("stripe_customer_id"),
     status: text("status", { enum: ["active", "inactive"] })
       .default("active")
       .notNull(),

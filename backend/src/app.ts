@@ -7,6 +7,7 @@ import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
 import connectRoutes from "./routes/connect";
+import crmClientsRoute from "./routes/crm-clients";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
 import paymentsRoutes from "./routes/payments";
@@ -126,6 +127,7 @@ export async function buildServer() {
   server.register(healthRoutes, { prefix: "/api/v1" });
   server.register(authRoutes, { prefix: "/api/v1" });
   server.register(connectRoutes, { prefix: "/api/v1" });
+  server.register(crmClientsRoute, { prefix: "/api/v1" });
   server.register(paymentsRoutes, { prefix: "/api/v1" });
   server.register(webhooksRoute, { prefix: "/api/v1" });
   server.register(clientRoutes, { prefix: "/api/v1" });
