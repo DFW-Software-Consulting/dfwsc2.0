@@ -36,13 +36,11 @@ run_step() {
   shift
 
   log_file=$(mktemp)
-  echo "${label} check..."
 
   if "$@" >"$log_file" 2>&1; then
-    echo "${label} pass"
     rm -f "$log_file"
   else
-    echo "${label} failed"
+    echo "❌ ${label} check failed"
     cat "$log_file"
     rm -f "$log_file"
     exit 1
@@ -152,11 +150,5 @@ fi
 # 11. Auto-fix staged files with Biome
 run_step "Lint" npx lint-staged --quiet
 
-# 12. TypeScript type-check (backend source only — excludes tests and node_modules types)
-run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json"
-
-# 13. Frontend tests (no Docker required)
-run_step "Frontend tests" npm run test:front
-
-# 14. Guard: .claude/CLAUDE.md mirrors must exist and stay in sync
+# 12. Guard: .claude/CLAUDE.md mirrors must exist and stay in sync
 run_step "Agent docs" check_agent_docs_sync

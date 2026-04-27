@@ -36,13 +36,11 @@ run_step() {
   shift
 
   log_file=$(mktemp)
-  echo "${label} check..."
 
   if "$@" >"$log_file" 2>&1; then
-    echo "${label} pass"
     rm -f "$log_file"
   else
-    echo "${label} failed"
+    echo "❌ ${label} check failed"
     cat "$log_file"
     rm -f "$log_file"
     exit 1
@@ -81,5 +79,8 @@ run_step "Agent docs" check_agent_docs_sync
 # 5. Backend TypeScript type-check
 run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json"
 
-# 6. Frontend tests
+# 6. Frontend build
+run_step "Frontend build" npm run build:frontend
+
+# 7. Frontend tests
 run_step "Frontend tests" npm run test:front
