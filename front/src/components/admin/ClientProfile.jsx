@@ -50,7 +50,7 @@ export default function ClientProfile({
 
   useEffect(() => {
     pullLedgerInvoices();
-  }, [pullLedgerInvoices]);
+  }, []);
 
   const filteredInvoices = useMemo(() => {
     if (invoiceFilter === "all") return invoices;

@@ -222,7 +222,7 @@ export async function createDfwscClient(data: {
   const syncResult = await createNextcloudContact({
     id: clientId,
     name: data.name,
-    email: data.email,
+    email: data.email.toLowerCase().trim(),
     stripeCustomerId,
     phone: data.phone,
     notes: data.notes,
@@ -231,8 +231,8 @@ export async function createDfwscClient(data: {
   if (!syncResult.success) {
     try {
       await stripe.customers.del(stripeCustomerId);
-    } catch {
-      console.error("Failed to delete Stripe customer during rollback:", stripeCustomerId);
+    } catch (delErr) {
+      req.log.error({ err: delErr, stripeCustomerId }, "Failed to delete Stripe customer during rollback");
     }
     await db.update(clients).set({ status: "failed", updatedAt: new Date() }).where(eq(clients.id, clientId));
     return {

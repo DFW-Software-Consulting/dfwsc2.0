@@ -3,7 +3,7 @@ import { requireAdminJwt } from "../lib/auth";
 import { createInvoiceForClient, getLedgerInvoicesForClient } from "../lib/nextcloud-invoices";
 import { db } from "../db/client";
 import { invoices, clients } from "../db/schema";
-import { eq, desc, and, isNotNull } from "drizzle-orm";
+import { eq, desc, and, isNotNull, inArray } from "drizzle-orm";
 
 interface CreateInvoiceBody {
   clientId: string;
@@ -130,7 +130,7 @@ const invoicesRoute: FastifyPluginAsync = async (app) => {
         const clientIds = [...new Set(invoiceList.map((i) => i.clientId))];
         const clientRows = clientIds.length > 0
           ? await db.select().from(clients).where(
-            clientIds.length === 1 ? eq(clients.id, clientIds[0]) : undefined
+            clientIds.length === 1 ? eq(clients.id, clientIds[0]) : inArray(clients.id, clientIds)
           )
           : [];
         const clientMap = clientRows.length > 0

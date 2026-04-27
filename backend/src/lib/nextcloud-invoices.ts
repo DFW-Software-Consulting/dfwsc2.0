@@ -275,8 +275,8 @@ export async function createInvoiceForClient(clientId: string, data: {
   if (!syncResult.success) {
     try {
       await stripe.invoices.voidInvoice(stripeInvoiceId);
-    } catch {
-      // best effort rollback
+    } catch (voidErr) {
+      req.log.error({ err: voidErr, stripeInvoiceId }, "Failed to void Stripe invoice after Nextcloud sync failure");
     }
     return {
       invoiceId: "",
@@ -327,6 +327,7 @@ export async function getLedgerInvoicesForClient(clientId: string): Promise<{
       headers: {
         "OCS-APIREQUEST": "true",
         "Content-Type": "application/json",
+        Authorization: `Basic ${getNextcloudAuth()}`,
       },
     });
 
