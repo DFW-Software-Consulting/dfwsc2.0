@@ -21,6 +21,7 @@ async function createNextcloudContact(client: {
   id: string;
   name: string;
   email: string;
+  stripeCustomerId?: string;
   phone?: string | null;
   notes?: string | null;
 }): Promise<{ success: boolean; externalId?: string; error?: string }> {
@@ -38,6 +39,7 @@ async function createNextcloudContact(client: {
     phone: client.phone ?? undefined,
     notes: client.notes ?? undefined,
     _dfwsc_client_id: client.id,
+    _dfwsc_stripe_customer_id: client.stripeCustomerId,
   };
 
   let lastError: string = "";
@@ -151,6 +153,7 @@ export async function syncClientToNextcloud(clientId: string): Promise<{ synced:
     id: client.id,
     name: client.name,
     email: client.email,
+    stripeCustomerId: client.stripeCustomerId || undefined,
     phone: client.phone,
     notes: client.notes,
   });
@@ -218,6 +221,7 @@ export async function createDfwscClient(data: {
     id: clientId,
     name: data.name,
     email: data.email,
+    stripeCustomerId,
     phone: data.phone,
     notes: data.notes,
   });
