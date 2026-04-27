@@ -3,7 +3,7 @@ import { requireAdminJwt } from "../lib/auth";
 import { createDfwscClient } from "../lib/nextcloud-contacts";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 
 interface CreateClientBody {
   name: string;
@@ -37,7 +37,12 @@ const crmClientsRoute: FastifyPluginAsync = async (app) => {
         const [existing] = await db
           .select({ id: clients.id })
           .from(clients)
-          .where(eq(sql`lower(${clients.email})`, email.toLowerCase().trim()))
+          .where(
+            and(
+              eq(sql`lower(${clients.email})`, email.toLowerCase().trim()),
+              eq(clients.workspace, "dfwsc")
+            )
+          )
           .limit(1);
 
         if (existing) {

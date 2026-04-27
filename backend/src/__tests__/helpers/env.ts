@@ -18,6 +18,12 @@ export function ensureBaseEnv(): void {
   setIfMissing("SMTP_USER", "test");
   setIfMissing("SMTP_PASS", "test");
   setIfMissing("JWT_SECRET", TEST_JWT_SECRET);
+  setIfMissing("NEXTCLOUD_BASE_URL", "https://cloud.example.com");
+  setIfMissing("NEXTCLOUD_USERNAME", "test");
+  setIfMissing("NEXTCLOUD_APP_PASSWORD", "test-password");
+  setIfMissing("NEXTCLOUD_REGISTER_ID", "1");
+  setIfMissing("NEXTCLOUD_CONTACT_SCHEMA_ID", "1");
+  setIfMissing("NEXTCLOUD_LEDGER_SCHEMA_ID", "1");
 }
 
 // For unit tests (mocked DB) — forces all values

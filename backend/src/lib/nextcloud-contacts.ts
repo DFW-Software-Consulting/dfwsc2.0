@@ -4,6 +4,9 @@ import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { stripe } from "./stripe";
 
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
+
 function isNextcloudConfigured(): boolean {
   return !!(process.env.NEXTCLOUD_BASE_URL && process.env.NEXTCLOUD_USERNAME && process.env.NEXTCLOUD_APP_PASSWORD);
 }
@@ -37,30 +40,42 @@ async function createNextcloudContact(client: {
     _dfwsc_client_id: client.id,
   };
 
-  try {
-    const res = await fetch(
-      `${baseUrl}/index.php/apps/openregister/api/objects/${registerId}/${schemaId}`,
-      {
-        method: "POST",
-        headers: {
-          "OCS-APIREQUEST": "true",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+  let lastError: string = "";
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(
+        `${baseUrl}/index.php/apps/openregister/api/objects/${registerId}/${schemaId}`,
+        {
+          method: "POST",
+          headers: {
+            "OCS-APIREQUEST": "true",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        lastError = `Nextcloud API error: ${res.status} ${text}`;
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+          continue;
+        }
+        return { success: false, error: lastError };
       }
-    );
 
-    if (!res.ok) {
-      const text = await res.text();
-      return { success: false, error: `Nextcloud API error: ${res.status} ${text}` };
+      const data = await res.json();
+      const externalId = data?.id || uuidv4();
+      return { success: true, externalId };
+    } catch (err) {
+      lastError = String(err);
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+      }
     }
-
-    const data = await res.json();
-    const externalId = data?.id || uuidv4();
-    return { success: true, externalId };
-  } catch (err) {
-    return { success: false, error: String(err) };
   }
+  return { success: false, error: lastError };
 }
 
 async function updateNextcloudContact(client: {
@@ -157,16 +172,33 @@ export async function createDfwscClient(data: {
   const now = new Date();
 
   let stripeCustomerId: string | null = null;
-  try {
-    const stripeCustomer = await stripe.customers.create({
-      name: data.name,
-      email: data.email.toLowerCase().trim(),
-      phone: data.phone?.trim() || undefined,
-      metadata: { clientId },
-    });
-    stripeCustomerId = stripeCustomer.id;
-  } catch (err) {
-    console.error("Failed to create Stripe customer:", err);
+  let stripeError: string | null = null;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const stripeCustomer = await stripe.customers.create({
+        name: data.name,
+        email: data.email.toLowerCase().trim(),
+        phone: data.phone?.trim() || undefined,
+        metadata: { clientId },
+      });
+      stripeCustomerId = stripeCustomer.id;
+      break;
+    } catch (err) {
+      stripeError = String(err);
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+      }
+    }
+  }
+
+  if (!stripeCustomerId) {
+    return {
+      clientId,
+      stripeCustomerId: undefined,
+      synced: false,
+      externalId: undefined,
+      error: stripeError || "Failed to create Stripe customer after retries",
+    };
   }
 
   await db.insert(clients).values({
@@ -177,7 +209,7 @@ export async function createDfwscClient(data: {
     phone: data.phone?.trim() || null,
     notes: data.notes || null,
     stripeCustomerId,
-    status: "active",
+    status: "pending",
     createdAt: now,
     updatedAt: now,
   });
@@ -190,11 +222,28 @@ export async function createDfwscClient(data: {
     notes: data.notes,
   });
 
+  if (!syncResult.success) {
+    try {
+      await stripe.customers.delete(stripeCustomerId);
+    } catch {
+      console.error("Failed to delete Stripe customer during rollback:", stripeCustomerId);
+    }
+    await db.update(clients).set({ status: "failed", updatedAt: new Date() }).where(eq(clients.id, clientId));
+    return {
+      clientId,
+      stripeCustomerId: undefined,
+      synced: false,
+      externalId: undefined,
+      error: syncResult.error || "Failed to sync to Nextcloud",
+    };
+  }
+
+  await db.update(clients).set({ status: "active", updatedAt: new Date() }).where(eq(clients.id, clientId));
+
   return {
     clientId,
-    stripeCustomerId: stripeCustomerId || undefined,
-    synced: syncResult.success,
+    stripeCustomerId,
+    synced: true,
     externalId: syncResult.externalId,
-    error: syncResult.error,
   };
 }

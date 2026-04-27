@@ -6,6 +6,15 @@ import { clients } from "../../db/schema";
 import { ensureBaseEnv } from "../helpers/env";
 import jwt from "jsonwebtoken";
 
+vi.mock("../../lib/stripe", () => ({
+  stripe: {
+    customers: {
+      create: vi.fn().mockResolvedValue({ id: "cus_test123" }),
+      delete: vi.fn().mockResolvedValue({ id: "cus_test123", deleted: true }),
+    },
+  },
+}));
+
 const TEST_JWT_SECRET = "test_jwt_secret_minimum_32_characters_long_random_string";
 
 function makeAdminToken() {
