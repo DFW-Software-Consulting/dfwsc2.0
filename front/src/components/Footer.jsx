@@ -25,7 +25,7 @@ const socialLinks = [
   },
   {
     name: "Email",
-    href: "mailto:dfwsoftwareconsulting@gmail.com",
+    href: "mailto:mail@dfwsc.com",
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5 fill-current">
         <path d="M3.75 5.5A2.75 2.75 0 0 0 1 8.25v7.5A2.75 2.75 0 0 0 3.75 18.5h16.5A2.75 2.75 0 0 0 23 15.75v-7.5A2.75 2.75 0 0 0 20.25 5.5zm.433 1.5h15.634L12 12.568zM2.5 9.014v6.736a1.75 1.75 0 0 0 1.75 1.75h16.5a1.75 1.75 0 0 0 1.75-1.75V9.014l-9.407 6.333a1 1 0 0 1-1.086 0z" />
@@ -51,13 +51,37 @@ export default function Footer() {
               <img
                 src="/DFWSC-Logo-HorizWordmarkPNG.png"
                 alt="DFW Software Consulting"
-                className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === 'dark' ? 'invert hue-rotate-180 brightness-125' : ''}`}
+                className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === "dark" ? "invert hue-rotate-180 brightness-125" : ""}`}
               />
             </Link>
             <p className="text-lg text-[var(--text-muted)] leading-relaxed max-w-md transition-colors">
-              Dallas-Fort Worth based engineers delivering end-to-end product strategy and 
-              resilient cloud infrastructure for teams that need shipping momentum.
+              Dallas-Fort Worth based engineers delivering end-to-end product strategy and resilient
+              cloud infrastructure for teams that need shipping momentum.
             </p>
+            <div className="flex flex-col gap-3">
+              <a
+                href="tel:+12143260128"
+                className="flex items-center gap-3 text-base font-medium text-[var(--text-muted)] hover:text-brand-600 dark:hover:text-brand-300 transition-colors"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] text-slate-500 dark:text-slate-300">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current">
+                    <path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.01-.24c1.12.37 2.33.57 3.58.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.61 21 3 13.39 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.46.57 3.58a1 1 0 0 1-.24 1.01z" />
+                  </svg>
+                </span>
+                (214) 326-0128
+              </a>
+              <a
+                href="mailto:mail@dfwsc.com"
+                className="flex items-center gap-3 text-base font-medium text-[var(--text-muted)] hover:text-brand-600 dark:hover:text-brand-300 transition-colors"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] text-slate-500 dark:text-slate-300">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 fill-current">
+                    <path d="M3.75 5.5A2.75 2.75 0 0 0 1 8.25v7.5A2.75 2.75 0 0 0 3.75 18.5h16.5A2.75 2.75 0 0 0 23 15.75v-7.5A2.75 2.75 0 0 0 20.25 5.5zm.433 1.5h15.634L12 12.568zM2.5 9.014v6.736a1.75 1.75 0 0 0 1.75 1.75h16.5a1.75 1.75 0 0 0 1.75-1.75V9.014l-9.407 6.333a1 1 0 0 1-1.086 0z" />
+                  </svg>
+                </span>
+                mail@dfwsc.com
+              </a>
+            </div>
             <div className="flex flex-wrap gap-4">
               {socialLinks.map((link) => (
                 <a
@@ -76,7 +100,9 @@ export default function Footer() {
 
           <div className="grid gap-12 sm:grid-cols-2 lg:gap-16">
             <div>
-              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 transition-colors">Navigation</h3>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 transition-colors">
+                Navigation
+              </h3>
               <nav className="mt-6 flex flex-col gap-4">
                 {[
                   { label: "Home", to: "/" },
@@ -98,7 +124,9 @@ export default function Footer() {
               </nav>
             </div>
             <div>
-              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 transition-colors">Insights</h3>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 transition-colors">
+                Insights
+              </h3>
               <div className="mt-6 space-y-6">
                 <a
                   href="https://linkedin.byjc.dev"
@@ -111,8 +139,20 @@ export default function Footer() {
                   </p>
                   <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-500 group-hover:text-brand-400 transition-colors">
                     LEARN MORE
-                    <svg className="h-3 w-3 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                    <svg
+                      className="h-3 w-3 transition-transform group-hover:translate-x-1"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      aria-hidden="true"
+                      focusable="false"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M17 8l4 4m0 0l-4 4m4-4H3"
+                      />
                     </svg>
                   </span>
                 </a>
@@ -123,7 +163,7 @@ export default function Footer() {
             </div>
           </div>
         </div>
-        
+
         <div className="mt-20 border-t border-slate-200 dark:border-white/5 pt-10 text-center transition-colors">
           <p className="text-sm text-[var(--text-muted)]">
             © {year} DFW Software Consulting. All rights reserved.
