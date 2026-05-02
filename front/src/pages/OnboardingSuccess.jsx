@@ -23,7 +23,9 @@ export default function OnboardingSuccess() {
             />
           </svg>
         </div>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">Onboarding Complete</h1>
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">
+          Onboarding Complete
+        </h1>
         <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
           Your Stripe account setup is complete. DFWSC will follow up with next steps shortly.
         </p>

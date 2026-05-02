@@ -110,8 +110,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
 
         if (!isWorkspace(workspace)) {
           return res.status(400).send({
-            error:
-              "workspace query parameter is required (client_portal).",
+            error: "workspace query parameter is required (client_portal).",
           });
         }
 

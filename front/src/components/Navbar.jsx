@@ -68,6 +68,8 @@ export default function Navbar() {
           viewBox="0 0 24 24"
           stroke="currentColor"
           strokeWidth={2}
+          aria-hidden="true"
+          focusable="false"
         >
           <path
             strokeLinecap="round"
@@ -84,6 +86,8 @@ export default function Navbar() {
           viewBox="0 0 24 24"
           stroke="currentColor"
           strokeWidth={2}
+          aria-hidden="true"
+          focusable="false"
         >
           <path
             strokeLinecap="round"
@@ -92,7 +96,11 @@ export default function Navbar() {
           />
         </svg>
       </div>
-      {mobile && <span className="text-sm font-medium">{theme === "dark" ? "Switch to Light" : "Switch to Dark"}</span>}
+      {mobile && (
+        <span className="text-sm font-medium">
+          {theme === "dark" ? "Switch to Light" : "Switch to Dark"}
+        </span>
+      )}
     </button>
   );
 
@@ -108,7 +116,7 @@ export default function Navbar() {
           <img
             src="/DFWSC-Logo-HorizWordmarkPNG.png"
             alt="DFW Software Consulting"
-            className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === 'dark' ? 'invert hue-rotate-180 brightness-125' : ''}`}
+            className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === "dark" ? "invert hue-rotate-180 brightness-125" : ""}`}
           />
         </Link>
 

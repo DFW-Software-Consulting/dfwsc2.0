@@ -23,7 +23,9 @@ export default function PaymentSuccess() {
             />
           </svg>
         </div>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">Payment Successful!</h1>
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">
+          Payment Successful!
+        </h1>
         <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
           Thank you for your payment. DFWSC is happy to have you as a client! Your service will be
           set up shortly.

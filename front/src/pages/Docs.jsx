@@ -164,8 +164,7 @@ export default function Docs() {
         </p>
         <div className="mt-8 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 transition-colors">
           <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
-          Prerequisites: you have already been onboarded and received your API key. 
-          If not, {" "}
+          Prerequisites: you have already been onboarded and received your API key. If not,{" "}
           <Link
             to="/"
             state={{ scrollTo: "contact" }}
@@ -181,7 +180,9 @@ export default function Docs() {
         {/* Sidebar — hidden on mobile, shown on lg+ */}
         <aside className="hidden lg:block w-64 flex-none">
           <nav className="sticky top-32 space-y-1" aria-label="Page sections">
-            <h3 className="px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 mb-4 transition-colors">On this page</h3>
+            <h3 className="px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400 mb-4 transition-colors">
+              On this page
+            </h3>
             {sidebarSections.map((s) => (
               <button
                 key={s.id}
@@ -216,16 +217,33 @@ export default function Docs() {
           <section>
             <SectionAnchor id="what-you-have" />
             <SectionBadge>Credentials</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">What You Have</h2>
-            <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 transition-colors">After onboarding you should have received:</p>
+            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              What You Have
+            </h2>
+            <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 transition-colors">
+              After onboarding you should have received:
+            </p>
             <div className="mt-8 grid gap-4">
               {[
-                { label: "API Key", desc: "A long string of letters and numbers. Authenticates every request. Keep it secret — treat it like a password and never expose it in frontend code." },
-                { label: "API Base URL", desc: "The address of the payment server (e.g., https://api.yourdfwscportal.com)." }
+                {
+                  label: "API Key",
+                  desc: "A long string of letters and numbers. Authenticates every request. Keep it secret — treat it like a password and never expose it in frontend code.",
+                },
+                {
+                  label: "API Base URL",
+                  desc: "The address of the payment server (e.g., https://api.yourdfwscportal.com).",
+                },
               ].map((item) => (
-                <div key={item.label} className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm">
-                  <h3 className="font-bold text-slate-900 dark:text-white text-lg transition-colors">{item.label}</h3>
-                  <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">{item.desc}</p>
+                <div
+                  key={item.label}
+                  className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm"
+                >
+                  <h3 className="font-bold text-slate-900 dark:text-white text-lg transition-colors">
+                    {item.label}
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
+                    {item.desc}
+                  </p>
                 </div>
               ))}
             </div>
@@ -235,31 +253,52 @@ export default function Docs() {
           <section>
             <SectionAnchor id="how-it-works" />
             <SectionBadge>Overview</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">How It Works</h2>
+            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              How It Works
+            </h2>
             <div className="mt-8 space-y-6">
               {[
-                <>
-                  Your backend calls the DFWSC API with the payment amount — it returns a{" "}
-                  <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
-                    clientSecret
-                  </code>
-                  .
-                </>,
-                <>
-                  Your frontend uses Stripe.js with that{" "}
-                  <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
-                    clientSecret
-                  </code>{" "}
-                  to show a payment form.
-                </>,
-                "The customer fills in their card and submits — Stripe handles the actual charge.",
-                "You get a webhook or redirect when the payment succeeds.",
+                {
+                  id: "backend-secret",
+                  content: (
+                    <>
+                      Your backend calls the DFWSC API with the payment amount — it returns a{" "}
+                      <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
+                        clientSecret
+                      </code>
+                      .
+                    </>
+                  ),
+                },
+                {
+                  id: "frontend-stripejs",
+                  content: (
+                    <>
+                      Your frontend uses Stripe.js with that{" "}
+                      <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
+                        clientSecret
+                      </code>{" "}
+                      to show a payment form.
+                    </>
+                  ),
+                },
+                {
+                  id: "customer-submits",
+                  content:
+                    "The customer fills in their card and submits — Stripe handles the actual charge.",
+                },
+                {
+                  id: "webhook-redirect",
+                  content: "You get a webhook or redirect when the payment succeeds.",
+                },
               ].map((step, i) => (
-                <div key={i} className="flex items-start gap-6 group">
+                <div key={step.id} className="flex items-start gap-6 group">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-brand-500/20 bg-brand-500/5 text-sm font-black text-brand-600 dark:text-brand-400 group-hover:bg-brand-500 group-hover:text-white transition-all">
                     {i + 1}
                   </span>
-                  <div className="pt-2 text-base text-slate-600 dark:text-slate-300 leading-relaxed transition-colors">{step}</div>
+                  <div className="pt-2 text-base text-slate-600 dark:text-slate-300 leading-relaxed transition-colors">
+                    {step.content}
+                  </div>
                 </div>
               ))}
             </div>
@@ -272,9 +311,12 @@ export default function Docs() {
           <section>
             <SectionAnchor id="quick-start" />
             <SectionBadge>Quick Start</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Test Your API Key</h2>
+            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              Test Your API Key
+            </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 transition-colors">
-              Run this curl command to confirm your key works. A successful response includes a clientSecret.
+              Run this curl command to confirm your key works. A successful response includes a
+              clientSecret.
             </p>
             <CodeBlock language="bash">{`curl -X POST https://<your-api-base-url>/api/v1/payments/create \\
   -H "X-Api-Key: <your-api-key>" \\
@@ -287,22 +329,34 @@ export default function Docs() {
           <section>
             <SectionAnchor id="step-1" />
             <SectionBadge>Backend</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Step 1 — Create a Payment</h2>
+            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              Step 1 — Create a Payment
+            </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
-              Call this from your <strong className="text-slate-900 dark:text-white underline decoration-brand-500/50 transition-colors">server</strong>, never from the browser.
+              Call this from your{" "}
+              <strong className="text-slate-900 dark:text-white underline decoration-brand-500/50 transition-colors">
+                server
+              </strong>
+              , never from the browser.
             </p>
-            
+
             <div className="mt-8 p-4 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] font-mono text-brand-600 dark:text-brand-400 font-bold transition-colors">
               POST /api/v1/payments/create
             </div>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Required Headers</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
+              Required Headers
+            </h3>
             <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.01] transition-colors">
               <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Header</th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Value</th>
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Header
+                    </th>
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Value
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -311,8 +365,13 @@ export default function Docs() {
                     ["Idempotency-Key", "A unique string for this payment attempt"],
                     ["Content-Type", "application/json"],
                   ].map(([header, value]) => (
-                    <tr key={header} className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]">
-                      <td className="px-6 py-4 font-mono text-brand-600 dark:text-brand-300">{header}</td>
+                    <tr
+                      key={header}
+                      className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-6 py-4 font-mono text-brand-600 dark:text-brand-300">
+                        {header}
+                      </td>
                       <td className="px-6 py-4">{value}</td>
                     </tr>
                   ))}
@@ -321,15 +380,22 @@ export default function Docs() {
             </div>
 
             <div className="mt-12 p-8 rounded-[2rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] transition-colors">
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white transition-colors">What is an Idempotency Key?</h3>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white transition-colors">
+                What is an Idempotency Key?
+              </h3>
               <p className="mt-4 text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
-                Every request needs a unique <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-200/50 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">Idempotency-Key</code>. 
-                It prevents double-charges if a network error causes a retry. If you send the same key twice, 
-                the second request returns the same result — no duplicate charge.
+                Every request needs a unique{" "}
+                <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-200/50 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
+                  Idempotency-Key
+                </code>
+                . It prevents double-charges if a network error causes a retry. If you send the same
+                key twice, the second request returns the same result — no duplicate charge.
               </p>
             </div>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Request Body</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
+              Request Body
+            </h3>
             <CodeBlock language="json">{`{
   "amount": 5000,
   "currency": "usd",
@@ -344,9 +410,15 @@ export default function Docs() {
               <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Field</th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Required</th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Description</th>
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Field
+                    </th>
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Required
+                    </th>
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Description
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -356,10 +428,17 @@ export default function Docs() {
                     ["description", "No", "Shows up in your Stripe dashboard"],
                     ["metadata", "No", "Any key/value pairs you want attached to the payment"],
                   ].map(([field, req, desc]) => (
-                    <tr key={field} className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]">
-                      <td className="px-6 py-4 font-mono text-brand-600 dark:text-brand-300">{field}</td>
+                    <tr
+                      key={field}
+                      className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-6 py-4 font-mono text-brand-600 dark:text-brand-300">
+                        {field}
+                      </td>
                       <td className="px-6 py-4">
-                        <span className={`text-[10px] font-black px-2 py-1 rounded-full transition-colors ${req === "Yes" ? "bg-brand-500/20 text-brand-600 dark:text-brand-400" : "bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400"}`}>
+                        <span
+                          className={`text-[10px] font-black px-2 py-1 rounded-full transition-colors ${req === "Yes" ? "bg-brand-500/20 text-brand-600 dark:text-brand-400" : "bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400"}`}
+                        >
                           {req.toUpperCase()}
                         </span>
                       </td>
@@ -375,16 +454,22 @@ export default function Docs() {
           <section>
             <SectionAnchor id="step-2" />
             <SectionBadge>Frontend</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Step 2 — Show the Payment Form</h2>
+            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              Step 2 — Show the Payment Form
+            </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
               Use Stripe.js to collect and submit the card. Stripe handles PCI compliance — you
               never touch raw card numbers.
             </p>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Add Stripe.js to your page</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
+              Add Stripe.js to your page
+            </h3>
             <CodeBlock language="html">{`<script src="https://js.stripe.com/v3/"></script>`}</CodeBlock>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Mount the payment form</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
+              Mount the payment form
+            </h3>
             <div className="space-y-4">
               <CodeBlock language="javascript">{`const stripe = Stripe('<your-stripe-publishable-key>');
 
@@ -400,7 +485,9 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
 </form>`}</CodeBlock>
             </div>
 
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">Handle form submission</h3>
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
+              Handle form submission
+            </h3>
             <CodeBlock language="javascript">{`document.getElementById('payment-form')
   .addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -417,12 +504,14 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
         error.message;
     }
   });`}</CodeBlock>
-            
+
             <div className="mt-8 p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] text-sm text-slate-700 dark:text-slate-300 transition-colors shadow-sm">
-              <span className="font-bold text-slate-900 dark:text-white uppercase text-[10px] tracking-widest block mb-2 transition-colors">Pro Tip:</span>
-              Your <strong>Stripe publishable key</strong> (pk_live_... or pk_test_...) 
-              is different from your DFWSC API key. Find it in your Stripe dashboard under 
-              Developers &gt; API keys.
+              <span className="font-bold text-slate-900 dark:text-white uppercase text-[10px] tracking-widest block mb-2 transition-colors">
+                Pro Tip:
+              </span>
+              Your <strong>Stripe publishable key</strong> (pk_live_... or pk_test_...) is different
+              from your DFWSC API key. Find it in your Stripe dashboard under Developers &gt; API
+              keys.
             </div>
           </section>
 
@@ -430,8 +519,10 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
           <section>
             <SectionAnchor id="code-examples" />
             <SectionBadge>Examples</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Code Examples</h2>
-            
+            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              Code Examples
+            </h2>
+
             <div className="mt-8 flex flex-wrap gap-2">
               {LANG_TABS.map((tab) => (
                 <button
@@ -458,26 +549,45 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
           <section>
             <SectionAnchor id="error-handling" />
             <SectionBadge>Errors</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Error Handling</h2>
+            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              Error Handling
+            </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
-              Errors return a JSON body with an <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">error</code> field.
+              Errors return a JSON body with an{" "}
+              <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
+                error
+              </code>{" "}
+              field.
             </p>
             <CodeBlock language="json">{`{ "error": "Description of what went wrong" }`}</CodeBlock>
-            
+
             <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.01] transition-colors shadow-sm">
               <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Status</th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Cause</th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">Fix</th>
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Status
+                    </th>
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Cause
+                    </th>
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Fix
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {ERROR_ROWS.map((row) => (
-                    <tr key={row.status} className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]">
-                      <td className="px-6 py-4 font-black text-slate-900 dark:text-white transition-colors">{row.status}</td>
-                      <td className="px-6 py-4 text-slate-600 dark:text-slate-300 transition-colors">{row.cause}</td>
+                    <tr
+                      key={row.status}
+                      className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-6 py-4 font-black text-slate-900 dark:text-white transition-colors">
+                        {row.status}
+                      </td>
+                      <td className="px-6 py-4 text-slate-600 dark:text-slate-300 transition-colors">
+                        {row.cause}
+                      </td>
                       <td className="px-6 py-4 text-xs transition-colors">{row.fix}</td>
                     </tr>
                   ))}
@@ -490,17 +600,35 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
           <section>
             <SectionAnchor id="rules" />
             <SectionBadge>Rules</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">Rules to Follow</h2>
+            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              Rules to Follow
+            </h2>
             <div className="mt-8 grid gap-4">
               {[
-                { title: "Your API key goes on your backend only.", desc: "Never put it in frontend JavaScript or a mobile app binary." },
-                { title: "Always use a unique Idempotency-Key per payment attempt.", desc: "Your invoice or order ID works great." },
-                { title: "Amounts are in cents.", desc: "$1.00 = 100, $25.50 = 2550, $100.00 = 10000." },
-                { title: "Use HTTPS.", desc: "Never send your API key over plain HTTP." }
+                {
+                  title: "Your API key goes on your backend only.",
+                  desc: "Never put it in frontend JavaScript or a mobile app binary.",
+                },
+                {
+                  title: "Always use a unique Idempotency-Key per payment attempt.",
+                  desc: "Your invoice or order ID works great.",
+                },
+                {
+                  title: "Amounts are in cents.",
+                  desc: "$1.00 = 100, $25.50 = 2550, $100.00 = 10000.",
+                },
+                { title: "Use HTTPS.", desc: "Never send your API key over plain HTTP." },
               ].map((rule) => (
-                <div key={rule.title} className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm">
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base transition-colors">{rule.title}</h3>
-                  <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">{rule.desc}</p>
+                <div
+                  key={rule.title}
+                  className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm"
+                >
+                  <h3 className="font-bold text-slate-900 dark:text-white text-base transition-colors">
+                    {rule.title}
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
+                    {rule.desc}
+                  </p>
                 </div>
               ))}
             </div>
@@ -510,9 +638,11 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
           <section className="pt-12 border-t border-slate-200 dark:border-white/5 transition-colors">
             <SectionAnchor id="need-help" />
             <div className="rounded-[2.5rem] bg-gradient-to-br from-brand-600/5 to-transparent dark:from-brand-600/20 dark:to-transparent border border-slate-200 dark:border-white/5 p-12 text-center shadow-sm">
-              <h2 className="text-3xl font-bold text-slate-900 dark:text-white transition-colors">Need custom integration help?</h2>
+              <h2 className="text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+                Need custom integration help?
+              </h2>
               <p className="mt-6 text-lg text-slate-700 dark:text-slate-300 max-w-2xl mx-auto transition-colors">
-                Our engineers are available for embedded support, custom API builds, and 
+                Our engineers are available for embedded support, custom API builds, and
                 architecture reviews. Let&apos;s talk about your next milestone.
               </p>
               <Link

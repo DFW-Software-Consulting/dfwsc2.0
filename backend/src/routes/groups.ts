@@ -56,9 +56,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
       return res.status(400).send({ error: "name is required." });
     }
     if (!isWorkspace(workspace)) {
-      return res
-        .status(400)
-        .send({ error: "workspace is required (client_portal)." });
+      return res.status(400).send({ error: "workspace is required (client_portal)." });
     }
 
     const id = nanoid();

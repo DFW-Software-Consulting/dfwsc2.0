@@ -56,7 +56,10 @@ export default function AdminTable({
         </thead>
         <tbody className="divide-y divide-slate-100 dark:divide-gray-800 transition-colors">
           {rows.map((row) => (
-            <tr key={row[keyField]} className="hover:bg-slate-50 dark:hover:bg-gray-700/50 transition-colors">
+            <tr
+              key={row[keyField]}
+              className="hover:bg-slate-50 dark:hover:bg-gray-700/50 transition-colors"
+            >
               {columns.map((col) => (
                 <td
                   key={col.header}

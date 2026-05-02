@@ -3,75 +3,67 @@
 This document describes the data model, Drizzle ORM usage, and migration strategy for the DFWSC Payment Portal.
 
 ## 1. Overview
-The project uses **PostgreSQL 17** with the **Drizzle ORM**. All schema definitions are centralized in `backend/src/db/schema.ts`.
+The project uses **PostgreSQL 17** with **Drizzle ORM**. All schema definitions live in `backend/src/db/schema.ts`.
 
 ## 2. Core Tables
 
 ### `clients`
-The primary entity for each consultant's client. Covers the full lifecycle from first contact (lead) through active billing to suspension.
+The primary entity for each consulting client.
 
-- **Keys**: `id` (UUID), `name`, `email`.
-- **Workspace**: `workspace` (`"dfwsc_services"`, `"client_portal"`, or `"ledger_crm"`) - separates application domains.
-- **Credentials**: `apiKeyHash` (bcrypt), `apiKeyLookup` (SHA256).
-- **Stripe**: `stripeAccountId` (linked Express account), `stripeCustomerId` (for invoicing — null for leads).
-- **Status**: `status` (`"active"`, `"inactive"`, or `"lead"`). Leads have no Stripe customer. Converting a lead to a client creates the Stripe customer and changes status to `"active"`.
-- **Group**: `groupId` (optional) - links to `client_groups`.
-- **Pricing**: `processingFeePercent`, `processingFeeCents`.
-- **URLs**: `paymentSuccessUrl`, `paymentCancelUrl` - redirect URLs after payment.
-- **Contact Info**: `phone`, `billingContactName`.
+- **Keys**: `id` (text, UUID), `name`, `email`.
+- **Workspace**: `workspace` — always `"client_portal"`.
+- **Credentials**: `apiKeyHash` (bcrypt), `apiKeyLookup` (SHA256 — fast lookup index).
+- **Stripe**: `stripeAccountId` (linked Express account), `stripeCustomerId`.
+- **Status**: `"active"`, `"inactive"`, `"pending"`, `"failed"`.
+- **Group**: `groupId` (optional FK → `client_groups.id`).
+- **Pricing**: `processingFeePercent`, `processingFeeCents` (set one, not both).
+- **URLs**: `paymentSuccessUrl`, `paymentCancelUrl`.
+- **Contact**: `phone`, `billingContactName`.
 - **Address**: `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`.
-- **Billing**: `defaultPaymentTermsDays` - default payment terms for invoices.
-- **Notes**: `notes` - free-form text field for admin notes.
-- **Lead Workflow**: `lastContactAt`, `nextAction`, `followUpAt` for CRM follow-up tracking.
-- **CRM / Payment Sync** (added in migration `0007_gorgeous_fallen_one.sql`):
-  - `paymentStatus` — cached Stripe subscription status: `active`, `trialing`, `past_due`, `unpaid`, `canceled`, or `none`. Updated every 15 minutes.
-  - `paymentStatusSyncedAt` — timestamp of the last sync.
-  - `suspendedAt` — when the client was suspended (null if not suspended).
-  - `suspensionReason` — optional text reason for suspension.
+- **Billing**: `defaultPaymentTermsDays`.
+- **Notes**: `notes` (free-form admin text).
 - **Timestamps**: `createdAt`, `updatedAt`.
 
 **Indexes:**
-- `apiKeyHashIdx` - Fast API key lookup
-- `apiKeyLookupIdx` - SHA256 lookup for API key
-- `emailWorkspaceUnique` - Ensures unique email per workspace
+- `clients_api_key_hash_idx` — API key verification
+- `clients_api_key_lookup_idx` — SHA256 fast lookup
+- `clients_email_workspace_unique` — unique email per workspace
 
 ### `client_groups`
-Allows grouping multiple clients to share configuration.
-- Shared settings for fees and URLs (`paymentSuccessUrl`, etc.).
+Groups multiple clients to share fee and redirect URL configuration.
+
+- **Workspace**: always `"client_portal"`.
+- **Status**: `"active"` or `"inactive"`.
+- **Shared config**: `processingFeePercent`, `processingFeeCents`, `paymentSuccessUrl`, `paymentCancelUrl`.
 
 ### `onboarding_tokens`
-Manages the lifecycle of Stripe Connect onboarding sessions.
-- **Statuses**: `pending`, `in_progress`, `completed`.
-- **State**: Includes a CSRF `state` with a 30-minute expiry.
+Manages the lifecycle of a client's Stripe Connect onboarding session.
 
-### `subscriptions` & `invoices`
-- **Subscriptions**: Defines recurring amounts and intervals.
-- **Invoices**: Tracks individual billing records. Tokens are unique for public payment access.
+- **Statuses**: `pending` → `in_progress` → `completed` (or `revoked` on resend).
+- **CSRF**: `state` field (32-byte hex) + `stateExpiresAt` (30-minute window) validated in `/connect/callback`.
+- **FK**: `clientId` → `clients.id` (cascade delete).
 
 ### `webhook_events`
-- An **idempotency table** used to de-duplicate Stripe webhook notifications.
+Idempotency table to de-duplicate Stripe webhook notifications.
+
 - **Fields**: `id`, `stripeEventId` (unique), `type`, `payload` (JSONB), `processedAt`, `createdAt`.
 
-### `profile_sync_state`
-Tracks bi-directional sync state between DFWSC clients and Nextcloud OpenRegister objects.
-- **Primary key**: `clientId` (FK → `clients.id`, cascade delete).
-- **Fields**: `externalSource` (default `"nextcloud"`), `externalId` (OpenRegister UUID), `syncStatus` (`"synced"`, `"pending"`, or `"failed"`), `syncError`, `syncAttempts`, `lastSyncAttemptAt`, `lastSyncedAt`, `createdAt`, `updatedAt`.
-- See [NEXTCLOUD.md](./NEXTCLOUD.md) for full integration details.
-
 ### `admins`
-Stores administrator accounts for the admin dashboard.
-- **Fields**: `id`, `username` (unique), `passwordHash`, `role` (default: `"admin"`), `active`, `setupConfirmed`, `lastLoginAt`, `createdAt`, `updatedAt`.
-- **Note**: Admin accounts are created via the bootstrap flow (`/auth/setup` → `/auth/confirm-bootstrap`).
+Admin accounts for the dashboard.
+
+- **Fields**: `id`, `username` (unique), `passwordHash`, `role` (default `"admin"`), `active`, `setupConfirmed`, `lastLoginAt`, `createdAt`, `updatedAt`.
+- Created via the bootstrap flow: `POST /auth/setup` → `POST /auth/confirm-bootstrap`.
 
 ### `settings`
-Simple key-value store for system configuration.
-- **Fields**: `key` (primary key), `value`, `updatedAt`.
-- **Usage**: Stores system-wide defaults like payment terms.
+Key-value store for system-wide configuration.
+
+- **Fields**: `key` (PK), `value`, `updatedAt`.
+- Example key: `company_name` (used in onboarding emails).
 
 ## 3. Tooling & Migrations
-- **Schema Changes**: Modify `backend/src/db/schema.ts`.
-- **Generate**: `npm run db:generate` (creates SQL in `backend/drizzle/`).
-- **Apply**: `npm run db:migrate` (uses `migrate.ts` script).
+- **Schema Changes**: Edit `backend/src/db/schema.ts`.
+- **Generate**: `npm run db:generate` — creates SQL migration files in `backend/drizzle/`.
+- **Apply**: `npm run db:migrate` — runs `migrate.ts` to apply pending migrations.
 
 ## 4. Idempotency Strategy
-All Stripe operations, including webhook handling, are guarded by `Idempotency-Key` headers or the `webhook_events` table to prevent duplicate processing.
+Stripe webhook handling is guarded by the `webhook_events` table. Payment creation uses `Idempotency-Key` headers (required for API key calls).

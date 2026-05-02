@@ -253,7 +253,7 @@ Key files for Coolify deployment:
 - `front/Dockerfile` - Recommended frontend build (create this)
 - `front/nginx.conf` - Already configured for API proxying
 - `backend/.env` - Reference for environment variable names (use values, don't commit file)
-- `docker-compose.prod.yml` - Reference for service relationships (see commit 701b8d2e2b38a5c5f7d1bba47bef57502e15eadb)
+- `docker-compose.base.yml` / `docker-compose.dev.yml` - Local dev stack reference for service relationships
 
 This setup gives you the benefits of both worlds:
 - **Development**: Monorepo simplicity with atomic commits and shared tooling

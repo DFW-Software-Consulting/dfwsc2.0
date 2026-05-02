@@ -3,49 +3,51 @@
 This document details the backend implementation, API design, and core logic for the DFWSC Payment Portal.
 
 ## 1. Overview
-The backend is a **Fastify 5** application written in **TypeScript**, using **Node.js 20**. It follows a controller-service pattern where routes handle HTTP concerns and `lib/` handles core business logic (Stripe, Mailer, etc.).
+The backend is a **Fastify 5** application written in **TypeScript**, using **Node.js 20**. Routes handle HTTP concerns; `src/lib/` handles core business logic (Stripe, mailer, auth, etc.).
 
 ## 2. Request Authentication
 Two distinct schemes are implemented:
 
 - **Client-Facing Routes** (`POST /payments/create`):
-  - Uses `X-Api-Key` header.
-  - Verification: `apiKeyLookup` (SHA256) for O(1) DB lookup + `apiKeyHash` (bcrypt) for secure verification.
+  - `X-Api-Key` header.
+  - `apiKeyLookup` (SHA256) for O(1) DB lookup + `apiKeyHash` (bcrypt) for secure verification.
 - **Admin Routes**:
-  - Uses JWT Bearer tokens obtained from `POST /api/v1/auth/login`.
+  - JWT Bearer token from `POST /api/v1/auth/login`.
   - Claims must include `role: "admin"`.
+
+The payment route also accepts Admin JWT as a fallback (for admin-initiated payments).
 
 ## 3. Core Flows
 
-### Payment Flow (Stripe Connect)
+### Payment Flow
 The `USE_CHECKOUT` environment variable toggles between two modes:
 - **`USE_CHECKOUT=true`**: Creates a **Checkout Session** and returns a redirect URL.
 - **`USE_CHECKOUT=false`**: Creates a **PaymentIntent** and returns a `clientSecret` for Stripe Elements.
 
-All payments resolve platform fees via a 5-level priority chain:
+All payments resolve `application_fee_amount` via a 4-level priority chain:
 1. Client `processingFeePercent`
 2. Client `processingFeeCents`
 3. Group `processingFeePercent`
 4. Group `processingFeeCents`
-5. Global `DEFAULT_PROCESS_FEE_CENTS`
+
+If none are set, no fee is applied (no global fallback).
 
 ### Onboarding Flow
-1. **Initiation**: `POST /api/v1/onboard-client/initiate` creates a pending token.
-2. **Onboarding**: Client visits `/onboard?token=...`, triggering Stripe Account/Link creation.
-3. **Completion**: Stripe redirects to `/api/v1/connect/callback`, which marks the token `completed` and links the `stripeAccountId`.
+1. **Create client**: `POST /api/v1/accounts` creates a client record + pending onboarding token in one transaction, returns `apiKey`, `clientId`, and `onboardingToken`.
+2. **Send email**: `POST /api/v1/onboard-client/initiate` does the same but also emails the client.
+3. **Resend**: `POST /api/v1/onboard-client/resend` revokes active tokens and issues a new one with a fresh email.
+4. **Onboard**: `GET /api/v1/onboard-client?token=...` creates a Stripe Express Account (if not already) and returns an Account Link URL.
+5. **Callback**: Stripe redirects to `GET /api/v1/connect/callback` with `client_id`, `account`, and `state`. Validates CSRF state, links `stripeAccountId` to client, marks token `completed`, redirects browser to `/onboarding-success`.
+6. **Refresh**: `GET /api/v1/connect/refresh?token=...` regenerates an expired account link and redirects the client.
 
 ## 4. Rate Limiting
 - **Implementation**: In-memory sliding-window limiter (`lib/rate-limit.ts`).
 - **Admin/Onboard Routes**: 10 req/min per IP.
+- **Resend Route**: 5 req/min per IP.
 - **Payment Routes**: 20 req/min per Stripe Account ID (fallback to IP).
 
-## 5. Workspace Separation
-All client-facing entities include a `workspace` field that separates:
-- **`client_portal`** — External consulting clients
-- **`dfwsc_services`** — Internal DFWSC service clients
-- **`ledger_crm`** — Ledger CRM + direct billing clients
-
-Routes like `/clients` and `/dfwsc-clients` provide filtered access by workspace.
+## 5. Workspace
+All clients and groups belong to the `client_portal` workspace. The `workspace` query parameter is required on all admin list endpoints and validated server-side.
 
 ## 6. API Route Map
 All routes are prefixed with `/api/v1`.
@@ -54,102 +56,53 @@ All routes are prefixed with `/api/v1`.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| GET | `/config` | Public config (useCheckout flag) |
-| GET | `/auth/setup/status` | Check if setup is needed |
+| GET | `/config` | Public config (`useCheckout` flag) |
+| GET | `/auth/setup/status` | Check if admin setup is needed |
 
 ### Authentication
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | POST | `/auth/login` | Admin login (returns JWT) | Public |
-| POST | `/auth/setup` | First-run setup (legacy) | Public |
+| POST | `/auth/setup` | First-run admin creation | Public |
 | POST | `/auth/confirm-bootstrap` | Finalize admin setup | Public |
 
-### Clients & Groups
+### Clients
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| GET | `/clients` | List clients (includes CRM columns) | Admin JWT |
-| POST | `/accounts` | Create client (Stripe customer immediately) | Admin JWT |
-| PATCH | `/clients/:id` | Update client | Admin JWT |
-| POST | `/clients/sync-payment-status` | Trigger immediate Stripe subscription sync | Admin JWT |
-| POST | `/clients/:id/suspend` | Suspend client (set inactive + log reason) | Admin JWT |
-| POST | `/clients/:id/reinstate` | Reinstate suspended client | Admin JWT |
-| GET | `/dfwsc-clients` | List DFWSC workspace clients | Admin JWT |
-| GET | `/groups` | List groups | Admin JWT |
+| GET | `/clients` | List clients (`?workspace=client_portal`) | Admin JWT |
+| GET | `/clients/:id` | Get single client | Admin JWT |
+| PATCH | `/clients/:id` | Update client fields | Admin JWT |
+
+### Groups
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| GET | `/groups` | List groups (`?workspace=client_portal`) | Admin JWT |
 | POST | `/groups` | Create group | Admin JWT |
 | PATCH | `/groups/:id` | Update group | Admin JWT |
 
-### Lead Pipeline (CRM workspaces)
+### Onboarding & Connect
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| POST | `/crm/leads` | Create lead (no Stripe, UUID id) | Admin JWT |
-| POST | `/crm/leads/:id/convert` | Convert lead → client (creates Stripe customer) | Admin JWT |
-| POST | `/dfwsc/leads` | Backward-compatible DFWSC lead endpoint | Admin JWT |
-| POST | `/dfwsc/leads/:id/convert` | Backward-compatible DFWSC convert endpoint | Admin JWT |
-
-### Onboarding
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| POST | `/onboard-client/initiate` | Send onboarding email | Admin JWT |
-| POST | `/onboard-client/resend` | Resend onboarding email | Admin JWT |
-| GET | `/onboard-client` | Get Stripe onboarding link | Public (token) |
+| POST | `/accounts` | Create client + onboarding token (no email) | Admin JWT |
+| POST | `/onboard-client/initiate` | Create client + onboarding token + send email | Admin JWT |
+| POST | `/onboard-client/resend` | Revoke old tokens + resend email | Admin JWT |
+| GET | `/onboard-client` | Get Stripe Account Link URL | Public (token) |
 | GET | `/connect/callback` | Stripe Connect callback | Public |
-| GET | `/connect/refresh` | Refresh account link | Public |
+| GET | `/connect/refresh` | Refresh expired account link | Public |
 
-### Payments & Billing
+### Payments
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| POST | `/payments/create` | Create payment | API Key |
-| GET | `/reports/payments` | List payments | Admin JWT |
-| GET | `/invoices` | List invoices | Admin JWT |
-| POST | `/invoices` | Create invoice | Admin JWT |
-| PATCH | `/invoices/:id` | Cancel/void invoice | Admin JWT |
-| GET | `/invoices/pay/:token` | Get invoice by token | Public |
-| POST | `/invoices/pay/:token` | Submit invoice payment | Public |
-| GET | `/subscriptions` | List subscriptions | Admin JWT |
-| POST | `/subscriptions` | Create subscription | Admin JWT |
-| GET | `/subscriptions/:id` | Get subscription details | Admin JWT |
-| PATCH | `/subscriptions/:id` | Update subscription | Admin JWT |
+| POST | `/payments/create` | Create PaymentIntent or Checkout Session | API Key or Admin JWT |
+| GET | `/reports/payments` | List Stripe PaymentIntents by client or group | Admin JWT |
 
-### Stripe Management
+### Products & Settings
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | GET | `/products` | List Stripe products | Admin JWT |
 | POST | `/products` | Create Stripe product | Admin JWT |
-| GET | `/stripe-customers` | List Stripe customers | Admin JWT |
-| POST | `/stripe-customers` | Create Stripe customer | Admin JWT |
-
-### System
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
 | GET | `/settings` | Get system settings | Admin JWT |
-| POST | `/webhooks/stripe` | Stripe webhooks | Stripe Signature |
-| POST | `/integrations/nextcloud/webhook` | Nextcloud OpenRegister webhook | SHA256 signature |
+| POST | `/webhooks/stripe` | Stripe webhook handler | Stripe Signature |
 
-For the full CRM reference (lead pipeline, lifecycle, UI), see [CRM.md](./CRM.md).
-For Nextcloud OpenRegister integration details, see [NEXTCLOUD.md](./NEXTCLOUD.md).
-
-## 7. Background Jobs
-
-### Payment Sync (`lib/payment-sync.ts`)
-Runs immediately on server startup, then every **15 minutes** via `setInterval(...).unref()`.
-
-1. Queries all CRM+billing clients (`dfwsc_services` and `ledger_crm`) with a `stripeCustomerId`.
-2. Paginates all Stripe subscriptions (`status: "all"`).
-3. Derives effective payment status per client using priority: `active > trialing > past_due > unpaid > canceled > none`.
-4. Batch-updates `paymentStatus` + `paymentStatusSyncedAt` in the DB (50 rows per batch).
-
-Use `POST /clients/sync-payment-status` to trigger an immediate sync from the admin UI.
-
-### Nextcloud OpenRegister Sync (`lib/nextcloud-sync.ts`)
-
-Bi-directional client profile sync with a Nextcloud instance running the OpenRegister app. Three mechanisms:
-
-- **Outbound push** (`syncClientProfileToNextcloud`): POSTs new clients or PUTs updates to OpenRegister. Tracks sync state in `profile_sync_state`.
-- **Inbound webhook** (`POST /integrations/nextcloud/webhook`): Receives push events from Nextcloud, verifies SHA256 signature via `X-Nextcloud-Webhooks` header.
-- **Inbound polling** (`lib/nextcloud-poll.ts`): Runs every `NEXTCLOUD_POLL_INTERVAL_MS` (default 60s). Fetches individual objects by ID (GET list endpoint is broken in OpenRegister). Started on server boot via `startNextcloudPolling()`.
-
-See [NEXTCLOUD.md](./NEXTCLOUD.md) for full details.
-
-## 8. Scope Exclusion
-
-Recruiter tracking is not part of this backend domain model or route surface.
+## 7. Swagger
+Swagger UI is available at `/docs` when the backend is started with `ENABLE_SWAGGER=true`. It is disabled by default in production to keep the build lean.

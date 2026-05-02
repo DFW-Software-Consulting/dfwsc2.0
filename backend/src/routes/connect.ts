@@ -146,9 +146,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         workspace: Workspace;
       };
       if (!isWorkspace(workspace)) {
-        return reply
-          .code(400)
-          .send({ error: "workspace must be client_portal." });
+        return reply.code(400).send({ error: "workspace must be client_portal." });
       }
 
       request.log.info(

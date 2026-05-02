@@ -16,7 +16,10 @@ const values = [
 
 export default function Values() {
   return (
-    <section id="values" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
+    <section
+      id="values"
+      className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300"
+    >
       <div className="mx-auto max-w-3xl text-center mb-16">
         <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-800 dark:text-brand-300">
           Team values
