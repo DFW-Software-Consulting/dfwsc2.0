@@ -39,17 +39,19 @@ export default function OnboardClient() {
   const isError = message.startsWith("Error");
 
   return (
-    <section
-      className="min-h-[90vh] flex items-center justify-center p-4 transition-colors duration-300"
-    >
+    <section className="min-h-[90vh] flex items-center justify-center p-4 transition-colors duration-300">
       <div className="w-full max-w-xl mx-auto">
         <div className="bg-[var(--bg-main)] dark:bg-white/[0.02] backdrop-blur-md p-8 rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 transition-colors">
-          <h1 className="text-3xl font-bold text-center mb-4 text-slate-900 dark:text-white transition-colors">Stripe Account Setup</h1>
+          <h1 className="text-3xl font-bold text-center mb-4 text-slate-900 dark:text-white transition-colors">
+            Stripe Account Setup
+          </h1>
 
           <p className="text-center text-slate-600 dark:text-gray-300 mb-8 transition-colors">
             Please enter the onboarding token provided by{" "}
-            <span className="text-brand-600 dark:text-brand-400 font-semibold transition-colors">DFW Software Consulting</span> to set up
-            your Stripe account.
+            <span className="text-brand-600 dark:text-brand-400 font-semibold transition-colors">
+              DFW Software Consulting
+            </span>{" "}
+            to set up your Stripe account.
           </p>
 
           <div className="mb-6">
@@ -84,7 +86,9 @@ export default function OnboardClient() {
           </button>
 
           {message && (
-            <p className={`mt-4 text-center text-sm font-medium ${isError ? "text-red-500 dark:text-red-400" : "text-brand-600 dark:text-brand-400"} transition-colors`}>
+            <p
+              className={`mt-4 text-center text-sm font-medium ${isError ? "text-red-500 dark:text-red-400" : "text-brand-600 dark:text-brand-400"} transition-colors`}
+            >
               {message}
             </p>
           )}

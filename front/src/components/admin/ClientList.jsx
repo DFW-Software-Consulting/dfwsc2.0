@@ -1,9 +1,5 @@
 import { useCallback, useState } from "react";
-import {
-  useClients,
-  usePatchClientStatus,
-  useResendOnboarding,
-} from "../../hooks/useClients";
+import { useClients, usePatchClientStatus, useResendOnboarding } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import logger from "../../utils/logger";
 import ConfirmModal from "./ConfirmModal";

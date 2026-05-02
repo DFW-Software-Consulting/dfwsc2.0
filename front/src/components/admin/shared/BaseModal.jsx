@@ -43,7 +43,10 @@ export default function BaseModal({ isOpen, onClose, title, titleId, size = "md"
           className={`bg-[var(--bg-main)] rounded-xl shadow-xl border border-slate-200 dark:border-gray-700 p-6 w-full max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] overflow-y-auto transition-colors duration-300 ${SIZE_CLASSES[size] ?? SIZE_CLASSES.md}`}
         >
           <div className="flex justify-between items-center mb-4">
-            <h3 id={titleId} className="text-lg font-semibold text-slate-900 dark:text-white transition-colors">
+            <h3
+              id={titleId}
+              className="text-lg font-semibold text-slate-900 dark:text-white transition-colors"
+            >
               {title}
             </h3>
             <button

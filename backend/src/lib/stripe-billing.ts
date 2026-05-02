@@ -1,6 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { db } from "../db/client";
-import { type clientGroups, clients, settings } from "../db/schema";
+import { type clientGroups, type clients, settings } from "../db/schema";
 import { stripe } from "./stripe";
 
 export { stripe };

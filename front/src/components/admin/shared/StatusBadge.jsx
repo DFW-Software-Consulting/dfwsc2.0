@@ -32,8 +32,9 @@ const LABEL_MAP = {
 
 export default function StatusBadge({ status }) {
   const normalizedStatus = typeof status === "string" ? status : "unknown";
-  const label = LABEL_MAP[normalizedStatus] ??
-    (normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1));
+  const label =
+    LABEL_MAP[normalizedStatus] ??
+    normalizedStatus.charAt(0).toUpperCase() + normalizedStatus.slice(1);
 
   return (
     <span

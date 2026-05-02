@@ -57,7 +57,10 @@ const services = [
 
 export default function Services() {
   return (
-    <section id="services" className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
+    <section
+      id="services"
+      className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300"
+    >
       <div className="mx-auto max-w-3xl text-center mb-16">
         <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-800 dark:text-brand-300">
           What we do
@@ -78,7 +81,7 @@ export default function Services() {
             className="group relative h-full rounded-[2rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-8 text-left transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:shadow-glow shadow-sm"
           >
             <div className="absolute -inset-px rounded-[2rem] bg-gradient-to-br from-brand-500/10 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100 pointer-events-none" />
-            
+
             <div className="relative z-10">
               <div className="flex items-start justify-between gap-4">
                 <h3 className="text-2xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors duration-300">

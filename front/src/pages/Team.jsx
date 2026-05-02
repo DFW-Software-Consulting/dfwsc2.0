@@ -74,7 +74,7 @@ export default function Team() {
             }`}
           >
             <div className="absolute -inset-px rounded-[2.5rem] bg-gradient-to-br from-brand-500/10 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100 pointer-events-none" />
-            
+
             {/* Image */}
             <div className="relative w-full md:w-1/3 flex-shrink-0 flex justify-center">
               <div className="relative">
@@ -95,7 +95,9 @@ export default function Team() {
               <h2 className="mt-2 text-3xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-100 transition-colors">
                 {member.name}
               </h2>
-              <p className="mt-6 text-lg leading-relaxed text-[var(--text-muted)] transition-colors">{member.bio}</p>
+              <p className="mt-6 text-lg leading-relaxed text-[var(--text-muted)] transition-colors">
+                {member.bio}
+              </p>
             </div>
           </article>
         ))}

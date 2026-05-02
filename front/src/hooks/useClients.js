@@ -84,4 +84,3 @@ export function useDfwscClient() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }
-

@@ -8,11 +8,14 @@ const stats = [
 
 export default function Hero() {
   return (
-    <section id="top" className="relative overflow-hidden pt-8 pb-20 transition-colors duration-300">
+    <section
+      id="top"
+      className="relative overflow-hidden pt-8 pb-20 transition-colors duration-300"
+    >
       {/* Background decoration */}
       <div className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(11,114,133,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(11,114,133,0.05)_1px,transparent_1px)] [background-size:64px_64px] [mask-image:radial-gradient(circle_at_center,white,transparent_80%)] opacity-20 dark:opacity-100" />
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-[500px] bg-brand-500/10 blur-[120px] rounded-full pointer-events-none" />
-      
+
       <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 relative">
         <div className="mx-auto grid max-w-6xl items-center gap-16 lg:grid-cols-[1.2fr,1fr]">
           <div className="text-center lg:text-left">
@@ -46,20 +49,24 @@ export default function Hero() {
                 Book a discovery call
               </a>
             </div>
-            
+
             <div className="mt-16 grid grid-cols-1 gap-6 text-left sm:grid-cols-3">
               {stats.map((item) => (
                 <div
                   key={item.value}
                   className="group rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-6 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.05] hover:border-slate-300 dark:hover:border-white/10 shadow-sm"
                 >
-                  <p className="text-lg font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-300 transition-colors">{item.value}</p>
-                  <p className="mt-2 text-sm text-[var(--text-muted)] leading-snug transition-colors">{item.detail}</p>
+                  <p className="text-lg font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-300 transition-colors">
+                    {item.value}
+                  </p>
+                  <p className="mt-2 text-sm text-[var(--text-muted)] leading-snug transition-colors">
+                    {item.detail}
+                  </p>
                 </div>
               ))}
             </div>
           </div>
-          
+
           <div className="relative group lg:mt-0 mt-12">
             <div
               className="absolute -inset-4 rounded-[2rem] bg-gradient-to-br from-brand-500/20 to-transparent blur-2xl opacity-30 dark:opacity-50 group-hover:opacity-50 dark:group-hover:opacity-80 transition-opacity duration-500"

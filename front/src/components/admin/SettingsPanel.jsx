@@ -198,7 +198,7 @@ export default function SettingsPanel({ showToast }) {
             <div className="bg-gray-800/50 rounded-md p-3 border border-gray-600/50">
               <div className="flex items-center justify-between">
                 <div>
-                  <label className="block text-xs text-gray-400 mb-0.5">Sender Email</label>
+                  <p className="block text-xs text-gray-400 mb-0.5">Sender Email</p>
                   <span className="text-sm text-gray-200 font-mono">
                     {settings.smtpFrom || "Not configured"}
                   </span>
@@ -208,7 +208,8 @@ export default function SettingsPanel({ showToast }) {
                 </span>
               </div>
               <p className="text-xs text-gray-500 mt-2">
-                Configured via environment variables. Contact your administrator to change SMTP settings.
+                Configured via environment variables. Contact your administrator to change SMTP
+                settings.
               </p>
             </div>
           </div>
