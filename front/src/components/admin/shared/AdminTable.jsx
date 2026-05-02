@@ -40,27 +40,27 @@ export default function AdminTable({
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-700">
+    <div className="overflow-x-auto transition-colors duration-300">
+      <table className="min-w-full divide-y divide-slate-200 dark:divide-gray-700 transition-colors">
         <thead>
           <tr>
             {columns.map((col) => (
               <th
                 key={col.header}
-                className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
+                className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-gray-300 uppercase tracking-wider transition-colors"
               >
                 {col.header}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-800">
+        <tbody className="divide-y divide-slate-100 dark:divide-gray-800 transition-colors">
           {rows.map((row) => (
-            <tr key={row[keyField]} className="hover:bg-gray-700/50">
+            <tr key={row[keyField]} className="hover:bg-slate-50 dark:hover:bg-gray-700/50 transition-colors">
               {columns.map((col) => (
                 <td
                   key={col.header}
-                  className={`px-3 py-2 whitespace-nowrap text-sm text-gray-200 ${col.tdClassName ?? ""}`}
+                  className={`px-3 py-2 whitespace-nowrap text-sm text-slate-700 dark:text-gray-200 transition-colors ${col.tdClassName ?? ""}`}
                 >
                   {col.render ? col.render(row) : col.key ? row[col.key] : null}
                 </td>

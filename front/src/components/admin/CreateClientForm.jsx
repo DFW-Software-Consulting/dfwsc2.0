@@ -10,7 +10,8 @@ import FormInput from "./shared/FormInput";
 const NAME_MAX_LENGTH = 100;
 
 export default function CreateClientForm({ showToast, workspace = "client_portal", onSuccess }) {
-  const isDfwscMode = workspace === "dfwsc_services";
+  const isDfwscMode = workspace === "dfwsc";
+  const isPortalMode = workspace === "client_portal";
   const { data: groups = [] } = useGroups(workspace);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -299,7 +300,7 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
           </>
         )}
 
-        {!isDfwscMode && (
+        {isPortalMode && (
           <div className="mb-4">
             <label
               htmlFor="newClientGroup"
@@ -342,7 +343,7 @@ export default function CreateClientForm({ showToast, workspace = "client_portal
         <ErrorMessage message={error} className="mt-2" />
       </form>
 
-      {createdClientInfo && !isDfwscMode && (
+      {createdClientInfo && isPortalMode && (
         <div className="mt-4 p-4 bg-gray-800/50 rounded-lg border border-gray-600">
           <h5 className="font-semibold text-green-400 mb-2">Client Created Successfully!</h5>
 

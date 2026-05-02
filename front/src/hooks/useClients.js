@@ -2,14 +2,22 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createClient,
   createDfwscClient,
+  getClient,
   getClients,
-  getStripeCustomers,
-  importStripeCustomer,
   patchClient,
-  syncStripeCustomer,
 } from "../api/clients";
 import { resendOnboardingLink } from "../api/onboarding";
 import { useAuth } from "../contexts/AuthContext";
+
+export function useClient(id, workspace) {
+  const { token } = useAuth();
+  return useQuery({
+    queryKey: ["client", id, workspace],
+    queryFn: () => getClient(token, id, workspace),
+    enabled: !!token && !!id,
+    select: (data) => data.client,
+  });
+}
 
 export function useClients(params = {}) {
   const { token } = useAuth();
@@ -17,16 +25,6 @@ export function useClients(params = {}) {
   return useQuery({
     queryKey: ["clients", effectiveParams],
     queryFn: () => getClients(token, effectiveParams),
-    enabled: !!token,
-  });
-}
-
-export function useStripeCustomers(starting_after, workspace) {
-  const { token } = useAuth();
-  const effectiveWorkspace = workspace ?? "client_portal";
-  return useQuery({
-    queryKey: ["stripe-customers", starting_after, effectiveWorkspace],
-    queryFn: () => getStripeCustomers(token, { starting_after, workspace: effectiveWorkspace }),
     enabled: !!token,
   });
 }
@@ -40,24 +38,15 @@ export function useCreateClient() {
   });
 }
 
-export function useImportStripeCustomer() {
-  const { token } = useAuth();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ stripeCustomerId, groupId, workspace }) =>
-      importStripeCustomer(token, stripeCustomerId, groupId, workspace),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
-  });
-}
-
 export function usePatchClient() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, body }) => patchClient(token, id, body),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
+      queryClient.invalidateQueries({ queryKey: ["client", variables.id] });
     },
   });
 }
@@ -96,11 +85,3 @@ export function useDfwscClient() {
   });
 }
 
-export function useSyncStripeCustomer() {
-  const { token } = useAuth();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body) => syncStripeCustomer(token, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["stripe-customers"] }),
-  });
-}

@@ -24,7 +24,7 @@ export default function AdminSetup({
 
   const confirmMutation = useMutation({
     mutationFn: ({ body, token }) => confirmBootstrap(body, token),
-    onSuccess: (_data) => {
+    onSuccess: () => {
       showToast?.("Admin credentials confirmed successfully!", "success");
       onSetupComplete?.();
     },

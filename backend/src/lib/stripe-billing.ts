@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import { type clientGroups, clients, settings } from "../db/schema";
 import { stripe } from "./stripe";
@@ -14,26 +14,6 @@ export async function getSettings(): Promise<Record<string, string>> {
     },
     {} as Record<string, string>
   );
-}
-
-export async function ensureStripeCustomer(client: {
-  id: string;
-  email: string;
-  name: string;
-  stripeCustomerId: string | null;
-}): Promise<string> {
-  if (client.stripeCustomerId) {
-    return client.stripeCustomerId;
-  }
-
-  const cust = await stripe.customers.create(
-    { email: client.email, name: client.name, metadata: { clientId: client.id } },
-    { idempotencyKey: `customer-${client.id}` }
-  );
-
-  await db.update(clients).set({ stripeCustomerId: cust.id }).where(eq(clients.id, client.id));
-
-  return cust.id;
 }
 
 export type CalendarInterval = "week" | "bi_weekly" | "month" | "quarter" | "year";
@@ -58,7 +38,6 @@ export function toStripeInterval(interval: CalendarInterval): {
     case "year":
       return { interval: "year", interval_count: 1 };
     default:
-      // Fallback for any unexpected values
       return { interval: "month", interval_count: 1 };
   }
 }
@@ -141,7 +120,6 @@ export function calculateNextPaymentDate(
       const next = new Date(start);
       const targetMonth = next.getUTCMonth() + paymentsMade;
       next.setUTCMonth(targetMonth);
-      // Clamp overflow: e.g. Jan 31 + 1 month overflows to Mar — roll back to last day of target month
       if (next.getUTCMonth() !== ((targetMonth % 12) + 12) % 12) {
         next.setUTCDate(0);
       }

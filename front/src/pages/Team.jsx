@@ -39,17 +39,17 @@ export default function Team() {
   }, []);
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 lg:px-8">
+    <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
       {/* Header */}
-      <div className="mb-12 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-300/80">
+      <div className="mb-20 flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+        <div className="max-w-3xl">
+          <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-800 dark:text-brand-200">
             Meet our team
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">
+          </span>
+          <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-[var(--text-main)] sm:text-6xl text-gradient">
             Experts building reliable software outcomes
           </h1>
-          <p className="mt-4 max-w-2xl text-base text-slate-400">
+          <p className="mt-8 text-xl text-[var(--text-muted)] leading-relaxed transition-colors">
             Every engagement is led by seasoned practitioners who have shipped critical systems for
             finance, logistics, and high-growth startups. We stay close to business goals, turning
             strategy into running software.
@@ -58,44 +58,51 @@ export default function Team() {
         <Link
           to="/"
           state={{ scrollTo: "contact" }}
-          className="inline-flex items-center justify-center rounded-full border border-brand-500/60 px-5 py-2 text-sm font-semibold text-brand-200 transition hover:border-brand-400 hover:text-brand-100"
+          className="inline-flex w-fit items-center justify-center gap-2 rounded-full bg-brand-500 px-8 py-3 text-base font-bold text-white shadow-glow transition-all duration-300 hover:shadow-glow-strong hover:-translate-y-1"
         >
           Start a project
         </Link>
       </div>
 
       {/* Team Members */}
-      <div className="space-y-16">
+      <div className="space-y-12">
         {teamMembers.map((member, idx) => (
-          <div
+          <article
             key={member.name}
-            className={`flex flex-col items-center gap-8 rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_40px_80px_-50px_rgba(11,114,133,0.8)] transition hover:bg-white/10 md:flex-row ${
+            className={`group relative flex flex-col items-center gap-10 rounded-[2.5rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-10 transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] md:flex-row shadow-sm ${
               idx % 2 === 1 ? "md:flex-row-reverse" : ""
             }`}
           >
+            <div className="absolute -inset-px rounded-[2.5rem] bg-gradient-to-br from-brand-500/10 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100 pointer-events-none" />
+            
             {/* Image */}
-            <div className="w-full md:w-1/3 flex-shrink-0">
-              <img
-                src={member.image}
-                alt={member.name}
-                className="mx-auto h-56 w-56 rounded-full border border-white/10 object-cover shadow-lg md:h-64 md:w-64"
-              />
+            <div className="relative w-full md:w-1/3 flex-shrink-0 flex justify-center">
+              <div className="relative">
+                <div className="absolute -inset-4 rounded-full bg-brand-500/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                <img
+                  src={member.image}
+                  alt={member.name}
+                  className="relative z-10 h-64 w-64 rounded-2xl border border-slate-200 dark:border-white/10 object-cover shadow-2xl transition-all duration-500 grayscale-[0.4] group-hover:grayscale-0 group-hover:scale-[1.02]"
+                />
+              </div>
             </div>
 
             {/* Info */}
-            <div className="w-full md:w-2/3 text-center md:text-left">
-              <h2 className="text-2xl font-semibold text-white">{member.name}</h2>
-              <p className="mt-1 text-sm font-medium uppercase tracking-[0.18em] text-brand-200/80">
+            <div className="relative z-10 w-full md:w-2/3 text-center md:text-left">
+              <span className="text-xs font-bold uppercase tracking-[0.2em] text-brand-600 dark:text-brand-400 transition-colors">
                 {member.role}
-              </p>
-              <p className="mt-4 text-base leading-relaxed text-slate-300">{member.bio}</p>
+              </span>
+              <h2 className="mt-2 text-3xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-100 transition-colors">
+                {member.name}
+              </h2>
+              <p className="mt-6 text-lg leading-relaxed text-[var(--text-muted)] transition-colors">{member.bio}</p>
             </div>
-          </div>
+          </article>
         ))}
       </div>
 
       <Banner
-        className="mt-20"
+        className="mt-24 glass rounded-3xl p-6 border-brand-500/20 shadow-sm transition-colors"
         message="🤝 Embedded software engineers and web developers partner with you from whiteboard to launch."
       />
     </section>

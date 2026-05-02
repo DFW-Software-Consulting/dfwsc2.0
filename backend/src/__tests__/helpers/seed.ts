@@ -13,7 +13,6 @@ export interface SeedClientOpts {
   apiKeyHash?: string | null;
   status?: string;
   stripeAccountId?: string | null;
-  stripeCustomerId?: string | null;
   groupId?: string | null;
   workspace?: string;
   [key: string]: any;
@@ -28,9 +27,8 @@ export function seedClient(dataStore: SeedableDataStore, opts: SeedClientOpts) {
     apiKeyHash,
     status = "active",
     stripeAccountId = null,
-    stripeCustomerId = null,
     groupId = null,
-    workspace = "dfwsc_services",
+    workspace = "client_portal",
     ...rest
   } = opts;
   dataStore.clients.set(id, {
@@ -41,7 +39,6 @@ export function seedClient(dataStore: SeedableDataStore, opts: SeedClientOpts) {
     apiKeyHash: apiKeyHash !== undefined ? apiKeyHash : `hashed:${apiKey}`,
     status,
     stripeAccountId,
-    stripeCustomerId,
     groupId,
     workspace,
     ...rest,
@@ -89,7 +86,7 @@ export function seedClientGroup(
     id: opts.id,
     name: opts.name,
     status: opts.status ?? "active",
-    workspace: opts.workspace ?? "dfwsc_services",
+    workspace: opts.workspace ?? "client_portal",
     createdAt: new Date(),
     updatedAt: new Date(),
   });

@@ -21,7 +21,7 @@ function formatDate(ts) {
 }
 
 export default function PaymentReports({ workspace = "client_portal" }) {
-  const isDfwscMode = workspace === "dfwsc_services";
+  const isDfwscMode = workspace === "dfwsc";
   const { data: clients = [] } = useClients({ workspace });
   const { data: groups = [] } = useGroups(workspace);
 

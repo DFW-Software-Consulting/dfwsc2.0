@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --color-brand-50: #e6f5f7;
@@ -8,14 +10,68 @@
   --color-brand-300: #63bdcc;
   --color-brand-400: #2ca1b4;
   --color-brand-500: #0b7285;
+  --color-brand-600: #095d6d;
+  --color-brand-700: #074955;
+
+  --animate-pulse-slow: pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-float: float 3s ease-in-out infinite;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
 }
 
 @layer base {
   :root {
+    color-scheme: light;
+    --bg-main: #ffffff;
+    --bg-surface: #f1f5f9; /* slate-100 */
+    --text-main: #0f172a; /* slate-900 */
+    --text-muted: #334155; /* slate-700 */
+    --border-subtle: rgba(0, 0, 0, 0.1);
+    --glass-bg: rgba(255, 255, 255, 0.8);
+    --glass-border: rgba(0, 0, 0, 0.05);
+  }
+
+  .dark {
     color-scheme: dark;
+    --bg-main: #020617;
+    --bg-surface: #0f172a; /* slate-900 */
+    --text-main: #f8fafc; /* slate-50 */
+    --text-muted: #cbd5e1; /* slate-300 */
+    --border-subtle: rgba(255, 255, 255, 0.05);
+    --glass-bg: rgba(15, 23, 42, 0.8);
+    --glass-border: rgba(255, 255, 255, 0.1);
   }
 
   body {
-    @apply bg-slate-950 text-slate-100 antialiased font-sans;
+    @apply bg-[var(--bg-main)] text-[var(--text-main)] antialiased font-sans selection:bg-brand-500/30 transition-colors duration-300;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply border border-[var(--glass-border)] bg-[var(--glass-bg)] backdrop-blur-md;
+  }
+  
+  .glass-dark {
+    @apply border border-white/5 bg-black/20 backdrop-blur-xl;
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-br from-[var(--text-main)] via-[var(--text-main)] to-[var(--text-muted)] bg-clip-text text-transparent;
+  }
+
+  .text-gradient-brand {
+    @apply bg-gradient-to-r from-brand-400 via-brand-500 to-brand-700 bg-clip-text text-transparent;
+  }
+
+  .shadow-glow {
+    @apply shadow-[0_0_20px_-5px_rgba(11,114,133,0.3)];
+  }
+
+  .shadow-glow-strong {
+    @apply shadow-[0_0_40px_-10px_rgba(11,114,133,0.5)];
   }
 }

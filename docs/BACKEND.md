@@ -43,6 +43,7 @@ All payments resolve platform fees via a 5-level priority chain:
 All client-facing entities include a `workspace` field that separates:
 - **`client_portal`** — External consulting clients
 - **`dfwsc_services`** — Internal DFWSC service clients
+- **`ledger_crm`** — Ledger CRM + direct billing clients
 
 Routes like `/clients` and `/dfwsc-clients` provide filtered access by workspace.
 
@@ -66,13 +67,24 @@ All routes are prefixed with `/api/v1`.
 ### Clients & Groups
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| GET | `/clients` | List clients | Admin JWT |
-| POST | `/accounts` | Create client | Admin JWT |
+| GET | `/clients` | List clients (includes CRM columns) | Admin JWT |
+| POST | `/accounts` | Create client (Stripe customer immediately) | Admin JWT |
 | PATCH | `/clients/:id` | Update client | Admin JWT |
+| POST | `/clients/sync-payment-status` | Trigger immediate Stripe subscription sync | Admin JWT |
+| POST | `/clients/:id/suspend` | Suspend client (set inactive + log reason) | Admin JWT |
+| POST | `/clients/:id/reinstate` | Reinstate suspended client | Admin JWT |
 | GET | `/dfwsc-clients` | List DFWSC workspace clients | Admin JWT |
 | GET | `/groups` | List groups | Admin JWT |
 | POST | `/groups` | Create group | Admin JWT |
 | PATCH | `/groups/:id` | Update group | Admin JWT |
+
+### Lead Pipeline (CRM workspaces)
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/crm/leads` | Create lead (no Stripe, UUID id) | Admin JWT |
+| POST | `/crm/leads/:id/convert` | Convert lead → client (creates Stripe customer) | Admin JWT |
+| POST | `/dfwsc/leads` | Backward-compatible DFWSC lead endpoint | Admin JWT |
+| POST | `/dfwsc/leads/:id/convert` | Backward-compatible DFWSC convert endpoint | Admin JWT |
 
 ### Onboarding
 | Method | Path | Description | Auth |
@@ -90,7 +102,7 @@ All routes are prefixed with `/api/v1`.
 | GET | `/reports/payments` | List payments | Admin JWT |
 | GET | `/invoices` | List invoices | Admin JWT |
 | POST | `/invoices` | Create invoice | Admin JWT |
-| PATCH | `/invoices/:id` | Cancel invoice | Admin JWT |
+| PATCH | `/invoices/:id` | Cancel/void invoice | Admin JWT |
 | GET | `/invoices/pay/:token` | Get invoice by token | Public |
 | POST | `/invoices/pay/:token` | Submit invoice payment | Public |
 | GET | `/subscriptions` | List subscriptions | Admin JWT |
@@ -111,5 +123,33 @@ All routes are prefixed with `/api/v1`.
 |--------|------|-------------|------|
 | GET | `/settings` | Get system settings | Admin JWT |
 | POST | `/webhooks/stripe` | Stripe webhooks | Stripe Signature |
+| POST | `/integrations/nextcloud/webhook` | Nextcloud OpenRegister webhook | SHA256 signature |
 
-For complete endpoint details, see `API_DOCS.md`.
+For the full CRM reference (lead pipeline, lifecycle, UI), see [CRM.md](./CRM.md).
+For Nextcloud OpenRegister integration details, see [NEXTCLOUD.md](./NEXTCLOUD.md).
+
+## 7. Background Jobs
+
+### Payment Sync (`lib/payment-sync.ts`)
+Runs immediately on server startup, then every **15 minutes** via `setInterval(...).unref()`.
+
+1. Queries all CRM+billing clients (`dfwsc_services` and `ledger_crm`) with a `stripeCustomerId`.
+2. Paginates all Stripe subscriptions (`status: "all"`).
+3. Derives effective payment status per client using priority: `active > trialing > past_due > unpaid > canceled > none`.
+4. Batch-updates `paymentStatus` + `paymentStatusSyncedAt` in the DB (50 rows per batch).
+
+Use `POST /clients/sync-payment-status` to trigger an immediate sync from the admin UI.
+
+### Nextcloud OpenRegister Sync (`lib/nextcloud-sync.ts`)
+
+Bi-directional client profile sync with a Nextcloud instance running the OpenRegister app. Three mechanisms:
+
+- **Outbound push** (`syncClientProfileToNextcloud`): POSTs new clients or PUTs updates to OpenRegister. Tracks sync state in `profile_sync_state`.
+- **Inbound webhook** (`POST /integrations/nextcloud/webhook`): Receives push events from Nextcloud, verifies SHA256 signature via `X-Nextcloud-Webhooks` header.
+- **Inbound polling** (`lib/nextcloud-poll.ts`): Runs every `NEXTCLOUD_POLL_INTERVAL_MS` (default 60s). Fetches individual objects by ID (GET list endpoint is broken in OpenRegister). Started on server boot via `startNextcloudPolling()`.
+
+See [NEXTCLOUD.md](./NEXTCLOUD.md) for full details.
+
+## 8. Scope Exclusion
+
+Recruiter tracking is not part of this backend domain model or route surface.

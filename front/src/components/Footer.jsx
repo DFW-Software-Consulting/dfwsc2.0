@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useTheme } from "../contexts/ThemeContext.jsx";
 
 const socialLinks = [
   {
@@ -34,105 +35,99 @@ const socialLinks = [
 ];
 
 export default function Footer() {
+  const { theme } = useTheme();
   const year = new Date().getFullYear();
 
   return (
-    <footer className="border-t border-white/10 bg-slate-950/80">
-      <div className="w-full px-4 py-14 sm:px-8 lg:px-16 xl:px-24">
-        <div className="mx-auto max-w-screen-2xl">
-          {/* Two-column layout */}
-          <div className="flex flex-col gap-12 md:flex-row md:justify-between md:items-start">
-            {/* Left: Logo + Branding */}
-            <div className="flex-1 space-y-6">
-              <Link
-                to="/"
-                className="inline-flex items-center gap-3 bg-sky-200 p-1 rounded-md hover:scale-105 transition-transform duration-200"
-              >
-                <img
-                  src="/DFWSC-Logo-HorizWordmarkPNG.png"
-                  alt="DFW Software Consulting"
-                  className="h-9 w-auto"
-                />
-              </Link>
-              <p className="text-base text-slate-400 max-w-xl">
-                Dallas-Fort Worth based engineers delivering end-to-end product strategy, resilient
-                cloud infrastructure, and measurable outcomes for teams that need shipping momentum.
-              </p>
-              <div className="flex flex-wrap gap-3 text-xs text-slate-400">
-                <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 uppercase tracking-[0.25em] text-[0.65rem] text-slate-200/80">
-                  Built with clarity
-                </span>
-                <span className="rounded-full border border-white/5 px-3 py-1 uppercase tracking-[0.25em] text-[0.65rem] text-slate-400">
-                  Own your roadmap
-                </span>
+    <footer className="border-t border-slate-200 dark:border-white/[0.05] bg-[var(--bg-main)] pt-20 pb-10 transition-colors duration-300">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
+        <div className="grid gap-16 lg:grid-cols-2 lg:gap-24">
+          <div className="flex flex-col items-start gap-8">
+            <Link
+              to="/"
+              className="group relative inline-flex items-center gap-3 transition-all duration-300 hover:brightness-110"
+            >
+              <div className="absolute -inset-2 rounded-xl bg-brand-500/10 blur-xl transition-opacity opacity-0 group-hover:opacity-100" />
+              <img
+                src="/DFWSC-Logo-HorizWordmarkPNG.png"
+                alt="DFW Software Consulting"
+                className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === 'dark' ? 'invert hue-rotate-180 brightness-125' : ''}`}
+              />
+            </Link>
+            <p className="text-lg text-[var(--text-muted)] leading-relaxed max-w-md transition-colors">
+              Dallas-Fort Worth based engineers delivering end-to-end product strategy and 
+              resilient cloud infrastructure for teams that need shipping momentum.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              {socialLinks.map((link) => (
+                <a
+                  key={link.name}
+                  href={link.href}
+                  target={link.href.startsWith("http") ? "_blank" : undefined}
+                  rel={link.href.startsWith("http") ? "noreferrer" : undefined}
+                  className="group flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] text-slate-500 dark:text-slate-300 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.08] hover:border-brand-500/30 hover:text-brand-600 dark:hover:text-white hover:-translate-y-1 shadow-sm"
+                  aria-label={link.name}
+                >
+                  {link.icon}
+                </a>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid gap-12 sm:grid-cols-2 lg:gap-16">
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 transition-colors">Navigation</h3>
+              <nav className="mt-6 flex flex-col gap-4">
+                {[
+                  { label: "Home", to: "/" },
+                  { label: "Services", to: "/", state: { scrollTo: "services" } },
+                  { label: "Values", to: "/", state: { scrollTo: "values" } },
+                  { label: "Pricing", to: "/pricing" },
+                  { label: "Meet our team", to: "/team" },
+                  { label: "Contact", to: "/", state: { scrollTo: "contact" } },
+                ].map((item) => (
+                  <Link
+                    key={item.label}
+                    to={item.to}
+                    state={item.state}
+                    className="text-base text-[var(--text-muted)] transition-colors hover:text-brand-600 dark:hover:text-brand-300"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </nav>
+            </div>
+            <div>
+              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 transition-colors">Insights</h3>
+              <div className="mt-6 space-y-6">
+                <a
+                  href="https://linkedin.byjc.dev"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group block"
+                >
+                  <p className="text-base text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
+                    Follow our founder Jeremy Ashley on LinkedIn
+                  </p>
+                  <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-brand-600 dark:text-brand-500 group-hover:text-brand-400 transition-colors">
+                    LEARN MORE
+                    <svg className="h-3 w-3 transition-transform group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                    </svg>
+                  </span>
+                </a>
+                <div className="rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-4 text-xs text-slate-500 transition-colors">
+                  Built with clarity. Own your roadmap.
+                </div>
               </div>
             </div>
-
-            {/* Right: Navigation */}
-            <nav className="flex-1 space-y-6 text-sm text-slate-300">
-              <div className="grid grid-cols-2 gap-y-3 gap-x-8 sm:grid-cols-3">
-                <Link to="/" className="transition-colors hover:text-white">
-                  Home
-                </Link>
-                <Link
-                  to="/"
-                  state={{ scrollTo: "services" }}
-                  className="transition-colors hover:text-white"
-                >
-                  Services
-                </Link>
-                <Link
-                  to="/"
-                  state={{ scrollTo: "values" }}
-                  className="transition-colors hover:text-white"
-                >
-                  Values
-                </Link>
-                <Link to="/pricing" className="transition-colors hover:text-white">
-                  Pricing
-                </Link>
-                <Link to="/team" className="transition-colors hover:text-white">
-                  Meet our team
-                </Link>
-                <Link
-                  to="/"
-                  state={{ scrollTo: "contact" }}
-                  className="transition-colors hover:text-white"
-                >
-                  Contact
-                </Link>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                {socialLinks.map((link) => (
-                  <a
-                    key={link.name}
-                    href={link.href}
-                    target={link.href.startsWith("http") ? "_blank" : undefined}
-                    rel={link.href.startsWith("http") ? "noreferrer" : undefined}
-                    className="group inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition hover:-translate-y-0.5 hover:border-white/20 hover:text-white"
-                    aria-label={link.name}
-                  >
-                    {link.icon}
-                  </a>
-                ))}
-              </div>
-              <a
-                href="https://linkedin.byjc.dev"
-                target="_blank"
-                rel="noreferrer"
-                className="block text-sm font-semibold text-slate-200 transition hover:text-white"
-              >
-                Follow our founder Jeremy Ashley on LinkedIn
-              </a>
-            </nav>
           </div>
-
-          {/* Footer Bottom */}
-          <div className="mt-12 border-t border-white/10 pt-6">
-            <p className="text-center text-xs text-slate-500">
-              © {year} DFW Software Consulting. All rights reserved.
-            </p>
-          </div>
+        </div>
+        
+        <div className="mt-20 border-t border-slate-200 dark:border-white/5 pt-10 text-center transition-colors">
+          <p className="text-sm text-[var(--text-muted)]">
+            © {year} DFW Software Consulting. All rights reserved.
+          </p>
         </div>
       </div>
     </footer>

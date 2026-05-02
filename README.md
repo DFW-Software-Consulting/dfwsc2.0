@@ -142,9 +142,14 @@ All API routes are prefixed with `/api/v1`:
 | POST | `/api/v1/auth/login` | Admin login (returns JWT token) | Public |
 | GET | `/api/v1/auth/setup/status` | Bootstrap setup status | Public |
 | POST | `/api/v1/auth/setup` | First-run admin setup | Optional token |
-| GET | `/api/v1/clients` | List all clients | Admin (JWT) |
+| GET | `/api/v1/clients` | List all clients (includes CRM columns) | Admin (JWT) |
 | PATCH | `/api/v1/clients/:id` | Update client config | Admin (JWT) |
 | POST | `/api/v1/accounts` | Create client account | Admin (JWT) |
+| POST | `/api/v1/clients/sync-payment-status` | Trigger Stripe payment status sync | Admin (JWT) |
+| POST | `/api/v1/clients/:id/suspend` | Suspend a client | Admin (JWT) |
+| POST | `/api/v1/clients/:id/reinstate` | Reinstate a suspended client | Admin (JWT) |
+| POST | `/api/v1/dfwsc/leads` | Create a lead (no Stripe) | Admin (JWT) |
+| POST | `/api/v1/dfwsc/leads/:id/convert` | Convert lead to client (creates Stripe customer) | Admin (JWT) |
 | POST | `/api/v1/onboard-client/initiate` | Send onboarding email | Admin (JWT) |
 | POST | `/api/v1/onboard-client/resend` | Resend onboarding email | Admin (JWT) |
 | GET | `/api/v1/onboard-client` | Get Stripe onboarding link | Public |
@@ -212,6 +217,7 @@ SETUP_FLAG_PATH=/data/admin-setup-used
 # Payment Config
 USE_CHECKOUT=true
 DEFAULT_PROCESS_FEE_CENTS=100
+
 ```
 
 **Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, enable `ALLOW_ADMIN_SETUP=true`, use `/auth/setup` to create credentials, then confirm with `/auth/confirm-bootstrap`. After setup, set `ALLOW_ADMIN_SETUP=false`. See `.env.example` for detailed documentation.
@@ -266,12 +272,16 @@ cd backend && npm run test:ui
 
 ## 📚 Documentation
 
-Additional documentation is available in `backend/documentation/`:
-- API documentation
-- Database schema
-- Stripe setup guide
-- Email configuration
-- Deployment guide
+Detailed documentation lives in `docs/`:
+
+| File | What it covers |
+|------|----------------|
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System overview, tech stack, data model |
+| [BACKEND.md](./docs/BACKEND.md) | API routes, auth, background jobs |
+| [DATABASE.md](./docs/DATABASE.md) | Schema, Drizzle, migrations |
+| [STRIPE.md](./docs/STRIPE.md) | Stripe Connect, webhooks, payment flows |
+| [CRM.md](./docs/CRM.md) | Lead pipeline, client lifecycle, payment sync |
+| [STYLES.md](./docs/STYLES.md) | Tailwind v4, UI patterns |
 
 ## 🧯 Troubleshooting
 

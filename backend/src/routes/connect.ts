@@ -133,7 +133,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             name: { type: "string", minLength: 1 },
             email: { type: "string", format: "email" },
             groupId: { type: "string" },
-            workspace: { type: "string", enum: ["dfwsc_services", "client_portal"] },
+            workspace: { type: "string", enum: ["client_portal"] },
           },
         },
       },
@@ -148,7 +148,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       if (!isWorkspace(workspace)) {
         return reply
           .code(400)
-          .send({ error: "workspace must be dfwsc_services or client_portal." });
+          .send({ error: "workspace must be client_portal." });
       }
 
       request.log.info(

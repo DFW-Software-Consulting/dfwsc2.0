@@ -21,28 +21,32 @@ const promises = [
 
 export default function ValueProps() {
   return (
-    <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-      <div className="mx-auto max-w-3xl text-center">
-        <span className="mb-6 inline-flex items-center rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-100/80">
+    <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
+      <div className="mx-auto max-w-3xl text-center mb-16">
+        <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 dark:text-brand-300">
           Why teams choose DFWSC
         </span>
-        <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+        <h2 className="text-3xl font-bold tracking-tight sm:text-5xl text-gradient">
           Strategic partners, not just contractors
         </h2>
-        <p className="mt-4 text-base text-slate-300">
+        <p className="mt-6 text-lg text-[var(--text-muted)]">
           We blend senior engineering experience with pragmatic planning so you can move fast
           without creating tech debt.
         </p>
       </div>
 
-      <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {promises.map((promise) => (
           <article
             key={promise.title}
-            className="rounded-3xl border border-white/10 bg-slate-900/50 p-6 text-left shadow-lg shadow-black/20 backdrop-blur transition hover:-translate-y-1 hover:scale-105 hover:border-brand-500/40 hover:shadow-sky-400/20 hover:bg-brand-500"
+            className="group relative rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-8 text-left transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow shadow-sm"
           >
-            <h3 className="text-lg font-semibold text-white">{promise.title}</h3>
-            <p className="mt-3 text-sm text-slate-300">{promise.description}</p>
+            <h3 className="text-xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
+              {promise.title}
+            </h3>
+            <p className="mt-4 text-sm text-[var(--text-muted)] leading-relaxed transition-colors">
+              {promise.description}
+            </p>
           </article>
         ))}
       </div>

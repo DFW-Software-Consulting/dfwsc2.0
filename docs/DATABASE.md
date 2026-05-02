@@ -8,12 +8,13 @@ The project uses **PostgreSQL 17** with the **Drizzle ORM**. All schema definiti
 ## 2. Core Tables
 
 ### `clients`
-The primary entity for each consultant's client.
+The primary entity for each consultant's client. Covers the full lifecycle from first contact (lead) through active billing to suspension.
+
 - **Keys**: `id` (UUID), `name`, `email`.
-- **Workspace**: `workspace` (`"dfwsc_services"` or `"client_portal"`) - separates internal and external clients.
+- **Workspace**: `workspace` (`"dfwsc_services"`, `"client_portal"`, or `"ledger_crm"`) - separates application domains.
 - **Credentials**: `apiKeyHash` (bcrypt), `apiKeyLookup` (SHA256).
-- **Stripe**: `stripeAccountId` (linked Express account), `stripeCustomerId` (for invoicing).
-- **Status**: `status` (`"active"` or `"inactive"`).
+- **Stripe**: `stripeAccountId` (linked Express account), `stripeCustomerId` (for invoicing — null for leads).
+- **Status**: `status` (`"active"`, `"inactive"`, or `"lead"`). Leads have no Stripe customer. Converting a lead to a client creates the Stripe customer and changes status to `"active"`.
 - **Group**: `groupId` (optional) - links to `client_groups`.
 - **Pricing**: `processingFeePercent`, `processingFeeCents`.
 - **URLs**: `paymentSuccessUrl`, `paymentCancelUrl` - redirect URLs after payment.
@@ -21,6 +22,12 @@ The primary entity for each consultant's client.
 - **Address**: `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`.
 - **Billing**: `defaultPaymentTermsDays` - default payment terms for invoices.
 - **Notes**: `notes` - free-form text field for admin notes.
+- **Lead Workflow**: `lastContactAt`, `nextAction`, `followUpAt` for CRM follow-up tracking.
+- **CRM / Payment Sync** (added in migration `0007_gorgeous_fallen_one.sql`):
+  - `paymentStatus` — cached Stripe subscription status: `active`, `trialing`, `past_due`, `unpaid`, `canceled`, or `none`. Updated every 15 minutes.
+  - `paymentStatusSyncedAt` — timestamp of the last sync.
+  - `suspendedAt` — when the client was suspended (null if not suspended).
+  - `suspensionReason` — optional text reason for suspension.
 - **Timestamps**: `createdAt`, `updatedAt`.
 
 **Indexes:**
@@ -44,6 +51,12 @@ Manages the lifecycle of Stripe Connect onboarding sessions.
 ### `webhook_events`
 - An **idempotency table** used to de-duplicate Stripe webhook notifications.
 - **Fields**: `id`, `stripeEventId` (unique), `type`, `payload` (JSONB), `processedAt`, `createdAt`.
+
+### `profile_sync_state`
+Tracks bi-directional sync state between DFWSC clients and Nextcloud OpenRegister objects.
+- **Primary key**: `clientId` (FK → `clients.id`, cascade delete).
+- **Fields**: `externalSource` (default `"nextcloud"`), `externalId` (OpenRegister UUID), `syncStatus` (`"synced"`, `"pending"`, or `"failed"`), `syncError`, `syncAttempts`, `lastSyncAttemptAt`, `lastSyncedAt`, `createdAt`, `updatedAt`.
+- See [NEXTCLOUD.md](./NEXTCLOUD.md) for full integration details.
 
 ### `admins`
 Stores administrator accounts for the admin dashboard.

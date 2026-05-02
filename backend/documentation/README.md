@@ -32,7 +32,6 @@ documentation/
     ├── deployment.md
     ├── email_setup.md
     ├── env_setup.md
-    ├── env_setup_nextcloud.md
     ├── security.md
     ├── stripe_setup.md
     └── testing.md

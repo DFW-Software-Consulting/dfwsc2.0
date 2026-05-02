@@ -54,15 +54,15 @@ describe("Connect Callback State Validation Integration", () => {
   it("should verify complete token lifecycle: pending → in_progress → completed", async () => {
     // Create a client
     const clientId = randomUUID();
-    const testEmail = "test@example.com";
+    const testEmail = `test-${randomUUID()}@example.com`;
     const testToken = `test_token_${randomUUID().replace(/-/g, "")}`;
 
     await db.insert(clients).values({
       id: clientId,
       name: "Test Client",
       email: testEmail,
-      apiKey: `test_api_key_${randomUUID().replace(/-/g, "")}`,
       status: "active",
+      workspace: "client_portal",
     });
 
     // Create an onboarding token with initial 'pending' status
@@ -136,14 +136,14 @@ describe("Connect Callback State Validation Integration", () => {
   it("should accept valid state parameter and update stripeAccountId", async () => {
     // Create a client
     const clientId = randomUUID();
-    const testEmail = "test@example.com";
+    const testEmail = `test-${randomUUID()}@example.com`;
 
     await db.insert(clients).values({
       id: clientId,
       name: "Test Client",
       email: testEmail,
-      apiKey: `test_api_key_${randomUUID().replace(/-/g, "")}`,
       status: "active",
+      workspace: "client_portal",
     });
 
     // Create an onboarding token with a valid state
@@ -196,9 +196,9 @@ describe("Connect Callback State Validation Integration", () => {
     await db.insert(clients).values({
       id: clientId,
       name: "Test Client",
-      email: "test@example.com",
-      apiKey: `test_api_key_${randomUUID().replace(/-/g, "")}`,
+      email: `test-${randomUUID()}@example.com`,
       status: "active",
+      workspace: "client_portal",
     });
 
     // Make a request to the callback without state parameter
@@ -254,9 +254,9 @@ describe("Connect Callback State Validation Integration", () => {
     await db.insert(clients).values({
       id: clientId,
       name: "Test Client",
-      email: "test@example.com",
-      apiKey: `test_api_key_${randomUUID().replace(/-/g, "")}`,
+      email: `test-${randomUUID()}@example.com`,
       status: "active",
+      workspace: "client_portal",
     });
 
     // Create an onboarding token with a valid state
@@ -272,7 +272,7 @@ describe("Connect Callback State Validation Integration", () => {
       clientId: clientId,
       token: `test_token_${randomUUID().replace(/-/g, "")}`,
       status: "in_progress",
-      email: "test@example.com",
+      email: `test-${randomUUID()}@example.com`,
       state: validState,
       stateExpiresAt: stateExpiresAt,
     });
@@ -300,9 +300,9 @@ describe("Connect Callback State Validation Integration", () => {
     await db.insert(clients).values({
       id: clientId,
       name: "Test Client",
-      email: "test@example.com",
-      apiKey: `test_api_key_${randomUUID().replace(/-/g, "")}`,
+      email: `test-${randomUUID()}@example.com`,
       status: "active",
+      workspace: "client_portal",
     });
 
     // Create an onboarding token with an expired state
@@ -317,7 +317,7 @@ describe("Connect Callback State Validation Integration", () => {
       clientId: clientId,
       token: `test_token_${randomUUID().replace(/-/g, "")}`,
       status: "in_progress",
-      email: "test@example.com",
+      email: `test-${randomUUID()}@example.com`,
       state: expiredState,
       stateExpiresAt: expiredStateExpiresAt,
     });
@@ -346,9 +346,9 @@ describe("Connect Callback State Validation Integration", () => {
     await db.insert(clients).values({
       id: clientId,
       name: "Test Client",
-      email: "test@example.com",
-      apiKey: `test_api_key_${randomUUID().replace(/-/g, "")}`,
+      email: `test-${randomUUID()}@example.com`,
       status: "active",
+      workspace: "client_portal",
       stripeAccountId: existingStripeAccount,
     });
 
@@ -364,7 +364,7 @@ describe("Connect Callback State Validation Integration", () => {
       clientId: clientId,
       token: `test_token_${randomUUID().replace(/-/g, "")}`,
       status: "in_progress",
-      email: "test@example.com",
+      email: `test-${randomUUID()}@example.com`,
       state: state,
       stateExpiresAt: stateExpiresAt,
     });
@@ -398,16 +398,16 @@ describe("Connect Callback State Validation Integration", () => {
       id: clientAId,
       name: "Test Client A",
       email: TEST_EMAIL_A,
-      apiKey: `test_api_key_${randomUUID().replace(/-/g, "")}`,
       status: "active",
+      workspace: "client_portal",
     });
 
     await db.insert(clients).values({
       id: clientBId,
       name: "Test Client B",
       email: TEST_EMAIL_B,
-      apiKey: `test_api_key_${randomUUID().replace(/-/g, "")}`,
       status: "active",
+      workspace: "client_portal",
     });
 
     // Create onboarding tokens with states for both clients

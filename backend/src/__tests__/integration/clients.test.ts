@@ -1,15 +1,3 @@
-import { vi } from "vitest";
-
-// Mock Stripe before importing anything else
-vi.mock("../../lib/stripe", () => ({
-  stripe: {
-    customers: {
-      list: vi.fn(),
-      retrieve: vi.fn(),
-    },
-  },
-}));
-
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -23,7 +11,7 @@ describe("Clients API Integration", () => {
   let app: any;
   let cleanupIds: string[] = [];
   let cleanupGroupIds: string[] = [];
-  const workspace = "dfwsc_services";
+  const workspace = "client_portal";
 
   beforeAll(async () => {
     ensureBaseEnv();
@@ -53,7 +41,7 @@ describe("Clients API Integration", () => {
     it("returns 401 if not authenticated", async () => {
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/clients?workspace=dfwsc_services",
+        url: "/api/v1/clients?workspace=client_portal",
       });
       expect(response.statusCode).toBe(401);
     });
@@ -78,29 +66,18 @@ describe("Clients API Integration", () => {
       expect(response.json().error).toMatch(/workspace query parameter is required/i);
     });
 
-    it("returns 400 when groupId does not belong to workspace", async () => {
-      const groupId = randomUUID();
-      cleanupGroupIds.push(groupId);
+    it("returns only clients in the requested workspace", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
 
-      // Create a group in client_portal workspace
-      await db.insert(clientGroups).values({
-        id: groupId,
-        name: "Test Group",
-        workspace: "client_portal",
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Test Client",
+        email: "test@example.com",
+        workspace,
         status: "active",
       });
 
-      const response = await app.inject({
-        method: "GET",
-        url: `/api/v1/clients?workspace=dfwsc_services&groupId=${groupId}`,
-        headers: { authorization: `Bearer ${makeAdminToken()}` },
-      });
-
-      expect(response.statusCode).toBe(400);
-      expect(response.json().error).toBe("groupId does not belong to the selected workspace.");
-    });
-
-    it("returns empty array when no clients exist in workspace", async () => {
       const response = await app.inject({
         method: "GET",
         url: `/api/v1/clients?workspace=${workspace}`,
@@ -108,7 +85,9 @@ describe("Clients API Integration", () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual([]);
+      const body = response.json();
+      expect(body.some((c: any) => c.id === clientId)).toBe(true);
+      expect(body.every((c: any) => c.workspace === workspace)).toBe(true);
     });
 
     it("lists clients filtered by workspace", async () => {
@@ -428,41 +407,6 @@ describe("Clients API Integration", () => {
       expect(response.json().error).toBe("Group not found.");
     });
 
-    it("returns 400 when groupId workspace does not match client workspace", async () => {
-      const clientId = randomUUID();
-      const groupId = randomUUID();
-      cleanupIds.push(clientId);
-      cleanupGroupIds.push(groupId);
-
-      await db.insert(clients).values({
-        id: clientId,
-        name: "Test Client",
-        email: "test@example.com",
-        workspace,
-        status: "active",
-      });
-
-      await db.insert(clientGroups).values({
-        id: groupId,
-        name: "Test Group",
-        workspace: "client_portal",
-        status: "active",
-      });
-
-      const response = await app.inject({
-        method: "PATCH",
-        url: `/api/v1/clients/${clientId}`,
-        headers: {
-          authorization: `Bearer ${makeAdminToken()}`,
-          "content-type": "application/json",
-        },
-        payload: { groupId },
-      });
-
-      expect(response.statusCode).toBe(400);
-      expect(response.json().error).toBe("groupId workspace does not match client workspace.");
-    });
-
     it("successfully updates client status", async () => {
       const clientId = randomUUID();
       cleanupIds.push(clientId);
@@ -699,6 +643,230 @@ describe("Clients API Integration", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().groupId).toBeNull();
+    });
+
+    it("returns 400 when name is empty", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Test Client",
+        email: "test@example.com",
+        workspace,
+        status: "active",
+      });
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId}`,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: { name: "   " },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/name must not be empty/i);
+    });
+
+    it("returns 400 when email format is invalid", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Test Client",
+        email: "test@example.com",
+        workspace,
+        status: "active",
+      });
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId}`,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: { email: "not-an-email" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/email must be a valid email/i);
+    });
+
+    it("returns 409 when email conflicts with another client in same workspace", async () => {
+      const clientId1 = randomUUID();
+      const clientId2 = randomUUID();
+      cleanupIds.push(clientId1, clientId2);
+
+      await db.insert(clients).values([
+        {
+          id: clientId1,
+          name: "Client One",
+          email: "one@example.com",
+          workspace,
+          status: "active",
+        },
+        {
+          id: clientId2,
+          name: "Client Two",
+          email: "two@example.com",
+          workspace,
+          status: "active",
+        },
+      ]);
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId1}`,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: { email: "two@example.com" },
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error).toMatch(/already exists/i);
+    });
+
+    it("returns 400 when defaultPaymentTermsDays is not a positive integer", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Test Client",
+        email: "test@example.com",
+        workspace,
+        status: "active",
+      });
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId}`,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: { defaultPaymentTermsDays: -5 },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/defaultPaymentTermsDays must be a positive integer/i);
+    });
+
+    it("successfully updates profile fields (name, phone, address)", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Test Client",
+        email: "test@example.com",
+        workspace,
+        status: "active",
+      });
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId}`,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: {
+          name: "Updated Corp",
+          phone: "+1 (555) 000-1234",
+          addressLine1: "456 Oak Ave",
+          city: "Dallas",
+          state: "TX",
+          postalCode: "75201",
+          country: "US",
+          defaultPaymentTermsDays: 30,
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.name).toBe("Updated Corp");
+      expect(body.phone).toBe("+1 (555) 000-1234");
+      expect(body.addressLine1).toBe("456 Oak Ave");
+      expect(body.city).toBe("Dallas");
+      expect(body.defaultPaymentTermsDays).toBe(30);
+    });
+  });
+
+  describe("GET /api/v1/clients/:id", () => {
+    it("returns 401 if not authenticated", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients/${randomUUID()}?workspace=${workspace}`,
+      });
+      expect(response.statusCode).toBe(401);
+    });
+
+    it("returns 400 when workspace is missing", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients/${randomUUID()}`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/workspace query parameter is required/i);
+    });
+
+    it("returns 404 when client does not exist", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients/${randomUUID()}?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error).toBe("Client not found.");
+    });
+
+    it("returns all client fields on success", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Full Client",
+        email: "full@example.com",
+        workspace,
+        status: "active",
+        phone: "+1 (555) 123-4567",
+        billingContactName: "Jane Doe",
+        addressLine1: "123 Main St",
+        city: "Dallas",
+        state: "TX",
+        postalCode: "75201",
+        country: "US",
+        notes: "VIP client",
+        defaultPaymentTermsDays: 45,
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients/${clientId}?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const { client } = response.json();
+      expect(client.id).toBe(clientId);
+      expect(client.name).toBe("Full Client");
+      expect(client.phone).toBe("+1 (555) 123-4567");
+      expect(client.billingContactName).toBe("Jane Doe");
+      expect(client.addressLine1).toBe("123 Main St");
+      expect(client.city).toBe("Dallas");
+      expect(client.defaultPaymentTermsDays).toBe(45);
+      expect(client.createdAt).toBeDefined();
+      expect(client.updatedAt).toBeDefined();
     });
   });
 });

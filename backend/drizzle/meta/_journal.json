@@ -50,6 +50,62 @@
       "when": 1776029000000,
       "tag": "0006_clients_billing_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777089390092,
+      "tag": "0007_gorgeous_fallen_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777100000000,
+      "tag": "0008_ledger_crm_lead_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777111111111,
+      "tag": "0009_pipelinq_sync_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777174560144,
+      "tag": "0010_demonic_expediter",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777251529991,
+      "tag": "0011_hot_cardiac",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777252664380,
+      "tag": "0012_fantastic_rick_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777255399682,
+      "tag": "0013_famous_ender_wiggin",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777255791160,
+      "tag": "0014_flat_triton",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import {
   createSubscription,
   getSubscriptionDetail,
   getSubscriptions,
+  linkSubscription,
   patchSubscription,
 } from "../api/subscriptions";
 import { useAuth } from "../contexts/AuthContext";
@@ -46,6 +47,17 @@ export function usePatchSubscription() {
     onSuccess: (_data, { id }) => {
       queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
       queryClient.invalidateQueries({ queryKey: ["subscriptions", "detail", id] });
+    },
+  });
+}
+
+export function useLinkSubscription() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => linkSubscription(token, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["subscriptions"] });
     },
   });
 }

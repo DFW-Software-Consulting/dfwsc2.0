@@ -16,46 +16,48 @@ vi.mock("../hooks/useSetupStatus", () => ({
 
 vi.mock("../components/admin/AdminLogin", () => ({ default: () => <div>AdminLogin</div> }));
 vi.mock("../components/admin/AdminSetup", () => ({ default: () => <div>AdminSetup</div> }));
-vi.mock("../components/admin/BillingPanel", () => ({
-  default: ({ workspace }) => <div>BillingPanel:{workspace}</div>,
-}));
-vi.mock("../components/admin/ClientList", () => ({
-  default: ({ workspace }) => <div>ClientList:{workspace}</div>,
-}));
-vi.mock("../components/admin/CreateClientForm", () => ({
-  default: ({ workspace }) => <div>CreateClientForm:{workspace}</div>,
-}));
 vi.mock("../components/admin/GroupPanel", () => ({
   default: ({ workspace }) => <div>GroupPanel:{workspace}</div>,
-}));
-vi.mock("../components/admin/ImportStripeCustomer", () => ({
-  default: ({ workspace }) => <div>ImportStripeCustomer:{workspace}</div>,
 }));
 vi.mock("../components/admin/PaymentReports", () => ({
   default: ({ workspace }) => <div>PaymentReports:{workspace}</div>,
 }));
+vi.mock("../components/admin/ClientList", () => ({
+  default: ({ workspace }) => <div>ClientList:{workspace}</div>,
+}));
+vi.mock("../components/admin/AddClientModal", () => ({ default: () => null }));
 vi.mock("../components/admin/SettingsPanel", () => ({ default: () => <div>SettingsPanel</div> }));
 vi.mock("../components/admin/Toast", () => ({ default: () => null }));
 
-describe("AdminDashboard workspace behavior", () => {
-  it("hides Companies in DFWSC and shows it in Client Portal", async () => {
+describe("AdminDashboard", () => {
+  it("defaults to Accounts tab showing portal client list", () => {
     renderWithProviders(<AdminDashboard />, { token: "admin-token" });
 
-    expect(screen.queryByRole("button", { name: "Companies" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Accounts" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reports" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Billing" })).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "Client Portal" }));
     expect(screen.getByRole("button", { name: "Companies" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reports" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByText("ClientList:client_portal")).toBeInTheDocument();
+  });
+
+  it("switches to Companies tab and shows GroupPanel", async () => {
+    renderWithProviders(<AdminDashboard />, { token: "admin-token" });
 
     await userEvent.click(screen.getByRole("button", { name: "Companies" }));
     expect(screen.getByText("GroupPanel:client_portal")).toBeInTheDocument();
+  });
 
-    await userEvent.click(screen.getByRole("button", { name: "DFWSC Services" }));
-    expect(screen.queryByRole("button", { name: "Companies" })).not.toBeInTheDocument();
-    expect(screen.queryByText("GroupPanel:client_portal")).not.toBeInTheDocument();
-    expect(screen.getByText("CreateClientForm:dfwsc_services")).toBeInTheDocument();
+  it("switches to Reports tab", async () => {
+    renderWithProviders(<AdminDashboard />, { token: "admin-token" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Reports" }));
+    expect(screen.getByText("PaymentReports:client_portal")).toBeInTheDocument();
+  });
+
+  it("switches to Settings tab", async () => {
+    renderWithProviders(<AdminDashboard />, { token: "admin-token" });
+
+    await userEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByText("SettingsPanel")).toBeInTheDocument();
   });
 });

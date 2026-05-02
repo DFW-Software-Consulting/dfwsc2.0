@@ -12,7 +12,7 @@ import {
 
 export const clientGroups = pgTable("client_groups", {
   id: text("id").primaryKey(),
-  workspace: text("workspace", { enum: ["dfwsc_services", "client_portal"] })
+  workspace: text("workspace", { enum: ["client_portal"] })
     .default("client_portal")
     .notNull(),
   name: text("name").notNull(),
@@ -31,7 +31,7 @@ export const clients = pgTable(
   "clients",
   {
     id: text("id").primaryKey(),
-    workspace: text("workspace", { enum: ["dfwsc_services", "client_portal"] })
+    workspace: text("workspace", { enum: ["client_portal"] })
       .default("client_portal")
       .notNull(),
     name: text("name").notNull(),
@@ -40,7 +40,7 @@ export const clients = pgTable(
     apiKeyLookup: text("api_key_lookup").unique(),
     stripeAccountId: text("stripe_account_id"),
     stripeCustomerId: text("stripe_customer_id"),
-    status: text("status", { enum: ["active", "inactive"] })
+    status: text("status", { enum: ["active", "inactive", "pending", "failed"] })
       .default("active")
       .notNull(),
     groupId: text("group_id").references(() => clientGroups.id),
@@ -108,3 +108,4 @@ export const settings = pgTable("settings", {
   value: text("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
+
