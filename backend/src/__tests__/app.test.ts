@@ -1002,7 +1002,11 @@ describe("reports", () => {
   });
 
   it("lists workspace payments for group clients by connected account", async () => {
-    seedClientGroup(dataStore, { id: "grp_payments", name: "Payments Group", workspace: "client_portal" });
+    seedClientGroup(dataStore, {
+      id: "grp_payments",
+      name: "Payments Group",
+      workspace: "client_portal",
+    });
     seedClient({
       id: "dfwsc_client_1",
       name: "DFWSC A",
@@ -1369,8 +1373,18 @@ describe("client groups", () => {
 
   it("aggregates payments for a group via GET /reports/payments?groupId=", async () => {
     seedClientGroup(dataStore, { id: "grp_5", name: "PropGroup", workspace: "client_portal" });
-    seedClient({ id: "gc_1", stripeAccountId: "acct_gc1", workspace: "client_portal", groupId: "grp_5" });
-    seedClient({ id: "gc_2", stripeAccountId: "acct_gc2", workspace: "client_portal", groupId: "grp_5" });
+    seedClient({
+      id: "gc_1",
+      stripeAccountId: "acct_gc1",
+      workspace: "client_portal",
+      groupId: "grp_5",
+    });
+    seedClient({
+      id: "gc_2",
+      stripeAccountId: "acct_gc2",
+      workspace: "client_portal",
+      groupId: "grp_5",
+    });
 
     stripeMock.paymentIntents.list
       .mockResolvedValueOnce({ data: [{ id: "pi_gc1" }], has_more: false })
@@ -1418,5 +1432,3 @@ describe("client groups", () => {
     await server.close();
   });
 });
-
-

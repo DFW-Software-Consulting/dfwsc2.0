@@ -103,10 +103,6 @@ export interface AppDataStore {
   admins: Map<string, any>;
 }
 
-export interface InvoicesDataStore {
-  clients: Map<string, any>;
-}
-
 // ─── App DB mock (used by app.test.ts) ───────────────────────────────────────
 
 export function createAppDbMock(dataStore: AppDataStore) {
@@ -386,39 +382,6 @@ export function createAppDbMock(dataStore: AppDataStore) {
     transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(mock)),
   };
   return mock;
-}
-
-// ─── Invoices DB mock (used by invoices.test.ts) ──────────────────────────────
-
-export function createInvoicesDbMock(dataStore: InvoicesDataStore) {
-  return {
-    select: vi.fn((_fields?: any) => ({
-      from: (table: any) => {
-        const baseRows = isTable(table, "clients") ? Array.from(dataStore.clients.values()) : [];
-        const basePromise = Promise.resolve(baseRows);
-        return {
-          leftJoin: (_joinTable: any, _on: any) => ({
-            where: (expr: any) => chainable(Promise.resolve(filterByExpr(baseRows, expr))),
-            then: basePromise.then.bind(basePromise),
-          }),
-          where: (expr: any) => chainable(Promise.resolve(filterByExpr(baseRows, expr))),
-          then: basePromise.then.bind(basePromise),
-          catch: basePromise.catch.bind(basePromise),
-          finally: basePromise.finally.bind(basePromise),
-        };
-      },
-    })),
-    update: vi.fn((table: any) => ({
-      set: (values: any) => ({
-        where: (expr: any) => {
-          const rows = isTable(table, "clients") ? Array.from(dataStore.clients.values()) : [];
-          const targets = filterByExpr(rows, expr);
-          for (const row of targets) Object.assign(row, values);
-          return Promise.resolve(targets);
-        },
-      }),
-    })),
-  };
 }
 
 // ─── Stripe mock (used by app.test.ts) ───────────────────────────────────────

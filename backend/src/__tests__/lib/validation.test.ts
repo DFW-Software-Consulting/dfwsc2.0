@@ -44,7 +44,7 @@ describe("validation constants", () => {
 });
 
 describe("validateWorkspace", () => {
-it("should return workspace for valid client_portal", () => {
+  it("should return workspace for valid client_portal", () => {
     const res = mockReply();
     const result = validateWorkspace("client_portal", res);
     expect(result).toBe("client_portal");

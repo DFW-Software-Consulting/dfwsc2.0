@@ -12,7 +12,7 @@ import {
 
 export const clientGroups = pgTable("client_groups", {
   id: text("id").primaryKey(),
-  workspace: text("workspace", { enum: ["client_portal", "dfwsc"] })
+  workspace: text("workspace", { enum: ["client_portal"] })
     .default("client_portal")
     .notNull(),
   name: text("name").notNull(),
@@ -31,7 +31,7 @@ export const clients = pgTable(
   "clients",
   {
     id: text("id").primaryKey(),
-    workspace: text("workspace", { enum: ["client_portal", "dfwsc"] })
+    workspace: text("workspace", { enum: ["client_portal"] })
       .default("client_portal")
       .notNull(),
     name: text("name").notNull(),
@@ -109,21 +109,3 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
-export const invoices = pgTable("invoices", {
-  id: text("id").primaryKey(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => clients.id, { onDelete: "cascade" }),
-  invoiceNumber: text("invoice_number").notNull(),
-  amountCents: integer("amount_cents").notNull(),
-  status: text("status", { enum: ["draft", "open", "paid", "void", "overdue"] })
-    .default("draft")
-    .notNull(),
-  dueDate: timestamp("due_date", { withTimezone: true }),
-  paidAt: timestamp("paid_at", { withTimezone: true }),
-  stripeInvoiceId: text("stripe_invoice_id"),
-  nextcloudId: text("nextcloud_id"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
