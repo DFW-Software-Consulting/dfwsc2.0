@@ -61,35 +61,28 @@ export async function createClientWithOnboardingToken({
   const apiKeyHash = await hashApiKey(apiKey);
   const apiKeyLookup = sha256Lookup(apiKey);
 
-  await db.insert(clients).values({
-    id: clientId,
-    workspace,
-    name,
-    email,
-    apiKeyHash,
-    apiKeyLookup,
-    ...(groupId ? { groupId } : {}),
-  });
-
   const token = crypto.randomBytes(32).toString("hex");
   const onboardingTokenId = uuidv4();
 
-  try {
-    await db.insert(onboardingTokens).values({
+  await db.transaction(async (tx) => {
+    await tx.insert(clients).values({
+      id: clientId,
+      workspace,
+      name,
+      email,
+      apiKeyHash,
+      apiKeyLookup,
+      ...(groupId ? { groupId } : {}),
+    });
+
+    await tx.insert(onboardingTokens).values({
       id: onboardingTokenId,
       clientId,
       token,
       status: "pending",
       email,
     });
-  } catch (error) {
-    try {
-      await db.delete(clients).where(eq(clients.id, clientId));
-    } catch {
-      // Preserve original error from token insertion.
-    }
-    throw error;
-  }
+  });
 
   return { clientId, apiKey, token };
 }

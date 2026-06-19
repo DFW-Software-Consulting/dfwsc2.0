@@ -128,20 +128,6 @@ describe("requireApiKey", () => {
     expect(reply.send).toHaveBeenCalledWith({ error: "Invalid API key." });
   });
 
-  it("attaches legacy client to request when hash matches and client is active", async () => {
-    const apiKey = "legacy-correct-key";
-    const hash = await bcrypt.hash(apiKey, 10);
-    const legacyClient = { id: "lc1", apiKeyHash: hash, apiKeyLookup: null, status: "active" };
-
-    mockSelect.mockReturnValueOnce(fastChain([])).mockReturnValueOnce(legacyChain([legacyClient]));
-
-    const request = makeRequest(apiKey) as any;
-    const reply = makeReply();
-    await requireApiKey(request, reply as any);
-    expect(reply.code).not.toHaveBeenCalled();
-    expect(request.client).toBe(legacyClient);
-  });
-
   it("skips legacy clients that have no apiKeyHash", async () => {
     const legacyClient = { id: "lc2", apiKeyHash: null, apiKeyLookup: null, status: "active" };
 

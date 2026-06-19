@@ -19,7 +19,7 @@ describe("Environment Template Documentation", () => {
   beforeAll(() => {
     // ENV_EXAMPLE_PATH is set by docker-compose.dev.yml to /tmp/env-example (mounted from root .env.example).
     // Falls back to ../../.env.example for local runs outside Docker.
-    const envExamplePath = process.env.ENV_EXAMPLE_PATH ?? join(__dirname, "../../.env.example");
+    const envExamplePath = process.env.ENV_EXAMPLE_PATH ?? join(__dirname, "../../../.env.example");
     try {
       envExampleContent = readFileSync(envExamplePath, "utf-8");
     } catch (error) {

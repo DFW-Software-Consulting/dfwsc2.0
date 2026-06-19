@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { isValidHttpsUrl } from "../lib/validation";
 import { isWorkspace } from "../lib/workspace";
 
 interface ClientPatchBody {
@@ -31,15 +32,6 @@ interface ClientParams {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function isValidHttpsUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
 
 const clientRoutes: FastifyPluginAsync = async (app) => {
   // GET /clients - List all clients (admin only)
@@ -85,10 +77,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         ? await query.where(and(eq(clients.groupId, groupId), eq(clients.workspace, workspace)))
         : await query.where(eq(clients.workspace, workspace));
 
-      const scopedList = clientList.filter((client) => client.workspace === workspace);
-
       return res.status(200).send(
-        scopedList.map((client) => ({
+        clientList.map((client) => ({
           ...client,
           createdAt: client.createdAt?.toISOString(),
         }))

@@ -14,7 +14,7 @@ describe("Environment Loading Order Integration", () => {
     process.env.SMTP_PORT = "587";
     process.env.SMTP_USER = "test_user";
     process.env.SMTP_PASS = "test_pass";
-    process.env.JWT_SECRET = "test_jwt_secret";
+    process.env.JWT_SECRET = "test_jwt_secret_minimum_32_characters_long_xx";
     process.env.API_BASE_URL = "http://localhost:4242";
   });
 

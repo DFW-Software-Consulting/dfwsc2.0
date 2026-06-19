@@ -43,7 +43,7 @@ function createWhereResult(rowsPromise: Promise<any[]>) {
   };
 }
 
-function chainable(rowsPromise: Promise<any[]>) {
+function _chainable(rowsPromise: Promise<any[]>) {
   return {
     limit: (_n: number) => rowsPromise.then((rows) => rows.slice(0, _n)),
     then: rowsPromise.then.bind(rowsPromise),
@@ -264,6 +264,9 @@ export function createAppDbMock(dataStore: AppDataStore) {
             lastContactAt: payload.lastContactAt ?? existing?.lastContactAt ?? null,
             nextAction: payload.nextAction ?? existing?.nextAction ?? null,
             followUpAt: payload.followUpAt ?? existing?.followUpAt ?? null,
+            chargesEnabled: payload.chargesEnabled ?? existing?.chargesEnabled ?? false,
+            payoutsEnabled: payload.payoutsEnabled ?? existing?.payoutsEnabled ?? false,
+            detailsSubmitted: payload.detailsSubmitted ?? existing?.detailsSubmitted ?? false,
             createdAt: existing?.createdAt ?? new Date(),
             updatedAt: new Date(),
           };
@@ -389,7 +392,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
 export function createStripeMock() {
   const webhookHelper = new Stripe("sk_test_12345", { apiVersion: "2023-10-16" });
   return {
-    accounts: { create: vi.fn() },
+    accounts: { create: vi.fn(), retrieve: vi.fn() },
     accountLinks: { create: vi.fn() },
     customers: { create: vi.fn() },
     paymentIntents: { create: vi.fn(), list: vi.fn() },

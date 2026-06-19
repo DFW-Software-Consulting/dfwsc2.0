@@ -114,7 +114,7 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
       },
     });
 
-    expect(response.statusCode).toBe(500);
+    expect(response.statusCode).toBe(502);
   });
 });
 

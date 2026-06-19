@@ -701,6 +701,10 @@ describe("connect onboarding", () => {
       expect.objectContaining({
         email: "pending@example.com",
         metadata: { clientId },
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
       })
     );
     const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
@@ -788,6 +792,13 @@ describe("connect callback", () => {
 
     const server = await createServer();
 
+    stripeMock.accounts.retrieve.mockResolvedValue({
+      type: "express",
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
+
     const origin = process.env.FRONTEND_ORIGIN;
 
     const response = await server.inject({
@@ -801,8 +812,105 @@ describe("connect callback", () => {
 
     const updatedClient = dataStore.clients.get(clientId);
     expect(updatedClient?.stripeAccountId).toBe("acct_789");
+    expect(updatedClient?.chargesEnabled).toBe(true);
+    expect(updatedClient?.payoutsEnabled).toBe(true);
+    expect(updatedClient?.detailsSubmitted).toBe(true);
     const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
     expect(updatedToken?.status).toBe("completed");
+
+    await server.close();
+  });
+
+  it("resolves account from stored stripeAccountId when account param omitted", async () => {
+    const clientId = "client_stored_acct";
+    seedClient({
+      id: clientId,
+      name: "Stored Account Client",
+      email: "stored@example.com",
+      stripeAccountId: "acct_stored",
+    });
+    const onboardingTokenId = "token_stored_acct";
+    const state = "state_stored_acct";
+    seedOnboardingToken(dataStore, {
+      id: onboardingTokenId,
+      clientId,
+      token: "token_value_stored_acct",
+      status: "in_progress",
+      email: "stored@example.com",
+      state,
+      stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+
+    const server = await createServer();
+
+    stripeMock.accounts.retrieve.mockResolvedValue({
+      type: "express",
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
+
+    const origin = process.env.FRONTEND_ORIGIN;
+
+    const response = await server.inject({
+      method: "GET",
+      url: `/api/v1/connect/callback?client_id=${clientId}&state=${state}`,
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe(`${origin}/onboarding-success`);
+    expect(stripeMock.accounts.retrieve).toHaveBeenCalledWith("acct_stored");
+
+    const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
+    expect(updatedToken?.status).toBe("completed");
+
+    await server.close();
+  });
+
+  it("keeps token in_progress when details_submitted is false", async () => {
+    const clientId = "client_not_submitted";
+    seedClient({
+      id: clientId,
+      name: "Not Submitted Client",
+      email: "notsubmitted@example.com",
+      stripeAccountId: "acct_notsubmitted",
+    });
+    const onboardingTokenId = "token_not_submitted";
+    const state = "state_not_submitted";
+    seedOnboardingToken(dataStore, {
+      id: onboardingTokenId,
+      clientId,
+      token: "token_value_not_submitted",
+      status: "in_progress",
+      email: "notsubmitted@example.com",
+      state,
+      stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    });
+
+    const server = await createServer();
+
+    stripeMock.accounts.retrieve.mockResolvedValue({
+      type: "express",
+      details_submitted: false,
+      charges_enabled: false,
+      payouts_enabled: false,
+    });
+
+    const origin = process.env.FRONTEND_ORIGIN;
+
+    const response = await server.inject({
+      method: "GET",
+      url: `/api/v1/connect/callback?client_id=${clientId}&state=${state}`,
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe(`${origin}/onboarding-success`);
+
+    const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
+    expect(updatedToken?.status).toBe("in_progress");
+
+    const updatedClient = dataStore.clients.get(clientId);
+    expect(updatedClient?.detailsSubmitted).toBe(false);
 
     await server.close();
   });
@@ -815,7 +923,7 @@ describe("connect callback", () => {
       id: clientId,
       name: "Json Client",
       email: "json@example.com",
-      stripeAccountId: null,
+      stripeAccountId: "acct_json",
     });
     const onboardingTokenId = "token_json";
     const state = "state_json";
@@ -831,15 +939,21 @@ describe("connect callback", () => {
 
     const server = await createServer({ skipEnvValidation: true });
 
+    stripeMock.accounts.retrieve.mockResolvedValue({
+      type: "express",
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
+
     const response = await server.inject({
       method: "GET",
       url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_json&state=${state}`,
     });
 
     expect(response.statusCode).toBe(500);
-    expect(response.json()).toEqual({
-      error: "Server configuration error: FRONTEND_ORIGIN not set.",
-    });
+    expect(response.json().error).toBe("FRONTEND_ORIGIN is not configured");
+    expect(response.json().code).toBe("CONFIGURATION_ERROR");
 
     await server.close();
   });
@@ -858,6 +972,13 @@ describe("connect callback", () => {
       stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
     });
     const server = await createServer();
+
+    stripeMock.accounts.retrieve.mockResolvedValue({
+      type: "express",
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
 
     const response = await server.inject({
       method: "GET",
@@ -884,7 +1005,7 @@ describe("connect callback", () => {
     await server.close();
   });
 
-  it("rejects callback when account is missing and preserves onboarding state", async () => {
+  it("redirects to success and keeps token in_progress when account param omitted and no stored account", async () => {
     const clientId = "client_missing_account";
     seedClient({
       id: clientId,
@@ -911,8 +1032,9 @@ describe("connect callback", () => {
       url: `/api/v1/connect/callback?client_id=${clientId}&state=${state}`,
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Missing account parameter." });
+    const origin = process.env.FRONTEND_ORIGIN;
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe(`${origin}/onboarding-success`);
 
     const updatedClient = dataStore.clients.get(clientId);
     expect(updatedClient?.stripeAccountId).toBeNull();

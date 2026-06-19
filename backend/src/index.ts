@@ -12,6 +12,7 @@ async function start() {
   const { runMigrations } = await import("./lib/migrate");
   const { bootstrapAdminIfNeeded } = await import("./lib/bootstrap");
   const { verifyDatabaseSchema } = await import("./lib/schema-check");
+  const { pool } = await import("./db/client");
 
   const server = await buildServer();
 
@@ -26,6 +27,22 @@ async function start() {
     server.log.error(err);
     process.exit(1);
   }
+
+  const shutdown = async (signal: string) => {
+    server.log.info({ signal }, "Received signal, shutting down gracefully");
+    try {
+      await server.close();
+      await pool.end();
+      server.log.info("Server closed successfully");
+      process.exit(0);
+    } catch (err) {
+      server.log.error(err, "Error during shutdown");
+      process.exit(1);
+    }
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 start();

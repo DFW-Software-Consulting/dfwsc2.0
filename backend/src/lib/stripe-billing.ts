@@ -5,15 +5,24 @@ import { stripe } from "./stripe";
 
 export { stripe };
 
+let settingsCache: { data: Record<string, string>; expiresAt: number } | null = null;
+const SETTINGS_CACHE_TTL_MS = 30_000;
+
+export function clearSettingsCache(): void {
+  settingsCache = null;
+}
+
 export async function getSettings(): Promise<Record<string, string>> {
+  if (settingsCache && Date.now() < settingsCache.expiresAt) {
+    return settingsCache.data;
+  }
   const allSettings = await db.select().from(settings);
-  return allSettings.reduce(
-    (acc, s) => {
-      acc[s.key] = s.value;
-      return acc;
-    },
-    {} as Record<string, string>
-  );
+  const map: Record<string, string> = {};
+  for (const row of allSettings) {
+    map[row.key] = row.value;
+  }
+  settingsCache = { data: map, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS };
+  return map;
 }
 
 export type CalendarInterval = "week" | "bi_weekly" | "month" | "quarter" | "year";

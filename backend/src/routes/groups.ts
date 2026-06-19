@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { db } from "../db/client";
 import { clientGroups } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { isValidHttpsUrl } from "../lib/validation";
 import { isWorkspace, type Workspace } from "../lib/workspace";
 
 interface GroupBody {
@@ -22,15 +23,6 @@ interface GroupPatchBody {
 
 interface GroupParams {
   id: string;
-}
-
-function isValidHttpsUrl(value: string): boolean {
-  try {
-    const u = new URL(value);
-    return u.protocol === "https:";
-  } catch {
-    return false;
-  }
 }
 
 function formatGroupResponse(g: typeof clientGroups.$inferSelect) {
@@ -166,13 +158,11 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
       if ("paymentSuccessUrl" in req.body) setValues.paymentSuccessUrl = paymentSuccessUrl;
       if ("paymentCancelUrl" in req.body) setValues.paymentCancelUrl = paymentCancelUrl;
 
-      await db.update(clientGroups).set(setValues).where(eq(clientGroups.id, id));
-
       const [updated] = await db
-        .select()
-        .from(clientGroups)
+        .update(clientGroups)
+        .set(setValues)
         .where(eq(clientGroups.id, id))
-        .limit(1);
+        .returning();
       return res.status(200).send(formatGroupResponse(updated));
     }
   );
