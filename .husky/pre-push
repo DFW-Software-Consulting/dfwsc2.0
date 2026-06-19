@@ -84,3 +84,10 @@ run_step "Frontend build" npm run build:frontend
 
 # 7. Frontend tests
 run_step "Frontend tests" npm run test:front
+
+# 8. Prod image build (mirrors the CI "build" job)
+if [ "${SKIP_DOCKER_BUILD}" = "1" ]; then
+  echo "⚠️  SKIP_DOCKER_BUILD=1 — prod image build skipped."
+else
+  run_step "Prod build" docker compose -f docker-compose.prod.yml build
+fi
