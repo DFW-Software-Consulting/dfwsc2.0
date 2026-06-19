@@ -85,3 +85,84 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker compose -f docker-compose.prod.yml build
+
+  # --- Checks mirrored from the local git hooks ---
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Secret scan (secretlint)
+        run: npx secretlint --secretlintignore .gitignore "**/*"
+
+  commitlint:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Lint PR commit messages (commitlint)
+        run: npx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --verbose
+
+  source-guards:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: No console/debugger or .only/.skip in changed code
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          src=$(git diff --name-only --diff-filter=ACM "$BASE" "$HEAD" | grep -E '\.(ts|tsx|js|jsx)$' | grep -vE '\.(test|spec)\.' || true)
+          if [ -n "$src" ]; then
+            hits=$(git diff "$BASE" "$HEAD" -- $src | grep -E '^\+[^+].*\b(console\.(log|warn|error|info|debug)|debugger)\b' || true)
+            if [ -n "$hits" ]; then
+              echo "::error::console.log/debugger added in source files:"
+              echo "$hits"
+              exit 1
+            fi
+          fi
+          tests=$(git diff --name-only --diff-filter=ACM "$BASE" "$HEAD" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true)
+          if [ -n "$tests" ]; then
+            hits=$(git diff "$BASE" "$HEAD" -- $tests | grep -E '^\+[^+].*(it|test|describe)\.(only|skip)\(' || true)
+            if [ -n "$hits" ]; then
+              echo "::error::.only/.skip added in test files:"
+              echo "$hits"
+              exit 1
+            fi
+          fi
+          echo "Source guards passed."
+
+  docs-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Agent docs in sync with CLAUDE.md
+        run: |
+          set -eu
+          fail=0
+          for f in AGENTS.md Qwen.md Gemini.md; do
+            if ! diff -q CLAUDE.md "$f" >/dev/null 2>&1; then
+              echo "::error::$f is out of sync with CLAUDE.md"
+              diff CLAUDE.md "$f" || true
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "Regenerate the mirrors from CLAUDE.md (see .claude/sync-docs.sh)."
+            exit 1
+          fi
+          echo "Agent docs in sync."
