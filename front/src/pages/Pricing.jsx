@@ -17,13 +17,15 @@ const plans = [
   {
     name: "Standard Hosting",
     price: "$75 / mo",
-    includes: "Multi-page site hosting, domain management, and a small database included — you manage your own updates and changes",
+    includes:
+      "Multi-page site hosting, domain management, and a small database included — you manage your own updates and changes",
     idealFor: "Multi-page business sites with basic data needs",
   },
   {
     name: "Pro Hosting",
     price: "$100 / mo",
-    includes: "Everything in Standard plus maintenance, backups, backend API hosting, and expanded database — we keep it running so you don't have to",
+    includes:
+      "Everything in Standard plus maintenance, backups, backend API hosting, and expanded database — we keep it running so you don't have to",
     idealFor: "Full-stack apps and client portals",
   },
   {

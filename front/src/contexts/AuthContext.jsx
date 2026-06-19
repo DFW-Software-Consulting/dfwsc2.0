@@ -30,13 +30,12 @@ export function AuthProvider({ children, initialToken }) {
     };
   }, [logout]);
 
-  const value = useMemo(() => ({ token, isLoggedIn, login, logout }), [token, isLoggedIn, login, logout]);
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({ token, isLoggedIn, login, logout }),
+    [token, isLoggedIn, login, logout]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

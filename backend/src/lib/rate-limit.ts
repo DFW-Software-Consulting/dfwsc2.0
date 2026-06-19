@@ -25,7 +25,8 @@ export const hitBuckets = new Map<string, number[]>();
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 let maxRegisteredWindowMs = 0;
 setInterval(() => {
-  const bucketMaxAge = maxRegisteredWindowMs > 0 ? maxRegisteredWindowMs + SWEEP_INTERVAL_MS : 20 * 60 * 1000;
+  const bucketMaxAge =
+    maxRegisteredWindowMs > 0 ? maxRegisteredWindowMs + SWEEP_INTERVAL_MS : 20 * 60 * 1000;
   const cutoff = Date.now() - bucketMaxAge;
   for (const [key, hits] of hitBuckets) {
     if (hits.every((t) => t < cutoff)) {

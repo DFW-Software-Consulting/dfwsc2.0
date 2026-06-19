@@ -215,9 +215,14 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
             return reply.code(402).send({ error: err.message, code: "CARD_DECLINED" });
           }
           if (err instanceof Error && err.name === "StripeRateLimitError") {
-            return reply.code(429).send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
+            return reply
+              .code(429)
+              .send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
           }
-          return reply.code(502).send({ error: "Payment processing failed. Please try again.", code: "PAYMENT_FAILED" });
+          return reply.code(502).send({
+            error: "Payment processing failed. Please try again.",
+            code: "PAYMENT_FAILED",
+          });
         }
       }
 
@@ -319,9 +324,13 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           return reply.code(402).send({ error: err.message, code: "CARD_DECLINED" });
         }
         if (err instanceof Error && err.name === "StripeRateLimitError") {
-          return reply.code(429).send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
+          return reply
+            .code(429)
+            .send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
         }
-        return reply.code(502).send({ error: "Payment processing failed. Please try again.", code: "PAYMENT_FAILED" });
+        return reply
+          .code(502)
+          .send({ error: "Payment processing failed. Please try again.", code: "PAYMENT_FAILED" });
       }
     }
   );

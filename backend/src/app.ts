@@ -2,18 +2,18 @@ import crypto from "node:crypto";
 import fastifyCors from "@fastify/cors";
 import fastify from "fastify";
 import fastifyRawBody from "fastify-raw-body";
-import { AppError } from "./lib/errors";
 import { logMaskedEnvSummary, validateEnv } from "./lib/env";
+import { AppError } from "./lib/errors";
 import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
 import connectRoutes from "./routes/connect";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
+import metricsRoutes from "./routes/metrics";
 import paymentsRoutes from "./routes/payments";
 import productRoutes from "./routes/products";
 import settingsRoutes from "./routes/settings";
-import metricsRoutes from "./routes/metrics";
 import webhooksRoute from "./routes/webhooks";
 
 export async function buildServer() {
@@ -92,10 +92,7 @@ export async function buildServer() {
 
     request.log.error(error, error.message);
 
-    const safeMessage =
-      statusCode < 500 && error.message
-        ? error.message
-        : "Internal Server Error";
+    const safeMessage = statusCode < 500 && error.message ? error.message : "Internal Server Error";
 
     reply.status(statusCode).send({ error: safeMessage, requestId: request.id });
   });

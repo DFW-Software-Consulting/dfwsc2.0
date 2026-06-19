@@ -25,11 +25,13 @@ export default function App() {
 
         <Navbar />
         <main className="relative z-10">
-          <Suspense fallback={
-            <div className="flex items-center justify-center min-h-[50vh]">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500" />
-            </div>
-          }>
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center min-h-[50vh]">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500" />
+              </div>
+            }
+          >
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/pricing" element={<Pricing />} />
