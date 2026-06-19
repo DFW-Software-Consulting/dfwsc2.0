@@ -4,6 +4,7 @@ import { vi } from "vitest";
 vi.mock("../../lib/stripe", async () => {
   const mockAccounts = {
     create: vi.fn(),
+    retrieve: vi.fn(),
   };
   const mockAccountLinks = {
     create: vi.fn(),
@@ -22,6 +23,7 @@ import { eq } from "drizzle-orm";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, onboardingTokens } from "../../db/schema";
+import { hitBuckets } from "../../lib/rate-limit";
 
 // Constants for test values
 const TEST_STRIPE_ACCOUNT = "acct_test123456789";
@@ -40,6 +42,12 @@ describe("Connect Callback State Validation Integration", () => {
     // Mock Stripe methods
     const { stripe } = await import("../../lib/stripe");
     stripe.accounts.create.mockResolvedValue({ id: "acct_test123456789" });
+    stripe.accounts.retrieve.mockResolvedValue({
+      type: "express",
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
     stripe.accountLinks.create.mockResolvedValue({ url: "https://connect.stripe.com/setup/mock" });
 
     app = await buildServer();
@@ -49,6 +57,13 @@ describe("Connect Callback State Validation Integration", () => {
     if (app) {
       await app.close();
     }
+  });
+
+  beforeEach(() => {
+    // The callback is rate-limited via a shared in-memory store keyed by IP.
+    // Clear it between tests so callback hits from one test don't trip the
+    // limit (and return 429) for the next.
+    hitBuckets.clear();
   });
 
   it("should verify complete token lifecycle: pending → in_progress → completed", async () => {

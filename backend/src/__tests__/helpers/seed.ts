@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 export interface SeedableDataStore {
   clients: Map<string, any>;
   clientsByApiKey?: Map<string, string>;
@@ -11,11 +13,16 @@ export interface SeedClientOpts {
   email?: string;
   apiKey?: string;
   apiKeyHash?: string | null;
+  apiKeyLookup?: string | null;
   status?: string;
   stripeAccountId?: string | null;
   groupId?: string | null;
   workspace?: string;
   [key: string]: any;
+}
+
+function sha256(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
 }
 
 export function seedClient(dataStore: SeedableDataStore, opts: SeedClientOpts) {
@@ -25,18 +32,26 @@ export function seedClient(dataStore: SeedableDataStore, opts: SeedClientOpts) {
     email = "billing@acme.test",
     apiKey = `api-key-${id}`,
     apiKeyHash,
+    apiKeyLookup,
     status = "active",
     stripeAccountId = null,
     groupId = null,
     workspace = "client_portal",
     ...rest
   } = opts;
+
+  // apiKeyHash uses the fake "hashed:${key}" format matching the bcryptjs mock in tests.
+  // apiKeyLookup is the SHA256 of the key, matching what auth.ts computes for DB lookup.
+  const resolvedApiKeyHash = apiKeyHash !== undefined ? apiKeyHash : `hashed:${apiKey}`;
+  const resolvedApiKeyLookup = apiKeyLookup !== undefined ? apiKeyLookup : sha256(apiKey);
+
   dataStore.clients.set(id, {
     id,
     name,
     email,
     apiKey,
-    apiKeyHash: apiKeyHash !== undefined ? apiKeyHash : `hashed:${apiKey}`,
+    apiKeyHash: resolvedApiKeyHash,
+    apiKeyLookup: resolvedApiKeyLookup,
     status,
     stripeAccountId,
     groupId,

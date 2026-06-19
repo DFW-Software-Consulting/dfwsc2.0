@@ -27,4 +27,4 @@ COPY --from=builder /app/drizzle ./drizzle
 
 USER node
 
-CMD ["sh", "-c", "npm run db:migrate && npm run start"]
+CMD ["node", "dist/index.js"]

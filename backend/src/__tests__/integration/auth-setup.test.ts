@@ -235,7 +235,7 @@ describe("POST /api/v1/auth/setup", () => {
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 
-  it("returns 200 with username, passwordHash, and instructions on success", async () => {
+  it("returns 200 with username and instructions on success", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
 
     const server = await createServer();
@@ -250,7 +250,6 @@ describe("POST /api/v1/auth/setup", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.username).toBe("newadmin");
-    expect(body.passwordHash).toMatch(/^\$2[aby]\$/);
     expect(Array.isArray(body.instructions)).toBe(true);
     expect(body.instructions.length).toBe(3);
 

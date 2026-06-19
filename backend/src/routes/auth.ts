@@ -121,10 +121,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
         return reply.code(200).send({
           username,
-          passwordHash,
           instructions: [
-            "1. Copy the credentials above",
-            "2. Use these to login and follow the confirm-bootstrap flow to finalize your setup.",
+            "1. Use the username and the password you just entered to log in.",
+            "2. Follow the confirm-bootstrap flow to finalize your setup.",
             "3. (Recommended) Set ALLOW_ADMIN_SETUP=false in your environment.",
           ],
         });

@@ -161,3 +161,12 @@ export function calculateDaysUntilDue(
   const days = Math.max(1, Math.ceil((new Date(dueDate).getTime() - Date.now()) / 86_400_000));
   return days;
 }
+
+export function isValidHttpsUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}

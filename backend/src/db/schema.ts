@@ -10,22 +10,28 @@ import {
   unique,
 } from "drizzle-orm/pg-core";
 
-export const clientGroups = pgTable("client_groups", {
-  id: text("id").primaryKey(),
-  workspace: text("workspace", { enum: ["client_portal"] })
-    .default("client_portal")
-    .notNull(),
-  name: text("name").notNull(),
-  status: text("status", { enum: ["active", "inactive"] })
-    .default("active")
-    .notNull(),
-  processingFeePercent: numeric("processing_fee_percent", { precision: 5, scale: 2 }),
-  processingFeeCents: integer("processing_fee_cents"),
-  paymentSuccessUrl: text("payment_success_url"),
-  paymentCancelUrl: text("payment_cancel_url"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+export const clientGroups = pgTable(
+  "client_groups",
+  {
+    id: text("id").primaryKey(),
+    workspace: text("workspace", { enum: ["client_portal"] })
+      .default("client_portal")
+      .notNull(),
+    name: text("name").notNull(),
+    status: text("status", { enum: ["active", "inactive"] })
+      .default("active")
+      .notNull(),
+    processingFeePercent: numeric("processing_fee_percent", { precision: 5, scale: 2 }),
+    processingFeeCents: integer("processing_fee_cents"),
+    paymentSuccessUrl: text("payment_success_url"),
+    paymentCancelUrl: text("payment_cancel_url"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("client_groups_workspace_idx").on(table.workspace),
+  })
+);
 
 export const clients = pgTable(
   "clients",
@@ -43,7 +49,10 @@ export const clients = pgTable(
     status: text("status", { enum: ["active", "inactive", "pending", "failed"] })
       .default("active")
       .notNull(),
-    groupId: text("group_id").references(() => clientGroups.id),
+    chargesEnabled: boolean("charges_enabled").default(false).notNull(),
+    payoutsEnabled: boolean("payouts_enabled").default(false).notNull(),
+    detailsSubmitted: boolean("details_submitted").default(false).notNull(),
+    groupId: text("group_id").references(() => clientGroups.id, { onDelete: "set null" }),
     paymentSuccessUrl: text("payment_success_url"),
     paymentCancelUrl: text("payment_cancel_url"),
     processingFeePercent: numeric("processing_fee_percent", { precision: 5, scale: 2 }),
@@ -65,6 +74,9 @@ export const clients = pgTable(
     apiKeyHashIdx: index("clients_api_key_hash_idx").on(table.apiKeyHash),
     apiKeyLookupIdx: index("clients_api_key_lookup_idx").on(table.apiKeyLookup),
     emailWorkspaceUnique: unique("clients_email_workspace_unique").on(table.email, table.workspace),
+    stripeAccountIdUnique: unique("clients_stripe_account_id_unique").on(table.stripeAccountId),
+    groupIdIdx: index("clients_group_id_idx").on(table.groupId),
+    workspaceIdx: index("clients_workspace_idx").on(table.workspace),
   })
 );
 
@@ -77,26 +89,32 @@ export const webhookEvents = pgTable("webhook_events", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
-export const onboardingTokens = pgTable("onboarding_tokens", {
-  id: text("id").primaryKey(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => clients.id, { onDelete: "cascade" }),
-  token: text("token").notNull().unique(),
-  status: text("status").notNull(),
-  email: text("email").notNull(),
-  state: text("state"),
-  stateExpiresAt: timestamp("state_expires_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+export const onboardingTokens = pgTable(
+  "onboarding_tokens",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    status: text("status", { enum: ["pending", "in_progress", "completed", "revoked"] }).notNull(),
+    email: text("email").notNull(),
+    state: text("state"),
+    stateExpiresAt: timestamp("state_expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    clientIdStateIdx: index("onboarding_tokens_client_state_idx").on(table.clientId, table.state),
+  })
+);
 
 export const admins = pgTable("admins", {
   id: text("id").primaryKey(),
   username: text("username").unique().notNull(),
   passwordHash: text("password_hash").notNull(),
-  role: text("role").default("admin"),
-  active: boolean("active").default(true),
+  role: text("role").notNull().default("admin"),
+  active: boolean("active").notNull().default(true),
   setupConfirmed: boolean("setup_confirmed").default(false),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
@@ -109,3 +127,22 @@ export const settings = pgTable("settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
+export const invoices = pgTable("invoices", {
+  id: text("id").primaryKey(),
+  clientId: text("client_id")
+    .notNull()
+    .references(() => clients.id, { onDelete: "cascade" }),
+  invoiceNumber: text("invoice_number").notNull(),
+  amountCents: integer("amount_cents").notNull(),
+  currency: text("currency").default("usd").notNull(),
+  status: text("status", { enum: ["draft", "sent", "paid", "overdue", "void"] })
+    .default("draft")
+    .notNull(),
+  dueDate: timestamp("due_date", { withTimezone: true }),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
+  stripeInvoiceId: text("stripe_invoice_id"),
+  nextcloudId: text("nextcloud_id"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});

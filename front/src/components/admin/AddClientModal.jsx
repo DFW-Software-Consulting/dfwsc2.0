@@ -86,18 +86,10 @@ export default function AddClientModal({ isOpen, onClose, onCreated, showToast }
       </div>
 
       <div className="mt-6 flex justify-end gap-3">
-        <Button
-          variant="secondary"
-          onClick={handleClose}
-          disabled={createClientMutation.isPending}
-        >
+        <Button variant="secondary" onClick={handleClose} disabled={createClientMutation.isPending}>
           Cancel
         </Button>
-        <Button
-          variant="primary"
-          onClick={handleSubmit}
-          isLoading={createClientMutation.isPending}
-        >
+        <Button variant="primary" onClick={handleSubmit} isLoading={createClientMutation.isPending}>
           Create Client
         </Button>
       </div>

@@ -34,7 +34,11 @@ export function useCreateClient() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body) => createClient(token, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === "clients",
+      });
+    },
   });
 }
 
@@ -44,7 +48,9 @@ export function usePatchClient() {
   return useMutation({
     mutationFn: ({ id, body }) => patchClient(token, id, body),
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["clients"] });
+      queryClient.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === "clients",
+      });
       queryClient.invalidateQueries({ queryKey: ["groups"] });
       queryClient.invalidateQueries({ queryKey: ["client", variables.id] });
     },

@@ -217,6 +217,8 @@ describe("POST /api/v1/webhooks/stripe", () => {
     const event = makeStripeEvent("account.updated", {
       id: stripeAccountId,
       details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
       email: "updated@example.com",
       settings: {
         dashboard: { display_name: "Updated Name" },
@@ -233,16 +235,32 @@ describe("POST /api/v1/webhooks/stripe", () => {
     const [updatedClient] = await db.select().from(clients).where(eq(clients.id, clientId));
 
     expect(updatedClient.email).toBe("updated@example.com");
+    expect(updatedClient.chargesEnabled).toBe(true);
+    expect(updatedClient.payoutsEnabled).toBe(true);
+    expect(updatedClient.detailsSubmitted).toBe(true);
 
     // Clean up
     await db.delete(clients).where(eq(clients.id, clientId));
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
-  it("returns 200 for account.updated with details_submitted=false (no DB update)", async () => {
+  it("returns 200 for account.updated with details_submitted=false and persists false readiness booleans", async () => {
+    const clientId = randomUUID();
+    const stripeAccountId = `acct_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Readiness Test Client",
+      email: "readiness@example.com",
+      status: "active",
+      stripeAccountId,
+    });
+
     const event = makeStripeEvent("account.updated", {
-      id: "acct_nodeatailssubmit",
+      id: stripeAccountId,
       details_submitted: false,
+      charges_enabled: false,
+      payouts_enabled: false,
     });
     mockConstructEvent.mockReturnValueOnce(event);
 
@@ -251,6 +269,15 @@ describe("POST /api/v1/webhooks/stripe", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ received: true });
 
+    // Verify readiness booleans are persisted even when all are false
+    const [updatedClient] = await db.select().from(clients).where(eq(clients.id, clientId));
+
+    expect(updatedClient.detailsSubmitted).toBe(false);
+    expect(updatedClient.chargesEnabled).toBe(false);
+    expect(updatedClient.payoutsEnabled).toBe(false);
+
+    // Clean up
+    await db.delete(clients).where(eq(clients.id, clientId));
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 

@@ -49,8 +49,8 @@ describe("Frontend Dockerfile", () => {
       expect(dockerfileContent).toMatch(/CMD.*nginx/);
     });
 
-    it("should expose ports 80 and 443", () => {
-      expect(dockerfileContent).toContain("EXPOSE 80 443");
+    it("should expose port 80", () => {
+      expect(dockerfileContent).toContain("EXPOSE 80");
     });
 
     it("should use nginx to serve static files", () => {

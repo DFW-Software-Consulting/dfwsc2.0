@@ -187,27 +187,43 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           },
         };
 
-        if (stripeAccountId) {
-          if (!waiveFee) {
-            paymentIntentParams.application_fee_amount = feeAmount;
+        try {
+          if (stripeAccountId) {
+            if (!waiveFee) {
+              paymentIntentParams.application_fee_amount = feeAmount;
+            }
+            const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams, {
+              stripeAccount: stripeAccountId,
+              idempotencyKey,
+            });
+            return reply.code(201).send({
+              clientSecret: paymentIntent.client_secret,
+              paymentIntentId: paymentIntent.id,
+            });
           }
+
           const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams, {
-            stripeAccount: stripeAccountId,
             idempotencyKey,
           });
           return reply.code(201).send({
             clientSecret: paymentIntent.client_secret,
             paymentIntentId: paymentIntent.id,
           });
+        } catch (err) {
+          request.log.error({ err }, "Stripe PaymentIntent creation failed");
+          if (err instanceof Error && err.name === "StripeCardError") {
+            return reply.code(402).send({ error: err.message, code: "CARD_DECLINED" });
+          }
+          if (err instanceof Error && err.name === "StripeRateLimitError") {
+            return reply
+              .code(429)
+              .send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
+          }
+          return reply.code(502).send({
+            error: "Payment processing failed. Please try again.",
+            code: "PAYMENT_FAILED",
+          });
         }
-
-        const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams, {
-          idempotencyKey,
-        });
-        return reply.code(201).send({
-          clientSecret: paymentIntent.client_secret,
-          paymentIntentId: paymentIntent.id,
-        });
       }
 
       if (!Array.isArray(lineItems) || lineItems.length === 0) {
@@ -286,21 +302,36 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         },
       };
 
-      if (stripeAccountId) {
-        if (sessionParams.payment_intent_data && !waiveFee) {
-          sessionParams.payment_intent_data.application_fee_amount = feeAmount;
+      try {
+        if (stripeAccountId) {
+          if (sessionParams.payment_intent_data && !waiveFee) {
+            sessionParams.payment_intent_data.application_fee_amount = feeAmount;
+          }
+          const session = await stripe.checkout.sessions.create(sessionParams, {
+            stripeAccount: stripeAccountId,
+            idempotencyKey,
+          });
+          return reply.code(201).send({ url: session.url });
         }
+
         const session = await stripe.checkout.sessions.create(sessionParams, {
-          stripeAccount: stripeAccountId,
           idempotencyKey,
         });
         return reply.code(201).send({ url: session.url });
+      } catch (err) {
+        request.log.error({ err }, "Stripe Checkout session creation failed");
+        if (err instanceof Error && err.name === "StripeCardError") {
+          return reply.code(402).send({ error: err.message, code: "CARD_DECLINED" });
+        }
+        if (err instanceof Error && err.name === "StripeRateLimitError") {
+          return reply
+            .code(429)
+            .send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
+        }
+        return reply
+          .code(502)
+          .send({ error: "Payment processing failed. Please try again.", code: "PAYMENT_FAILED" });
       }
-
-      const session = await stripe.checkout.sessions.create(sessionParams, {
-        idempotencyKey,
-      });
-      return reply.code(201).send({ url: session.url });
     }
   );
 

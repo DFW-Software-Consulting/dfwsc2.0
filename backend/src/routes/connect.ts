@@ -2,11 +2,13 @@ import crypto from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import he from "he";
+import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { createClientWithOnboardingToken } from "../lib/client-factory";
+import { resolveFrontendOrigin } from "../lib/config";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { getSettings, stripe } from "../lib/stripe-billing";
@@ -78,6 +80,10 @@ async function createAccountLinkForToken(
       type: "express",
       email: clientRecord.email,
       metadata: { clientId: clientRecord.id },
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
     });
     stripeAccountId = account.id;
 
@@ -175,10 +181,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         groupId,
       });
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
-      if (!frontendOrigin) {
-        return reply.code(500).send({ error: "FRONTEND_ORIGIN is not configured." });
-      }
+      const frontendOrigin = resolveFrontendOrigin();
 
       const onboardingUrlHint = `${frontendOrigin}/onboard?token=${token}`;
 
@@ -252,10 +255,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         groupId,
       });
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
-      if (!frontendOrigin) {
-        return reply.code(500).send({ error: "FRONTEND_ORIGIN is not configured." });
-      }
+      const frontendOrigin = resolveFrontendOrigin();
 
       const onboardingUrl = `${frontendOrigin}/onboard?token=${token}`;
 
@@ -276,12 +276,16 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         If you did not request this, please ignore this email.
       `;
 
-      await sendMail({
-        to: email,
-        subject: `${companyName} - Stripe Onboarding`,
-        html: mailHtml,
-        text: mailText,
-      });
+      try {
+        await sendMail({
+          to: email,
+          subject: `${companyName} - Stripe Onboarding`,
+          html: mailHtml,
+          text: mailText,
+        });
+      } catch (err) {
+        request.log.error({ err, clientId }, "Failed to send onboarding email");
+      }
 
       return reply.code(201).send({
         message: "Onboarding email sent successfully.",
@@ -372,10 +376,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const settings = await getSettings();
       const companyName = settings.company_name || "DFW Software Consulting";
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
-      if (!frontendOrigin) {
-        return reply.code(500).send({ error: "FRONTEND_ORIGIN is not configured." });
-      }
+      const frontendOrigin = resolveFrontendOrigin();
 
       const onboardingUrl = `${frontendOrigin}/onboard?token=${newToken}`;
 
@@ -400,12 +401,16 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         Note: This link will expire in 30 minutes.
       `;
 
-      await sendMail({
-        to: clientRecord.email,
-        subject: `${companyName} - New Onboarding Link`,
-        html: mailHtml,
-        text: mailText,
-      });
+      try {
+        await sendMail({
+          to: clientRecord.email,
+          subject: `${companyName} - New Onboarding Link`,
+          html: mailHtml,
+          text: mailText,
+        });
+      } catch (err) {
+        request.log.error({ err, clientId: clientRecord.id }, "Failed to send onboarding email");
+      }
 
       request.log.info(
         {
@@ -489,136 +494,170 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     }
   );
 
-  fastify.get("/connect/callback", {}, async (request, reply) => {
-    const { client_id, account, state } = request.query as {
-      client_id: string;
-      account?: string;
-      state?: string;
-    };
-    const normalizedClientId = (client_id ?? "").trim();
-    const normalizedState = (state ?? "").trim();
+  fastify.get(
+    "/connect/callback",
+    { preHandler: [rateLimit({ max: 10, windowMs: 60_000 })] },
+    async (request, reply) => {
+      const { client_id, account, state } = request.query as {
+        client_id?: string;
+        account?: string;
+        state?: string;
+      };
+      const normalizedClientId = (client_id ?? "").trim();
+      const normalizedState = (state ?? "").trim();
+      const normalizedAccount = (account ?? "").trim();
 
-    if (!normalizedState) {
-      request.log.warn({ client_id, account }, "Missing state parameter");
-      return reply.code(400).send({ error: "Missing state parameter." });
-    }
+      if (!normalizedState) {
+        request.log.warn({ client_id, account }, "Missing state parameter");
+        return reply.code(400).send({ error: "Missing state parameter." });
+      }
 
-    if (!account) {
-      request.log.warn({ client_id, state }, "Missing account parameter");
-      return reply.code(400).send({ error: "Missing account parameter." });
-    }
-    const normalizedAccount = account.trim();
-    if (!normalizedAccount) {
-      request.log.warn({ client_id, state }, "Missing account parameter");
-      return reply.code(400).send({ error: "Missing account parameter." });
-    }
-    if (!normalizedClientId) {
-      request.log.warn({ account, state }, "Missing client_id parameter");
-      return reply.code(400).send({ error: "Missing client_id parameter." });
-    }
-    if (!/^acct_[A-Za-z0-9]+$/.test(normalizedAccount)) {
-      request.log.warn(
-        { client_id: normalizedClientId, account: normalizedAccount },
-        "Invalid account parameter format"
-      );
-      return reply.code(400).send({ error: "Invalid account parameter." });
-    }
+      if (!normalizedClientId) {
+        request.log.warn({ account, state }, "Missing client_id parameter");
+        return reply.code(400).send({ error: "Missing client_id parameter." });
+      }
 
-    const [onboardingRecord] = await db
-      .select()
-      .from(onboardingTokens)
-      .where(
-        and(
-          eq(onboardingTokens.clientId, normalizedClientId),
-          eq(onboardingTokens.state, normalizedState)
+      // Stripe does NOT append `account` (or any state) to the Account Link
+      // return_url, so it is optional. When present (legacy/manual links) we
+      // validate its format and use it only as a defensive cross-check.
+      if (normalizedAccount && !/^acct_[A-Za-z0-9]+$/.test(normalizedAccount)) {
+        request.log.warn(
+          { client_id: normalizedClientId, account: normalizedAccount },
+          "Invalid account parameter format"
+        );
+        return reply.code(400).send({ error: "Invalid account parameter." });
+      }
+
+      // The (clientId, state) pair is the security binding: `state` is a
+      // single-use CSRF nonce minted server-side at account-link creation.
+      const [onboardingRecord] = await db
+        .select()
+        .from(onboardingTokens)
+        .where(
+          and(
+            eq(onboardingTokens.clientId, normalizedClientId),
+            eq(onboardingTokens.state, normalizedState)
+          )
         )
-      )
-      .limit(1);
+        .limit(1);
 
-    if (!onboardingRecord) {
-      request.log.warn(
-        {
-          client_id: normalizedClientId,
-          account: normalizedAccount,
-          state: normalizedState,
-        },
-        "Invalid or expired state parameter"
-      );
-      return reply.code(400).send({ error: "Invalid or expired state parameter." });
-    }
+      if (!onboardingRecord) {
+        request.log.warn(
+          { client_id: normalizedClientId, account: normalizedAccount, state: normalizedState },
+          "Invalid or expired state parameter"
+        );
+        return reply.code(400).send({ error: "Invalid or expired state parameter." });
+      }
 
-    if (onboardingRecord.stateExpiresAt && new Date() > new Date(onboardingRecord.stateExpiresAt)) {
-      request.log.warn(
-        {
-          client_id: normalizedClientId,
-          account: normalizedAccount,
-          state: normalizedState,
-        },
-        "Expired state parameter"
-      );
-      return reply.code(400).send({ error: "Expired state parameter." });
-    }
+      if (
+        onboardingRecord.stateExpiresAt &&
+        new Date() > new Date(onboardingRecord.stateExpiresAt)
+      ) {
+        request.log.warn(
+          { client_id: normalizedClientId, account: normalizedAccount, state: normalizedState },
+          "Expired state parameter"
+        );
+        return reply.code(400).send({ error: "Expired state parameter." });
+      }
 
-    const [clientRecord] = await db
-      .select()
-      .from(clients)
-      .where(eq(clients.id, normalizedClientId));
-
-    if (!clientRecord) {
-      request.log.warn(
-        { client_id: normalizedClientId, account: normalizedAccount },
-        "Client record not found during callback"
-      );
-      return reply.code(400).send({ error: "Client not found." });
-    }
-
-    const existingStripeAccountId =
-      clientRecord.stripeAccountId ??
-      (clientRecord as { stripe_account_id?: string }).stripe_account_id ??
-      null;
-
-    if (existingStripeAccountId && existingStripeAccountId !== normalizedAccount) {
-      request.log.warn(
-        {
-          client_id: normalizedClientId,
-          account: normalizedAccount,
-          existingAccount: existingStripeAccountId,
-        },
-        "Attempt to overwrite existing stripeAccountId"
-      );
-      return reply.code(400).send({ error: "Stripe account already linked to this client." });
-    }
-
-    request.log.info(
-      {
-        token_id: onboardingRecord.id,
-        old_status: onboardingRecord.status,
-        new_status: "completed",
-        timestamp: new Date().toISOString(),
-      },
-      "Updating onboarding token status to completed"
-    );
-
-    await db.transaction(async (tx) => {
-      await tx
-        .update(clients)
-        .set({ stripeAccountId: normalizedAccount })
+      const [clientRecord] = await db
+        .select()
+        .from(clients)
         .where(eq(clients.id, normalizedClientId));
-      await tx
-        .update(onboardingTokens)
-        .set({ status: "completed" })
-        .where(eq(onboardingTokens.id, onboardingRecord.id));
-    });
 
-    const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
-    if (!frontendOrigin) {
-      request.log.error("FRONTEND_ORIGIN is not configured");
-      return reply
-        .code(500)
-        .send({ error: "Server configuration error: FRONTEND_ORIGIN not set." });
+      if (!clientRecord) {
+        request.log.warn(
+          { client_id: normalizedClientId, account: normalizedAccount },
+          "Client record not found during callback"
+        );
+        return reply.code(400).send({ error: "Client not found." });
+      }
+
+      const storedAccountId = clientRecord.stripeAccountId ?? null;
+
+      // Defensive: refuse to swap an account if a different id was supplied than
+      // the one already linked to this client.
+      if (normalizedAccount && storedAccountId && storedAccountId !== normalizedAccount) {
+        request.log.warn(
+          {
+            client_id: normalizedClientId,
+            account: normalizedAccount,
+            existingAccount: storedAccountId,
+          },
+          "Attempt to overwrite existing stripeAccountId"
+        );
+        return reply.code(400).send({ error: "Stripe account already linked to this client." });
+      }
+
+      const frontendOrigin = resolveFrontendOrigin();
+      const redirectUrl = `${frontendOrigin}/onboarding-success`;
+
+      // The account id is persisted at account-link creation, so the stored
+      // value is the source of truth; fall back to a supplied `account`.
+      const effectiveAccountId = storedAccountId ?? (normalizedAccount || null);
+
+      if (!effectiveAccountId) {
+        request.log.warn(
+          { client_id: normalizedClientId, state: normalizedState },
+          "No Stripe account id resolved at callback; leaving token in_progress"
+        );
+        return reply.redirect(redirectUrl);
+      }
+
+      let verifiedAccount: Stripe.Account;
+      try {
+        verifiedAccount = await stripe.accounts.retrieve(effectiveAccountId);
+      } catch (err) {
+        // Transient Stripe failure on a user-facing return: don't dead-end the
+        // user. The account.updated webhook reconciles readiness authoritatively.
+        request.log.warn(
+          { account: effectiveAccountId, err },
+          "Failed to verify account with Stripe; leaving token in_progress"
+        );
+        return reply.redirect(redirectUrl);
+      }
+
+      if (verifiedAccount.type !== "express") {
+        request.log.warn({ account: effectiveAccountId }, "Account is not an Express account");
+        return reply.code(400).send({ error: "Invalid account type." });
+      }
+
+      const chargesEnabled = verifiedAccount.charges_enabled ?? false;
+      const payoutsEnabled = verifiedAccount.payouts_enabled ?? false;
+      const detailsSubmitted = verifiedAccount.details_submitted ?? false;
+      const tokenStatus = detailsSubmitted ? "completed" : "in_progress";
+
+      request.log.info(
+        {
+          token_id: onboardingRecord.id,
+          old_status: onboardingRecord.status,
+          new_status: tokenStatus,
+          chargesEnabled,
+          payoutsEnabled,
+          detailsSubmitted,
+          timestamp: new Date().toISOString(),
+        },
+        "Syncing onboarding callback result"
+      );
+
+      await db.transaction(async (tx) => {
+        await tx
+          .update(clients)
+          .set({
+            stripeAccountId: effectiveAccountId,
+            chargesEnabled,
+            payoutsEnabled,
+            detailsSubmitted,
+            updatedAt: new Date(),
+          })
+          .where(eq(clients.id, normalizedClientId));
+        await tx
+          .update(onboardingTokens)
+          .set({ status: tokenStatus, updatedAt: new Date() })
+          .where(eq(onboardingTokens.id, onboardingRecord.id));
+      });
+
+      return reply.redirect(redirectUrl);
     }
-    const redirectUrl = `${frontendOrigin}/onboarding-success`;
-
-    reply.redirect(redirectUrl);
-  });
+  );
 }

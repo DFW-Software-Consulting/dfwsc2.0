@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getSettings, resolveClientFee } from "../../lib/stripe-billing";
+import { clearSettingsCache, getSettings, resolveClientFee } from "../../lib/stripe-billing";
 
 // Mock the db module
 vi.mock("../../db/client", () => ({
@@ -17,7 +17,6 @@ vi.mock("../../db/client", () => ({
 }));
 
 import { db } from "../../db/client";
-import { stripe } from "../../lib/stripe";
 
 // Mock stripe
 vi.mock("../../lib/stripe", () => ({
@@ -158,6 +157,10 @@ describe("resolveClientFee", () => {
 });
 
 describe("getSettings", () => {
+  beforeEach(() => {
+    clearSettingsCache();
+  });
+
   it("returns empty object when no settings exist", async () => {
     const mockSelect = vi.fn().mockReturnValue({
       from: vi.fn().mockResolvedValue([]),

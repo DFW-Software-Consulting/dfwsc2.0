@@ -98,13 +98,15 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
     });
     expect(setupRes.statusCode).toBe(200);
 
-    // Seed the mock DB with the setup results (since mock DB isn't real)
-    const setupBody = setupRes.json();
+    // The setup endpoint no longer persists to DB — it just returns credentials.
+    // Seed the mock DB directly using the known plaintext bootstrapPassword.
+    const bcrypt = await import("bcryptjs");
+    const hash = await bcrypt.hash(bootstrapPassword, 10);
     dbState.admins = [
       {
         id: "admin-setup-1",
-        username: setupBody.username,
-        passwordHash: setupBody.passwordHash,
+        username: bootstrapUsername,
+        passwordHash: hash,
         role: "admin",
         active: true,
         setupConfirmed: false,

@@ -53,4 +53,4 @@ If none of the four levels are configured, no fee is applied.
 | `STRIPE_SECRET_KEY` | Stripe secret key (platform account) |
 | `STRIPE_WEBHOOK_SECRET` | Webhook endpoint signing secret |
 | `USE_CHECKOUT` | `"true"` for Checkout Sessions, `"false"` for PaymentIntents |
-| `DEFAULT_PROCESS_FEE_CENTS` | (optional) Legacy fallback — no longer used in fee chain |
+| `DEFAULT_PROCESS_FEE_CENTS` | (optional) Last-resort fallback fee (cents) when no client/group/DB default is configured |

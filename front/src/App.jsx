@@ -1,15 +1,17 @@
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import Footer from "./components/Footer.jsx";
 import Navbar from "./components/Navbar.jsx";
-import AdminPage from "./pages/AdminPage";
-import Docs from "./pages/Docs.jsx";
-import Home from "./pages/Home.jsx";
-import OnboardClient from "./pages/OnboardClient";
-import OnboardingSuccess from "./pages/OnboardingSuccess";
-import PaymentCancel from "./pages/PaymentCancel";
-import PaymentSuccess from "./pages/PaymentSuccess";
-import Pricing from "./pages/Pricing.jsx";
-import Team from "./pages/Team.jsx";
+
+const Home = lazy(() => import("./pages/Home.jsx"));
+const Pricing = lazy(() => import("./pages/Pricing.jsx"));
+const Team = lazy(() => import("./pages/Team.jsx"));
+const Docs = lazy(() => import("./pages/Docs.jsx"));
+const OnboardClient = lazy(() => import("./pages/OnboardClient"));
+const AdminPage = lazy(() => import("./pages/AdminPage"));
+const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
+const PaymentCancel = lazy(() => import("./pages/PaymentCancel"));
+const OnboardingSuccess = lazy(() => import("./pages/OnboardingSuccess"));
 
 export default function App() {
   return (
@@ -23,17 +25,25 @@ export default function App() {
 
         <Navbar />
         <main className="relative z-10">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/pricing" element={<Pricing />} />
-            <Route path="/team" element={<Team />} />
-            <Route path="/docs" element={<Docs />} />
-            <Route path="/onboard" element={<OnboardClient />} />
-            <Route path="/admin" element={<AdminPage />} />
-            <Route path="/payment-success" element={<PaymentSuccess />} />
-            <Route path="/payment-cancel" element={<PaymentCancel />} />
-            <Route path="/onboarding-success" element={<OnboardingSuccess />} />
-          </Routes>
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center min-h-[50vh]">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500" />
+              </div>
+            }
+          >
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/pricing" element={<Pricing />} />
+              <Route path="/team" element={<Team />} />
+              <Route path="/docs" element={<Docs />} />
+              <Route path="/onboard" element={<OnboardClient />} />
+              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/payment-success" element={<PaymentSuccess />} />
+              <Route path="/payment-cancel" element={<PaymentCancel />} />
+              <Route path="/onboarding-success" element={<OnboardingSuccess />} />
+            </Routes>
+          </Suspense>
         </main>
         <Footer />
       </div>

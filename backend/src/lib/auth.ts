@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import jwt from "jsonwebtoken";
 import { db } from "../db/client";
@@ -34,20 +34,6 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
         (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client =
           clientByLookup;
         return;
-      }
-      return reply.code(401).send({ error: "Invalid API key." });
-    }
-
-    // Legacy fallback for clients not yet migrated to apiKeyLookup
-    const legacyClients = await db.select().from(clients).where(isNull(clients.apiKeyLookup));
-
-    for (const client of legacyClients) {
-      if (client.apiKeyHash) {
-        const isValid = await verifyPassword(apiKey, client.apiKeyHash);
-        if (isValid && client.status !== "inactive") {
-          (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client = client;
-          return;
-        }
       }
     }
 
@@ -114,6 +100,8 @@ export async function requireAdminJwt(request: FastifyRequest, reply: FastifyRep
     if (decoded.role !== "admin") {
       return reply.code(403).send({ error: "Forbidden: Admin role required" });
     }
+
+    (request as any).admin = decoded;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
       return reply.code(401).send({ error: "Token expired" });

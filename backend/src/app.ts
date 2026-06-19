@@ -3,12 +3,14 @@ import fastifyCors from "@fastify/cors";
 import fastify from "fastify";
 import fastifyRawBody from "fastify-raw-body";
 import { logMaskedEnvSummary, validateEnv } from "./lib/env";
+import { AppError } from "./lib/errors";
 import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
 import connectRoutes from "./routes/connect";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
+import metricsRoutes from "./routes/metrics";
 import paymentsRoutes from "./routes/payments";
 import productRoutes from "./routes/products";
 import settingsRoutes from "./routes/settings";
@@ -56,7 +58,7 @@ export async function buildServer() {
     .filter((origin) => origin.length > 0);
 
   server.register(fastifyCors, {
-    origin: allowedOrigins.length === 0 ? true : allowedOrigins,
+    origin: allowedOrigins.length > 0 ? allowedOrigins : false,
     credentials: true,
   });
 
@@ -73,6 +75,14 @@ export async function buildServer() {
   });
 
   server.setErrorHandler((error, request, reply) => {
+    if (error instanceof AppError) {
+      return reply.status(error.statusCode).send({
+        error: error.message,
+        code: error.code,
+        requestId: request.id,
+      });
+    }
+
     const statusCode = error.statusCode ?? (error.validation ? 400 : 500);
 
     if (error.validation) {
@@ -81,9 +91,10 @@ export async function buildServer() {
     }
 
     request.log.error(error, error.message);
-    reply
-      .status(statusCode)
-      .send({ error: error.message ?? "Internal Server Error", requestId: request.id });
+
+    const safeMessage = statusCode < 500 && error.message ? error.message : "Internal Server Error";
+
+    reply.status(statusCode).send({ error: safeMessage, requestId: request.id });
   });
 
   /**
@@ -132,6 +143,7 @@ export async function buildServer() {
   server.register(groupRoutes, { prefix: "/api/v1" });
   server.register(productRoutes, { prefix: "/api/v1" });
   server.register(settingsRoutes, { prefix: "/api/v1" });
+  server.register(metricsRoutes, { prefix: "/api/v1" });
 
   server.setNotFoundHandler((_request, reply) => {
     reply.code(404).send({ error: "Not Found" });
