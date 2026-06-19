@@ -11,7 +11,6 @@ Payment portal for DFW Software Consulting clients integrating Stripe Connect.
 - [FRONTEND.md](./docs/FRONTEND.md) — React, State, and Routing.
 - [DATABASE.md](./docs/DATABASE.md) — Schema and Migrations.
 - [STRIPE.md](./docs/STRIPE.md) — Connect, Webhooks, and Payments.
-- [NEXTCLOUD.md](./docs/NEXTCLOUD.md) — OpenRegister Client Profile Sync.
 - [STYLES.md](./docs/STYLES.md) — Styling and UI Patterns.
 - [README.md](./README.md) — Quickstart and Setup.
 
