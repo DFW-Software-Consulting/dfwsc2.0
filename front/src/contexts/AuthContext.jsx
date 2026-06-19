@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 export const AuthContext = createContext(null);
 
@@ -30,8 +30,10 @@ export function AuthProvider({ children, initialToken }) {
     };
   }, [logout]);
 
+  const value = useMemo(() => ({ token, isLoggedIn, login, logout }), [token, isLoggedIn, login, logout]);
+
   return (
-    <AuthContext.Provider value={{ token, isLoggedIn, login, logout }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

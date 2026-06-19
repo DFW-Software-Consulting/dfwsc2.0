@@ -9,6 +9,11 @@ services:
       DATABASE_URL: ${DATABASE_URL}
     # Use migrate instead of push for production for better safety and consistency
     command: sh -lc "npm run db:migrate"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     restart: "no"
 
   api:
@@ -35,10 +40,18 @@ services:
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
     ports:
-      - "4242:4242"
+      - "127.0.0.1:4242:4242"
     depends_on:
       migrator:
         condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.5"
+          memory: 256M
     restart: unless-stopped
     command: node dist/index.js
     healthcheck:

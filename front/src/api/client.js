@@ -8,10 +8,18 @@ export async function apiFetch(path, { token, method = "GET", body, headers = {}
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  const data = await res.json().catch(() => ({}));
+  const contentType = res.headers.get("content-type") || "";
+  let data;
+  if (contentType.includes("application/json")) {
+    data = await res.json();
+  } else {
+    const text = await res.text();
+    data = { error: text.slice(0, 200) || `HTTP ${res.status}` };
+  }
   if (!res.ok) {
     const err = new Error(data.error || `HTTP ${res.status}`);
     err.status = res.status;
+    err.data = data;
     throw err;
   }
   return data;
