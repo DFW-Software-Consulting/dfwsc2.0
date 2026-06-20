@@ -290,6 +290,20 @@ Detailed documentation lives in `docs/`:
 - **Stripe webhook signature errors**: update `STRIPE_WEBHOOK_SECRET` to match the Stripe CLI or dashboard endpoint.
 - **Onboarding redirect mismatch**: set `API_BASE_URL` when running behind a reverse proxy.
 
+## 🚀 Production deployment (current)
+
+Hosted on **Coolify** (self-hosted), behind **Cloudflare**. Frontend and backend are **separate Coolify resources** that auto-deploy on push to `main`:
+
+| Resource | Source | Serves | Domain |
+|----------|--------|--------|--------|
+| Frontend app | `./front` (`front/Dockerfile`, nginx) | SPA + proxies `/api/` to the backend | `dfwsc.com`, `www.dfwsc.com` |
+| Backend stack | `docker-compose.prod.yml` (`migrator` → `api` on `:4242`) | API only | internal (proxied via frontend nginx) |
+| Database | Coolify Postgres | — | internal |
+
+> **Not the portal:** `cloud.dfwsc.com` is a **Nextcloud** instance used only as an integration backend (`NEXTCLOUD_BASE_URL`, OpenRegister). The old `stripe.dfwsc.com` / `api.stripe.dfwsc.com` subdomains are **retired** (no DNS).
+
+**404 triage:** a plain `404 page not found` (`text/plain`) on `dfwsc.com` is **Traefik's** default — it means the **frontend Coolify app is down or has lost its domain binding**. Check that app's status + latest deploy log, and confirm its Domains/FQDN field still lists `dfwsc.com` and `www.dfwsc.com`.
+
 ## 🔄 Migration Notes
 
 This project was recently restructured from separate frontend/backend repos:
