@@ -473,6 +473,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const { token } = request.query as { token: string };
+      if (typeof token !== "string" || token.trim().length === 0) {
+        return reply.code(400).send({ error: "token is required." });
+      }
       try {
         const { accountLinkUrl } = await createAccountLinkForToken(request, token);
         return reply.send({ url: accountLinkUrl });
@@ -509,6 +512,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const { token } = request.query as { token: string };
+      if (typeof token !== "string" || token.trim().length === 0) {
+        return reply.code(400).send({ error: "token is required." });
+      }
 
       try {
         const { accountLinkUrl } = await createAccountLinkForToken(request, token);
@@ -527,7 +533,14 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           "Stripe accountLinks.create failed during refresh"
         );
 
-        return reply.code(statusCode).send({ error: errorMessage });
+        if (statusCode === 404) {
+          return reply.code(404).send({ error: errorMessage });
+        }
+
+        return reply.code(502).send({
+          error: "Failed to create Stripe account link. Please try again.",
+          code: "STRIPE_ACCOUNT_LINK_FAILED",
+        });
       }
     }
   );
@@ -710,9 +723,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           .update(onboardingTokens)
           .set({
             status: tokenStatus,
-            // Once onboarding is fully complete, invalidate the single-use
-            // state nonce so this callback URL cannot be replayed.
-            ...(tokenStatus === "completed" ? { state: null } : {}),
+            // Single-use nonce: invalidate on first successful callback
+            // regardless of in_progress/completed, so this callback URL
+            // cannot be replayed. Legitimate re-entry (GET /onboard-client,
+            // GET /connect/refresh) mints a fresh state via
+            // createAccountLinkForToken.
+            state: null,
             updatedAt: new Date(),
           })
           .where(eq(onboardingTokens.id, onboardingRecord.id));

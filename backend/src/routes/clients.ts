@@ -271,10 +271,17 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       if ("groupId" in body) setValues.groupId = groupId;
       if ("paymentSuccessUrl" in body) setValues.paymentSuccessUrl = paymentSuccessUrl;
       if ("paymentCancelUrl" in body) setValues.paymentCancelUrl = paymentCancelUrl;
-      if ("processingFeePercent" in body)
+      if ("processingFeePercent" in body) {
         setValues.processingFeePercent =
           processingFeePercent != null ? String(processingFeePercent) : null;
-      if ("processingFeeCents" in body) setValues.processingFeeCents = processingFeeCents;
+        // Setting a non-null percent fee clears the flat cents fee to keep them mutually exclusive.
+        if (processingFeePercent != null) setValues.processingFeeCents = null;
+      }
+      if ("processingFeeCents" in body) {
+        setValues.processingFeeCents = processingFeeCents;
+        // Setting a non-null cents fee clears the percent fee to keep them mutually exclusive.
+        if (processingFeeCents != null) setValues.processingFeePercent = null;
+      }
       if (name !== undefined) setValues.name = name;
       if (email !== undefined) setValues.email = email;
       if ("phone" in body) setValues.phone = body.phone;
