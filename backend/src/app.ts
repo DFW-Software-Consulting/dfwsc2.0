@@ -16,13 +16,34 @@ import productRoutes from "./routes/products";
 import settingsRoutes from "./routes/settings";
 import webhooksRoute from "./routes/webhooks";
 
+// Resolve trustProxy from TRUST_PROXY env. Accepts a plain integer (number of
+// proxy hops), 'true'/'false' (boolean), or unset (defaults to 1 hop — the
+// nginx/Coolify reverse proxy) so request.ip reflects the real client.
+function resolveTrustProxy(): number | boolean {
+  const raw = process.env.TRUST_PROXY;
+  if (raw === undefined || raw.trim() === "") {
+    return 1;
+  }
+  const trimmed = raw.trim();
+  if (trimmed === "true") {
+    return true;
+  }
+  if (trimmed === "false") {
+    return false;
+  }
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  return 1;
+}
+
 export async function buildServer() {
   const logger = process.env.NODE_ENV === "test" ? { level: "silent" } : true;
   const server = fastify({
     logger,
-    // Trust exactly one reverse-proxy hop (nginx/Coolify) so request.ip
-    // reflects the real client, not the proxy.
-    trustProxy: 1,
+    // Trust reverse-proxy hops so request.ip reflects the real client, not the
+    // proxy. Configurable via TRUST_PROXY (defaults to 1 hop).
+    trustProxy: resolveTrustProxy(),
     // Generate unique request IDs for tracing
     genReqId: () => crypto.randomUUID(),
     ajv: {
