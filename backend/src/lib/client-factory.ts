@@ -5,6 +5,7 @@ import validator from "validator";
 import { db } from "../db/client";
 import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { hashApiKey, sha256Lookup } from "./auth";
+import { dbErrorConstraint, errors, isUniqueViolation } from "./errors";
 import type { Workspace } from "./workspace";
 
 function generateApiKey(): string {
@@ -64,25 +65,36 @@ export async function createClientWithOnboardingToken({
   const token = crypto.randomBytes(32).toString("hex");
   const onboardingTokenId = uuidv4();
 
-  await db.transaction(async (tx) => {
-    await tx.insert(clients).values({
-      id: clientId,
-      workspace,
-      name,
-      email,
-      apiKeyHash,
-      apiKeyLookup,
-      ...(groupId ? { groupId } : {}),
-    });
+  try {
+    await db.transaction(async (tx) => {
+      await tx.insert(clients).values({
+        id: clientId,
+        workspace,
+        name,
+        email,
+        apiKeyHash,
+        apiKeyLookup,
+        ...(groupId ? { groupId } : {}),
+      });
 
-    await tx.insert(onboardingTokens).values({
-      id: onboardingTokenId,
-      clientId,
-      token,
-      status: "pending",
-      email,
+      await tx.insert(onboardingTokens).values({
+        id: onboardingTokenId,
+        clientId,
+        token,
+        status: "pending",
+        email,
+      });
     });
-  });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const constraint = dbErrorConstraint(err);
+      if (constraint?.includes("email")) {
+        throw errors.conflict("A client with this email already exists.");
+      }
+      throw errors.conflict("A client with these details already exists.");
+    }
+    throw err;
+  }
 
   return { clientId, apiKey, token };
 }

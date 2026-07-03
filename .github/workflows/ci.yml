@@ -97,7 +97,7 @@ jobs:
           node-version: 20
       - run: npm ci
       - name: Secret scan (secretlint)
-        run: npx secretlint --secretlintignore .gitignore "**/*"
+        run: npx secretlint "**/*"
 
   commitlint:
     runs-on: ubuntu-latest

@@ -58,12 +58,13 @@ export async function getAdminFromDb(username: string): Promise<{
   username: string;
   passwordHash: string;
   setupConfirmed: boolean | null;
+  active: boolean | null;
 } | null> {
   const [admin] = await db.select().from(admins).where(eq(admins.username, username)).limit(1);
   return admin ?? null;
 }
 
-export function signJwt(payload: { role: string }): string {
+export function signJwt(payload: { role: string; sub: string }): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     throw new Error("JWT_SECRET is not configured");
@@ -95,7 +96,9 @@ export async function requireAdminJwt(request: FastifyRequest, reply: FastifyRep
       throw new Error("JWT_SECRET is not configured");
     }
 
-    const decoded = jwt.verify(token, secret) as jwt.JwtPayload & { role: string };
+    const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] }) as jwt.JwtPayload & {
+      role: string;
+    };
 
     if (decoded.role !== "admin") {
       return reply.code(403).send({ error: "Forbidden: Admin role required" });

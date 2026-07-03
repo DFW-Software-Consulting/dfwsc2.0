@@ -123,21 +123,38 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
     expect(loginRes1.statusCode).toBe(200);
     expect(loginRes1.json()).toHaveProperty("token");
 
-    // Step 3: setup/status → bootstrapPending=true
+    // Step 3: setup/status → adminConfigured=false (setupConfirmed is still
+    // false at this point). `bootstrapPending` is intentionally not exposed
+    // to unauthenticated callers.
     const statusRes = await server.inject({
       method: "GET",
       url: "/api/v1/auth/setup/status",
     });
     expect(statusRes.statusCode).toBe(200);
-    expect(statusRes.json().bootstrapPending).toBe(true);
+    expect(statusRes.json()).not.toHaveProperty("bootstrapPending");
     expect(statusRes.json().adminConfigured).toBe(false);
+    expect(statusRes.json().requiresSetup).toBe(false);
 
-    // Step 4: confirm-bootstrap with new creds → 200
-    const confirmRes = await server.inject({
+    // Step 3b: confirm-bootstrap now requires an authenticated admin JWT.
+    // An unauthenticated call must be rejected.
+    const unauthConfirmRes = await server.inject({
       method: "POST",
       url: "/api/v1/auth/confirm-bootstrap",
       payload: { username: newUsername, password: newPassword },
       headers: { "content-type": "application/json" },
+    });
+    expect(unauthConfirmRes.statusCode).toBe(401);
+
+    // Step 4: confirm-bootstrap with new creds, authenticated using the
+    // bootstrap admin's JWT obtained in step 2 → 200
+    const confirmRes = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/confirm-bootstrap",
+      payload: { username: newUsername, password: newPassword },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${loginRes1.json().token}`,
+      },
     });
     expect(confirmRes.statusCode).toBe(200);
     expect(confirmRes.json().message).toBe("Admin credentials confirmed");

@@ -299,7 +299,7 @@ This project was recently restructured from separate frontend/backend repos:
 - `stripe_payment_portal` - Separate backend
 
 **After:**
-- `dfwsc2.0/front` - React frontend (built and served by nginx)
+- `dfwsc2.0/front` - React frontend (built and served by nginx, deployed as a container on Coolify)
 - `dfwsc2.0/backend` - Fastify backend (API only)
 
 **Benefits:**

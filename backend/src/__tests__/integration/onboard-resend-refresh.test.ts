@@ -261,6 +261,42 @@ describe("Onboard Resend + Connect Refresh", () => {
 
       expect(response.statusCode).toBe(401);
     });
+
+    it("short-circuits and does not issue a new link when the client is already fully onboarded", async () => {
+      const token = makeAdminToken();
+
+      const liveClientId = randomUUID();
+      await db.insert(clients).values({
+        id: liveClientId,
+        name: "Already Live Client",
+        email: `live-${liveClientId}@example.com`,
+        status: "active",
+        stripeAccountId: "acct_already_live",
+        chargesEnabled: true,
+      });
+      extraClientIds.push(liveClientId);
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/onboard-client/resend",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { clientId: liveClientId },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        clientId: liveClientId,
+        alreadyOnboarded: true,
+      });
+
+      // No new onboarding token should have been created and no email sent.
+      const tokens = await db
+        .select()
+        .from(onboardingTokens)
+        .where(eq(onboardingTokens.clientId, liveClientId));
+      expect(tokens).toHaveLength(0);
+      expect(sendMail).not.toHaveBeenCalled();
+    });
   });
 
   // ── GET /connect/refresh ──────────────────────────────────────────────────
@@ -378,6 +414,36 @@ describe("Onboard Resend + Connect Refresh", () => {
       });
 
       expect(response.statusCode).toBe(404);
+    });
+
+    it("returns 404 when the onboarding token has exceeded its TTL", async () => {
+      const cId = randomUUID();
+      const tValue = randomBytes(32).toString("hex");
+
+      await db.insert(clients).values({
+        id: cId,
+        name: "Expired Token Client",
+        email: `expired-${cId}@example.com`,
+        status: "active",
+      });
+      // Created 25 hours ago — past the 24h onboarding token TTL.
+      await db.insert(onboardingTokens).values({
+        id: randomUUID(),
+        clientId: cId,
+        token: tValue,
+        status: "pending",
+        email: `expired-${cId}@example.com`,
+        createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+      });
+      extraClientIds.push(cId);
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/connect/refresh?token=${tValue}`,
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error).toMatch(/expired/i);
     });
 
     it("returns 502 when stripe.accountLinks.create throws", async () => {

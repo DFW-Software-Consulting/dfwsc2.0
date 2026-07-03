@@ -95,7 +95,7 @@ describe("Admin Setup Integration", () => {
       const body = response.json();
       expect(body.requiresSetup).toBe(true);
       expect(body.adminConfigured).toBe(false);
-      expect(body.bootstrapPending).toBe(false);
+      expect(body.bootstrapPending).toBeUndefined();
 
       await server.close();
     });
@@ -122,13 +122,13 @@ describe("Admin Setup Integration", () => {
       expect(response.statusCode).toBe(200);
       const body = response.json();
       expect(body.adminConfigured).toBe(true);
-      expect(body.bootstrapPending).toBe(false);
+      expect(body.bootstrapPending).toBeUndefined();
       expect(body.requiresSetup).toBe(false);
 
       await server.close();
     });
 
-    it("should return bootstrapPending=true when admin exists but not yet confirmed", async () => {
+    it("does not expose bootstrapPending when admin exists but not yet confirmed", async () => {
       dbState.admins = [
         {
           id: "admin-1",
@@ -148,7 +148,7 @@ describe("Admin Setup Integration", () => {
 
       expect(response.statusCode).toBe(200);
       const body = response.json();
-      expect(body.bootstrapPending).toBe(true);
+      expect(body.bootstrapPending).toBeUndefined();
       expect(body.adminConfigured).toBe(false);
       expect(body.requiresSetup).toBe(false);
 

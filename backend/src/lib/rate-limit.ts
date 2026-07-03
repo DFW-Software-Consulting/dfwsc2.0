@@ -1,5 +1,4 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import Redis from "ioredis";
 
 type RateLimitOptions = {
   max: number;
@@ -8,19 +7,7 @@ type RateLimitOptions = {
   maxGenerator?: (request: FastifyRequest) => number;
 };
 
-let redis: Redis | null = null;
-
-function getRedis(): Redis {
-  if (!redis) {
-    redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", {
-      maxRetriesPerRequest: 3,
-      lazyConnect: true,
-    });
-  }
-  return redis;
-}
-
-// Fallback to in-memory if Redis is unavailable
+// In-memory limiter — assumes a single API instance. Pin the api service to 1 replica in prod.
 export const hitBuckets = new Map<string, number[]>();
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 let maxRegisteredWindowMs = 0;
@@ -45,26 +32,6 @@ export function rateLimit(options: RateLimitOptions) {
     const now = Date.now();
     const windowStart = now - windowMs;
 
-    try {
-      const r = getRedis();
-      if (r.status === "ready") {
-        const pipeline = r.pipeline();
-        pipeline.zremrangebyscore(key, "0", String(windowStart));
-        pipeline.zadd(key, String(now), `${now}`);
-        pipeline.zcard(key);
-        pipeline.pexpire(key, windowMs);
-        const results = await pipeline.exec();
-        const count = (results?.[2]?.[1] as number) ?? 0;
-        if (count > maxForRequest) {
-          return reply.code(429).send({ error: "Too Many Requests" });
-        }
-        return;
-      }
-    } catch {
-      // Fall through to in-memory
-    }
-
-    // In-memory fallback
     const hits = hitBuckets.get(key) ?? [];
     const recentHits = hits.filter((timestamp) => timestamp > windowStart);
     if (recentHits.length >= maxForRequest) {

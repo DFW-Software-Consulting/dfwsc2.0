@@ -20,8 +20,8 @@ async function start() {
     if (process.env.NODE_ENV !== "production") {
       await runMigrations(server);
     }
-    await bootstrapAdminIfNeeded(server);
     await verifyDatabaseSchema();
+    await bootstrapAdminIfNeeded(server);
     await server.listen({ port: Number(process.env.PORT) || 4242, host: "0.0.0.0" });
   } catch (err) {
     server.log.error(err);

@@ -131,6 +131,7 @@ describe("Connect Callback State Validation Integration", () => {
 
     // Should redirect successfully (302 for redirect)
     expect(callbackResponse.statusCode).toBe(302);
+    expect(callbackResponse.headers.location).toContain("status=completed");
 
     // Verify that the stripeAccountId was updated in the database
     const [updatedClient] = await db.select().from(clients).where(eq(clients.id, clientId));
@@ -142,6 +143,8 @@ describe("Connect Callback State Validation Integration", () => {
       .from(onboardingTokens)
       .where(eq(onboardingTokens.id, onboardingTokenId));
     expect(tokenRecord.status).toBe("completed");
+    // The single-use state nonce is invalidated once the flow completes.
+    expect(tokenRecord.state).toBeNull();
 
     // Clean up
     await db.delete(clients).where(eq(clients.id, clientId));
@@ -481,5 +484,61 @@ describe("Connect Callback State Validation Integration", () => {
     await db.delete(clients).where(eq(clients.id, clientBId));
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenAId));
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenBId));
+  });
+
+  it("should reject a replayed state parameter after the token has completed", async () => {
+    const clientId = randomUUID();
+    const testEmail = `test-${randomUUID()}@example.com`;
+    const testStripeAccount = "acct_test123456789";
+
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Test Client",
+      email: testEmail,
+      status: "active",
+      workspace: "client_portal",
+    });
+
+    const onboardingTokenId = randomUUID();
+    const state = `test_state_${randomUUID().replace(/-/g, "")}`;
+    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+    await db.insert(onboardingTokens).values({
+      id: onboardingTokenId,
+      clientId: clientId,
+      token: `test_token_${randomUUID().replace(/-/g, "")}`,
+      status: "in_progress",
+      email: testEmail,
+      state: state,
+      stateExpiresAt: stateExpiresAt,
+    });
+
+    // First callback: completes onboarding and consumes the state nonce.
+    const firstResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=${testStripeAccount}&state=${state}`,
+    });
+    expect(firstResponse.statusCode).toBe(302);
+
+    const [tokenRecord] = await db
+      .select()
+      .from(onboardingTokens)
+      .where(eq(onboardingTokens.id, onboardingTokenId));
+    expect(tokenRecord.status).toBe("completed");
+
+    // Replaying the exact same callback URL (same state) must be rejected.
+    const replayResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=${testStripeAccount}&state=${state}`,
+    });
+
+    expect(replayResponse.statusCode).toBe(400);
+    expect(replayResponse.json()).toEqual({
+      error: "Invalid or expired state parameter.",
+    });
+
+    // Clean up
+    await db.delete(clients).where(eq(clients.id, clientId));
+    await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenId));
   });
 });

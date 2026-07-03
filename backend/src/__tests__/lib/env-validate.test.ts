@@ -76,6 +76,46 @@ describe("validateEnv", () => {
 
     expect(() => validateEnv()).not.toThrow();
   });
+
+  it("throws in production when ADMIN_PASSWORD is too short", () => {
+    for (const [k, v] of Object.entries(BASE_ENV)) {
+      process.env[k] = v;
+    }
+    process.env.NODE_ENV = "production";
+    process.env.ADMIN_PASSWORD = "short1";
+
+    expect(() => validateEnv()).toThrow("ADMIN_PASSWORD is too weak");
+  });
+
+  it("throws in production when ADMIN_PASSWORD is a known-dev value", () => {
+    for (const [k, v] of Object.entries(BASE_ENV)) {
+      process.env[k] = v;
+    }
+    process.env.NODE_ENV = "production";
+    process.env.ADMIN_PASSWORD = "changeme";
+
+    expect(() => validateEnv()).toThrow("ADMIN_PASSWORD is too weak");
+  });
+
+  it("allows a strong ADMIN_PASSWORD in production", () => {
+    for (const [k, v] of Object.entries(BASE_ENV)) {
+      process.env[k] = v;
+    }
+    process.env.NODE_ENV = "production";
+    process.env.ADMIN_PASSWORD = "Str0ng-Adm1n-Passw0rd!";
+
+    expect(() => validateEnv()).not.toThrow();
+  });
+
+  it("allows a weak ADMIN_PASSWORD outside production", () => {
+    for (const [k, v] of Object.entries(BASE_ENV)) {
+      process.env[k] = v;
+    }
+    process.env.NODE_ENV = "development";
+    process.env.ADMIN_PASSWORD = "changeme";
+
+    expect(() => validateEnv()).not.toThrow();
+  });
 });
 
 describe("logMaskedEnvSummary (maskValue behaviour)", () => {
@@ -103,13 +143,52 @@ describe("logMaskedEnvSummary (maskValue behaviour)", () => {
     expect(call[0].env.EMPTY).toBe("undefined");
   });
 
-  it("masks a long value by keeping the first 6 chars visible", () => {
+  it("masks a long non-secret value by keeping the first 6 chars visible", () => {
     const fakeServer = { log: { info: vi.fn() } };
-    logMaskedEnvSummary(fakeServer as any, { LONG: "sk_test_supersecretvalue" });
+    logMaskedEnvSummary(fakeServer as any, { LONG: "some_long_preview_value" });
 
     const call = fakeServer.log.info.mock.calls[0];
     const masked: string = call[0].env.LONG;
-    expect(masked.startsWith("sk_tes")).toBe(true);
+    expect(masked.startsWith("some_l")).toBe(true);
     expect(masked).toContain("*");
+  });
+
+  it("fully redacts a fully-secret key with no prefix or length leak", () => {
+    const fakeServer = { log: { info: vi.fn() } };
+    logMaskedEnvSummary(fakeServer as any, { STRIPE_SECRET_KEY: "sk_test_supersecretvalue" });
+
+    const call = fakeServer.log.info.mock.calls[0];
+    expect(call[0].env.STRIPE_SECRET_KEY).toBe("<redacted>");
+  });
+
+  it("fully redacts any key matching *_SECRET/*_PASSWORD/*_KEY patterns", () => {
+    const fakeServer = { log: { info: vi.fn() } };
+    logMaskedEnvSummary(fakeServer as any, {
+      JWT_SECRET: "abcdefghijklmnopqrstuvwxyz",
+      SMTP_PASS: "abcdefghijklmnop",
+      DATABASE_URL: "postgresql://user:pass@host:5432/db",
+      ADMIN_PASSWORD: "Str0ng-Adm1n-Passw0rd!",
+      NEXTCLOUD_APP_PASSWORD: "some-app-password",
+      ADMIN_SETUP_TOKEN: "some-setup-token",
+      CUSTOM_KEY: "custom-key-value",
+    });
+
+    const call = fakeServer.log.info.mock.calls[0];
+    const env = call[0].env;
+    expect(env.JWT_SECRET).toBe("<redacted>");
+    expect(env.SMTP_PASS).toBe("<redacted>");
+    expect(env.DATABASE_URL).toBe("<redacted>");
+    expect(env.ADMIN_PASSWORD).toBe("<redacted>");
+    expect(env.NEXTCLOUD_APP_PASSWORD).toBe("<redacted>");
+    expect(env.ADMIN_SETUP_TOKEN).toBe("<redacted>");
+    expect(env.CUSTOM_KEY).toBe("<redacted>");
+  });
+
+  it('fully redacts to "undefined" when a secret value is empty', () => {
+    const fakeServer = { log: { info: vi.fn() } };
+    logMaskedEnvSummary(fakeServer as any, { JWT_SECRET: "" });
+
+    const call = fakeServer.log.info.mock.calls[0];
+    expect(call[0].env.JWT_SECRET).toBe("undefined");
   });
 });

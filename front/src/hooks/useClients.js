@@ -63,15 +63,21 @@ export function usePatchClientStatus() {
   return useMutation({
     mutationFn: ({ id, status }) => patchClient(token, id, { status }),
     onMutate: async ({ id, status }) => {
-      await queryClient.cancelQueries({ queryKey: ["clients"] });
-      const prev = queryClient.getQueryData(["clients"]);
-      queryClient.setQueryData(["clients"], (old) =>
+      const isClientsQuery = (query) => query.queryKey[0] === "clients";
+      await queryClient.cancelQueries({ predicate: isClientsQuery });
+      const prev = queryClient.getQueriesData({ predicate: isClientsQuery });
+      queryClient.setQueriesData({ predicate: isClientsQuery }, (old) =>
         old?.map((c) => (c.id === id ? { ...c, status } : c))
       );
       return { prev };
     },
-    onError: (_err, _vars, ctx) => queryClient.setQueryData(["clients"], ctx.prev),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
+    onError: (_err, _vars, ctx) => {
+      ctx?.prev?.forEach(([queryKey, data]) => {
+        queryClient.setQueryData(queryKey, data);
+      });
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "clients" }),
   });
 }
 

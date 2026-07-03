@@ -3,6 +3,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { isUniqueViolation } from "../lib/errors";
 import { isValidHttpsUrl } from "../lib/validation";
 import { isWorkspace } from "../lib/workspace";
 
@@ -203,13 +204,13 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           .send({ error: "defaultPaymentTermsDays must be a positive integer." });
       }
 
+      const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
+
+      if (!existingClient) {
+        return res.status(404).send({ error: "Client not found." });
+      }
+
       if (groupId != null) {
-        const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
-
-        if (!existingClient) {
-          return res.status(404).send({ error: "Client not found." });
-        }
-
         const [group] = await db
           .select({ id: clientGroups.id, workspace: clientGroups.workspace })
           .from(clientGroups)
@@ -223,12 +224,6 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
             .status(400)
             .send({ error: "groupId workspace does not match client workspace." });
         }
-      }
-
-      const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
-
-      if (!existingClient) {
-        return res.status(404).send({ error: "Client not found." });
       }
 
       if (email !== undefined) {
@@ -294,11 +289,21 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       if ("defaultPaymentTermsDays" in body)
         setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
 
-      const updatedClients = await db
-        .update(clients)
-        .set(setValues)
-        .where(eq(clients.id, id))
-        .returning();
+      let updatedClients: (typeof clients.$inferSelect)[];
+      try {
+        updatedClients = await db
+          .update(clients)
+          .set(setValues)
+          .where(eq(clients.id, id))
+          .returning();
+      } catch (updateError) {
+        if (isUniqueViolation(updateError)) {
+          return res
+            .status(409)
+            .send({ error: "A client with this email already exists in this workspace." });
+        }
+        throw updateError;
+      }
 
       if (updatedClients.length === 0) {
         return res.status(500).send({ error: "Failed to update client." });

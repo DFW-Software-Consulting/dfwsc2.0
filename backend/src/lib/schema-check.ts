@@ -21,6 +21,8 @@ const REQUIRED_TABLES: TableColumns[] = [
       "charges_enabled",
       "payouts_enabled",
       "details_submitted",
+      "workspace",
+      "group_id",
       "created_at",
       "updated_at",
     ],
@@ -46,6 +48,14 @@ const REQUIRED_TABLES: TableColumns[] = [
       "created_at",
       "updated_at",
     ],
+  },
+  {
+    table: "settings",
+    columns: ["key", "value", "updated_at"],
+  },
+  {
+    table: "client_groups",
+    columns: ["id", "workspace", "name", "status", "created_at", "updated_at"],
   },
 ];
 
