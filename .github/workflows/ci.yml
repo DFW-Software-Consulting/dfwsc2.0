@@ -166,3 +166,22 @@ jobs:
             exit 1
           fi
           echo "Agent docs in sync."
+
+  # Fallow codebase-intelligence gate: fails only on NEW dead code / circular deps /
+  # unresolved imports introduced beyond the committed baselines. Existing debt is
+  # baselined (see fallow-baselines/), so touching a file with legacy findings does
+  # not fail CI — only regressions do. Regenerate a baseline after cleaning debt:
+  #   (cd backend && npx fallow@2.104.0 dead-code --save-baseline ../fallow-baselines/backend-dead-code.json --quiet)
+  fallow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Fallow dead-code gate (backend)
+        working-directory: backend
+        run: npx --yes fallow@2.104.0 dead-code --baseline ../fallow-baselines/backend-dead-code.json --fail-on-issues --quiet
+      - name: Fallow dead-code gate (frontend)
+        working-directory: front
+        run: npx --yes fallow@2.104.0 dead-code --baseline ../fallow-baselines/front-dead-code.json --fail-on-issues --quiet
