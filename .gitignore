@@ -58,3 +58,6 @@ zzzzz.txt
 # Memory bank (planning/documentation)
 memory-bank/
 backend/tsconfig.tsbuildinfo
+
+# Fallow cache (baselines under fallow-baselines/ are committed intentionally)
+.fallow/
