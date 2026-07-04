@@ -51,6 +51,11 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
     async (req, res) => {
       try {
         const { key } = req.params;
+
+        if (!req.body || typeof req.body !== "object" || !("value" in req.body)) {
+          return res.status(400).send({ error: "value is required." });
+        }
+
         const { value } = req.body;
 
         if (!ALLOWED_SETTING_KEYS.has(key)) {

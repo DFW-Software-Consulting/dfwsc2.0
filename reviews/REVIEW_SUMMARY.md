@@ -1,3 +1,5 @@
+> **STALE** — 2026-04 snapshot referencing the removed `dfwsc_services` workspace and phantom `/dfwsc-clients`, `/stripe-customers`, `invoices.ts`/`subscriptions.ts` routes that no longer exist. See `README.md` and `backend/src/routes/` for current truth.
+
 # Documentation Review Complete
 
 ## Summary
