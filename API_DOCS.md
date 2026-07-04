@@ -355,9 +355,9 @@ Validates the token, creates a Stripe Express account (if not already created), 
 
 ### Stripe Connect
 
-#### `GET /api/v1/connect/callback?client_id=...&state=...&account=...`
+#### `GET /api/v1/connect/callback?client_id=...&state=...`
 
-No auth. This is the redirect URL Stripe calls after a client completes onboarding. You don't call this manually — Stripe does.
+No auth. This is the redirect URL Stripe calls after a client completes onboarding. You don't call this manually — Stripe does. Stripe only redirects to the platform-registered `return_url` (`client_id` + `state`); it does not append `account`. An `account` query param is accepted only as an optional legacy/manual cross-check — the client's `stripeAccountId` is looked up from the database.
 
 After successful validation, the client's `stripeAccountId` is saved and the user is redirected to `<FRONTEND_ORIGIN>/onboarding-success`.
 

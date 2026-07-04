@@ -12,7 +12,7 @@ The platform uses **Stripe Connect** with **Express Accounts**.
 2. **Email**: Client receives a link to `/onboard?token=...`.
 3. **Account Link**: `GET /api/v1/onboard-client?token=...` creates a Stripe Express Account (if not yet created) and returns an Account Link URL. Token moves to `in_progress`.
 4. **Stripe Redirect**: Client completes onboarding on Stripe-hosted pages.
-5. **Callback**: Stripe redirects to `GET /api/v1/connect/callback?client_id=...&account=acct_...&state=...`. State is CSRF-validated (32-byte, 30-min expiry). `stripeAccountId` is written to the client record; token is marked `completed`. Browser is redirected to `/onboarding-success`.
+5. **Callback**: Stripe redirects to the platform-registered return URL, `GET /api/v1/connect/callback?client_id=...&state=...` — Stripe does **not** append `account`. `state` is CSRF-validated (32-byte, 30-min expiry) and is the actual security binding; the client's `stripeAccountId` is looked up from the DB (source of truth). An `account` query param is accepted only as an optional legacy/manual cross-check when present. Token is marked `completed`. Browser is redirected to `/onboarding-success`.
 6. **Refresh**: If the account link expires before the client completes it, `GET /api/v1/connect/refresh?token=...` generates a new link and redirects.
 7. **Resend**: `POST /api/v1/onboard-client/resend` revokes all active tokens for the client and issues a new one with a fresh email.
 
@@ -21,7 +21,8 @@ Controlled by the `USE_CHECKOUT` environment variable.
 
 ### Stripe Elements (`USE_CHECKOUT=false`)
 - Creates a **PaymentIntent** on behalf of the client's Express Account.
-- Returns `clientSecret` for the frontend to render `@stripe/react-stripe-js` Elements.
+- Returns `clientSecret`, `paymentIntentId`, and `stripeAccountId` for the frontend to render `@stripe/react-stripe-js` Elements.
+- Integrators must initialize Stripe.js with `{ stripeAccount: stripeAccountId }` (direct-charge Elements requires the connected account context).
 - Requires `amount` (cents) and `currency` in the request body.
 - `Idempotency-Key` header is required for API key calls.
 

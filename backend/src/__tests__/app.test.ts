@@ -343,6 +343,7 @@ describe("payments", () => {
     expect(response.json()).toEqual({
       clientSecret: "secret_123",
       paymentIntentId: "pi_123",
+      stripeAccountId: "acct_123",
     });
     await server.close();
   });
