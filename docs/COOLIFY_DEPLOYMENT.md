@@ -44,7 +44,7 @@ All services can be deployed independently on Coolify while sharing the same mon
   API_BASE_URL=https://your-backend-domain.com
   ALLOW_ADMIN_SETUP=false  # Set to true only during initial admin setup
   ```
-- **Startup Command**: `npm run db:migrate && npm run start` (handled by Dockerfile)
+- **Startup Command**: `node dist/index.js` (handled by Dockerfile). Note: the image does **not** run DB migrations at startup — run `npm run db:migrate` separately as part of your deploy process.
 - **Dependencies**: Database service must be healthy first
 - **Healthcheck**: `curl -f http://localhost:4242/api/v1/health || exit 1`
 
@@ -94,7 +94,7 @@ COPY --from=builder /app/drizzle ./drizzle
 
 USER node
 
-CMD ["sh", "-c", "npm run db:migrate && npm run start"]
+CMD ["node", "dist/index.js"]
 ```
 
 ### Frontend Dockerfile (recommended)

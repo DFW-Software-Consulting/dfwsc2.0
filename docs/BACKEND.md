@@ -35,7 +35,7 @@ All payments resolve `application_fee_amount` via a 6-level priority chain:
 If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environment variable is applied as a fallback; if that is also unset, no fee is applied.
 
 ### Onboarding Flow
-1. **Create client**: `POST /api/v1/accounts` creates a client record + pending onboarding token in one transaction, returns `apiKey`, `clientId`, and `onboardingToken`.
+1. **Create client**: `POST /api/v1/accounts` creates a client record + pending onboarding token in one transaction, returns `apiKey`, `clientId`, and `onboardingUrlHint` (a URL embedding the onboarding token; the raw token is no longer returned as a separate `onboardingToken` field).
 2. **Send email**: `POST /api/v1/onboard-client/initiate` does the same but also emails the client.
 3. **Resend**: `POST /api/v1/onboard-client/resend` revokes active tokens and issues a new one with a fresh email.
 4. **Onboard**: `GET /api/v1/onboard-client?token=...` creates a Stripe Express Account (if not already) and returns an Account Link URL.

@@ -1,8 +1,14 @@
 # Accepting Payments with the DFWSC Payment API
 
-This guide is for developers integrating the DFWSC payment API into their own application. By the end you will be able to charge customers directly from your app while keeping them on your site.
+This guide is for developers integrating the DFWSC payment API into their own application. By the end you will be able to charge customers directly from your app.
 
 **Prerequisites:** You have already been onboarded and received your API key. If you haven't, contact your DFWSC administrator.
+
+> **Two payment modes.** The API supports two flows, selected by the `USE_CHECKOUT` server setting:
+> - **Checkout redirect (`USE_CHECKOUT=true`) — the shipped default.** `POST /api/v1/payments/create` requires a `lineItems` array and returns a Stripe-hosted `url`. You redirect the customer to that URL; they complete payment on Stripe and are then sent back to your site. See [How It Works](#how-it-works).
+> - **Elements / PaymentIntents (`USE_CHECKOUT=false`).** The endpoint returns a `clientSecret` and you embed Stripe Elements so customers stay on your site. See [Step 2](#step-2--show-the-payment-form-frontend-elements-mode-only).
+>
+> Confirm which mode your DFWSC server runs before integrating — the request body and response differ between them. The current committed configuration ships with `USE_CHECKOUT=true` (Checkout redirect).
 
 ---
 
@@ -17,16 +23,41 @@ After onboarding you should have been given:
 
 ## How It Works
 
+**Checkout redirect mode (`USE_CHECKOUT=true`, the shipped default):**
+
+1. Your backend calls the DFWSC API with a `lineItems` array — it returns a Stripe-hosted Checkout `url`
+2. You redirect the customer to that `url`
+3. The customer enters and submits their card on Stripe's hosted page — Stripe handles the actual charge
+4. Stripe redirects the customer back to your success/cancel URL, and you get a webhook when the payment succeeds
+
+In this mode the customer is briefly redirected off your site to Stripe Checkout.
+
+**Elements mode (`USE_CHECKOUT=false`):**
+
 1. Your backend calls the DFWSC API with the payment amount — it returns a `clientSecret`
 2. Your frontend uses Stripe.js with that `clientSecret` to show a payment form to the customer
 3. The customer fills in their card and submits — Stripe handles the actual charge
 4. You get a webhook or redirect when the payment succeeds
 
-Your customers never leave your site.
+In Elements mode your customers never leave your site.
 
 ---
 
 ## Quick Start — Test Your API Key
+
+**If your server runs Checkout redirect mode (`USE_CHECKOUT=true`, the default):**
+
+```bash
+curl -X POST https://<your-api-base-url>/api/v1/payments/create \
+  -H "X-Api-Key: <your-api-key>" \
+  -H "Idempotency-Key: test-001" \
+  -H "Content-Type: application/json" \
+  -d '{ "lineItems": [{ "name": "Test", "amount": 100, "currency": "usd", "quantity": 1 }] }'
+```
+
+If your key is working you'll get back a Stripe Checkout `url`. A `401` means your API key is wrong. Sending only `{ "amount": 100, "currency": "usd" }` in this mode returns `400 "lineItems are required when USE_CHECKOUT=true."`.
+
+**If your server runs Elements mode (`USE_CHECKOUT=false`):**
 
 ```bash
 curl -X POST https://<your-api-base-url>/api/v1/payments/create \
@@ -62,7 +93,28 @@ Every request needs a unique `Idempotency-Key`. It prevents double-charges if a 
 
 If you accidentally send the same key twice, the second request returns the same result — no duplicate charge.
 
-### Request Body
+### Request Body (Checkout redirect mode — `USE_CHECKOUT=true`, the default)
+
+```json
+{
+  "lineItems": [
+    { "name": "Invoice #1234", "amount": 5000, "currency": "usd", "quantity": 1 }
+  ],
+  "metadata": {
+    "invoiceId": "1234",
+    "customerName": "Jane Smith"
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `lineItems` | Yes | Non-empty array of items to charge. A bare `{ "amount", "currency" }` body returns `400 "lineItems are required when USE_CHECKOUT=true."` |
+| `metadata` | No | Any key/value pairs you want attached to the payment |
+
+Amounts inside line items are in **cents** (`5000` = $50.00).
+
+### Request Body (Elements mode — `USE_CHECKOUT=false`)
 
 ```json
 {
@@ -83,7 +135,17 @@ If you accidentally send the same key twice, the second request returns the same
 | `description` | No | Shows up in your Stripe dashboard |
 | `metadata` | No | Any key/value pairs you want attached to the payment |
 
-### Response
+### Response (Checkout redirect mode — `USE_CHECKOUT=true`)
+
+```json
+{
+  "url": "https://checkout.stripe.com/c/pay/cs_test_..."
+}
+```
+
+Redirect the customer to `url`. They complete payment on Stripe's hosted page and are returned to your success/cancel URL. There is no `clientSecret` in this mode — skip Step 2 (Elements) entirely.
+
+### Response (Elements mode — `USE_CHECKOUT=false`)
 
 ```json
 {
@@ -92,11 +154,13 @@ If you accidentally send the same key twice, the second request returns the same
 }
 ```
 
-Pass the `clientSecret` to your frontend — do not log or store it.
+Pass the `clientSecret` to your frontend — do not log or store it. Continue with Step 2.
 
 ---
 
-## Step 2 — Show the Payment Form (Frontend)
+## Step 2 — Show the Payment Form (Frontend, Elements mode only)
+
+> This step applies only in Elements mode (`USE_CHECKOUT=false`). In the shipped Checkout redirect mode you redirect the customer to the `url` from Step 1 instead — Stripe hosts the payment form.
 
 Use Stripe.js to collect and submit the card. Stripe handles PCI compliance — you never touch raw card numbers.
 
@@ -153,6 +217,8 @@ After successful payment, Stripe redirects the customer to your `return_url` wit
 ---
 
 ## Code Examples (Backend)
+
+> The examples below show the Elements-mode contract (`USE_CHECKOUT=false`): they send `{ amount, currency }` and read back `{ clientSecret, paymentIntentId }`. For the shipped Checkout redirect mode (`USE_CHECKOUT=true`), send a `lineItems` array instead and read the returned `url` (see Step 1).
 
 ### Node.js
 

@@ -40,7 +40,7 @@ Defined in the `@theme` block. All map to Tailwind's `brand-*` utilities.
 ## 4. Glassmorphism Utilities
 Two prebuilt glass classes defined in `@layer utilities`:
 
-- `.glass` — light-mode glass (blurred, white-tinted border, semi-opaque bg).
+- `.glass` — light-mode glass (blurred, subtle dark border, semi-opaque white bg).
 - `.glass-dark` — dark-mode glass (blurred, white/5 border, black/20 bg).
 
 ## 5. UI Patterns

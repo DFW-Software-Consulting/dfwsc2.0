@@ -63,8 +63,8 @@ dfwsc2.0/
 2. **Configure environment:**
    ```bash
    # Backend configuration
-   cp backend/.env.example backend/.env
-   # Edit backend/.env with your Stripe keys, database URL, SMTP settings
+   cp .env.example .env
+   # Edit .env with your Stripe keys, database URL, SMTP settings
    ```
 
 3. **Run database migrations:**
@@ -232,7 +232,7 @@ VITE_API_URL=/api/v1
 - `npm run dev:frontend` - Start frontend dev server
 - `npm run dev:backend` - Start backend dev server
 - `npm run build` - Build frontend + backend
-- `npm run build:frontend` - Build React app to backend/public
+- `npm run build:frontend` - Build React static assets (output: front/build-dist)
 - `npm run build:backend` - Compile TypeScript backend
 - `npm run start` - Start production server
 - `npm run install:all` - Install all dependencies
