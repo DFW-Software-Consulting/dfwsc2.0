@@ -127,7 +127,7 @@ async function createAccountLinkForToken(
       return_url: callbackUrl,
       type: "account_onboarding",
     },
-    { idempotencyKey: `acct-link-${clientRecord.id}-${hashToken(token)}` }
+    { idempotencyKey: `acct-link-${clientRecord.id}-${state}` }
   );
 
   request.log.info(
