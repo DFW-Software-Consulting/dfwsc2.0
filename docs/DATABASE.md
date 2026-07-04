@@ -63,7 +63,7 @@ Key-value store for system-wide configuration.
 ## 3. Tooling & Migrations
 - **Schema Changes**: Edit `backend/src/db/schema.ts`.
 - **Generate**: `npm run db:generate` — creates SQL migration files in `backend/drizzle/`.
-- **Apply**: `npm run db:migrate` — runs `migrate.ts` to apply pending migrations.
+- **Apply**: `npm run db:migrate` — runs the `drizzle-kit migrate` CLI to apply pending migrations. (Separately, `runMigrations` in `src/lib/migrate.ts` applies the same migrations automatically at app startup in non-production environments.)
 
 ## 4. Idempotency Strategy
 Stripe webhook handling is guarded by the `webhook_events` table. Payment creation uses `Idempotency-Key` headers (required for API key calls).

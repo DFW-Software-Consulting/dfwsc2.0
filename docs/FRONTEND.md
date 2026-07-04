@@ -10,13 +10,13 @@ This document details the frontend implementation, state management, and UI patt
 - **Styling**: TailwindCSS v4
 
 ## 2. Directory Structure (`front/src/`)
-- **`api/`**: API client wrappers per domain (`auth`, `clients`, `groups`, `onboarding`, `payments`, `settings`, `subscriptions`).
+- **`api/`**: API client wrappers per domain (`auth`, `clients`, `groups`, `onboarding`, `payments`, `settings`), built on the shared `client.js` base wrapper.
 - **`components/`**: UI components organized by domain:
   - **`admin/`**: Dashboard components (ClientList, EditClientModal, GroupPanel, PaymentReports, SettingsPanel, etc.).
   - **`admin/shared/`**: Reusable admin primitives (AdminTable, BaseModal, Button, FormInput, StatusBadge, etc.).
   - **Marketing components**: Banner, CaseStudies, Contact, Footer, Hero, Navbar, Process, Services, TechStrip, ValueProps, Values.
 - **`contexts/`**: `AuthContext` (admin JWT state), `ThemeContext` (light/dark toggle).
-- **`hooks/`**: TanStack Query hooks — `useClients`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSubscriptions`, `useSetupStatus`.
+- **`hooks/`**: TanStack Query hooks — `useClients`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus`.
 - **`pages/`**: Route-level components.
 - **`utils/`**: `scrollToSection`, `validation`, `logger`.
 
@@ -49,4 +49,4 @@ Glassmorphism surfaces use the `.glass` and `.glass-dark` utility classes.
 - **GroupPanel**: group creation and management.
 - **PaymentReports**: Stripe PaymentIntent history per client or group.
 - **SettingsPanel**: system settings (company name, default payment terms).
-- **ImportStripeCustomer**: import an existing Stripe customer into the portal.
+- **AddClientModal**: surfaced via an "Add Client" button; creates a new client account in the portal.

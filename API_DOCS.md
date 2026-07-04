@@ -206,41 +206,22 @@ Check whether first-run admin setup is available.
 
 #### `POST /api/v1/auth/setup`
 
-First-run only. Initiates the initial admin account creation. Requires `ALLOW_ADMIN_SETUP=true` and no existing admin in the database.
+> **Deprecated.** This endpoint no longer creates an admin account and always returns `410 Gone`. Bootstrap the initial admin by setting the `ADMIN_USERNAME` / `ADMIN_PASSWORD` environment variables, logging in via `/auth/login`, then calling `/auth/confirm-bootstrap` (see the Setup Flow below).
 
-**Headers (if `ADMIN_SETUP_TOKEN` is set):**
-```
-X-Setup-Token: <your-setup-token>
-```
-
-**Request:**
+**Response `410`:**
 ```json
 {
-  "username": "admin",
-  "password": "at-least-8-chars"
+  "error": "This endpoint is deprecated. Bootstrap the admin using the ADMIN_USERNAME and ADMIN_PASSWORD environment variables and /auth/confirm-bootstrap."
 }
 ```
-
-**Response `200`:**
-```json
-{
-  "username": "admin",
-  "passwordHash": "$2b$10$...",
-  "instructions": [
-    "1. Copy the credentials above",
-    "2. Use these credentials with /auth/confirm-bootstrap to finalize setup",
-    "3. (Recommended) Set ALLOW_ADMIN_SETUP=false in your environment."
-  ]
-}
-```
-
-> **Note:** This endpoint returns a password hash for verification. The admin account is not fully active until confirmed via `/auth/confirm-bootstrap`.
 
 ---
 
 #### `POST /api/v1/auth/confirm-bootstrap`
 
-Finalizes the admin account setup after initial creation via `/auth/setup`. This stores the credentials in the database and enables login.
+**Auth: Admin JWT**
+
+Finalizes the admin account setup. Call this after logging in via `/auth/login` with the bootstrap credentials (`ADMIN_USERNAME` / `ADMIN_PASSWORD`) to obtain a JWT. This confirms the credentials in the database and clears the pending bootstrap state.
 
 **Request:**
 ```json
@@ -259,9 +240,10 @@ Finalizes the admin account setup after initial creation via `/auth/setup`. This
 
 **Errors:**
 - `400` — Missing username/password, or bootstrap already confirmed, or no bootstrap admin found
+- `401` — Missing or invalid admin JWT
 - `429` — Rate limited
 
-> **Setup Flow:** 1) Call `/auth/setup` to generate credentials → 2) Call `/auth/confirm-bootstrap` with same credentials to store in DB → 3) Login via `/auth/login`
+> **Setup Flow:** 1) Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables → 2) Login via `/auth/login` with those credentials to obtain an admin JWT (the response indicates `bootstrapPending`) → 3) Call `/auth/confirm-bootstrap` with that Bearer token to finalize setup.
 
 ---
 
@@ -865,18 +847,15 @@ Events are stored in `webhook_events` for idempotency — duplicate events are i
 
 ### Configuration
 
-#### `GET /api/v1/config`
+#### `GET /app-config.js`
 
-No auth required. Returns public configuration used by the frontend.
+No auth required. Registered without the `/api/v1` prefix. Returns a small JavaScript snippet (not JSON) that the frontend loads to discover the API base URL:
 
-**Response `200`:**
-```json
-{
-  "useCheckout": true
-}
+```js
+window.API_URL = "https://api.example.com";
 ```
 
-This indicates whether the backend is configured to use Stripe Checkout (`true`) or PaymentIntent (`false`) mode.
+> The `USE_CHECKOUT` flag is read only server-side inside the payments handler; it is **not** exposed by any endpoint.
 
 ---
 
