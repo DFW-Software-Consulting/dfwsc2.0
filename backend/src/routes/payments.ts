@@ -237,19 +237,29 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: "lineItems are required when USE_CHECKOUT=true." });
       }
 
-      let baseAmount = amount ?? 0;
-      const hasExplicitAmount = typeof amount === "number" && amount > 0;
+      const hasExplicitAmount = typeof amount === "number";
+      if (hasExplicitAmount && (!Number.isInteger(amount) || (amount as number) <= 0)) {
+        return reply
+          .code(400)
+          .send({ error: "amount must be a positive integer (in the smallest currency unit)." });
+      }
+
+      let baseAmount = hasExplicitAmount ? (amount as number) : 0;
       if (!hasExplicitAmount) {
-        baseAmount = lineItems.reduce((acc, item) => {
+        for (const item of lineItems) {
           const unitAmount = item.price_data?.unit_amount;
           if (typeof unitAmount !== "number" || unitAmount <= 0) {
             request.log.warn(
               { item: { price_data: item.price_data, price: item.price } },
               "Line item missing unit_amount - using price ID requires explicit amount"
             );
+            return reply.code(400).send({
+              error:
+                "An explicit integer amount is required when any line item references a Stripe price ID.",
+            });
           }
-          return acc + (typeof unitAmount === "number" ? unitAmount : 0) * (item.quantity || 1);
-        }, 0);
+          baseAmount += unitAmount * (item.quantity || 1);
+        }
       }
 
       if (baseAmount <= 0) {
@@ -407,22 +417,41 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       const maxConcurrency = 3;
       const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
+      const failedAccounts: string[] = [];
       let hasMore = false;
       for (let i = 0; i < connected.length; i += maxConcurrency) {
         const batch = connected.slice(i, i + maxConcurrency);
-        const batchResults = await Promise.all(
+        const settled = await Promise.allSettled(
           batch.map(async (c) => {
             const pi = await stripe.paymentIntents.list(perAccountParams, {
               stripeAccount: c.stripeAccountId,
             });
-            if (pi.has_more) hasMore = true;
-            return pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name }));
+            return { pi, client: c };
           })
         );
-        results.push(...batchResults);
+        for (let j = 0; j < settled.length; j++) {
+          const outcome = settled[j];
+          if (outcome.status === "fulfilled") {
+            const { pi, client: c } = outcome.value;
+            if (pi.has_more) hasMore = true;
+            results.push(pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name })));
+          } else {
+            const c = batch[j];
+            failedAccounts.push(c.id);
+            request.log.error(
+              { err: outcome.reason, clientId: c.id, stripeAccountId: c.stripeAccountId },
+              "Failed to list payments for connected account; excluding from group report"
+            );
+          }
+        }
       }
       const merged = results.flat();
-      return reply.send({ groupId, data: merged, hasMore });
+      return reply.send({
+        groupId,
+        data: merged,
+        hasMore,
+        ...(failedAccounts.length > 0 ? { partial: true, failedClientIds: failedAccounts } : {}),
+      });
     }
 
     if (!clientId) {
