@@ -15,7 +15,18 @@ vi.mock("../../lib/stripe", () => ({
       }),
       update: vi.fn().mockResolvedValue({ id: "sub_test" }),
     },
+    invoices: {
+      // Idempotent invoice.paid derives the paid count from this listing.
+      list: vi.fn().mockResolvedValue({
+        data: [{ id: "in_test1", status: "paid" }],
+        has_more: false,
+      }),
+    },
     subscriptionSchedules: {
+      retrieve: vi.fn().mockResolvedValue({
+        id: "sched_test",
+        metadata: { paymentsMade: "0" },
+      }),
       update: vi.fn().mockResolvedValue({ id: "sched_test" }),
     },
   },
@@ -486,16 +497,84 @@ describe("POST /api/v1/webhooks/stripe", () => {
       metadata: { clientId: "client_123" },
     });
 
+    // Gate the winner's first Stripe call so it parks mid-processing with its
+    // claim row inserted but unprocessed. That lets us deterministically send
+    // the concurrent duplicate while the claim is genuinely in-flight, instead
+    // of racing two concurrent injects and hoping for a particular ordering.
+    let releaseGate: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    retrieveMock.mockImplementationOnce(async () => {
+      await gate;
+      return { id: "sub_test", metadata: { paymentsMade: "0" } };
+    });
+
     mockConstructEvent.mockReturnValue(event);
 
-    // Fire both deliveries concurrently to exercise the atomic INSERT claim
-    // (onConflictDoNothing + returning) rather than a sequential SELECT-then-write.
-    const [first, second] = await Promise.all([sendWebhook(app, event), sendWebhook(app, event)]);
+    // Delivery A: fire without awaiting so it parks inside the gated retrieve
+    // call while holding the claim.
+    const firstPromise = sendWebhook(app, event);
 
+    // Wait until A has actually claimed the event and is blocked on retrieve.
+    await vi.waitFor(() => expect(retrieveMock).toHaveBeenCalledTimes(1));
+
+    // Delivery B: the claim is unprocessed and not stale, so this must be
+    // told to back off and let Stripe retry later rather than double-processing.
+    const second = await sendWebhook(app, event);
+    expect(second.statusCode).toBe(409);
+
+    // Release A and let it finish.
+    releaseGate();
+    const first = await firstPromise;
     expect(first.statusCode).toBe(200);
-    expect(second.statusCode).toBe(200);
     expect(retrieveMock).toHaveBeenCalledTimes(1);
     expect(updateMock).toHaveBeenCalledTimes(1);
+
+    // A genuine Stripe retry after A completed should be idempotent: the event
+    // is already marked processed, so it short-circuits with 200 and no new
+    // Stripe API calls.
+    mockConstructEvent.mockReturnValueOnce(event);
+    const retry = await sendWebhook(app, event);
+    expect(retry.statusCode).toBe(200);
+    expect(retrieveMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+
+    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  it("reclaims a stale lease (crashed processor) and processes the event", async () => {
+    const updateMock = stripe.subscriptions.update as ReturnType<typeof vi.fn>;
+    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
+    const event = makeStripeEvent("invoice.paid", {
+      id: "inv_stale_lease",
+      parent: { subscription_details: { subscription: subscriptionId } },
+      metadata: { clientId: "client_123" },
+    });
+
+    // Simulate a crashed processor: a claim row exists, unprocessed, with a
+    // lease older than STALE_CLAIM_MS.
+    await db.insert(webhookEvents).values({
+      id: randomUUID(),
+      stripeEventId: event.id,
+      type: event.type,
+      payload: JSON.parse(JSON.stringify(event)) as Record<string, unknown>,
+      processedAt: null,
+      claimedAt: new Date(Date.now() - 60 * 60 * 1000),
+    });
+
+    mockConstructEvent.mockReturnValueOnce(event);
+    const response = await sendWebhook(app, event);
+
+    // The stale lease must be reclaimed and the event processed to completion.
+    expect(response.statusCode).toBe(200);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+
+    const [row] = await db
+      .select()
+      .from(webhookEvents)
+      .where(eq(webhookEvents.stripeEventId, event.id));
+    expect(row.processedAt).not.toBeNull();
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });

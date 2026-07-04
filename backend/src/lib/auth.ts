@@ -104,7 +104,27 @@ export async function requireAdminJwt(request: FastifyRequest, reply: FastifyRep
       return reply.code(403).send({ error: "Forbidden: Admin role required" });
     }
 
-    (request as any).admin = decoded;
+    // Re-validate the admin against the DB so that deactivated or deleted
+    // admins lose access immediately instead of remaining valid until the
+    // token expires. Tokens issued by signJwt always carry `sub`; if `sub`
+    // is absent we fall back to trusting the (validly signed) token.
+    if (decoded.sub) {
+      let adminRow: typeof admins.$inferSelect | undefined;
+      try {
+        [adminRow] = await db.select().from(admins).where(eq(admins.id, decoded.sub)).limit(1);
+      } catch (dbError) {
+        request.log.error({ dbError }, "Error validating admin session against DB");
+        return reply.code(500).send({ error: "Internal server error" });
+      }
+
+      if (!adminRow || adminRow.active === false) {
+        return reply.code(401).send({ error: "Account is not active" });
+      }
+
+      (request as any).admin = adminRow;
+    } else {
+      (request as any).admin = decoded;
+    }
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
       return reply.code(401).send({ error: "Token expired" });

@@ -24,13 +24,15 @@ The `USE_CHECKOUT` environment variable toggles between two modes:
 - **`USE_CHECKOUT=true`**: Creates a **Checkout Session** and returns a redirect URL.
 - **`USE_CHECKOUT=false`**: Creates a **PaymentIntent** and returns a `clientSecret` for Stripe Elements.
 
-All payments resolve `application_fee_amount` via a 4-level priority chain:
+All payments resolve `application_fee_amount` via a 6-level priority chain:
 1. Client `processingFeePercent`
 2. Client `processingFeeCents`
 3. Group `processingFeePercent`
 4. Group `processingFeeCents`
+5. DB setting `default_fee_percent`
+6. DB setting `default_fee_cents`
 
-If none are set, no fee is applied (no global fallback).
+If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environment variable is applied as a fallback; if that is also unset, no fee is applied.
 
 ### Onboarding Flow
 1. **Create client**: `POST /api/v1/accounts` creates a client record + pending onboarding token in one transaction, returns `apiKey`, `clientId`, and `onboardingToken`.
@@ -56,7 +58,7 @@ All routes are prefixed with `/api/v1`.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| GET | `/config` | Public config (`useCheckout` flag) |
+| GET | `/app-config.js` | Public runtime config script (sets window API base URL from API_BASE_URL) |
 | GET | `/auth/setup/status` | Check if admin setup is needed |
 
 ### Authentication

@@ -1,19 +1,22 @@
 import jwt from "jsonwebtoken";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// DB is not needed for unit tests but auth.ts imports it at the module level
+// requireAdminJwt re-validates the token's `sub` against the admins table. The
+// mock returns a single active admin so that valid, sub-bearing tokens pass the
+// DB revalidation step. Tokens without `sub` skip the DB lookup entirely.
 vi.mock("../../db/client", () => ({
   db: {
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
         where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue([]),
+          limit: vi.fn().mockResolvedValue([{ id: "admin-1", active: true }]),
         }),
       }),
     }),
   },
 }));
 
+import { db } from "../../db/client";
 import { requireAdminJwt, signJwt } from "../../lib/auth";
 
 const TEST_SECRET = "test_jwt_secret_minimum_32_characters_long_random_string";
@@ -149,6 +152,36 @@ describe("requireAdminJwt", () => {
     await requireAdminJwt(makeRequest(`Bearer ${token}`) as any, reply as any);
     expect(reply.code).not.toHaveBeenCalled();
     expect(reply.send).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when the admin (by sub) no longer exists in the DB", async () => {
+    process.env.JWT_SECRET = TEST_SECRET;
+    const limit = vi.fn().mockResolvedValueOnce([]);
+    vi.mocked(db.select).mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit }) }),
+      // biome-ignore lint/suspicious/noExplicitAny: partial mock of the query builder
+    } as any);
+
+    const token = jwt.sign({ role: "admin", sub: "ghost-admin" }, TEST_SECRET, { expiresIn: "1h" });
+    const reply = makeMockReply();
+    await requireAdminJwt(makeRequest(`Bearer ${token}`) as any, reply as any);
+    expect(reply.code).toHaveBeenCalledWith(401);
+    expect(reply.send).toHaveBeenCalledWith({ error: "Account is not active" });
+  });
+
+  it("returns 401 when the admin (by sub) is deactivated", async () => {
+    process.env.JWT_SECRET = TEST_SECRET;
+    const limit = vi.fn().mockResolvedValueOnce([{ id: "admin-1", active: false }]);
+    vi.mocked(db.select).mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit }) }),
+      // biome-ignore lint/suspicious/noExplicitAny: partial mock of the query builder
+    } as any);
+
+    const token = jwt.sign({ role: "admin", sub: "admin-1" }, TEST_SECRET, { expiresIn: "1h" });
+    const reply = makeMockReply();
+    await requireAdminJwt(makeRequest(`Bearer ${token}`) as any, reply as any);
+    expect(reply.code).toHaveBeenCalledWith(401);
+    expect(reply.send).toHaveBeenCalledWith({ error: "Account is not active" });
   });
 
   it("rejects a token signed with an algorithm other than HS256", async () => {

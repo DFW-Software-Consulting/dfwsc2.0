@@ -89,14 +89,14 @@ npm run dev:frontend
 - **Backend:** http://localhost:4242
 - Frontend makes API calls to backend at http://localhost:4242/api/v1/*
 
-If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:1919`.
+If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:5173`.
 
 #### Option 2: Docker Dev Stack (Full stack in containers)
 ```bash
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-- **Web UI:** http://localhost:1919
+- **Web UI:** http://localhost:5173
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
 - **Stripe CLI:** forwards webhooks to `/api/v1/webhooks/stripe`
@@ -119,14 +119,12 @@ make down
 make up-build
 ```
 
-Services (default):
-- **Web UI:** http://localhost:8080
+`make up-build` starts the DEV stack (base + dev compose):
+- **Web UI:** http://localhost:5173
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
 
-For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:1919`.
-
-If you want the UI on port 80, change the `web` service port mapping in `docker-compose.base.yml`.
+The production stack (`make prod` → `docker-compose.prod.yml`) runs ONLY the `migrator` and `api` services — there is no bundled web container. The frontend is built and served separately (e.g. its own nginx container on Coolify).
 
 ### Container Healthchecks & Logs
 - **Healthchecks**: `GET /api/v1/health` for the API; verify container status with `docker compose ps`.
@@ -134,43 +132,37 @@ If you want the UI on port 80, change the `web` service port mapping in `docker-
 
 ## 📡 API Routes
 
-All API routes are prefixed with `/api/v1`:
+Most API routes are prefixed with `/api/v1` (the runtime config script `/app-config.js` is the one exception, served at the root):
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| GET | `/api/v1/health` | Health check | Public |
+| GET | `/app-config.js` | Runtime API base URL script (served at root, no `/api/v1` prefix) | Public |
+| GET | `/api/v1/health` | Health check (verifies DB connectivity) | Public |
 | POST | `/api/v1/auth/login` | Admin login (returns JWT token) | Public |
 | GET | `/api/v1/auth/setup/status` | Bootstrap setup status | Public |
 | POST | `/api/v1/auth/setup` | Deprecated — always returns 410 Gone | Public |
 | POST | `/api/v1/auth/confirm-bootstrap` | Confirm bootstrap admin credentials | Admin (JWT) |
-| GET | `/api/v1/clients` | List all clients (includes CRM columns) | Admin (JWT) |
+| GET | `/api/v1/clients` | List clients (requires `workspace` query) | Admin (JWT) |
+| GET | `/api/v1/clients/:id` | Get a single client | Admin (JWT) |
 | PATCH | `/api/v1/clients/:id` | Update client config | Admin (JWT) |
-| POST | `/api/v1/accounts` | Create client account | Admin (JWT) |
-| POST | `/api/v1/clients/sync-payment-status` | Trigger Stripe payment status sync | Admin (JWT) |
-| POST | `/api/v1/clients/:id/suspend` | Suspend a client | Admin (JWT) |
-| POST | `/api/v1/clients/:id/reinstate` | Reinstate a suspended client | Admin (JWT) |
-| POST | `/api/v1/dfwsc/leads` | Create a lead (no Stripe) | Admin (JWT) |
-| POST | `/api/v1/dfwsc/leads/:id/convert` | Convert lead to client (creates Stripe customer) | Admin (JWT) |
-| POST | `/api/v1/onboard-client/initiate` | Send onboarding email | Admin (JWT) |
+| POST | `/api/v1/accounts` | Create client + onboarding token (no email) | Admin (JWT) |
+| POST | `/api/v1/onboard-client/initiate` | Create client and email onboarding link | Admin (JWT) |
 | POST | `/api/v1/onboard-client/resend` | Resend onboarding email | Admin (JWT) |
-| GET | `/api/v1/onboard-client` | Get Stripe onboarding link | Public |
-| GET | `/api/v1/connect/callback` | Stripe Connect callback | Public |
-| GET | `/api/v1/connect/refresh` | Refresh Stripe account link | Public |
-| POST | `/api/v1/payments/create` | Create payment | Client (API key) |
+| GET | `/api/v1/onboard-client` | Get Stripe onboarding link (JSON) by token | Public |
+| GET | `/api/v1/connect/refresh` | Refresh Stripe account link (redirect) | Public |
+| GET | `/api/v1/connect/callback` | Stripe Connect return callback | Public |
+| POST | `/api/v1/payments/create` | Create payment (PaymentIntent or Checkout) | Client (API key) or Admin (JWT) |
 | GET | `/api/v1/reports/payments` | List payments | Admin (JWT) |
 | GET | `/api/v1/groups` | List client groups | Admin (JWT) |
 | POST | `/api/v1/groups` | Create client group | Admin (JWT) |
 | PATCH | `/api/v1/groups/:id` | Update group config | Admin (JWT) |
-| GET | `/api/v1/invoices` | List invoices | Admin (JWT) |
-| POST | `/api/v1/invoices` | Create invoice | Admin (JWT) |
-| PATCH | `/api/v1/invoices/:id` | Cancel invoice | Admin (JWT) |
-| GET | `/api/v1/invoices/pay/:token` | Fetch invoice by token | Public |
-| POST | `/api/v1/invoices/pay/:token` | Submit invoice payment | Public |
-| GET | `/api/v1/subscriptions` | List subscriptions | Admin (JWT) |
-| POST | `/api/v1/subscriptions` | Create subscription | Admin (JWT) |
-| GET | `/api/v1/subscriptions/:id` | Get subscription + invoices | Admin (JWT) |
-| PATCH | `/api/v1/subscriptions/:id` | Update subscription status | Admin (JWT) |
-| POST | `/api/v1/webhooks/stripe` | Stripe webhooks | Stripe |
+| GET | `/api/v1/products` | List Stripe products | Admin (JWT) |
+| POST | `/api/v1/products` | Create Stripe product + price | Admin (JWT) |
+| GET | `/api/v1/tax-rates` | List active Stripe tax rates | Admin (JWT) |
+| GET | `/api/v1/settings` | Fetch global settings | Admin (JWT) |
+| PATCH | `/api/v1/settings/:key` | Update a global setting | Admin (JWT) |
+| GET | `/api/v1/metrics` | Prometheus metrics (requires METRICS_TOKEN; 404 if unset) | Token |
+| POST | `/api/v1/webhooks/stripe` | Stripe webhooks | Stripe signature |
 
 ## 🌐 Frontend Routes
 
@@ -193,8 +185,8 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 # Server
 PORT=4242
 # For local dev: http://localhost:5173 (npm)
-# For Docker dev/prod: http://localhost:8080
-FRONTEND_ORIGIN=http://localhost:8080
+# For Docker dev (docker-compose): http://localhost:5173
+FRONTEND_ORIGIN=http://localhost:5173
 API_BASE_URL=http://localhost:4242
 
 # Database
@@ -279,9 +271,9 @@ Detailed documentation lives in `docs/`:
 |------|----------------|
 | [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System overview, tech stack, data model |
 | [BACKEND.md](./docs/BACKEND.md) | API routes, auth, background jobs |
+| [FRONTEND.md](./docs/FRONTEND.md) | React, state, and routing |
 | [DATABASE.md](./docs/DATABASE.md) | Schema, Drizzle, migrations |
 | [STRIPE.md](./docs/STRIPE.md) | Stripe Connect, webhooks, payment flows |
-| [CRM.md](./docs/CRM.md) | Lead pipeline, client lifecycle, payment sync |
 | [STYLES.md](./docs/STYLES.md) | Tailwind v4, UI patterns |
 
 ## 🧯 Troubleshooting
