@@ -73,7 +73,7 @@ async function createPayment(amountCents, description) {
     throw new Error(\`Payment error: \${err.error}\`);
   }
 
-  return response.json(); // { clientSecret, paymentIntentId }
+  return response.json(); // { clientSecret, paymentIntentId, stripeAccountId }
 }`;
 
 const PYTHON_CODE = `import requests
@@ -96,7 +96,7 @@ def create_payment(amount_cents: int, description: str) -> dict:
         }
     )
     response.raise_for_status()
-    return response.json()  # { 'clientSecret': ..., 'paymentIntentId': ... }`;
+    return response.json()  # { 'clientSecret': ..., 'paymentIntentId': ..., 'stripeAccountId': ... }`;
 
 const PHP_CODE = `function createPayment(int $amountCents, string $description): array {
     $ch = curl_init(
@@ -119,7 +119,7 @@ const PHP_CODE = `function createPayment(int $amountCents, string $description):
     $result = curl_exec($ch);
     curl_close($ch);
     return json_decode($result, true);
-    // ['clientSecret' => ..., 'paymentIntentId' => ...]
+    // ['clientSecret' => ..., 'paymentIntentId' => ..., 'stripeAccountId' => ...]
 }`;
 
 const LANG_TABS = [
@@ -471,7 +471,8 @@ export default function Docs() {
               Mount the payment form
             </h3>
             <div className="space-y-4">
-              <CodeBlock language="javascript">{`const stripe = Stripe('<your-stripe-publishable-key>');
+              <CodeBlock language="javascript">{`// stripeAccountId comes from the /payments/create response (Step 1)
+const stripe = Stripe('<your-stripe-publishable-key>', { stripeAccount: stripeAccountId });
 
 // clientSecret comes from your backend (Step 1)
 const elements = stripe.elements({ clientSecret });
@@ -511,7 +512,8 @@ paymentElement.mount('#payment-element');`}</CodeBlock>
               </span>
               Your <strong>Stripe publishable key</strong> (pk_live_... or pk_test_...) is different
               from your DFWSC API key. Find it in your Stripe dashboard under Developers &gt; API
-              keys.
+              keys. The <strong>stripeAccountId</strong> returned in the payment response is
+              required to initialize Stripe.js for this direct-charge Elements flow.
             </div>
           </section>
 

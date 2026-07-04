@@ -32,7 +32,7 @@ sequenceDiagram
     A->>A: Resolve Platform Fee (6-level chain + env fallback)
     A->>S: Create PaymentIntent or Checkout Session
     S-->>A: clientSecret or session URL
-    A-->>C: clientSecret / url
+    A-->>C: clientSecret + stripeAccountId / url
     C->>S: Complete Payment
 ```
 
@@ -52,7 +52,7 @@ sequenceDiagram
     A->>S: Create Express Account + Account Link
     S-->>C: Redirect to Stripe Onboarding
     C->>S: Completes Onboarding
-    S->>A: Redirect to /api/v1/connect/callback?client_id=...&account=...&state=...
+    S->>A: Redirect to /api/v1/connect/callback?client_id=...&state=...
     A->>DB: Mark token 'completed' + store stripeAccountId on client
     A-->>C: Redirect to /onboarding-success
 ```

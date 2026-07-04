@@ -22,7 +22,7 @@ The payment route also accepts Admin JWT as a fallback (for admin-initiated paym
 ### Payment Flow
 The `USE_CHECKOUT` environment variable toggles between two modes:
 - **`USE_CHECKOUT=true`**: Creates a **Checkout Session** and returns a redirect URL.
-- **`USE_CHECKOUT=false`**: Creates a **PaymentIntent** and returns a `clientSecret` for Stripe Elements.
+- **`USE_CHECKOUT=false`**: Creates a **PaymentIntent** and returns `clientSecret`, `paymentIntentId`, and `stripeAccountId` for Stripe Elements. Integrators must initialize Stripe.js with `{ stripeAccount: stripeAccountId }` for this direct-charge flow.
 
 All payments resolve `application_fee_amount` via a 6-level priority chain:
 1. Client `processingFeePercent`
@@ -39,7 +39,7 @@ If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environm
 2. **Send email**: `POST /api/v1/onboard-client/initiate` does the same but also emails the client.
 3. **Resend**: `POST /api/v1/onboard-client/resend` revokes active tokens and issues a new one with a fresh email.
 4. **Onboard**: `GET /api/v1/onboard-client?token=...` creates a Stripe Express Account (if not already) and returns an Account Link URL.
-5. **Callback**: Stripe redirects to `GET /api/v1/connect/callback` with `client_id`, `account`, and `state`. Validates CSRF state, links `stripeAccountId` to client, marks token `completed`, redirects browser to `/onboarding-success`.
+5. **Callback**: Stripe redirects to the platform-registered return URL, `GET /api/v1/connect/callback` with `client_id` and `state` (Stripe does not append `account`; it is accepted only as an optional legacy cross-check). Validates CSRF state, looks up `stripeAccountId` from the client record, marks token `completed`, redirects browser to `/onboarding-success`.
 6. **Refresh**: `GET /api/v1/connect/refresh?token=...` regenerates an expired account link and redirects the client.
 
 ## 4. Rate Limiting

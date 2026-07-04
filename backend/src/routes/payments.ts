@@ -215,6 +215,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           return reply.code(201).send({
             clientSecret: paymentIntent.client_secret,
             paymentIntentId: paymentIntent.id,
+            stripeAccountId,
           });
         } catch (err) {
           request.log.error({ err }, "Stripe PaymentIntent creation failed");
