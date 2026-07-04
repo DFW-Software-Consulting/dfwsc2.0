@@ -1,7 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import CreateClientForm from "../components/admin/CreateClientForm";
 import OnboardClient from "../pages/OnboardClient";
 import { renderWithProviders } from "../test/renderWithProviders";
 
@@ -116,118 +114,48 @@ describe("OnboardClient", () => {
       expect(screen.getByText(/please enter your onboarding token/i)).toBeInTheDocument();
     });
   });
-});
 
-describe("CreateClientForm", () => {
-  const mockShowToast = vi.fn();
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockShowToast.mockClear();
-    global.fetch.mockClear();
-  });
-
-  it("validates required fields and shows error messages", async () => {
-    renderWithProviders(<CreateClientForm showToast={mockShowToast} />);
-
-    const nameInput = screen.getByRole("textbox", { name: /account name/i });
-    await userEvent.type(nameInput, "Test Client");
-
-    const emailInput = screen.getByRole("textbox", { name: /account email/i });
-    await userEvent.type(emailInput, "test@example.com");
-
-    await waitFor(() => {
-      const submitButton = screen.getByRole("button", { name: /create client/i });
-      expect(submitButton).not.toBeDisabled();
-    });
-
-    await userEvent.clear(nameInput);
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const form = document.querySelector("form");
-    fireEvent.submit(form);
-
-    await waitFor(() => {
-      expect(screen.getByText(/client name is required/i)).toBeInTheDocument();
-    });
-  });
-
-  it("validates email format", async () => {
-    renderWithProviders(<CreateClientForm showToast={mockShowToast} />);
-
-    const nameInput = screen.getByRole("textbox", { name: /account name/i });
-    await userEvent.type(nameInput, "Test Client");
-
-    const emailInput = screen.getByRole("textbox", { name: /account email/i });
-    await userEvent.type(emailInput, "valid@email.com");
-
-    await waitFor(() => {
-      const submitButton = screen.getByRole("button", { name: /create client/i });
-      expect(submitButton).not.toBeDisabled();
-    });
-
-    await userEvent.clear(emailInput);
-    await userEvent.type(emailInput, "invalid-email");
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    const form = document.querySelector("form");
-    fireEvent.submit(form);
-
-    await waitFor(() => {
-      expect(screen.getByText(/please enter a valid email address/i)).toBeInTheDocument();
-    });
-  });
-
-  it("successfully creates a client with valid inputs", async () => {
+  it("rejects a non-https redirect URL and shows an error instead of navigating", async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       headers: { get: () => "application/json" },
-      json: async () => ({
-        id: "client-123",
-        name: "Test Client",
-        email: "test@example.com",
-        onboardingToken: "token-abc-123",
-        onboardingUrlHint: "https://example.com/onboard?token=token-abc-123",
-      }),
+      json: async () => ({ url: "javascript:alert(1)" }),
     });
 
-    renderWithProviders(<CreateClientForm showToast={mockShowToast} />, {
-      token: "admin-token",
-    });
+    renderWithProviders(<OnboardClient />, { token: null });
 
-    const nameInput = screen.getByRole("textbox", { name: /account name/i });
-    fireEvent.change(nameInput, { target: { value: "Test Client" } });
+    const tokenInput = screen.getByRole("textbox", { name: /onboarding token/i });
+    fireEvent.change(tokenInput, { target: { value: "test-token" } });
 
-    const emailInput = screen.getByRole("textbox", { name: /account email/i });
-    fireEvent.change(emailInput, { target: { value: "test@example.com" } });
-
-    const submitButton = screen.getByRole("button", { name: /create client/i });
+    const submitButton = screen.getByRole("button", { name: /continue to stripe setup/i });
     fireEvent.click(submitButton);
 
     await waitFor(() => {
-      expect(screen.getByText(/client created successfully!/i)).toBeInTheDocument();
+      expect(screen.getByText(/error: received an invalid redirect url/i)).toBeInTheDocument();
     });
 
-    expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/accounts"),
-      expect.objectContaining({
-        method: "POST",
-        headers: expect.objectContaining({
-          Authorization: "Bearer admin-token",
-        }),
-        body: JSON.stringify({
-          name: "Test Client",
-          email: "test@example.com",
-          workspace: "client_portal",
-        }),
-      })
-    );
+    expect(window.location.href).toBe("http://localhost/");
+  });
 
-    expect(mockShowToast).toHaveBeenCalledWith(
-      "Client Test Client created successfully!",
-      "success"
-    );
+  it("rejects an http:// (non-https) redirect URL and shows an error instead of navigating", async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      headers: { get: () => "application/json" },
+      json: async () => ({ url: "http://example.com/onboard" }),
+    });
+
+    renderWithProviders(<OnboardClient />, { token: null });
+
+    const tokenInput = screen.getByRole("textbox", { name: /onboarding token/i });
+    fireEvent.change(tokenInput, { target: { value: "test-token" } });
+
+    const submitButton = screen.getByRole("button", { name: /continue to stripe setup/i });
+    fireEvent.click(submitButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/error: received an invalid redirect url/i)).toBeInTheDocument();
+    });
+
+    expect(window.location.href).toBe("http://localhost/");
   });
 });

@@ -1,98 +1,119 @@
-import { useState } from "react";
-import { useDfwscClient } from "../../hooks/useClients";
+import { useCallback, useState } from "react";
+import { useInitiateClientOnboarding } from "../../hooks/useClients";
+import { useGroups } from "../../hooks/useGroups";
+import { validateEmail, validateName } from "../../utils/validation";
 import BaseModal from "./shared/BaseModal";
 import Button from "./shared/Button";
+import ErrorMessage from "./shared/ErrorMessage";
 import FormInput from "./shared/FormInput";
 
-export default function AddClientModal({ isOpen, onClose, onCreated, showToast }) {
-  const createClientMutation = useDfwscClient();
+export default function AddClientModal({ onClose, showToast, workspace = "client_portal" }) {
+  const { data: groups = [] } = useGroups(workspace);
+  const initiateOnboardingMutation = useInitiateClientOnboarding();
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
+  const [groupId, setGroupId] = useState("");
   const [error, setError] = useState("");
 
-  const reset = () => {
-    setName("");
-    setEmail("");
-    setPhone("");
-    setError("");
-  };
+  const handleSubmit = useCallback(
+    (e) => {
+      e.preventDefault();
+      setError("");
 
-  const handleClose = () => {
-    if (createClientMutation.isPending) return;
-    reset();
-    onClose();
-  };
-
-  const handleSubmit = () => {
-    setError("");
-    if (!name.trim() || !email.trim()) {
-      setError("Name and email are required.");
-      return;
-    }
-
-    createClientMutation.mutate(
-      { name: name.trim(), email: email.trim(), phone: phone.trim() || undefined },
-      {
-        onSuccess: (record) => {
-          showToast?.(`Client ${record.name} created.`, "success");
-          onCreated?.(record);
-          handleClose();
-        },
-        onError: (err) => {
-          setError(err.message);
-          showToast?.(err.message, "error");
-        },
+      const nameErr = validateName(name);
+      if (nameErr) {
+        setError(nameErr);
+        return;
       }
-    );
-  };
+
+      const emailErr = validateEmail(email);
+      if (emailErr) {
+        setError(emailErr);
+        return;
+      }
+
+      const body = {
+        name: name.trim(),
+        email: email.trim(),
+        workspace,
+        ...(groupId ? { groupId } : {}),
+      };
+
+      initiateOnboardingMutation.mutate(body, {
+        onSuccess: () => {
+          showToast?.("Client created — onboarding email sent", "success");
+          onClose();
+        },
+        onError: (err) => setError(err.message),
+      });
+    },
+    [name, email, groupId, workspace, initiateOnboardingMutation, onClose, showToast]
+  );
 
   return (
-    <BaseModal
-      isOpen={isOpen}
-      onClose={handleClose}
-      title="Add Client"
-      titleId="add-client"
-      size="md"
-    >
-      <div className="space-y-4">
+    <BaseModal isOpen onClose={onClose} title="Add Client" titleId="add-client-title">
+      <form onSubmit={handleSubmit} noValidate>
         <FormInput
           id="add-client-name"
           label="Name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Acme Inc"
-          disabled={createClientMutation.isPending}
+          placeholder="Client name"
+          wrapperClassName="mb-4"
+          disabled={initiateOnboardingMutation.isPending}
         />
+
         <FormInput
           id="add-client-email"
-          type="email"
           label="Email"
+          type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="billing@acme.com"
-          disabled={createClientMutation.isPending}
+          placeholder="client@example.com"
+          wrapperClassName="mb-4"
+          disabled={initiateOnboardingMutation.isPending}
         />
-        <FormInput
-          id="add-client-phone"
-          type="tel"
-          label="Phone (optional)"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          placeholder="+1 (555) 555-0100"
-          disabled={createClientMutation.isPending}
-        />
-        {error && <p className="text-sm text-red-400">{error}</p>}
-      </div>
 
-      <div className="mt-6 flex justify-end gap-3">
-        <Button variant="secondary" onClick={handleClose} disabled={createClientMutation.isPending}>
-          Cancel
-        </Button>
-        <Button variant="primary" onClick={handleSubmit} isLoading={createClientMutation.isPending}>
-          Create Client
-        </Button>
-      </div>
+        <div className="mb-5">
+          <label
+            htmlFor="add-client-group"
+            className="block text-sm font-medium text-slate-700 dark:text-gray-300 mb-1 transition-colors"
+          >
+            Company (optional)
+          </label>
+          <select
+            id="add-client-group"
+            value={groupId}
+            onChange={(e) => setGroupId(e.target.value)}
+            disabled={initiateOnboardingMutation.isPending}
+            className="w-full rounded-md border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-900/50 px-3 py-2 text-slate-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-blue-500 focus:border-brand-500 dark:focus:border-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <option value="">No company</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <ErrorMessage message={error} className="mb-3" />
+
+        <div className="flex justify-end gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onClose}
+            disabled={initiateOnboardingMutation.isPending}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" isLoading={initiateOnboardingMutation.isPending}>
+            {initiateOnboardingMutation.isPending ? "Creating..." : "Create Client"}
+          </Button>
+        </div>
+      </form>
     </BaseModal>
   );
 }

@@ -15,7 +15,5 @@ export const getClients = (token, { groupId, workspace } = {}) => {
 export const patchClient = (token, id, body) =>
   apiFetch(`/clients/${id}`, { token, method: "PATCH", body });
 
-export const createClient = (token, body) => apiFetch("/accounts", { token, method: "POST", body });
-
-export const createDfwscClient = (token, body) =>
-  apiFetch("/crm/clients", { token, method: "POST", body });
+export const initiateClientOnboarding = (token, body) =>
+  apiFetch("/onboard-client/initiate", { token, method: "POST", body });

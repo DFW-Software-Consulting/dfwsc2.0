@@ -31,15 +31,18 @@ export function usePatchGroup() {
     mutationFn: ({ id, body }) => patchGroup(token, id, body),
     onMutate: async ({ id, body }) => {
       if (body.status === undefined) return;
-      await queryClient.cancelQueries({ queryKey: ["groups"] });
-      const prev = queryClient.getQueryData(["groups"]);
-      queryClient.setQueryData(["groups"], (old) =>
+      const isGroupsQuery = (query) => query.queryKey[0] === "groups";
+      await queryClient.cancelQueries({ predicate: isGroupsQuery });
+      const prev = queryClient.getQueriesData({ predicate: isGroupsQuery });
+      queryClient.setQueriesData({ predicate: isGroupsQuery }, (old) =>
         old?.map((g) => (g.id === id ? { ...g, ...body } : g))
       );
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) queryClient.setQueryData(["groups"], ctx.prev);
+      ctx?.prev?.forEach(([queryKey, data]) => {
+        queryClient.setQueryData(queryKey, data);
+      });
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["groups"] }),
   });
