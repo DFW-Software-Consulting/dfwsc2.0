@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type Stripe from "stripe";
 import { requireAdminJwt } from "../lib/auth";
+import { adminRateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 
 interface CreateProductBody {
@@ -22,28 +23,37 @@ function formatProduct(product: Stripe.Product, price: Stripe.Price | null) {
   };
 }
 
+const adminCrudRateLimit = adminRateLimit({
+  max: 120,
+  windowMs: 60_000,
+});
+
 const productRoutes: FastifyPluginAsync = async (app) => {
   // GET /tax-rates — list active Stripe tax rates (platform account)
-  app.get("/tax-rates", { preHandler: requireAdminJwt }, async (_req, res) => {
-    const { data: taxRates } = await stripe.taxRates.list({
-      active: true,
-      limit: 100,
-    });
+  app.get(
+    "/tax-rates",
+    { preHandler: [requireAdminJwt, adminCrudRateLimit] },
+    async (_req, res) => {
+      const { data: taxRates } = await stripe.taxRates.list({
+        active: true,
+        limit: 100,
+      });
 
-    return res.send(
-      taxRates.map((rate) => ({
-        id: rate.id,
-        displayName: rate.display_name,
-        description: rate.description ?? null,
-        percentage: rate.percentage,
-        inclusive: rate.inclusive,
-        jurisdiction: rate.jurisdiction ?? null,
-      }))
-    );
-  });
+      return res.send(
+        taxRates.map((rate) => ({
+          id: rate.id,
+          displayName: rate.display_name,
+          description: rate.description ?? null,
+          percentage: rate.percentage,
+          inclusive: rate.inclusive,
+          jurisdiction: rate.jurisdiction ?? null,
+        }))
+      );
+    }
+  );
 
   // GET /products — list active Stripe products (platform account)
-  app.get("/products", { preHandler: requireAdminJwt }, async (_req, res) => {
+  app.get("/products", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (_req, res) => {
     const { data: products } = await stripe.products.list({
       active: true,
       limit: 100,
@@ -64,7 +74,7 @@ const productRoutes: FastifyPluginAsync = async (app) => {
   // POST /products — create Stripe product + price (platform account)
   app.post<{ Body: CreateProductBody }>(
     "/products",
-    { preHandler: requireAdminJwt },
+    { preHandler: [requireAdminJwt, adminCrudRateLimit] },
     async (req, res) => {
       const { name, description, amountCents, currency = "usd" } = req.body;
 

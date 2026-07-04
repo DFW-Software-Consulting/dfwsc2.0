@@ -18,6 +18,7 @@ vi.mock("../../lib/mailer", () => ({
 
 // Bypass in-memory rate limiter so tests don't hit the 5 req/min resend limit
 vi.mock("../../lib/rate-limit", () => ({
+  adminRateLimit: () => async () => {},
   rateLimit: () => async () => {},
 }));
 
@@ -27,6 +28,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, onboardingTokens } from "../../db/schema";
+import { hashOnboardingToken } from "../../lib/client-factory";
 import { sendMail } from "../../lib/mailer";
 import { stripe } from "../../lib/stripe";
 import { makeAdminToken } from "../helpers/auth";
@@ -61,7 +63,7 @@ describe("Onboard Resend + Connect Refresh", () => {
     await db.insert(onboardingTokens).values({
       id: randomUUID(),
       clientId: clientAId,
-      token: randomBytes(32).toString("hex"),
+      token: hashOnboardingToken(randomBytes(32).toString("hex")),
       status: "pending",
       email: `resend-a-${clientAId}@example.com`,
     });
@@ -76,7 +78,7 @@ describe("Onboard Resend + Connect Refresh", () => {
     await db.insert(onboardingTokens).values({
       id: randomUUID(),
       clientId: clientBId,
-      token: randomBytes(32).toString("hex"),
+      token: hashOnboardingToken(randomBytes(32).toString("hex")),
       status: "in_progress",
       email: `resend-b-${clientBId}@example.com`,
     });
@@ -318,7 +320,7 @@ describe("Onboard Resend + Connect Refresh", () => {
       await db.insert(onboardingTokens).values({
         id: randomUUID(),
         clientId: cId,
-        token: tValue,
+        token: hashOnboardingToken(tValue),
         status: tokenStatus,
         email: `refresh-${cId}@example.com`,
       });
@@ -430,7 +432,7 @@ describe("Onboard Resend + Connect Refresh", () => {
       await db.insert(onboardingTokens).values({
         id: randomUUID(),
         clientId: cId,
-        token: tValue,
+        token: hashOnboardingToken(tValue),
         status: "pending",
         email: `expired-${cId}@example.com`,
         createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000),

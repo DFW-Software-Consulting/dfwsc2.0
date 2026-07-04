@@ -78,7 +78,7 @@ export function seedOnboardingToken(
   dataStore.onboardingTokens?.set(opts.id, {
     id: opts.id,
     clientId: opts.clientId,
-    token: opts.token,
+    token: sha256(opts.token),
     status: opts.status ?? "pending",
     email: opts.email ?? "",
     state: opts.state ?? null,

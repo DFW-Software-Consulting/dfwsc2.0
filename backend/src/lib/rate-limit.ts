@@ -7,6 +7,8 @@ type RateLimitOptions = {
   maxGenerator?: (request: FastifyRequest) => number;
 };
 
+type AdminScopedRequest = FastifyRequest & { admin?: { id?: string } };
+
 // In-memory limiter — assumes a single API instance. Pin the api service to 1 replica in prod.
 export const hitBuckets = new Map<string, number[]>();
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
@@ -41,4 +43,14 @@ export function rateLimit(options: RateLimitOptions) {
     recentHits.push(now);
     hitBuckets.set(key, recentHits);
   };
+}
+
+export function adminRateLimit(options: Omit<RateLimitOptions, "keyGenerator">) {
+  return rateLimit({
+    ...options,
+    keyGenerator: (request) => {
+      const admin = (request as AdminScopedRequest).admin;
+      return `admin:${admin?.id ?? request.ip}`;
+    },
+  });
 }

@@ -4,6 +4,7 @@ import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { isUniqueViolation } from "../lib/errors";
+import { adminRateLimit } from "../lib/rate-limit";
 import { isValidHttpsUrl } from "../lib/validation";
 import { isWorkspace } from "../lib/workspace";
 
@@ -33,10 +34,14 @@ interface ClientParams {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const adminCrudRateLimit = adminRateLimit({
+  max: 120,
+  windowMs: 60_000,
+});
 
 const clientRoutes: FastifyPluginAsync = async (app) => {
   // GET /clients - List all clients (admin only)
-  app.get("/clients", { preHandler: requireAdminJwt }, async (req, res) => {
+  app.get("/clients", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
     try {
       const { groupId, workspace } = req.query as { groupId?: string; workspace?: string };
 
@@ -93,7 +98,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
   // GET /clients/:id - Get a single client (admin only)
   app.get<{ Params: ClientParams; Querystring: { workspace?: string } }>(
     "/clients/:id",
-    { preHandler: requireAdminJwt },
+    { preHandler: [requireAdminJwt, adminCrudRateLimit] },
     async (req, res) => {
       try {
         const { id } = req.params;
@@ -134,7 +139,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
   app.patch<{
     Params: ClientParams;
     Body: ClientPatchBody;
-  }>("/clients/:id", { preHandler: requireAdminJwt }, async (req, res) => {
+  }>("/clients/:id", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
     try {
       const { id } = req.params;
       const body = req.body;

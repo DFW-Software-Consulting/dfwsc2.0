@@ -3,6 +3,7 @@ import validator from "validator";
 import { db } from "../db/client";
 import { settings } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { adminRateLimit } from "../lib/rate-limit";
 import { clearSettingsCache } from "../lib/stripe-billing";
 
 const ALLOWED_SETTING_KEYS = new Set([
@@ -12,9 +13,14 @@ const ALLOWED_SETTING_KEYS = new Set([
   "contact_email",
 ]);
 
+const adminCrudRateLimit = adminRateLimit({
+  max: 120,
+  windowMs: 60_000,
+});
+
 const settingsRoutes: FastifyPluginAsync = async (app) => {
   // GET /settings - Fetch all global settings (Admin only)
-  app.get("/settings", { preHandler: requireAdminJwt }, async (req, res) => {
+  app.get("/settings", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
     try {
       const allSettings = await db.select().from(settings);
 
@@ -47,7 +53,7 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
   // PATCH /settings/:key - Update a specific global setting (Admin only)
   app.patch<{ Params: { key: string }; Body: { value: string } }>(
     "/settings/:key",
-    { preHandler: requireAdminJwt },
+    { preHandler: [requireAdminJwt, adminCrudRateLimit] },
     async (req, res) => {
       try {
         const { key } = req.params;

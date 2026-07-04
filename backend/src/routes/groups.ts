@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { db } from "../db/client";
 import { clientGroups } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { adminRateLimit } from "../lib/rate-limit";
 import { isValidHttpsUrl, validateRequiredString, validateWorkspace } from "../lib/validation";
 import { isWorkspace, type Workspace } from "../lib/workspace";
 
@@ -40,36 +41,45 @@ function formatGroupResponse(g: typeof clientGroups.$inferSelect) {
   };
 }
 
+const adminCrudRateLimit = adminRateLimit({
+  max: 120,
+  windowMs: 60_000,
+});
+
 const groupRoutes: FastifyPluginAsync = async (app) => {
-  app.post<{ Body: GroupBody }>("/groups", { preHandler: requireAdminJwt }, async (req, res) => {
-    const { name } = req.body;
-    const { workspace } = req.body;
-    if (!validateRequiredString(name, "name", res)) {
-      return;
+  app.post<{ Body: GroupBody }>(
+    "/groups",
+    { preHandler: [requireAdminJwt, adminCrudRateLimit] },
+    async (req, res) => {
+      const { name } = req.body;
+      const { workspace } = req.body;
+      if (!validateRequiredString(name, "name", res)) {
+        return;
+      }
+      const validatedWorkspace = validateWorkspace(workspace, res);
+      if (!validatedWorkspace) {
+        return;
+      }
+
+      const id = nanoid();
+      const now = new Date();
+      const [group] = await db
+        .insert(clientGroups)
+        .values({
+          id,
+          workspace: validatedWorkspace,
+          name: name.trim(),
+          status: "active",
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning();
+
+      return res.status(201).send(formatGroupResponse(group));
     }
-    const validatedWorkspace = validateWorkspace(workspace, res);
-    if (!validatedWorkspace) {
-      return;
-    }
+  );
 
-    const id = nanoid();
-    const now = new Date();
-    const [group] = await db
-      .insert(clientGroups)
-      .values({
-        id,
-        workspace: validatedWorkspace,
-        name: name.trim(),
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      })
-      .returning();
-
-    return res.status(201).send(formatGroupResponse(group));
-  });
-
-  app.get("/groups", { preHandler: requireAdminJwt }, async (req, res) => {
+  app.get("/groups", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
     const { workspace } = req.query as { workspace?: string };
     if (!isWorkspace(workspace)) {
       return res.status(400).send({
@@ -86,7 +96,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch<{ Params: GroupParams; Body: GroupPatchBody }>(
     "/groups/:id",
-    { preHandler: requireAdminJwt },
+    { preHandler: [requireAdminJwt, adminCrudRateLimit] },
     async (req, res) => {
       const { id } = req.params;
       const {

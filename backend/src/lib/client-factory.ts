@@ -12,6 +12,10 @@ function generateApiKey(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
+export function hashOnboardingToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
 interface CreateClientWithOnboardingTokenOptions {
   name: string;
   email: string;
@@ -63,6 +67,7 @@ export async function createClientWithOnboardingToken({
   const apiKeyLookup = sha256Lookup(apiKey);
 
   const token = crypto.randomBytes(32).toString("hex");
+  const tokenLookup = hashOnboardingToken(token);
   const onboardingTokenId = uuidv4();
 
   try {
@@ -80,7 +85,7 @@ export async function createClientWithOnboardingToken({
       await tx.insert(onboardingTokens).values({
         id: onboardingTokenId,
         clientId,
-        token,
+        token: tokenLookup,
         status: "pending",
         email,
       });

@@ -8,7 +8,7 @@ export const authLogoutRef = { current: null };
 
 export function AuthProvider({ children, initialToken }) {
   const queryClient = useQueryClient();
-  const [token, setToken] = useState(() => initialToken ?? sessionStorage.getItem("adminToken"));
+  const [token, setToken] = useState(() => initialToken ?? null);
   const [bootstrapPending, setBootstrapPending] = useState(
     () => sessionStorage.getItem("adminBootstrapPending") === "1"
   );
@@ -16,7 +16,7 @@ export function AuthProvider({ children, initialToken }) {
   const isLoggedIn = !!token;
 
   const login = useCallback((newToken, pending = false) => {
-    sessionStorage.setItem("adminToken", newToken);
+    sessionStorage.removeItem("adminToken");
     setToken(newToken);
     setBootstrapPending(pending);
     if (pending) {

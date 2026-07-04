@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
-import { createClientWithOnboardingToken } from "../lib/client-factory";
+import { createClientWithOnboardingToken, hashOnboardingToken } from "../lib/client-factory";
 import { resolveFrontendOrigin, resolveServerBaseUrl } from "../lib/config";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
@@ -35,7 +35,7 @@ async function createAccountLinkForToken(
   const [onboardingRecord] = await db
     .select()
     .from(onboardingTokens)
-    .where(eq(onboardingTokens.token, token))
+    .where(eq(onboardingTokens.token, hashOnboardingToken(token)))
     .limit(1);
 
   if (!onboardingRecord) {
@@ -401,12 +401,13 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       }
 
       const newToken = crypto.randomBytes(32).toString("hex");
+      const newTokenLookup = hashOnboardingToken(newToken);
       const newOnboardingTokenId = uuidv4();
 
       await db.insert(onboardingTokens).values({
         id: newOnboardingTokenId,
         clientId: clientRecord.id,
-        token: newToken,
+        token: newTokenLookup,
         status: "pending",
         email: clientRecord.email,
       });

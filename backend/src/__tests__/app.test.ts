@@ -619,7 +619,10 @@ describe("connect onboarding", () => {
       (token) => token.clientId === body.clientId
     );
     expect(savedToken).toBeDefined();
-    expect(body.onboardingUrlHint).toContain(savedToken?.token);
+    const rawToken = new URL(body.onboardingUrlHint).searchParams.get("token");
+    expect(rawToken).toBeTruthy();
+    expect(savedToken?.token).not.toBe(rawToken);
+    expect(savedToken?.token).toHaveLength(64);
     await server.close();
   });
 
