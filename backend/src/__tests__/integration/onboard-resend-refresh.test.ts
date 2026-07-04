@@ -446,6 +446,35 @@ describe("Onboard Resend + Connect Refresh", () => {
       expect(response.json().error).toMatch(/expired/i);
     });
 
+    it("mints a fresh idempotency key on each refresh attempt for the same token", async () => {
+      const { clientId, tokenValue } = await seedRefreshPair("pending");
+
+      (stripe.accounts.create as any).mockResolvedValue({ id: "acct_test_freshkey" });
+      (stripe.accountLinks.create as any).mockResolvedValue({
+        url: "https://connect.stripe.com/setup/mock_freshkey",
+      });
+
+      await app.inject({
+        method: "GET",
+        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+      });
+
+      await app.inject({
+        method: "GET",
+        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+      });
+
+      const calls = (stripe.accountLinks.create as any).mock.calls;
+      expect(calls).toHaveLength(2);
+
+      const firstKey = calls[0][1].idempotencyKey;
+      const secondKey = calls[1][1].idempotencyKey;
+
+      expect(firstKey).not.toBe(secondKey);
+      expect(firstKey).toMatch(new RegExp(`^acct-link-${clientId}-`));
+      expect(secondKey).toMatch(new RegExp(`^acct-link-${clientId}-`));
+    });
+
     it("returns 502 when stripe.accountLinks.create throws", async () => {
       const { tokenValue } = await seedRefreshPair("pending");
 
