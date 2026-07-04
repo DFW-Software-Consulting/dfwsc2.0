@@ -1,21 +1,28 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import AdminDashboard from "../components/admin/AdminDashboard";
 import { renderWithProviders } from "../test/renderWithProviders";
 
+const mockUseSetupStatus = vi.fn(() => ({
+  adminConfigured: true,
+  requiresSetup: false,
+  isLoading: false,
+  error: null,
+}));
+
 vi.mock("../hooks/useSetupStatus", () => ({
-  useSetupStatus: () => ({
-    bootstrapPending: false,
-    adminConfigured: true,
-    requiresSetup: false,
-    isLoading: false,
-    error: null,
-  }),
+  useSetupStatus: () => mockUseSetupStatus(),
 }));
 
 vi.mock("../components/admin/AdminLogin", () => ({ default: () => <div>AdminLogin</div> }));
-vi.mock("../components/admin/AdminSetup", () => ({ default: () => <div>AdminSetup</div> }));
+vi.mock("../components/admin/AdminSetup", () => ({
+  default: ({ isBootstrapPending, token }) => (
+    <div>
+      AdminSetup:{isBootstrapPending ? "confirm" : "create"}:{String(token)}
+    </div>
+  ),
+}));
 vi.mock("../components/admin/GroupPanel", () => ({
   default: ({ workspace }) => <div>GroupPanel:{workspace}</div>,
 }));
@@ -25,11 +32,20 @@ vi.mock("../components/admin/PaymentReports", () => ({
 vi.mock("../components/admin/ClientList", () => ({
   default: ({ workspace }) => <div>ClientList:{workspace}</div>,
 }));
-vi.mock("../components/admin/AddClientModal", () => ({ default: () => null }));
 vi.mock("../components/admin/SettingsPanel", () => ({ default: () => <div>SettingsPanel</div> }));
 vi.mock("../components/admin/Toast", () => ({ default: () => null }));
 
 describe("AdminDashboard", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+    mockUseSetupStatus.mockReturnValue({
+      adminConfigured: true,
+      requiresSetup: false,
+      isLoading: false,
+      error: null,
+    });
+  });
+
   it("defaults to Accounts tab showing portal client list", () => {
     renderWithProviders(<AdminDashboard />, { token: "admin-token" });
 
@@ -59,5 +75,41 @@ describe("AdminDashboard", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.getByText("SettingsPanel")).toBeInTheDocument();
+  });
+
+  it("renders AdminSetup in create mode when unauthenticated and setup is required", () => {
+    mockUseSetupStatus.mockReturnValue({
+      adminConfigured: false,
+      requiresSetup: true,
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithProviders(<AdminDashboard />, { token: null });
+
+    expect(screen.getByText("AdminSetup:create:undefined")).toBeInTheDocument();
+    expect(screen.queryByText("AdminLogin")).not.toBeInTheDocument();
+  });
+
+  it("renders AdminLogin (not a dead-end) when unauthenticated and admin is not yet configured", () => {
+    mockUseSetupStatus.mockReturnValue({
+      adminConfigured: false,
+      requiresSetup: false,
+      isLoading: false,
+      error: null,
+    });
+
+    renderWithProviders(<AdminDashboard />, { token: null });
+
+    expect(screen.getByText("AdminLogin")).toBeInTheDocument();
+    expect(screen.queryByText(/Unable to load admin state/)).not.toBeInTheDocument();
+  });
+
+  it("renders AdminSetup in confirm mode with token when logged in and bootstrap is pending", () => {
+    sessionStorage.setItem("adminBootstrapPending", "1");
+
+    renderWithProviders(<AdminDashboard />, { token: "admin-token" });
+
+    expect(screen.getByText("AdminSetup:confirm:admin-token")).toBeInTheDocument();
   });
 });

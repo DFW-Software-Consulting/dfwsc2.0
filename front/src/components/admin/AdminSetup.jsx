@@ -1,19 +1,23 @@
 import { useMutation } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { confirmBootstrap, createAdmin } from "../../api/auth";
+import { useAuth } from "../../contexts/AuthContext";
 import logger from "../../utils/logger";
 import { validatePassword } from "../../utils/validation";
 import Button from "./shared/Button";
 import FormInput from "./shared/FormInput";
 
-const MIN_PASSWORD_LENGTH = 8;
+// Must match MIN_ADMIN_PASSWORD_LENGTH in backend/src/routes/auth.ts
+const MIN_PASSWORD_LENGTH = 12;
 
 export default function AdminSetup({
   onSetupComplete,
   showToast,
   setupToken,
+  token,
   isBootstrapPending = false,
 }) {
+  const { logout } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -31,6 +35,9 @@ export default function AdminSetup({
     onError: (err) => {
       setError(err.message || "Confirmation failed");
       showToast?.(err.message || "Confirmation failed", "error");
+      if (err.status === 401) {
+        logout();
+      }
     },
   });
 
@@ -66,10 +73,10 @@ export default function AdminSetup({
       setError("");
       confirmMutation.mutate({
         body: { username: username.trim(), password },
-        token: setupTokenValue.trim() || undefined,
+        token,
       });
     },
-    [username, password, setupTokenValue, validateForm, confirmMutation]
+    [username, password, token, validateForm, confirmMutation]
   );
 
   const handleCreateSubmit = useCallback(
@@ -186,18 +193,6 @@ export default function AdminSetup({
         ) : (
           // Admin confirmation form
           <form onSubmit={handleConfirmSubmit}>
-            <FormInput
-              id="setupToken"
-              label="Setup Token (optional)"
-              value={setupTokenValue}
-              onChange={(e) => setSetupTokenValue(e.target.value)}
-              placeholder="Enter setup token if required"
-              disabled={confirmMutation.isPending}
-              autoComplete="one-time-code"
-              helper="Required only when ADMIN_SETUP_TOKEN is enabled on the server."
-              wrapperClassName="mb-4"
-            />
-
             <FormInput
               id="setupUsername"
               label="Admin Username"

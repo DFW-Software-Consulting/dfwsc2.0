@@ -122,6 +122,7 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
     });
     expect(loginRes1.statusCode).toBe(200);
     expect(loginRes1.json()).toHaveProperty("token");
+    expect(loginRes1.json().bootstrapPending).toBe(true);
 
     // Step 3: setup/status → adminConfigured=false (setupConfirmed is still
     // false at this point). `bootstrapPending` is intentionally not exposed
@@ -172,6 +173,7 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
     });
     expect(loginRes2.statusCode).toBe(200);
     expect(loginRes2.json()).toHaveProperty("token");
+    expect(loginRes2.json().bootstrapPending).toBe(false);
 
     await server.close();
   });

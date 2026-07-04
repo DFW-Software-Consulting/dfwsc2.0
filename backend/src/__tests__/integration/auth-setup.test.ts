@@ -338,6 +338,37 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toHaveProperty("token");
     expect(response.json()).toHaveProperty("expiresIn");
+    expect(response.json().bootstrapPending).toBe(false);
+
+    await server.close();
+  });
+
+  it("returns bootstrapPending=true when logging in as an admin with setupConfirmed=false", async () => {
+    const plainPassword = "pendingpassword99";
+    const hashed = await bcrypt.hash(plainPassword, 10);
+
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "pendingadmin",
+        passwordHash: hashed,
+        role: "admin",
+        active: true,
+        setupConfirmed: false,
+      },
+    ];
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { username: "pendingadmin", password: plainPassword },
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().bootstrapPending).toBe(true);
 
     await server.close();
   });

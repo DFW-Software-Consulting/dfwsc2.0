@@ -541,4 +541,77 @@ describe("Connect Callback State Validation Integration", () => {
     await db.delete(clients).where(eq(clients.id, clientId));
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenId));
   });
+
+  it("should invalidate the state nonce even when the callback leaves the token in_progress", async () => {
+    const { stripe } = await import("../../lib/stripe");
+    // Override the shared "completed" mock for just this call: details not
+    // yet submitted, so the callback resolves to in_progress rather than
+    // completed. Using mockResolvedValueOnce (not mockResolvedValue) so this
+    // does not leak into later tests, since beforeEach only clears
+    // hitBuckets and does not reset mocks.
+    stripe.accounts.retrieve.mockResolvedValueOnce({
+      type: "express",
+      details_submitted: false,
+      charges_enabled: false,
+      payouts_enabled: false,
+    });
+
+    const clientId = randomUUID();
+    const testEmail = `test-${randomUUID()}@example.com`;
+    const testStripeAccount = "acct_test123456789";
+
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Test Client",
+      email: testEmail,
+      status: "active",
+      workspace: "client_portal",
+    });
+
+    const onboardingTokenId = randomUUID();
+    const state = `test_state_${randomUUID().replace(/-/g, "")}`;
+    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+    await db.insert(onboardingTokens).values({
+      id: onboardingTokenId,
+      clientId: clientId,
+      token: `test_token_${randomUUID().replace(/-/g, "")}`,
+      status: "in_progress",
+      email: testEmail,
+      state: state,
+      stateExpiresAt: stateExpiresAt,
+    });
+
+    // First callback: account is not yet fully onboarded, so the token
+    // remains in_progress — but the state nonce must still be consumed.
+    const firstResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=${testStripeAccount}&state=${state}`,
+    });
+    expect(firstResponse.statusCode).toBe(302);
+    expect(firstResponse.headers.location).toContain("status=pending");
+
+    const [tokenRecord] = await db
+      .select()
+      .from(onboardingTokens)
+      .where(eq(onboardingTokens.id, onboardingTokenId));
+    expect(tokenRecord.status).toBe("in_progress");
+    expect(tokenRecord.state).toBeNull();
+
+    // Replaying the exact same callback URL must be rejected, since the
+    // (clientId, state) lookup no longer matches.
+    const replayResponse = await app.inject({
+      method: "GET",
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=${testStripeAccount}&state=${state}`,
+    });
+
+    expect(replayResponse.statusCode).toBe(400);
+    expect(replayResponse.json()).toEqual({
+      error: "Invalid or expired state parameter.",
+    });
+
+    // Clean up
+    await db.delete(clients).where(eq(clients.id, clientId));
+    await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenId));
+  });
 });

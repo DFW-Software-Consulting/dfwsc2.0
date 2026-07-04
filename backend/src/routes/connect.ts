@@ -710,9 +710,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           .update(onboardingTokens)
           .set({
             status: tokenStatus,
-            // Once onboarding is fully complete, invalidate the single-use
-            // state nonce so this callback URL cannot be replayed.
-            ...(tokenStatus === "completed" ? { state: null } : {}),
+            // Single-use nonce: invalidate on first successful callback
+            // regardless of in_progress/completed, so this callback URL
+            // cannot be replayed. Legitimate re-entry (GET /onboard-client,
+            // GET /connect/refresh) mints a fresh state via
+            // createAccountLinkForToken.
+            state: null,
             updatedAt: new Date(),
           })
           .where(eq(onboardingTokens.id, onboardingRecord.id));

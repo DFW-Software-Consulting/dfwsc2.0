@@ -11,12 +11,8 @@ export const setup = (body, setupToken) =>
     headers: setupToken ? { "X-Setup-Token": setupToken } : {},
   });
 
-export const confirmBootstrap = (body, setupToken) =>
-  apiFetch("/auth/confirm-bootstrap", {
-    method: "POST",
-    body,
-    headers: setupToken ? { "X-Setup-Token": setupToken } : {},
-  });
+export const confirmBootstrap = (body, token) =>
+  apiFetch("/auth/confirm-bootstrap", { token, method: "POST", body });
 
 // Alias for setup to maintain semantic clarity in AdminSetup component
 export const createAdmin = setup;

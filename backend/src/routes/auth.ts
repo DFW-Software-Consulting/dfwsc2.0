@@ -238,6 +238,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return reply.code(200).send({
           token,
           expiresIn,
+          bootstrapPending: admin.setupConfirmed !== true,
         });
       } catch (error) {
         fastify.log.error({ error }, "Error generating JWT token");
