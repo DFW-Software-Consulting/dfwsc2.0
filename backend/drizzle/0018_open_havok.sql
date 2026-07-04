@@ -1,0 +1,1 @@
+ALTER TABLE "webhook_events" DROP COLUMN "payload";

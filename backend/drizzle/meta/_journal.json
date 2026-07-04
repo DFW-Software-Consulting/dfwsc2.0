@@ -127,6 +127,13 @@
       "when": 1783116844051,
       "tag": "0017_aromatic_shaman",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783192636848,
+      "tag": "0018_open_havok",
+      "breakpoints": true
     }
   ]
 }

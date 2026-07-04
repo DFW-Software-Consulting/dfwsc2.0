@@ -29,7 +29,7 @@ const REQUIRED_TABLES: TableColumns[] = [
   },
   {
     table: "webhook_events",
-    columns: ["id", "stripe_event_id", "type", "payload", "processed_at", "created_at"],
+    columns: ["id", "stripe_event_id", "type", "processed_at", "created_at"],
   },
   {
     table: "onboarding_tokens",

@@ -257,7 +257,6 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         id: uuidv4(),
         stripeEventId: event.id,
         type: event.type,
-        payload: JSON.parse(JSON.stringify(event)) as Record<string, unknown>,
         claimedAt: new Date(),
       })
       .onConflictDoNothing({ target: webhookEvents.stripeEventId })
