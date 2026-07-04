@@ -57,7 +57,6 @@ All services can be deployed independently on Coolify while sharing the same mon
 - **Configuration**: Uses existing `front/nginx.conf` which:
   - Serves React static files from root path (`/`)
   - Proxies `/api/*` requests to backend service
-  - Proxies `/docs/*` requests to backend service (Swagger UI)
 - **Dependencies**: Backend service
 - **Healthcheck**: `curl -f http://localhost || exit 1`
 
@@ -113,7 +112,7 @@ RUN npm run build
 
 # Serve stage
 FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /app/build-dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80 443
@@ -125,7 +124,6 @@ CMD ["nginx", "-g", "daemon off;"]
 The existing `front/nginx.conf` is already configured correctly:
 - Serves React app from root
 - Proxies `/api/*` to backend service
-- Proxies `/docs/*` to backend service (Swagger UI)
 - Includes security headers and compression
 
 ## Deployment Sequence

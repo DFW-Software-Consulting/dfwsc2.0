@@ -1,5 +1,7 @@
 # DFW Software Consulting — Payment Portal API Docs
 
+> **STALE — PARTIALLY OUT OF DATE.** This document is a legacy snapshot and does not reflect the current backend. Treat `backend/src/app.ts` and `backend/src/routes/` as the source of truth for registered routes. The following sections describe features that are **NOT implemented** and should be ignored: Stripe Customers (`/api/v1/stripe-customers`), DFWSC Clients (`/api/v1/dfwsc-clients`) and the `dfwsc_services` workspace concept, Invoices (`/api/v1/invoices`), and Subscriptions (`/api/v1/subscriptions`). Additionally, the real Products endpoints take no `workspace` parameter, contrary to what may be documented below.
+
 This is the internal API for the DFWSC payment portal. It handles client onboarding through Stripe Connect and payment processing. This document covers everything you need to work with the API.
 
 ---
