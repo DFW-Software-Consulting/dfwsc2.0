@@ -17,16 +17,13 @@ describe("Metrics API Integration", () => {
     delete process.env.METRICS_TOKEN;
   });
 
-  it("returns Prometheus metrics without auth when METRICS_TOKEN is unset", async () => {
+  it("returns 401 when METRICS_TOKEN is unset (fail closed)", async () => {
     delete process.env.METRICS_TOKEN;
 
     const response = await app.inject({ method: "GET", url: "/api/v1/metrics" });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["content-type"]).toContain("text/plain");
-    expect(response.body).toContain("dfwsc_clients_total");
-    expect(response.body).toContain("dfwsc_webhooks_total");
-    expect(response.body).toContain("dfwsc_webhooks_unprocessed");
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: "Unauthorized" });
   });
 
   it("returns 401 when METRICS_TOKEN is set and no Authorization header is provided", async () => {

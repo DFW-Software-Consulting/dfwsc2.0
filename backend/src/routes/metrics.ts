@@ -18,10 +18,9 @@ function isAuthorizedForMetrics(authHeader: string | undefined, token: string): 
 }
 
 export default async function metricsRoute(fastify: FastifyInstance) {
-  // TODO: set METRICS_TOKEN in production
   fastify.get("/metrics", async (request, reply) => {
     const metricsToken = process.env.METRICS_TOKEN;
-    if (metricsToken && !isAuthorizedForMetrics(request.headers.authorization, metricsToken)) {
+    if (!metricsToken || !isAuthorizedForMetrics(request.headers.authorization, metricsToken)) {
       return reply.status(401).send({ error: "Unauthorized" });
     }
 

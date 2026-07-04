@@ -25,6 +25,7 @@ const OPTIONAL_ENV_VARS = [
   "ADMIN_SETUP_TOKEN",
   "ADMIN_PASSWORD",
   "NEXTCLOUD_APP_PASSWORD",
+  "METRICS_TOKEN",
 ];
 
 // Vars whose values must never appear in logs, even partially — presence only.
@@ -37,6 +38,7 @@ const FULLY_SECRET_ENV_VARS = new Set([
   "ADMIN_PASSWORD",
   "NEXTCLOUD_APP_PASSWORD",
   "ADMIN_SETUP_TOKEN",
+  "METRICS_TOKEN",
 ]);
 
 function isFullySecretKey(key: string): boolean {
