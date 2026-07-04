@@ -1,4 +1,3 @@
-import { existsSync, writeFileSync } from "node:fs";
 import bcrypt from "bcryptjs";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -9,6 +8,11 @@ import { rateLimit } from "../lib/rate-limit";
 
 const MIN_ADMIN_PASSWORD_LENGTH = 12;
 
+// A fixed, valid bcrypt hash used to equalize response timing when the supplied
+// username does not correspond to any admin. It is never expected to match any
+// real password (it is a hash of a random throwaway value).
+const DUMMY_PASSWORD_HASH = "$2a$10$CwTycUXWue0Thq9StjUM0uJ8Dq1nBQF1p1Q7B0k6QhE5jQ8hEo1Wa";
+
 function validateAdminPassword(pw: string): string | null {
   if (pw.length < MIN_ADMIN_PASSWORD_LENGTH) {
     return `Password must be at least ${MIN_ADMIN_PASSWORD_LENGTH} characters`;
@@ -16,25 +20,16 @@ function validateAdminPassword(pw: string): string | null {
   return null;
 }
 
-const SETUP_FLAG_FILE = process.env.SETUP_FLAG_PATH ?? "/tmp/admin-setup-used";
-
 interface LoginRequest {
   username: string;
   password: string;
 }
 
-interface SetupRequest {
-  username: string;
-  password: string;
-}
-
-// Persisted flag: survives restarts if SETUP_FLAG_PATH points to a mounted volume
-let setupUsed = existsSync(SETUP_FLAG_FILE);
-let setupInProgress = false;
-
-// For testing purposes only - reset the setup state
+// For testing purposes only. The deprecated /auth/setup handler no longer holds
+// any setup state, so this is now a no-op retained for backward compatibility
+// with existing test suites that import it.
 export function resetSetupState(): void {
-  setupUsed = false;
+  // no-op
 }
 
 export default async function authRoutes(fastify: FastifyInstance) {
@@ -55,93 +50,21 @@ export default async function authRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // POST /auth/setup - One-time admin credential setup (legacy, kept for backward compat)
+  // POST /auth/setup - Deprecated. This legacy handler never actually created an
+  // admin (it only hashed a password) yet it consumed the one-time setup flag,
+  // making it a misleading soft-DoS vector. The real bootstrap path is env
+  // ADMIN_USERNAME/ADMIN_PASSWORD followed by POST /auth/confirm-bootstrap.
+  // Returns 410 Gone without mutating any setup state.
   fastify.post(
     "/auth/setup",
     {
       preHandler: rateLimit({ max: 3, windowMs: 15 * 60 * 1000 }), // 3 requests per 15 minutes
     },
-    async (request, reply) => {
-      const allowAdminSetup = process.env.ALLOW_ADMIN_SETUP === "true";
-      const allAdmins = await db.select().from(admins);
-      const adminConfiguredInDb = allAdmins.length > 0;
-
-      // Check if setup is allowed
-      if (!allowAdminSetup) {
-        return reply.code(403).send({ error: "Admin setup is not enabled" });
-      }
-
-      if (adminConfiguredInDb) {
-        return reply.code(403).send({ error: "Admin is already configured" });
-      }
-
-      if (setupUsed) {
-        return reply.code(403).send({ error: "Setup has already been used this session" });
-      }
-
-      if (setupInProgress) {
-        return reply.code(409).send({ error: "Setup is already in progress" });
-      }
-
-      // Block concurrent setup attempts after passing the one-time guard.
-      setupInProgress = true;
-
-      try {
-        // Validate setup token if configured
-        const setupToken = process.env.ADMIN_SETUP_TOKEN;
-        if (setupToken) {
-          const providedToken = request.headers["x-setup-token"];
-          if (providedToken !== setupToken) {
-            fastify.log.warn("Invalid setup token provided");
-            return reply.code(401).send({ error: "Invalid setup token" });
-          }
-        }
-
-        const body = (request.body ?? {}) as Partial<SetupRequest>;
-        const { username, password } = body;
-
-        // Validate request body
-        if (!username || !password) {
-          return reply.code(400).send({ error: "Username and password are required" });
-        }
-
-        const passwordError = validateAdminPassword(password);
-        if (passwordError) {
-          return reply.code(400).send({ error: passwordError });
-        }
-
-        let passwordHash: string;
-        try {
-          // Generate bcrypt hash
-          const saltRounds = 10;
-          passwordHash = await bcrypt.hash(password, saltRounds);
-
-          // Persist flag so setup stays blocked across container restarts
-          try {
-            writeFileSync(SETUP_FLAG_FILE, "1");
-          } catch {
-            /* non-fatal */
-          }
-          setupUsed = true;
-        } catch (error) {
-          fastify.log.error({ error }, "Error generating admin password hash during setup");
-          return reply.code(500).send({ error: "Setup failed" });
-        }
-
-        fastify.log.info({ username }, "Admin credentials generated via setup endpoint");
-
-        return reply.code(200).send({
-          username,
-          instructions: [
-            "1. Use the username and the password you just entered to log in.",
-            "2. Follow the confirm-bootstrap flow to finalize your setup.",
-            "3. (Recommended) Set ALLOW_ADMIN_SETUP=false in your environment.",
-          ],
-        });
-      } finally {
-        // Release in-progress lock even if the request fails early.
-        setupInProgress = false;
-      }
+    async (_request, reply) => {
+      return reply.code(410).send({
+        error:
+          "This setup endpoint is deprecated. Bootstrap the first admin via ADMIN_USERNAME/ADMIN_PASSWORD env vars, then POST /auth/confirm-bootstrap.",
+      });
     }
   );
 
@@ -211,9 +134,16 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
       const admin = await getAdminFromDb(username);
 
+      // Return an identical generic 401 for both "no such admin" and "bad
+      // password" to avoid username enumeration. When the admin is missing we
+      // still run a bcrypt comparison against a fixed dummy hash so the response
+      // time does not reveal whether the username exists (timing oracle).
+      // The dedicated GET /auth/setup/status route is the only place that
+      // exposes the "setup required" signal.
       if (!admin) {
-        fastify.log.warn({ username }, "Login attempt — no admin configured in DB");
-        return reply.code(503).send({ error: "Admin not configured", setupRequired: true });
+        await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+        fastify.log.warn({ username }, "Failed login attempt (unknown user)");
+        return reply.code(401).send({ error: "Invalid credentials" });
       }
 
       const isValid = await bcrypt.compare(password, admin.passwordHash);

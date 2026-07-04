@@ -156,8 +156,8 @@ describe("Admin Setup Integration", () => {
     });
   });
 
-  describe("POST /auth/setup - guards", () => {
-    it("should return 403 when ALLOW_ADMIN_SETUP is not enabled", async () => {
+  describe("POST /auth/setup - deprecated", () => {
+    it("should return 410 Gone when ALLOW_ADMIN_SETUP is not enabled", async () => {
       delete process.env.ALLOW_ADMIN_SETUP;
       const server = await createServer();
 
@@ -168,24 +168,14 @@ describe("Admin Setup Integration", () => {
         headers: { "content-type": "application/json" },
       });
 
-      expect(response.statusCode).toBe(403);
-      expect(response.json().error).toBe("Admin setup is not enabled");
+      expect(response.statusCode).toBe(410);
+      expect(response.json().error).toMatch(/deprecated/i);
 
       await server.close();
     });
 
-    it("should return 403 when admin is already configured", async () => {
-      // Seed a confirmed admin to trigger the guard
-      dbState.admins = [
-        {
-          id: "admin-1",
-          username: "admin",
-          passwordHash: "$2a$10$example",
-          role: "admin",
-          active: true,
-          setupConfirmed: true,
-        },
-      ];
+    it("should return 410 Gone even when ALLOW_ADMIN_SETUP is enabled", async () => {
+      dbState.admins = [];
       process.env.ALLOW_ADMIN_SETUP = "true";
       const server = await createServer();
 
@@ -196,8 +186,10 @@ describe("Admin Setup Integration", () => {
         headers: { "content-type": "application/json" },
       });
 
-      expect(response.statusCode).toBe(403);
-      expect(response.json().error).toBe("Admin is already configured");
+      expect(response.statusCode).toBe(410);
+      expect(response.json().error).toMatch(/deprecated/i);
+      // No admin created as a side effect.
+      expect(dbState.admins.length).toBe(0);
 
       await server.close();
       delete process.env.ALLOW_ADMIN_SETUP;

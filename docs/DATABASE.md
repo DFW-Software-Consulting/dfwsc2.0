@@ -52,7 +52,7 @@ Idempotency table to de-duplicate Stripe webhook notifications.
 Admin accounts for the dashboard.
 
 - **Fields**: `id`, `username` (unique), `passwordHash`, `role` (default `"admin"`), `active`, `setupConfirmed`, `lastLoginAt`, `createdAt`, `updatedAt`.
-- Created via the bootstrap flow: `POST /auth/setup` → `POST /auth/confirm-bootstrap`.
+- Created via the bootstrap flow: seed `ADMIN_USERNAME`/`ADMIN_PASSWORD` env vars (with `ALLOW_ADMIN_SETUP=true`), log in, then `POST /auth/confirm-bootstrap`.
 
 ### `settings`
 Key-value store for system-wide configuration.

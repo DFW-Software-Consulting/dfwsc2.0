@@ -22,7 +22,6 @@ const OPTIONAL_ENV_VARS = [
   "SMTP_FROM",
   "ADMIN_API_KEY",
   "ALLOW_ADMIN_SETUP",
-  "ADMIN_SETUP_TOKEN",
   "ADMIN_PASSWORD",
   "NEXTCLOUD_APP_PASSWORD",
 ];
@@ -36,7 +35,6 @@ const FULLY_SECRET_ENV_VARS = new Set([
   "DATABASE_URL",
   "ADMIN_PASSWORD",
   "NEXTCLOUD_APP_PASSWORD",
-  "ADMIN_SETUP_TOKEN",
 ]);
 
 function isFullySecretKey(key: string): boolean {

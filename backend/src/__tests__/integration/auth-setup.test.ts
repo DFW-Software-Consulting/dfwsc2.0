@@ -97,7 +97,7 @@ describe("POST /api/v1/auth/setup", () => {
     dbState.admins = [];
   });
 
-  it("returns 403 when ALLOW_ADMIN_SETUP is not set", async () => {
+  it("returns 410 Gone (deprecated) regardless of ALLOW_ADMIN_SETUP", async () => {
     delete process.env.ALLOW_ADMIN_SETUP;
     const server = await createServer();
 
@@ -108,151 +108,37 @@ describe("POST /api/v1/auth/setup", () => {
       headers: { "content-type": "application/json" },
     });
 
-    expect(response.statusCode).toBe(403);
-    expect(response.json().error).toBe("Admin setup is not enabled");
+    expect(response.statusCode).toBe(410);
+    expect(response.json().error).toMatch(/deprecated/i);
 
     await server.close();
   });
 
-  it("returns 403 when admin is already configured (Admin exists in DB)", async () => {
+  it("returns 410 without inserting an admin or mutating setup state", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
-    // Seed DB with an admin
-    dbState.admins = [
-      {
-        id: "admin-1",
-        username: "admin",
-        passwordHash: "hash",
-        role: "admin",
-        active: true,
-        setupConfirmed: true,
-      },
-    ];
+    dbState.admins = [];
 
     const server = await createServer();
 
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/auth/setup",
-      payload: { username: "admin", password: "securepass123" },
-      headers: { "content-type": "application/json" },
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.json().error).toBe("Admin is already configured");
-
-    await server.close();
-    delete process.env.ALLOW_ADMIN_SETUP;
-  });
-
-  it('returns 403 "Setup has already been used" when setupUsed flag is set', async () => {
-    process.env.ALLOW_ADMIN_SETUP = "true";
-
-    const server = await createServer();
-
-    // First call succeeds (sets setupUsed=true)
-    const firstResponse = await server.inject({
-      method: "POST",
-      url: "/api/v1/auth/setup",
-      payload: { username: "admin", password: "securepass123" },
-      headers: { "content-type": "application/json" },
-    });
-
-    expect(firstResponse.statusCode).toBe(200);
-
-    // Second call should see setupUsed=true → 403
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/auth/setup",
-      payload: { username: "admin", password: "securepass123" },
-      headers: { "content-type": "application/json" },
-    });
-
-    expect(response.statusCode).toBe(403);
-    expect(response.json().error).toBe("Setup has already been used this session");
-
-    await server.close();
-    delete process.env.ALLOW_ADMIN_SETUP;
-  });
-
-  it("returns 401 when ADMIN_SETUP_TOKEN is set but wrong token is provided", async () => {
-    process.env.ALLOW_ADMIN_SETUP = "true";
-    process.env.ADMIN_SETUP_TOKEN = "correct-secret-token";
-
-    const server = await createServer();
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/auth/setup",
-      payload: { username: "admin", password: "securepass123" },
-      headers: {
-        "content-type": "application/json",
-        "x-setup-token": "wrong-token",
-      },
-    });
-
-    expect(response.statusCode).toBe(401);
-    expect(response.json().error).toBe("Invalid setup token");
-
-    await server.close();
-    delete process.env.ALLOW_ADMIN_SETUP;
-    delete process.env.ADMIN_SETUP_TOKEN;
-  });
-
-  it("returns 400 when username is missing from body", async () => {
-    process.env.ALLOW_ADMIN_SETUP = "true";
-
-    const server = await createServer();
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/auth/setup",
-      payload: { password: "securepass123" },
-      headers: { "content-type": "application/json" },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.json().error).toMatch(/username|password/i);
-
-    await server.close();
-    delete process.env.ALLOW_ADMIN_SETUP;
-  });
-
-  it("returns 400 when password is shorter than 12 characters", async () => {
-    process.env.ALLOW_ADMIN_SETUP = "true";
-
-    const server = await createServer();
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/auth/setup",
-      payload: { username: "admin", password: "short" },
-      headers: { "content-type": "application/json" },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.json().error).toMatch(/12 characters/i);
-
-    await server.close();
-    delete process.env.ALLOW_ADMIN_SETUP;
-  });
-
-  it("returns 200 with username and instructions on success", async () => {
-    process.env.ALLOW_ADMIN_SETUP = "true";
-
-    const server = await createServer();
-
-    const response = await server.inject({
+    const first = await server.inject({
       method: "POST",
       url: "/api/v1/auth/setup",
       payload: { username: "newadmin", password: "securepass123" },
       headers: { "content-type": "application/json" },
     });
+    expect(first.statusCode).toBe(410);
 
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body.username).toBe("newadmin");
-    expect(Array.isArray(body.instructions)).toBe(true);
-    expect(body.instructions.length).toBe(3);
+    // No admin should have been created as a side effect.
+    expect(dbState.admins.length).toBe(0);
+
+    // A second call behaves identically — no one-time flag was ever burned.
+    const second = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/setup",
+      payload: { username: "newadmin", password: "securepass123" },
+      headers: { "content-type": "application/json" },
+    });
+    expect(second.statusCode).toBe(410);
 
     await server.close();
     delete process.env.ALLOW_ADMIN_SETUP;
@@ -292,7 +178,7 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     await server.close();
   });
 
-  it("returns 503 when no admin is configured in the database", async () => {
+  it("returns a generic 401 (no enumeration) when no admin matches the username", async () => {
     // dbState.admins is empty — no admin in DB
     const server = await createServer();
 
@@ -303,8 +189,8 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
       headers: { "content-type": "application/json" },
     });
 
-    expect(response.statusCode).toBe(503);
-    expect(response.json().setupRequired).toBe(true);
+    expect(response.statusCode).toBe(401);
+    expect(response.json()).toEqual({ error: "Invalid credentials" });
 
     await server.close();
   });
