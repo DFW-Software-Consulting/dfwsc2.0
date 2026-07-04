@@ -29,7 +29,7 @@ sequenceDiagram
     participant S as Stripe
 
     C->>A: POST /api/v1/payments/create (API Key or Admin JWT)
-    A->>A: Resolve Platform Fee (4-level chain)
+    A->>A: Resolve Platform Fee (6-level chain + env fallback)
     A->>S: Create PaymentIntent or Checkout Session
     S-->>A: clientSecret or session URL
     A-->>C: clientSecret / url

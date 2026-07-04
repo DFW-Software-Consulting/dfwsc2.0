@@ -154,10 +154,17 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
 
       if (name !== undefined) setValues.name = name.trim();
       if (status !== undefined) setValues.status = status;
-      if ("processingFeePercent" in req.body)
+      if ("processingFeePercent" in req.body) {
         setValues.processingFeePercent =
           processingFeePercent != null ? String(processingFeePercent) : null;
-      if ("processingFeeCents" in req.body) setValues.processingFeeCents = processingFeeCents;
+        // Setting a non-null percent fee clears the flat cents fee to keep them mutually exclusive.
+        if (processingFeePercent != null) setValues.processingFeeCents = null;
+      }
+      if ("processingFeeCents" in req.body) {
+        setValues.processingFeeCents = processingFeeCents;
+        // Setting a non-null cents fee clears the percent fee to keep them mutually exclusive.
+        if (processingFeeCents != null) setValues.processingFeePercent = null;
+      }
       if ("paymentSuccessUrl" in req.body) setValues.paymentSuccessUrl = paymentSuccessUrl;
       if ("paymentCancelUrl" in req.body) setValues.paymentCancelUrl = paymentCancelUrl;
 
@@ -166,6 +173,9 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
         .set(setValues)
         .where(eq(clientGroups.id, id))
         .returning();
+      if (!updated) {
+        return res.status(404).send({ error: "Group not found." });
+      }
       return res.status(200).send(formatGroupResponse(updated));
     }
   );

@@ -31,15 +31,17 @@ Controlled by the `USE_CHECKOUT` environment variable.
 - Success/cancel URLs resolve from: client config → group config → `FRONTEND_ORIGIN` default.
 
 ## 4. Fee Resolution
-`application_fee_amount` is collected on every transaction via a 4-level priority chain (first non-null wins):
+`application_fee_amount` is collected on every transaction via a 6-level priority chain (first non-null wins):
 1. Client `processingFeePercent`
 2. Client `processingFeeCents`
 3. Group `processingFeePercent`
 4. Group `processingFeeCents`
+5. DB setting `default_fee_percent`
+6. DB setting `default_fee_cents`
 
-Pass `waiveFee: true` in the payment request body to skip the platform fee for a specific transaction.
+If none of the six levels are configured, the flat `DEFAULT_PROCESS_FEE_CENTS` environment variable is used as a last-resort fallback; if that is also unset, no fee is applied.
 
-If none of the four levels are configured, no fee is applied.
+Pass `waiveFee: true` in the payment request body to skip the platform fee for a specific transaction. This is honored **only** for admin (JWT) payments — for API-key (client-initiated) payments, `waiveFee` is ignored and the fee is always applied.
 
 ## 5. Webhook Handling
 `POST /api/v1/webhooks/stripe`

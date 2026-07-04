@@ -473,6 +473,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const { token } = request.query as { token: string };
+      if (typeof token !== "string" || token.trim().length === 0) {
+        return reply.code(400).send({ error: "token is required." });
+      }
       try {
         const { accountLinkUrl } = await createAccountLinkForToken(request, token);
         return reply.send({ url: accountLinkUrl });
@@ -509,6 +512,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const { token } = request.query as { token: string };
+      if (typeof token !== "string" || token.trim().length === 0) {
+        return reply.code(400).send({ error: "token is required." });
+      }
 
       try {
         const { accountLinkUrl } = await createAccountLinkForToken(request, token);
@@ -527,7 +533,14 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           "Stripe accountLinks.create failed during refresh"
         );
 
-        return reply.code(statusCode).send({ error: errorMessage });
+        if (statusCode === 404) {
+          return reply.code(404).send({ error: errorMessage });
+        }
+
+        return reply.code(502).send({
+          error: "Failed to create Stripe account link. Please try again.",
+          code: "STRIPE_ACCOUNT_LINK_FAILED",
+        });
       }
     }
   );

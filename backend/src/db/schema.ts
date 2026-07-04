@@ -113,6 +113,9 @@ export const webhookEvents = pgTable(
     type: text("type").notNull(),
     payload: jsonb("payload").notNull(),
     processedAt: timestamp("processed_at", { withTimezone: true }),
+    // Lease timestamp: set when a delivery claims an unprocessed event so a
+    // crashed processor's claim can be reclaimed after it goes stale.
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
     // TODO: retention/pruning of old webhook_events
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -176,37 +179,3 @@ export const settings = pgTable("settings", {
     .defaultNow()
     .$onUpdate(() => new Date()),
 });
-
-export const invoices = pgTable(
-  "invoices",
-  {
-    id: text("id").primaryKey(),
-    clientId: text("client_id")
-      .notNull()
-      .references(() => clients.id, { onDelete: "cascade" }),
-    invoiceNumber: text("invoice_number").notNull(),
-    amountCents: integer("amount_cents").notNull(),
-    currency: text("currency").default("usd").notNull(),
-    status: text("status", { enum: ["draft", "sent", "paid", "overdue", "void"] })
-      .default("draft")
-      .notNull(),
-    dueDate: timestamp("due_date", { withTimezone: true }),
-    paidAt: timestamp("paid_at", { withTimezone: true }),
-    stripeInvoiceId: text("stripe_invoice_id"),
-    nextcloudId: text("nextcloud_id"),
-    notes: text("notes"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow()
-      .$onUpdate(() => new Date()),
-  },
-  (table) => ({
-    clientIdIdx: index("invoices_client_id_idx").on(table.clientId),
-    stripeInvoiceIdIdx: index("invoices_stripe_invoice_id_idx").on(table.stripeInvoiceId),
-    statusCheck: check(
-      "invoices_status_check",
-      sql`${table.status} IN ('draft', 'sent', 'paid', 'overdue', 'void')`
-    ),
-  })
-);
