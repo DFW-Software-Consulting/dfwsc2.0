@@ -4,7 +4,6 @@ import {
   check,
   index,
   integer,
-  jsonb,
   numeric,
   pgTable,
   text,
@@ -111,7 +110,6 @@ export const webhookEvents = pgTable(
     id: text("id").primaryKey(),
     stripeEventId: text("stripe_event_id").notNull().unique(),
     type: text("type").notNull(),
-    payload: jsonb("payload").notNull(),
     processedAt: timestamp("processed_at", { withTimezone: true }),
     // Lease timestamp: set when a delivery claims an unprocessed event so a
     // crashed processor's claim can be reclaimed after it goes stale.
