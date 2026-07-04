@@ -107,16 +107,18 @@ export async function buildServer() {
       });
     }
 
-    const statusCode = error.statusCode ?? (error.validation ? 400 : 500);
+    const fastifyError = error as Error & { statusCode?: number; validation?: unknown };
+    const statusCode = fastifyError.statusCode ?? (fastifyError.validation ? 400 : 500);
 
-    if (error.validation) {
-      reply.status(statusCode).send({ error: error.message, requestId: request.id });
+    if (fastifyError.validation) {
+      reply.status(statusCode).send({ error: fastifyError.message, requestId: request.id });
       return;
     }
 
-    request.log.error(error, error.message);
+    request.log.error(fastifyError, fastifyError.message);
 
-    const safeMessage = statusCode < 500 && error.message ? error.message : "Internal Server Error";
+    const safeMessage =
+      statusCode < 500 && fastifyError.message ? fastifyError.message : "Internal Server Error";
 
     reply.status(statusCode).send({ error: safeMessage, requestId: request.id });
   });

@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, onboardingTokens } from "../../db/schema";
+import { hashOnboardingToken } from "../../lib/client-factory";
 import { hitBuckets } from "../../lib/rate-limit";
 
 // Constants for test values
@@ -87,7 +88,7 @@ describe("Connect Callback State Validation Integration", () => {
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
       clientId: clientId,
-      token: testToken,
+      token: hashOnboardingToken(testToken),
       status: "pending",
       email: testEmail,
     });

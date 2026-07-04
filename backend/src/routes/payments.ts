@@ -5,7 +5,7 @@ import type Stripe from "stripe";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
-import { rateLimit } from "../lib/rate-limit";
+import { adminRateLimit, rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
 import { validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
@@ -360,123 +360,137 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     }
   );
 
-  fastify.get("/reports/payments", { preHandler: requireAdminJwt }, async (request, reply) => {
-    const { clientId, groupId, workspace, limit, starting_after, ending_before } =
-      request.query as {
-        clientId?: string;
-        groupId?: string;
-        workspace?: string;
-        limit?: string;
-        starting_after?: string;
-        ending_before?: string;
-      };
+  fastify.get(
+    "/reports/payments",
+    {
+      preHandler: [
+        requireAdminJwt,
+        adminRateLimit({
+          max: 60,
+          windowMs: 60_000,
+        }),
+      ],
+    },
+    async (request, reply) => {
+      const { clientId, groupId, workspace, limit, starting_after, ending_before } =
+        request.query as {
+          clientId?: string;
+          groupId?: string;
+          workspace?: string;
+          limit?: string;
+          starting_after?: string;
+          ending_before?: string;
+        };
 
-    const validWorkspace = validateWorkspaceQuery(workspace, reply);
-    if (!validWorkspace) return;
+      const validWorkspace = validateWorkspaceQuery(workspace, reply);
+      if (!validWorkspace) return;
 
-    if (!clientId && !groupId) {
-      return reply.code(400).send({ error: "clientId or groupId query parameter is required." });
-    }
-
-    let parsedLimit: number | undefined;
-    if (limit) {
-      parsedLimit = Number(limit);
-      if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
-        return reply.code(400).send({ error: "limit must be an integer between 1 and 100." });
+      if (!clientId && !groupId) {
+        return reply.code(400).send({ error: "clientId or groupId query parameter is required." });
       }
-    }
 
-    const listParams: Stripe.PaymentIntentListParams = {};
-    if (parsedLimit !== undefined) listParams.limit = parsedLimit;
-    if (starting_after) listParams.starting_after = starting_after;
-    if (ending_before) listParams.ending_before = ending_before;
-
-    if (groupId) {
-      const [group] = await db
-        .select()
-        .from(clientGroups)
-        .where(eq(clientGroups.id, groupId))
-        .limit(1);
-      if (!group) {
-        return reply.code(400).send({ error: "Invalid groupId." });
-      }
-      const groupClients = await db
-        .select()
-        .from(clients)
-        .where(and(eq(clients.groupId, groupId), eq(clients.workspace, validWorkspace)));
-
-      const connected = groupClients.filter(
-        (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null
-      );
-      if (connected.length === 0) {
-        return reply.send({ groupId, data: [], hasMore: false });
-      }
-      // Cursors (starting_after/ending_before) are per-account and cannot be
-      // forwarded across accounts, so only the limit is applied per account.
-      const perAccountParams: Stripe.PaymentIntentListParams = {};
-      if (parsedLimit !== undefined) perAccountParams.limit = parsedLimit;
-
-      const maxConcurrency = 3;
-      const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
-      const failedAccounts: string[] = [];
-      let hasMore = false;
-      for (let i = 0; i < connected.length; i += maxConcurrency) {
-        const batch = connected.slice(i, i + maxConcurrency);
-        const settled = await Promise.allSettled(
-          batch.map(async (c) => {
-            const pi = await stripe.paymentIntents.list(perAccountParams, {
-              stripeAccount: c.stripeAccountId,
-            });
-            return { pi, client: c };
-          })
-        );
-        for (let j = 0; j < settled.length; j++) {
-          const outcome = settled[j];
-          if (outcome.status === "fulfilled") {
-            const { pi, client: c } = outcome.value;
-            if (pi.has_more) hasMore = true;
-            results.push(pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name })));
-          } else {
-            const c = batch[j];
-            failedAccounts.push(c.id);
-            request.log.error(
-              { err: outcome.reason, clientId: c.id, stripeAccountId: c.stripeAccountId },
-              "Failed to list payments for connected account; excluding from group report"
-            );
-          }
+      let parsedLimit: number | undefined;
+      if (limit) {
+        parsedLimit = Number(limit);
+        if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
+          return reply.code(400).send({ error: "limit must be an integer between 1 and 100." });
         }
       }
-      const merged = results.flat();
+
+      const listParams: Stripe.PaymentIntentListParams = {};
+      if (parsedLimit !== undefined) listParams.limit = parsedLimit;
+      if (starting_after) listParams.starting_after = starting_after;
+      if (ending_before) listParams.ending_before = ending_before;
+
+      if (groupId) {
+        const [group] = await db
+          .select()
+          .from(clientGroups)
+          .where(eq(clientGroups.id, groupId))
+          .limit(1);
+        if (!group) {
+          return reply.code(400).send({ error: "Invalid groupId." });
+        }
+        const groupClients = await db
+          .select()
+          .from(clients)
+          .where(and(eq(clients.groupId, groupId), eq(clients.workspace, validWorkspace)));
+
+        const connected = groupClients.filter(
+          (c): c is typeof c & { stripeAccountId: string } => c.stripeAccountId !== null
+        );
+        if (connected.length === 0) {
+          return reply.send({ groupId, data: [], hasMore: false });
+        }
+        // Cursors (starting_after/ending_before) are per-account and cannot be
+        // forwarded across accounts, so only the limit is applied per account.
+        const perAccountParams: Stripe.PaymentIntentListParams = {};
+        if (parsedLimit !== undefined) perAccountParams.limit = parsedLimit;
+
+        const maxConcurrency = 3;
+        const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
+        const failedAccounts: string[] = [];
+        let hasMore = false;
+        for (let i = 0; i < connected.length; i += maxConcurrency) {
+          const batch = connected.slice(i, i + maxConcurrency);
+          const settled = await Promise.allSettled(
+            batch.map(async (c) => {
+              const pi = await stripe.paymentIntents.list(perAccountParams, {
+                stripeAccount: c.stripeAccountId,
+              });
+              return { pi, client: c };
+            })
+          );
+          for (let j = 0; j < settled.length; j++) {
+            const outcome = settled[j];
+            if (outcome.status === "fulfilled") {
+              const { pi, client: c } = outcome.value;
+              if (pi.has_more) hasMore = true;
+              results.push(pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name })));
+            } else {
+              const c = batch[j];
+              failedAccounts.push(c.id);
+              request.log.error(
+                { err: outcome.reason, clientId: c.id, stripeAccountId: c.stripeAccountId },
+                "Failed to list payments for connected account; excluding from group report"
+              );
+            }
+          }
+        }
+        const merged = results.flat();
+        return reply.send({
+          groupId,
+          data: merged,
+          hasMore,
+          ...(failedAccounts.length > 0 ? { partial: true, failedClientIds: failedAccounts } : {}),
+        });
+      }
+
+      if (!clientId) {
+        return reply.code(400).send({ error: "clientId query parameter is required." });
+      }
+      const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+      if (!client) {
+        return reply.code(404).send({ error: "Client not found." });
+      }
+      if (client.workspace !== workspace) {
+        return reply
+          .code(400)
+          .send({ error: "clientId does not belong to the selected workspace." });
+      }
+
+      if (!client.stripeAccountId) {
+        return reply.code(404).send({ error: "Client with connected account not found." });
+      }
+      const paymentIntents = await stripe.paymentIntents.list(listParams, {
+        stripeAccount: client.stripeAccountId,
+      });
+
       return reply.send({
-        groupId,
-        data: merged,
-        hasMore,
-        ...(failedAccounts.length > 0 ? { partial: true, failedClientIds: failedAccounts } : {}),
+        clientId,
+        data: paymentIntents.data,
+        hasMore: paymentIntents.has_more,
       });
     }
-
-    if (!clientId) {
-      return reply.code(400).send({ error: "clientId query parameter is required." });
-    }
-    const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
-    if (!client) {
-      return reply.code(404).send({ error: "Client not found." });
-    }
-    if (client.workspace !== workspace) {
-      return reply.code(400).send({ error: "clientId does not belong to the selected workspace." });
-    }
-
-    if (!client.stripeAccountId) {
-      return reply.code(404).send({ error: "Client with connected account not found." });
-    }
-    const paymentIntents = await stripe.paymentIntents.list(listParams, {
-      stripeAccount: client.stripeAccountId,
-    });
-
-    return reply.send({
-      clientId,
-      data: paymentIntents.data,
-      hasMore: paymentIntents.has_more,
-    });
-  });
+  );
 }
