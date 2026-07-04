@@ -1,5 +1,7 @@
+import { sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -8,6 +10,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const clientGroups = pgTable(
@@ -25,11 +28,22 @@ export const clientGroups = pgTable(
     processingFeeCents: integer("processing_fee_cents"),
     paymentSuccessUrl: text("payment_success_url"),
     paymentCancelUrl: text("payment_cancel_url"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (table) => ({
     workspaceIdx: index("client_groups_workspace_idx").on(table.workspace),
+    workspaceCheck: check(
+      "client_groups_workspace_check",
+      sql`${table.workspace} IN ('client_portal')`
+    ),
+    statusCheck: check(
+      "client_groups_status_check",
+      sql`${table.status} IN ('active', 'inactive')`
+    ),
   })
 );
 
@@ -67,27 +81,47 @@ export const clients = pgTable(
     country: text("country"),
     notes: text("notes"),
     defaultPaymentTermsDays: integer("default_payment_terms_days"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (table) => ({
     apiKeyHashIdx: index("clients_api_key_hash_idx").on(table.apiKeyHash),
     apiKeyLookupIdx: index("clients_api_key_lookup_idx").on(table.apiKeyLookup),
     emailWorkspaceUnique: unique("clients_email_workspace_unique").on(table.email, table.workspace),
     stripeAccountIdUnique: unique("clients_stripe_account_id_unique").on(table.stripeAccountId),
+    stripeCustomerIdUniqueIdx: uniqueIndex("clients_stripe_customer_id_unique_idx")
+      .on(table.stripeCustomerId)
+      .where(sql`${table.stripeCustomerId} IS NOT NULL`),
     groupIdIdx: index("clients_group_id_idx").on(table.groupId),
     workspaceIdx: index("clients_workspace_idx").on(table.workspace),
+    workspaceCheck: check("clients_workspace_check", sql`${table.workspace} IN ('client_portal')`),
+    statusCheck: check(
+      "clients_status_check",
+      sql`${table.status} IN ('active', 'inactive', 'pending', 'failed')`
+    ),
   })
 );
 
-export const webhookEvents = pgTable("webhook_events", {
-  id: text("id").primaryKey(),
-  stripeEventId: text("stripe_event_id").notNull().unique(),
-  type: text("type").notNull(),
-  payload: jsonb("payload").notNull(),
-  processedAt: timestamp("processed_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-});
+export const webhookEvents = pgTable(
+  "webhook_events",
+  {
+    id: text("id").primaryKey(),
+    stripeEventId: text("stripe_event_id").notNull().unique(),
+    type: text("type").notNull(),
+    payload: jsonb("payload").notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    // TODO: retention/pruning of old webhook_events
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    unprocessedIdx: index("webhook_events_unprocessed_idx")
+      .on(table.processedAt)
+      .where(sql`${table.processedAt} IS NULL`),
+  })
+);
 
 export const onboardingTokens = pgTable(
   "onboarding_tokens",
@@ -101,11 +135,18 @@ export const onboardingTokens = pgTable(
     email: text("email").notNull(),
     state: text("state"),
     stateExpiresAt: timestamp("state_expires_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
   },
   (table) => ({
     clientIdStateIdx: index("onboarding_tokens_client_state_idx").on(table.clientId, table.state),
+    statusCheck: check(
+      "onboarding_tokens_status_check",
+      sql`${table.status} IN ('pending', 'in_progress', 'completed', 'revoked')`
+    ),
   })
 );
 
@@ -113,36 +154,59 @@ export const admins = pgTable("admins", {
   id: text("id").primaryKey(),
   username: text("username").unique().notNull(),
   passwordHash: text("password_hash").notNull(),
+  // NOTE: only "admin" is currently written by the app. Left unconstrained
+  // (no CHECK) since the full intended role set is not yet established -
+  // narrowing this now risks rejecting a future legitimate role value.
   role: text("role").notNull().default("admin"),
   active: boolean("active").notNull().default(true),
   setupConfirmed: boolean("setup_confirmed").default(false),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
 });
 
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
 });
 
-export const invoices = pgTable("invoices", {
-  id: text("id").primaryKey(),
-  clientId: text("client_id")
-    .notNull()
-    .references(() => clients.id, { onDelete: "cascade" }),
-  invoiceNumber: text("invoice_number").notNull(),
-  amountCents: integer("amount_cents").notNull(),
-  currency: text("currency").default("usd").notNull(),
-  status: text("status", { enum: ["draft", "sent", "paid", "overdue", "void"] })
-    .default("draft")
-    .notNull(),
-  dueDate: timestamp("due_date", { withTimezone: true }),
-  paidAt: timestamp("paid_at", { withTimezone: true }),
-  stripeInvoiceId: text("stripe_invoice_id"),
-  nextcloudId: text("nextcloud_id"),
-  notes: text("notes"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-});
+export const invoices = pgTable(
+  "invoices",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    invoiceNumber: text("invoice_number").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").default("usd").notNull(),
+    status: text("status", { enum: ["draft", "sent", "paid", "overdue", "void"] })
+      .default("draft")
+      .notNull(),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    stripeInvoiceId: text("stripe_invoice_id"),
+    nextcloudId: text("nextcloud_id"),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    clientIdIdx: index("invoices_client_id_idx").on(table.clientId),
+    stripeInvoiceIdIdx: index("invoices_stripe_invoice_id_idx").on(table.stripeInvoiceId),
+    statusCheck: check(
+      "invoices_status_check",
+      sql`${table.status} IN ('draft', 'sent', 'paid', 'overdue', 'void')`
+    ),
+  })
+);

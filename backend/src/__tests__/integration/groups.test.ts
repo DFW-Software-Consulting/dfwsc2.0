@@ -60,6 +60,11 @@ describe("Groups API", () => {
       expect(body.workspace).toBe(workspace);
       expect(body.status).toBe("active");
       expect(body.id).toBeTruthy();
+      expect(body.id).toEqual(expect.any(String));
+      expect(body.createdAt).toBeDefined();
+      expect(body.createdAt).not.toBeNull();
+      expect(body.updatedAt).toBeDefined();
+      expect(body.updatedAt).not.toBeNull();
       createdGroupIds.push(body.id);
     });
 
@@ -85,6 +90,19 @@ describe("Groups API", () => {
         url: "/api/v1/groups",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         payload: { name: "   ", workspace },
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it("returns 400 when workspace is invalid", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/groups",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { name: "Bad Workspace Group", workspace: "not_a_real_workspace" },
       });
 
       expect(response.statusCode).toBe(400);

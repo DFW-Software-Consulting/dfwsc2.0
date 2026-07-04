@@ -19,14 +19,8 @@ const TABS = [
 ];
 
 export default function AdminDashboard() {
-  const { isLoggedIn, logout } = useAuth();
-  const {
-    bootstrapPending,
-    adminConfigured,
-    requiresSetup,
-    isLoading: statusLoading,
-    error: statusError,
-  } = useSetupStatus();
+  const { isLoggedIn, logout, token, bootstrapPending, clearBootstrapPending } = useAuth();
+  const { requiresSetup, isLoading: statusLoading, error: statusError } = useSetupStatus();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState("clients");
@@ -71,37 +65,33 @@ export default function AdminDashboard() {
       );
     }
 
-    const showLogin = !bootstrapPending && !requiresSetup && adminConfigured;
-    const showSetup = bootstrapPending || requiresSetup;
+    const showSetup = requiresSetup;
 
     return (
       <>
-        {showSetup && (
+        {showSetup ? (
           <AdminSetup
             onSetupComplete={handleSetupComplete}
             showToast={showToast}
-            isBootstrapPending={bootstrapPending}
-            isCreatingAdmin={requiresSetup}
+            isBootstrapPending={false}
           />
-        )}
-        {showLogin ? (
-          <AdminLogin showToast={showToast} />
         ) : (
-          !showSetup && (
-            <div className="text-center py-8">
-              <p className="text-gray-400">
-                Unable to load admin state. Please check your configuration.
-              </p>
-              <button
-                type="button"
-                onClick={() => queryClient.invalidateQueries({ queryKey: ["setup-status"] })}
-                className="mt-4 text-blue-400 hover:text-blue-300 text-sm font-medium"
-              >
-                Retry
-              </button>
-            </div>
-          )
+          <AdminLogin showToast={showToast} />
         )}
+        <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
+      </>
+    );
+  }
+
+  if (bootstrapPending) {
+    return (
+      <>
+        <AdminSetup
+          isBootstrapPending
+          token={token}
+          showToast={showToast}
+          onSetupComplete={clearBootstrapPending}
+        />
         <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
       </>
     );

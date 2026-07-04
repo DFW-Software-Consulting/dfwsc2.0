@@ -9,17 +9,33 @@ export const authLogoutRef = { current: null };
 export function AuthProvider({ children, initialToken }) {
   const queryClient = useQueryClient();
   const [token, setToken] = useState(() => initialToken ?? sessionStorage.getItem("adminToken"));
+  const [bootstrapPending, setBootstrapPending] = useState(
+    () => sessionStorage.getItem("adminBootstrapPending") === "1"
+  );
 
   const isLoggedIn = !!token;
 
-  const login = useCallback((newToken) => {
+  const login = useCallback((newToken, pending = false) => {
     sessionStorage.setItem("adminToken", newToken);
     setToken(newToken);
+    setBootstrapPending(pending);
+    if (pending) {
+      sessionStorage.setItem("adminBootstrapPending", "1");
+    } else {
+      sessionStorage.removeItem("adminBootstrapPending");
+    }
+  }, []);
+
+  const clearBootstrapPending = useCallback(() => {
+    setBootstrapPending(false);
+    sessionStorage.removeItem("adminBootstrapPending");
   }, []);
 
   const logout = useCallback(() => {
     sessionStorage.removeItem("adminToken");
+    sessionStorage.removeItem("adminBootstrapPending");
     setToken(null);
+    setBootstrapPending(false);
     queryClient.clear();
   }, [queryClient]);
 
@@ -31,8 +47,8 @@ export function AuthProvider({ children, initialToken }) {
   }, [logout]);
 
   const value = useMemo(
-    () => ({ token, isLoggedIn, login, logout }),
-    [token, isLoggedIn, login, logout]
+    () => ({ token, isLoggedIn, login, logout, bootstrapPending, clearBootstrapPending }),
+    [token, isLoggedIn, login, logout, bootstrapPending, clearBootstrapPending]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -3,6 +3,7 @@ import validator from "validator";
 import { db } from "../db/client";
 import { settings } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { clearSettingsCache } from "../lib/stripe-billing";
 
 const ALLOWED_SETTING_KEYS = new Set([
   "default_fee_cents",
@@ -102,6 +103,8 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
             target: settings.key,
             set: { value: finalValue, updatedAt: new Date() },
           });
+
+        clearSettingsCache();
 
         return res.status(200).send({ message: "Setting updated successfully." });
       } catch (error) {

@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import he from "he";
 import type Stripe from "stripe";
@@ -8,25 +8,20 @@ import { db } from "../db/client";
 import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { createClientWithOnboardingToken } from "../lib/client-factory";
-import { resolveFrontendOrigin } from "../lib/config";
+import { resolveFrontendOrigin, resolveServerBaseUrl } from "../lib/config";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { getSettings, stripe } from "../lib/stripe-billing";
 import { isWorkspace, type Workspace } from "../lib/workspace";
 
-function resolveServerBaseUrl(request: FastifyRequest): string {
-  if (process.env.API_BASE_URL) {
-    return process.env.API_BASE_URL.replace(/\/$/, "");
-  }
+// Onboarding tokens are single-use links minted by an admin action; they
+// should not remain valid indefinitely. This bounds the window (based on
+// the token's `createdAt`) after which the recipient must request a fresh
+// link via the resend flow.
+const ONBOARDING_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
-  const host = request.headers["x-forwarded-host"] ?? request.headers.host;
-  const protocol = (request.headers["x-forwarded-proto"] as string) ?? request.protocol;
-
-  if (!host || !protocol) {
-    throw new Error("Unable to determine server base URL for onboarding.");
-  }
-
-  return `${protocol}://${host}`.replace(/\/$/, "");
+function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex").slice(0, 12);
 }
 
 interface AccountLinkContext {
@@ -64,6 +59,14 @@ async function createAccountLinkForToken(
     );
   }
 
+  const createdAt = onboardingRecord.createdAt ? new Date(onboardingRecord.createdAt) : null;
+  if (createdAt && Date.now() - createdAt.getTime() > ONBOARDING_TOKEN_TTL_MS) {
+    throw Object.assign(
+      new Error("This onboarding link has expired. Please request a new onboarding link."),
+      { statusCode: 404 }
+    );
+  }
+
   const [clientRecord] = await db
     .select()
     .from(clients)
@@ -76,18 +79,38 @@ async function createAccountLinkForToken(
   let stripeAccountId = clientRecord.stripeAccountId;
 
   if (!stripeAccountId) {
-    const account = await stripe.accounts.create({
-      type: "express",
-      email: clientRecord.email,
-      metadata: { clientId: clientRecord.id },
-      capabilities: {
-        card_payments: { requested: true },
-        transfers: { requested: true },
+    const account = await stripe.accounts.create(
+      {
+        type: "express",
+        email: clientRecord.email,
+        metadata: { clientId: clientRecord.id },
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+        },
       },
-    });
-    stripeAccountId = account.id;
+      { idempotencyKey: `acct-create-${clientRecord.id}` }
+    );
 
-    await db.update(clients).set({ stripeAccountId }).where(eq(clients.id, clientRecord.id));
+    // Conditional claim: only persist if no other concurrent request already
+    // did so. `clients.stripeAccountId` is also uniquely indexed, so a
+    // conflicting write would fail at the DB level regardless.
+    const [claimed] = await db
+      .update(clients)
+      .set({ stripeAccountId: account.id })
+      .where(and(eq(clients.id, clientRecord.id), isNull(clients.stripeAccountId)))
+      .returning();
+
+    if (claimed) {
+      stripeAccountId = account.id;
+    } else {
+      // Another concurrent request already claimed a Stripe account for this
+      // client. Re-read and use the existing id; the account we just created
+      // is orphaned.
+      // TODO: reconcile orphaned account via metadata.clientId
+      const [refreshed] = await db.select().from(clients).where(eq(clients.id, clientRecord.id));
+      stripeAccountId = refreshed?.stripeAccountId ?? account.id;
+    }
   }
 
   const state = crypto.randomBytes(32).toString("hex");
@@ -97,12 +120,15 @@ async function createAccountLinkForToken(
   const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
   const refreshUrl = `${baseUrl}/api/v1/connect/refresh?token=${encodeURIComponent(token)}`;
 
-  const accountLink = await stripe.accountLinks.create({
-    account: stripeAccountId,
-    refresh_url: refreshUrl,
-    return_url: callbackUrl,
-    type: "account_onboarding",
-  });
+  const accountLink = await stripe.accountLinks.create(
+    {
+      account: stripeAccountId,
+      refresh_url: refreshUrl,
+      return_url: callbackUrl,
+      type: "account_onboarding",
+    },
+    { idempotencyKey: `acct-link-${clientRecord.id}-${hashToken(token)}` }
+  );
 
   request.log.info(
     {
@@ -155,10 +181,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: "workspace must be client_portal." });
       }
 
-      request.log.info(
-        { name, email, groupId, workspace },
-        "Received request in /accounts handler"
-      );
+      request.log.info({ groupId, workspace }, "Received request in /accounts handler");
 
       if (groupId) {
         const [group] = await db
@@ -185,9 +208,14 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const onboardingUrlHint = `${frontendOrigin}/onboard?token=${token}`;
 
+      request.log.info({ clientId, workspace, groupId }, "Client created via /accounts handler");
+
       return reply.code(201).send({
         name,
-        onboardingToken: token,
+        // Note: this endpoint does not email the onboarding link (unlike
+        // /onboard-client/initiate), so `onboardingUrlHint` remains the only
+        // delivery mechanism for the admin caller. The raw token is no
+        // longer duplicated in a separate `onboardingToken` field.
         onboardingUrlHint,
         apiKey,
         clientId,
@@ -346,6 +374,16 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           .send({ error: "Client does not belong to the specified workspace." });
       }
 
+      // Client is already fully onboarded (has a Stripe account and can
+      // accept charges) — avoid re-issuing a new onboarding link/token.
+      if (clientRecord.stripeAccountId && clientRecord.chargesEnabled) {
+        return reply.code(200).send({
+          message: "Onboarding is already complete for this client.",
+          clientId: clientRecord.id,
+          alreadyOnboarded: true,
+        });
+      }
+
       const { rowCount } = await db
         .update(onboardingTokens)
         .set({ status: "revoked", updatedAt: new Date() })
@@ -388,7 +426,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         <p>Click the new link below to continue with your Stripe onboarding process.</p>
         <a href="${onboardingUrl}">Continue Onboarding</a>
         <p>If you did not request this, please contact us.</p>
-        <p><strong>Note:</strong> This link will expire in 30 minutes.</p>
+        <p><strong>Note:</strong> This link will expire in 24 hours.</p>
       `;
 
       const mailText = `
@@ -398,7 +436,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         Click the new link below to continue with your Stripe onboarding process.
         ${onboardingUrl}
         If you did not request this, please contact us.
-        Note: This link will expire in 30 minutes.
+        Note: This link will expire in 24 hours.
       `;
 
       try {
@@ -447,7 +485,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         request.log.error(
           {
             error: errorMessage,
-            token,
+            token_hash: hashToken(token),
           },
           "Stripe accountLinks.create failed"
         );
@@ -484,7 +522,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         request.log.error(
           {
             error: errorMessage,
-            token,
+            token_hash: hashToken(token),
           },
           "Stripe accountLinks.create failed during refresh"
         );
@@ -549,6 +587,23 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: "Invalid or expired state parameter." });
       }
 
+      // `state` is meant to be single-use. Once a token has reached a
+      // terminal status (completed/revoked) its state must be treated as
+      // already consumed, even if it hasn't been nulled out yet — this
+      // rejects replay of a previously-successful callback.
+      if (onboardingRecord.status === "completed" || onboardingRecord.status === "revoked") {
+        request.log.warn(
+          {
+            client_id: normalizedClientId,
+            account: normalizedAccount,
+            state: normalizedState,
+            token_status: onboardingRecord.status,
+          },
+          "Replayed or already-consumed state parameter"
+        );
+        return reply.code(400).send({ error: "Invalid or expired state parameter." });
+      }
+
       if (
         onboardingRecord.stateExpiresAt &&
         new Date() > new Date(onboardingRecord.stateExpiresAt)
@@ -590,7 +645,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       }
 
       const frontendOrigin = resolveFrontendOrigin();
-      const redirectUrl = `${frontendOrigin}/onboarding-success`;
+      const redirectBase = `${frontendOrigin}/onboarding-success`;
 
       // The account id is persisted at account-link creation, so the stored
       // value is the source of truth; fall back to a supplied `account`.
@@ -601,7 +656,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           { client_id: normalizedClientId, state: normalizedState },
           "No Stripe account id resolved at callback; leaving token in_progress"
         );
-        return reply.redirect(redirectUrl);
+        return reply.redirect(`${redirectBase}?status=pending`);
       }
 
       let verifiedAccount: Stripe.Account;
@@ -614,7 +669,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           { account: effectiveAccountId, err },
           "Failed to verify account with Stripe; leaving token in_progress"
         );
-        return reply.redirect(redirectUrl);
+        return reply.redirect(`${redirectBase}?status=error`);
       }
 
       if (verifiedAccount.type !== "express") {
@@ -653,11 +708,22 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           .where(eq(clients.id, normalizedClientId));
         await tx
           .update(onboardingTokens)
-          .set({ status: tokenStatus, updatedAt: new Date() })
+          .set({
+            status: tokenStatus,
+            // Single-use nonce: invalidate on first successful callback
+            // regardless of in_progress/completed, so this callback URL
+            // cannot be replayed. Legitimate re-entry (GET /onboard-client,
+            // GET /connect/refresh) mints a fresh state via
+            // createAccountLinkForToken.
+            state: null,
+            updatedAt: new Date(),
+          })
           .where(eq(onboardingTokens.id, onboardingRecord.id));
       });
 
-      return reply.redirect(redirectUrl);
+      return reply.redirect(
+        `${redirectBase}?status=${tokenStatus === "completed" ? "completed" : "pending"}`
+      );
     }
   );
 }

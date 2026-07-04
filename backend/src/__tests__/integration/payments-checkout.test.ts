@@ -18,11 +18,12 @@ vi.mock("../../lib/stripe", () => ({
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import jwt from "jsonwebtoken";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clientGroups, clients } from "../../db/schema";
 import { hashApiKey, sha256Lookup } from "../../lib/auth";
+import { stripe } from "../../lib/stripe";
 
 const TEST_JWT_SECRET = "test_jwt_secret_minimum_32_characters_long_random_string";
 
@@ -73,6 +74,7 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
       apiKeyLookup,
       status: "active",
       stripeAccountId: `acct_checkout${clientId.replace(/-/g, "").slice(0, 12)}`,
+      chargesEnabled: true,
       processingFeeCents: 1000, // $10 flat fee
     });
   });
@@ -97,9 +99,15 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
     expect(response.json().error).toMatch(/lineItems/i);
   });
 
-  it("returns 500 when Stripe call fails due to missing price", async () => {
-    // processingFeeCents=1000 (fee), amount=100 (payment) → fee > amount
-    // With fee-on-top logic, this succeeds but Stripe fails because price is invalid
+  it("returns 502 when Stripe call fails due to missing price", async () => {
+    // processingFeeCents=1000 (fee), amount=100 (payment) → fee > amount.
+    // Line items use a Stripe price ID (no price_data), so `currency` must be
+    // supplied explicitly for the server to resolve the processing-fee line
+    // item's currency (L2-adjacent validation) before it ever calls Stripe.
+    vi.mocked(stripe.checkout.sessions.create).mockRejectedValueOnce(
+      Object.assign(new Error("No such price: 'price_test'"), { name: "StripeInvalidRequestError" })
+    );
+
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/payments/create",
@@ -110,11 +118,119 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
       },
       payload: {
         amount: 100,
+        currency: "usd",
         lineItems: [{ price: "price_test", quantity: 1 }],
       },
     });
 
     expect(response.statusCode).toBe(502);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C1: fee waiver must be server-authoritative for API-key callers.
+// H1: un-connected clients must be rejected, not charged to the platform.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/payments/create — fee waiver and connected-account guard", () => {
+  let app: any;
+  let apiKey: string;
+  let clientId: string;
+
+  beforeAll(async () => {
+    ensureBaseEnv();
+    process.env.USE_CHECKOUT = "false";
+    app = await buildServer();
+  });
+
+  afterAll(async () => {
+    if (app) await app.close();
+  });
+
+  beforeEach(async () => {
+    clientId = randomUUID();
+    apiKey = randomUUID().replace(/-/g, "");
+    const apiKeyHash = await hashApiKey(apiKey);
+    const apiKeyLookup = sha256Lookup(apiKey);
+
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Fee Guard Client",
+      email: `feeguard-${clientId}@example.com`,
+      apiKeyHash,
+      apiKeyLookup,
+      status: "active",
+      stripeAccountId: `acct_feeguard${clientId.replace(/-/g, "").slice(0, 12)}`,
+      chargesEnabled: true,
+      processingFeeCents: 1000,
+    });
+
+    vi.mocked(stripe.paymentIntents.create).mockReset();
+    vi.mocked(stripe.paymentIntents.create).mockResolvedValue({
+      id: "pi_test",
+      client_secret: "pi_test_secret",
+    } as never);
+  });
+
+  afterEach(async () => {
+    await db.delete(clients).where(eq(clients.id, clientId));
+  });
+
+  it("ignores waiveFee from an API-key caller and still applies the platform fee (C1)", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+      payload: {
+        amount: 5000,
+        currency: "usd",
+        waiveFee: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const createCall = vi.mocked(stripe.paymentIntents.create).mock.calls[0][0];
+    expect(createCall.application_fee_amount).toBe(1000);
+    expect(createCall.amount).toBe(6000);
+  });
+
+  it("returns 409 ACCOUNT_NOT_CONNECTED when the client has no connected Stripe account (H1)", async () => {
+    const unconnectedId = randomUUID();
+    const unconnectedApiKey = randomUUID().replace(/-/g, "");
+    const unconnectedHash = await hashApiKey(unconnectedApiKey);
+    const unconnectedLookup = sha256Lookup(unconnectedApiKey);
+
+    await db.insert(clients).values({
+      id: unconnectedId,
+      name: "Unconnected Guard Client",
+      email: `unconnectedguard-${unconnectedId}@example.com`,
+      apiKeyHash: unconnectedHash,
+      apiKeyLookup: unconnectedLookup,
+      status: "active",
+      stripeAccountId: null,
+      chargesEnabled: false,
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": unconnectedApiKey,
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+      payload: { amount: 1000, currency: "usd" },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("ACCOUNT_NOT_CONNECTED");
+    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+
+    await db.delete(clients).where(eq(clients.id, unconnectedId));
   });
 });
 

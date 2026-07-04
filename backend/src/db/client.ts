@@ -9,8 +9,10 @@ const pool = new Pool({
 });
 
 pool.on("error", (err) => {
+  // Log and let the pool discard the dead client and reconnect on next checkout;
+  // do NOT exit the process — idle-client errors (failover, brief network blips)
+  // are recoverable and must not take the whole API down.
   console.error("Unexpected error on idle database client", err);
-  process.exit(1);
 });
 
 export const db = drizzle(pool);

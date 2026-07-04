@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeAdminToken } from "../helpers/auth";
 
 // Mock Stripe to avoid real API calls
 vi.mock("../../lib/stripe", () => ({
@@ -216,7 +217,7 @@ describe("POST /api/v1/auth/setup", () => {
     delete process.env.ALLOW_ADMIN_SETUP;
   });
 
-  it("returns 400 when password is shorter than 8 characters", async () => {
+  it("returns 400 when password is shorter than 12 characters", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
 
     const server = await createServer();
@@ -229,7 +230,7 @@ describe("POST /api/v1/auth/setup", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().error).toMatch(/8 characters/i);
+    expect(response.json().error).toMatch(/12 characters/i);
 
     await server.close();
     delete process.env.ALLOW_ADMIN_SETUP;
@@ -337,6 +338,37 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toHaveProperty("token");
     expect(response.json()).toHaveProperty("expiresIn");
+    expect(response.json().bootstrapPending).toBe(false);
+
+    await server.close();
+  });
+
+  it("returns bootstrapPending=true when logging in as an admin with setupConfirmed=false", async () => {
+    const plainPassword = "pendingpassword99";
+    const hashed = await bcrypt.hash(plainPassword, 10);
+
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "pendingadmin",
+        passwordHash: hashed,
+        role: "admin",
+        active: true,
+        setupConfirmed: false,
+      },
+    ];
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { username: "pendingadmin", password: plainPassword },
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().bootstrapPending).toBe(true);
 
     await server.close();
   });
@@ -369,6 +401,36 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toHaveProperty("token");
+
+    await server.close();
+  });
+
+  it("returns 403 when the admin account is deactivated", async () => {
+    const plainPassword = "deactivatedpass123";
+    const hashed = await bcrypt.hash(plainPassword, 10);
+
+    dbState.admins = [
+      {
+        id: "admin-1",
+        username: "deactivatedadmin",
+        passwordHash: hashed,
+        role: "admin",
+        active: false,
+        setupConfirmed: true,
+      },
+    ];
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { username: "deactivatedadmin", password: plainPassword },
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error).toBe("Account is deactivated");
 
     await server.close();
   });
@@ -442,13 +504,13 @@ describe("GET /api/v1/auth/setup/status", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.requiresSetup).toBe(true);
-    expect(body.bootstrapPending).toBe(false);
+    expect(body.bootstrapPending).toBeUndefined();
     expect(body.adminConfigured).toBe(false);
 
     await server.close();
   });
 
-  it("returns bootstrapPending=true when an admin exists with setupConfirmed=false", async () => {
+  it("does not expose bootstrapPending to unauthenticated callers when an admin exists with setupConfirmed=false", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
     dbState.admins = [
       {
@@ -470,7 +532,7 @@ describe("GET /api/v1/auth/setup/status", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.bootstrapPending).toBe(true);
+    expect(body.bootstrapPending).toBeUndefined();
     expect(body.requiresSetup).toBe(false);
     expect(body.adminConfigured).toBe(false);
 
@@ -501,7 +563,7 @@ describe("GET /api/v1/auth/setup/status", () => {
     const body = response.json();
     expect(body.adminConfigured).toBe(true);
     expect(body.requiresSetup).toBe(false);
-    expect(body.bootstrapPending).toBe(false);
+    expect(body.bootstrapPending).toBeUndefined();
 
     await server.close();
   });
@@ -524,6 +586,23 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
     dbState.admins = [];
   });
 
+  it("returns 401 when called without an admin bearer token", async () => {
+    process.env.ALLOW_ADMIN_SETUP = "true";
+
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/confirm-bootstrap",
+      payload: { username: "admin", password: "newpassword123" },
+      headers: { "content-type": "application/json" },
+    });
+
+    expect(response.statusCode).toBe(401);
+
+    await server.close();
+  });
+
   it("returns 400 when username and password are missing from the body", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
 
@@ -533,7 +612,10 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
       method: "POST",
       url: "/api/v1/auth/confirm-bootstrap",
       payload: {},
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${makeAdminToken()}`,
+      },
     });
 
     expect(response.statusCode).toBe(400);
@@ -542,7 +624,7 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
     await server.close();
   });
 
-  it("returns 400 when password is shorter than 8 characters", async () => {
+  it("returns 400 when password is shorter than 12 characters", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
 
     const server = await createServer();
@@ -551,11 +633,14 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
       method: "POST",
       url: "/api/v1/auth/confirm-bootstrap",
       payload: { username: "admin", password: "short" },
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${makeAdminToken()}`,
+      },
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().error).toMatch(/8 characters/i);
+    expect(response.json().error).toMatch(/12 characters/i);
 
     await server.close();
   });
@@ -570,7 +655,10 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
       method: "POST",
       url: "/api/v1/auth/confirm-bootstrap",
       payload: { username: "admin", password: "newpassword123" },
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${makeAdminToken()}`,
+      },
     });
 
     expect(response.statusCode).toBe(400);
@@ -598,7 +686,10 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
       method: "POST",
       url: "/api/v1/auth/confirm-bootstrap",
       payload: { username: "admin", password: "newpassword123" },
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${makeAdminToken()}`,
+      },
     });
 
     expect(response.statusCode).toBe(400);
@@ -607,7 +698,7 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
     await server.close();
   });
 
-  it("returns 200, marks admin confirmed, and updates credentials on success", async () => {
+  it("returns 200, marks admin confirmed, and updates credentials on success when a valid admin token is used", async () => {
     process.env.ALLOW_ADMIN_SETUP = "true";
     dbState.admins = [
       {
@@ -622,11 +713,20 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
 
     const server = await createServer();
 
+    // Mirrors the intended flow: the operator first logs in with the
+    // bootstrap admin's credentials to obtain a JWT, then uses it to
+    // confirm bootstrap. We issue an equivalent token via the shared test
+    // helper instead of driving a full login round-trip here.
+    const token = makeAdminToken();
+
     const response = await server.inject({
       method: "POST",
       url: "/api/v1/auth/confirm-bootstrap",
       payload: { username: "newadmin", password: "securepassword123" },
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
     });
 
     expect(response.statusCode).toBe(200);

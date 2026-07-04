@@ -4,10 +4,14 @@ import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clients, webhookEvents } from "../db/schema";
+import { isUniqueViolation } from "../lib/errors";
 import { stripe } from "../lib/stripe";
 
-interface StripeInvoiceWithSubscription extends Stripe.Invoice {
-  subscription: string | Stripe.Subscription | null;
+// A DB error is non-retryable when replaying the same Stripe event would fail
+// identically (e.g. a Postgres unique violation) — retrying would only wedge
+// Stripe's retry queue, so we mark the event processed instead of returning 500.
+function isNonRetryableDbError(err: unknown): boolean {
+  return isUniqueViolation(err);
 }
 
 export default async function webhooksRoute(fastify: FastifyInstance) {
@@ -36,7 +40,11 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: `Webhook Error: ${message}` });
     }
 
-    const [inserted] = await db
+    // Atomically claim this event: only the delivery whose INSERT actually
+    // lands a row is allowed to process it. Concurrent retries of the same
+    // event will race on the unique index and lose the claim, so they must
+    // short-circuit rather than double-process.
+    const [claimed] = await db
       .insert(webhookEvents)
       .values({
         id: uuidv4(),
@@ -47,16 +55,9 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
       .onConflictDoNothing({ target: webhookEvents.stripeEventId })
       .returning({ id: webhookEvents.id });
 
-    if (!inserted) {
-      // A prior delivery already inserted this event; check if it was processed
-      const [existing] = await db
-        .select({ processedAt: webhookEvents.processedAt })
-        .from(webhookEvents)
-        .where(eq(webhookEvents.stripeEventId, event.id))
-        .limit(1);
-      if (existing?.processedAt) {
-        return reply.send({ received: true });
-      }
+    if (!claimed) {
+      // A prior delivery already claimed (and possibly processed) this event.
+      return reply.send({ received: true });
     }
 
     try {
@@ -78,8 +79,6 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
               chargesEnabled: account.charges_enabled ?? false,
               payoutsEnabled: account.payouts_enabled ?? false,
               detailsSubmitted: account.details_submitted ?? false,
-              name: account.settings?.dashboard?.display_name ?? undefined,
-              email: account.email ?? undefined,
               updatedAt: new Date(),
             })
             .where(eq(clients.stripeAccountId, account.id));
@@ -98,7 +97,17 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           const charge = event.data.object as Stripe.Charge;
           fastify.log.info(
             { chargeId: charge.id, amountRefunded: charge.amount_refunded },
+            // TODO: application-fee reversal policy is a business decision
             "Charge refunded."
+          );
+          break;
+        }
+        case "application_fee.refunded": {
+          const fee = event.data.object as Stripe.ApplicationFee;
+          fastify.log.info(
+            { feeId: fee.id, amountRefunded: fee.amount_refunded },
+            // TODO: application-fee reversal policy is a business decision
+            "Application fee refunded."
           );
           break;
         }
@@ -160,22 +169,24 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           break;
         }
         case "invoice.paid": {
-          const inv = event.data.object as StripeInvoiceWithSubscription;
+          const inv = event.data.object as Stripe.Invoice;
+          const rawSub = inv.parent?.subscription_details?.subscription ?? null;
+          const subId = typeof rawSub === "string" ? rawSub : (rawSub?.id ?? null);
           fastify.log.info(
             {
               invoiceId: inv.id,
-              subscriptionId: inv.subscription,
+              subscriptionId: subId,
               clientId: inv.metadata?.clientId,
             },
             "Invoice paid - updating payment count."
           );
 
-          if (inv.subscription && typeof inv.subscription === "string") {
+          if (subId) {
             // Let failures propagate to the outer catch so the webhook returns
             // 500 and processedAt stays unset, prompting Stripe to retry.
-            const sub = await stripe.subscriptions.retrieve(inv.subscription);
+            const sub = await stripe.subscriptions.retrieve(subId);
             const currentPayments = parseInt(sub.metadata?.paymentsMade ?? "0", 10) || 0;
-            await stripe.subscriptions.update(inv.subscription, {
+            await stripe.subscriptions.update(subId, {
               metadata: {
                 ...sub.metadata,
                 paymentsMade: String(currentPayments + 1),
@@ -227,12 +238,28 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         }
       }
     } catch (err) {
-      // Do NOT mark the event processed: returning 500 lets Stripe retry.
-      fastify.log.error(
-        { err, eventId: event.id, eventType: event.type },
-        "Webhook event processing failed"
-      );
-      return reply.code(500).send({ error: "Webhook processing failed" });
+      if (isNonRetryableDbError(err)) {
+        // A DB constraint (e.g. unique violation) will never succeed on retry.
+        // Log it and still mark the event processed so a single bad event
+        // can't wedge the retry queue for every subsequent delivery.
+        fastify.log.error(
+          { err, eventId: event.id, eventType: event.type },
+          "Webhook event hit a non-retryable DB error; marking processed anyway"
+        );
+      } else {
+        // Retryable failure: release the claim so Stripe's retry can re-process.
+        // The row was inserted before processing to dedup concurrent deliveries;
+        // if we returned 500 without deleting it, every retry would conflict on
+        // the unique index, short-circuit as "already handled", and the event
+        // would stay claimed-but-unprocessed forever. Deleting restores
+        // at-least-once delivery (handlers must remain idempotent).
+        await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+        fastify.log.error(
+          { err, eventId: event.id, eventType: event.type },
+          "Webhook event processing failed; released claim so Stripe can retry"
+        );
+        return reply.code(500).send({ error: "Webhook processing failed" });
+      }
     }
 
     await db

@@ -17,7 +17,7 @@ export default function AdminLogin({ showToast }) {
   const loginMutation = useMutation({
     mutationFn: (vars) => login(vars),
     onSuccess: (data) => {
-      authLogin(data.token);
+      authLogin(data.token, data.bootstrapPending);
       setUsername("");
       setPassword("");
     },

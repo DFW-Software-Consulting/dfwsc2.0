@@ -23,7 +23,32 @@ const OPTIONAL_ENV_VARS = [
   "ADMIN_API_KEY",
   "ALLOW_ADMIN_SETUP",
   "ADMIN_SETUP_TOKEN",
+  "ADMIN_PASSWORD",
+  "NEXTCLOUD_APP_PASSWORD",
 ];
+
+// Vars whose values must never appear in logs, even partially — presence only.
+const FULLY_SECRET_ENV_VARS = new Set([
+  "STRIPE_SECRET_KEY",
+  "STRIPE_WEBHOOK_SECRET",
+  "JWT_SECRET",
+  "SMTP_PASS",
+  "DATABASE_URL",
+  "ADMIN_PASSWORD",
+  "NEXTCLOUD_APP_PASSWORD",
+  "ADMIN_SETUP_TOKEN",
+]);
+
+function isFullySecretKey(key: string): boolean {
+  return (
+    FULLY_SECRET_ENV_VARS.has(key) ||
+    key.endsWith("_SECRET") ||
+    key.endsWith("_PASSWORD") ||
+    key.endsWith("_KEY")
+  );
+}
+
+const WEAK_ADMIN_PASSWORDS = new Set(["testpassword", "password", "changeme"]);
 
 export function validateEnv(): Record<string, string> {
   // Load dotenv only when validation is called
@@ -68,6 +93,15 @@ export function validateEnv(): Record<string, string> {
   // Set default for optional env vars
   env.JWT_EXPIRY = process.env.JWT_EXPIRY ?? "1h";
 
+  if (process.env.NODE_ENV === "production" && env.ADMIN_PASSWORD) {
+    const adminPassword = env.ADMIN_PASSWORD;
+    if (adminPassword.length < 12 || WEAK_ADMIN_PASSWORDS.has(adminPassword.toLowerCase())) {
+      throw new Error(
+        "ADMIN_PASSWORD is too weak for production. Use a value at least 12 characters long that is not a known default."
+      );
+    }
+  }
+
   return env;
 }
 
@@ -84,7 +118,12 @@ function maskValue(value: string): string {
 
 export function logMaskedEnvSummary(server: FastifyInstance, env: Record<string, string>): void {
   const summary = Object.fromEntries(
-    Object.entries(env).map(([key, value]) => [key, maskValue(value)])
+    Object.entries(env).map(([key, value]) => {
+      if (isFullySecretKey(key)) {
+        return [key, value ? "<redacted>" : "undefined"];
+      }
+      return [key, maskValue(value)];
+    })
   );
 
   server.log.info({ env: summary }, "Environment configuration loaded (masked).");

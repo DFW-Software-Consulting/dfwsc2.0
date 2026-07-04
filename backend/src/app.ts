@@ -20,6 +20,9 @@ export async function buildServer() {
   const logger = process.env.NODE_ENV === "test" ? { level: "silent" } : true;
   const server = fastify({
     logger,
+    // Trust exactly one reverse-proxy hop (nginx/Coolify) so request.ip
+    // reflects the real client, not the proxy.
+    trustProxy: 1,
     // Generate unique request IDs for tracing
     genReqId: () => crypto.randomUUID(),
     ajv: {

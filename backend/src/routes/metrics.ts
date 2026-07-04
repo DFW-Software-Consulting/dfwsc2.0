@@ -1,10 +1,30 @@
+import crypto from "node:crypto";
 import { count, isNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client";
 import { clients, webhookEvents } from "../db/schema";
 
+function isAuthorizedForMetrics(authHeader: string | undefined, token: string): boolean {
+  if (!authHeader?.startsWith("Bearer ")) {
+    return false;
+  }
+  const provided = authHeader.slice("Bearer ".length);
+  const providedBuf = Buffer.from(provided);
+  const tokenBuf = Buffer.from(token);
+  if (providedBuf.length !== tokenBuf.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(providedBuf, tokenBuf);
+}
+
 export default async function metricsRoute(fastify: FastifyInstance) {
-  fastify.get("/metrics", async (_request, reply) => {
+  // TODO: set METRICS_TOKEN in production
+  fastify.get("/metrics", async (request, reply) => {
+    const metricsToken = process.env.METRICS_TOKEN;
+    if (metricsToken && !isAuthorizedForMetrics(request.headers.authorization, metricsToken)) {
+      return reply.status(401).send({ error: "Unauthorized" });
+    }
+
     const [clientCount] = await db.select({ count: count() }).from(clients);
     const [webhookCount] = await db.select({ count: count() }).from(webhookEvents);
     const [unprocessedWebhooks] = await db

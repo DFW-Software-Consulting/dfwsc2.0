@@ -43,14 +43,23 @@ describe("signJwt", () => {
 
   it("throws when JWT_SECRET is not set", () => {
     delete process.env.JWT_SECRET;
-    expect(() => signJwt({ role: "admin" })).toThrow("JWT_SECRET is not configured");
+    expect(() => signJwt({ role: "admin", sub: "admin-1" })).toThrow(
+      "JWT_SECRET is not configured"
+    );
   });
 
   it("returns a signed token when JWT_SECRET is set", () => {
     process.env.JWT_SECRET = TEST_SECRET;
-    const token = signJwt({ role: "admin" });
+    const token = signJwt({ role: "admin", sub: "admin-1" });
     const decoded = jwt.verify(token, TEST_SECRET) as jwt.JwtPayload;
     expect(decoded.role).toBe("admin");
+  });
+
+  it("includes sub (admin id) in the signed token payload", () => {
+    process.env.JWT_SECRET = TEST_SECRET;
+    const token = signJwt({ role: "admin", sub: "admin-42" });
+    const decoded = jwt.verify(token, TEST_SECRET) as jwt.JwtPayload;
+    expect(decoded.sub).toBe("admin-42");
   });
 });
 
@@ -128,5 +137,31 @@ describe("requireAdminJwt", () => {
     await requireAdminJwt(makeRequest(`Bearer ${token}`) as any, reply as any);
     expect(reply.code).not.toHaveBeenCalled();
     expect(reply.send).not.toHaveBeenCalled();
+  });
+
+  it("accepts a valid HS256-signed token explicitly pinned to that algorithm", async () => {
+    process.env.JWT_SECRET = TEST_SECRET;
+    const token = jwt.sign({ role: "admin", sub: "admin-1" }, TEST_SECRET, {
+      algorithm: "HS256",
+      expiresIn: "1h",
+    });
+    const reply = makeMockReply();
+    await requireAdminJwt(makeRequest(`Bearer ${token}`) as any, reply as any);
+    expect(reply.code).not.toHaveBeenCalled();
+    expect(reply.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects a token signed with an algorithm other than HS256", async () => {
+    process.env.JWT_SECRET = TEST_SECRET;
+    // "none" algorithm requires an unsigned token; simulate an alg mismatch
+    // by signing with HS384 while requireAdminJwt only accepts HS256.
+    const token = jwt.sign({ role: "admin" }, TEST_SECRET, {
+      algorithm: "HS384",
+      expiresIn: "1h",
+    });
+    const reply = makeMockReply();
+    await requireAdminJwt(makeRequest(`Bearer ${token}`) as any, reply as any);
+    expect(reply.code).toHaveBeenCalledWith(401);
+    expect(reply.send).toHaveBeenCalledWith({ error: "Invalid token" });
   });
 });

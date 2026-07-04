@@ -4,7 +4,7 @@ import { nanoid } from "nanoid";
 import { db } from "../db/client";
 import { clientGroups } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
-import { isValidHttpsUrl } from "../lib/validation";
+import { isValidHttpsUrl, validateRequiredString, validateWorkspace } from "../lib/validation";
 import { isWorkspace, type Workspace } from "../lib/workspace";
 
 interface GroupBody {
@@ -44,25 +44,28 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
   app.post<{ Body: GroupBody }>("/groups", { preHandler: requireAdminJwt }, async (req, res) => {
     const { name } = req.body;
     const { workspace } = req.body;
-    if (!name || typeof name !== "string" || name.trim().length === 0) {
-      return res.status(400).send({ error: "name is required." });
+    if (!validateRequiredString(name, "name", res)) {
+      return;
     }
-    if (!isWorkspace(workspace)) {
-      return res.status(400).send({ error: "workspace is required (client_portal)." });
+    const validatedWorkspace = validateWorkspace(workspace, res);
+    if (!validatedWorkspace) {
+      return;
     }
 
     const id = nanoid();
     const now = new Date();
-    await db.insert(clientGroups).values({
-      id,
-      workspace,
-      name: name.trim(),
-      status: "active",
-      createdAt: now,
-      updatedAt: now,
-    });
+    const [group] = await db
+      .insert(clientGroups)
+      .values({
+        id,
+        workspace: validatedWorkspace,
+        name: name.trim(),
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
 
-    const [group] = await db.select().from(clientGroups).where(eq(clientGroups.id, id)).limit(1);
     return res.status(201).send(formatGroupResponse(group));
   });
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
@@ -100,11 +101,12 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       ],
     },
     async (request, reply) => {
-      const idempotencyKey = extractIdempotencyKey(request);
+      const idempotencyKeyHeader = extractIdempotencyKey(request);
       const isApiCall = !!request.headers["x-api-key"];
-      if (isApiCall && (!idempotencyKey || idempotencyKey.trim().length === 0)) {
+      if (isApiCall && (!idempotencyKeyHeader || idempotencyKeyHeader.trim().length === 0)) {
         return reply.code(400).send({ error: "Idempotency-Key header is required for API calls." });
       }
+      const idempotencyKey = idempotencyKeyHeader ?? randomUUID();
 
       const {
         amount,
@@ -142,6 +144,15 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(404).send({ error: "Client not found." });
       }
 
+      if (!client.stripeAccountId || !client.chargesEnabled) {
+        return reply.code(409).send({
+          error: "Client Stripe account is not connected or cannot accept charges.",
+          code: "ACCOUNT_NOT_CONNECTED",
+        });
+      }
+
+      const effectiveWaiveFee = isApiCall ? false : waiveFee;
+
       if (!isApiCall && workspace && client.workspace !== workspace) {
         return reply
           .code(400)
@@ -164,6 +175,12 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
             .send({ error: "amount and currency are required for PaymentIntents." });
         }
 
+        if (!Number.isInteger(amount) || amount <= 0) {
+          return reply
+            .code(400)
+            .send({ error: "amount must be a positive integer (in the smallest currency unit)." });
+        }
+
         let feeAmount: number;
         try {
           feeAmount = await resolveClientFee(client, group, amount);
@@ -171,7 +188,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           return reply.code(400).send({ error: (e as Error).message });
         }
 
-        const totalAmount = waiveFee ? amount : amount + feeAmount;
+        const totalAmount = effectiveWaiveFee ? amount : amount + feeAmount;
 
         const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
           amount: totalAmount,
@@ -182,27 +199,17 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
             ...(metadata ?? {}),
             clientId,
             baseAmount: amount.toString(),
-            feeAmount: waiveFee ? "0" : feeAmount.toString(),
-            waivedFeeAmount: waiveFee ? feeAmount.toString() : "0",
+            feeAmount: effectiveWaiveFee ? "0" : feeAmount.toString(),
+            waivedFeeAmount: effectiveWaiveFee ? feeAmount.toString() : "0",
           },
         };
 
         try {
-          if (stripeAccountId) {
-            if (!waiveFee) {
-              paymentIntentParams.application_fee_amount = feeAmount;
-            }
-            const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams, {
-              stripeAccount: stripeAccountId,
-              idempotencyKey,
-            });
-            return reply.code(201).send({
-              clientSecret: paymentIntent.client_secret,
-              paymentIntentId: paymentIntent.id,
-            });
+          if (!effectiveWaiveFee) {
+            paymentIntentParams.application_fee_amount = feeAmount;
           }
-
           const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams, {
+            stripeAccount: stripeAccountId,
             idempotencyKey,
           });
           return reply.code(201).send({
@@ -265,14 +272,28 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
 
       const checkoutLineItems = [...lineItems];
-      if (feeAmount > 0) {
+      if (feeAmount > 0 && !effectiveWaiveFee) {
+        const priceDataCurrencies = new Set(
+          lineItems.map((item) => item.price_data?.currency).filter((c): c is string => !!c)
+        );
+        let feeCurrency: string | undefined;
+        if (priceDataCurrencies.size === 1) {
+          feeCurrency = [...priceDataCurrencies][0];
+        } else if (priceDataCurrencies.size === 0 && currency) {
+          feeCurrency = currency;
+        }
+        if (!feeCurrency) {
+          return reply.code(400).send({
+            error: "Unable to determine a consistent currency for the processing fee line item.",
+          });
+        }
         checkoutLineItems.push({
           price_data: {
-            currency: lineItems[0].price_data?.currency || "usd",
+            currency: feeCurrency,
             product_data: {
-              name: waiveFee ? "Processing Fee (Waived)" : "Processing Fee",
+              name: "Processing Fee",
             },
-            unit_amount: waiveFee ? 0 : feeAmount,
+            unit_amount: feeAmount,
           },
           quantity: 1,
         });
@@ -293,8 +314,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
             ...(metadata ?? {}),
             clientId,
             baseAmount: baseAmount.toString(),
-            feeAmount: waiveFee ? "0" : feeAmount.toString(),
-            waivedFeeAmount: waiveFee ? feeAmount.toString() : "0",
+            feeAmount: effectiveWaiveFee ? "0" : feeAmount.toString(),
+            waivedFeeAmount: effectiveWaiveFee ? feeAmount.toString() : "0",
           },
         },
         metadata: {
@@ -303,18 +324,11 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       };
 
       try {
-        if (stripeAccountId) {
-          if (sessionParams.payment_intent_data && !waiveFee) {
-            sessionParams.payment_intent_data.application_fee_amount = feeAmount;
-          }
-          const session = await stripe.checkout.sessions.create(sessionParams, {
-            stripeAccount: stripeAccountId,
-            idempotencyKey,
-          });
-          return reply.code(201).send({ url: session.url });
+        if (sessionParams.payment_intent_data && !effectiveWaiveFee) {
+          sessionParams.payment_intent_data.application_fee_amount = feeAmount;
         }
-
         const session = await stripe.checkout.sessions.create(sessionParams, {
+          stripeAccount: stripeAccountId,
           idempotencyKey,
         });
         return reply.code(201).send({ url: session.url });
@@ -386,22 +400,29 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       if (connected.length === 0) {
         return reply.send({ groupId, data: [], hasMore: false });
       }
+      // Cursors (starting_after/ending_before) are per-account and cannot be
+      // forwarded across accounts, so only the limit is applied per account.
+      const perAccountParams: Stripe.PaymentIntentListParams = {};
+      if (parsedLimit !== undefined) perAccountParams.limit = parsedLimit;
+
       const maxConcurrency = 3;
       const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
+      let hasMore = false;
       for (let i = 0; i < connected.length; i += maxConcurrency) {
         const batch = connected.slice(i, i + maxConcurrency);
         const batchResults = await Promise.all(
           batch.map(async (c) => {
-            const pi = await stripe.paymentIntents.list(listParams, {
+            const pi = await stripe.paymentIntents.list(perAccountParams, {
               stripeAccount: c.stripeAccountId,
             });
+            if (pi.has_more) hasMore = true;
             return pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name }));
           })
         );
         results.push(...batchResults);
       }
       const merged = results.flat();
-      return reply.send({ groupId, data: merged, hasMore: false });
+      return reply.send({ groupId, data: merged, hasMore });
     }
 
     if (!clientId) {

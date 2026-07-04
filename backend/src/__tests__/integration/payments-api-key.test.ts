@@ -7,6 +7,11 @@ describe("Payments API Key Authentication Integration", () => {
   let clients: any;
   let eq: (left: unknown, right: unknown) => unknown;
   let hashApiKey: (apiKey: string) => Promise<string>;
+  let sha256Lookup: (apiKey: string) => string;
+  let stripeMock: {
+    paymentIntents: { create: ReturnType<typeof vi.fn> };
+    checkout: { sessions: { create: ReturnType<typeof vi.fn> } };
+  };
 
   beforeAll(async () => {
     // Set up environment variables for testing
@@ -27,6 +32,12 @@ describe("Payments API Key Authentication Integration", () => {
     vi.unmock("drizzle-orm");
     vi.resetModules();
 
+    stripeMock = {
+      paymentIntents: { create: vi.fn() },
+      checkout: { sessions: { create: vi.fn() } },
+    };
+    vi.doMock("../../lib/stripe", () => ({ stripe: stripeMock }));
+
     const [{ buildServer }, dbModule, schemaModule, authModule, drizzleModule] = await Promise.all([
       import("../../app"),
       import("../../db/client"),
@@ -38,6 +49,7 @@ describe("Payments API Key Authentication Integration", () => {
     db = dbModule.db;
     clients = schemaModule.clients;
     hashApiKey = authModule.hashApiKey;
+    sha256Lookup = authModule.sha256Lookup;
     eq = drizzleModule.eq;
 
     app = await buildServer();
@@ -60,6 +72,7 @@ describe("Payments API Key Authentication Integration", () => {
       name: "Test Client",
       email: `payments-${randomUUID()}@example.com`,
       apiKeyHash: apiKeyHash,
+      apiKeyLookup: sha256Lookup(apiKey),
       status: "active",
     });
 
@@ -78,11 +91,74 @@ describe("Payments API Key Authentication Integration", () => {
       },
     });
 
-    // Since Stripe is not mocked, we expect a 401 due to missing Stripe account
-    // But importantly, we should NOT get a 401 (unauthorized) which would mean API key auth failed
-    expect(response.statusCode).toBe(401); // Expecting 401 because client doesn't have stripeAccountId
+    // API key auth succeeds, but the client has no connected Stripe account,
+    // so payment creation is rejected before ever calling Stripe.
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: "Client Stripe account is not connected or cannot accept charges.",
+      code: "ACCOUNT_NOT_CONNECTED",
+    });
 
     // Clean up
+    await db.delete(clients).where(eq(clients.id, clientId));
+  });
+
+  it("should reject waiveFee from an API-key caller and still apply the platform fee (C1)", async () => {
+    const clientId = randomUUID();
+    const apiKey = `test_api_key_${randomUUID().replace(/-/g, "")}`;
+    const apiKeyHash = await hashApiKey(apiKey);
+
+    // Connected client (stripeAccountId + chargesEnabled: true) so the
+    // request passes the ACCOUNT_NOT_CONNECTED gate and actually reaches
+    // fee resolution / Stripe PaymentIntent creation.
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Waive Fee Test Client",
+      email: `payments-waive-${randomUUID()}@example.com`,
+      apiKeyHash: apiKeyHash,
+      apiKeyLookup: sha256Lookup(apiKey),
+      status: "active",
+      stripeAccountId: "acct_waive_fee_test",
+      chargesEnabled: true,
+      // Fixed, deterministic fee (independent of global settings defaults)
+      // so the "fee is still charged" assertion below is not flaky.
+      processingFeeCents: 150,
+    });
+
+    stripeMock.paymentIntents.create.mockResolvedValueOnce({
+      id: "pi_waive_fee_test",
+      client_secret: "secret_waive_fee_test",
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": `test-idempotency-key-${randomUUID().replace(/-/g, "")}`,
+      },
+      payload: {
+        amount: 1000,
+        currency: "usd",
+        description: "Test payment",
+        waiveFee: true,
+      },
+    });
+
+    // A client-facing API-key caller cannot waive the platform fee (C1) —
+    // the request still succeeds, but the application fee is still charged
+    // as if waiveFee had not been set.
+    expect(response.statusCode).toBe(201);
+    expect(stripeMock.paymentIntents.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        application_fee_amount: expect.any(Number),
+      }),
+      expect.objectContaining({ stripeAccount: "acct_waive_fee_test" })
+    );
+    const [callArgs] = stripeMock.paymentIntents.create.mock.calls;
+    expect(callArgs[0].application_fee_amount).toBeGreaterThan(0);
+    expect(callArgs[0].metadata.waivedFeeAmount).toBe("0");
+
     await db.delete(clients).where(eq(clients.id, clientId));
   });
 

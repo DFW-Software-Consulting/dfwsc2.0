@@ -50,6 +50,8 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "charges_enabled" },
             { column_name: "payouts_enabled" },
             { column_name: "details_submitted" },
+            { column_name: "workspace" },
+            { column_name: "group_id" },
             { column_name: "created_at" },
             { column_name: "updated_at" },
             // webhook_events columns
@@ -69,6 +71,11 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "active" },
             { column_name: "setup_confirmed" },
             { column_name: "last_login_at" }, // now required by schema-check
+            // settings columns
+            { column_name: "key" },
+            { column_name: "value" },
+            // client_groups columns
+            { column_name: "name" },
           ],
         };
       }
@@ -77,7 +84,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(4);
+    expect(mockDb.execute).toHaveBeenCalledTimes(6);
   });
 
   it("throws when a table is missing required columns", async () => {
@@ -96,6 +103,8 @@ describe("verifyDatabaseSchema", () => {
           { column_name: "charges_enabled" },
           { column_name: "payouts_enabled" },
           { column_name: "details_submitted" },
+          { column_name: "workspace" },
+          { column_name: "group_id" },
           { column_name: "created_at" },
           { column_name: "updated_at" },
         ],
@@ -141,6 +150,8 @@ describe("verifyDatabaseSchema", () => {
               { column_name: "charges_enabled" },
               { column_name: "payouts_enabled" },
               { column_name: "details_submitted" },
+              { column_name: "workspace" },
+              { column_name: "group_id" },
               { column_name: "created_at" },
               { column_name: "updated_at" },
             ],

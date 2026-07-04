@@ -32,6 +32,11 @@ services:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
       API_BASE_URL: ${API_BASE_URL}
       ALLOW_ADMIN_SETUP: ${ALLOW_ADMIN_SETUP}
+      # SETUP_FLAG_PATH is intentionally not wired here: it defaults to an
+      # ephemeral container path with no persistent volume, so it resets on
+      # every redeploy. The DB-level `setupConfirmed` guard is the
+      # authoritative protection against re-running admin setup; the file
+      # flag is only a secondary, non-persistent safeguard.
       USE_CHECKOUT: ${USE_CHECKOUT}
       DEFAULT_PROCESS_FEE_CENTS: ${DEFAULT_PROCESS_FEE_CENTS}
       SMTP_HOST: ${SMTP_HOST}

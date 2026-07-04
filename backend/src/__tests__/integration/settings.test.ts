@@ -83,6 +83,49 @@ describe("Settings API Integration", () => {
       expect(getResponse.json().companyName).toBe(newValue);
     });
 
+    it("should invalidate the cache so a second update is reflected immediately", async () => {
+      const firstValue = `First Corp ${Math.random().toString(36).substring(7)}`;
+      const firstResponse = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/settings/company_name",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { value: firstValue },
+      });
+      expect(firstResponse.statusCode).toBe(200);
+
+      const firstGetResponse = await app.inject({
+        method: "GET",
+        url: "/api/v1/settings",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+      });
+      expect(firstGetResponse.json().companyName).toBe(firstValue);
+
+      const secondValue = `Second Corp ${Math.random().toString(36).substring(7)}`;
+      const secondResponse = await app.inject({
+        method: "PATCH",
+        url: "/api/v1/settings/company_name",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+        payload: { value: secondValue },
+      });
+      expect(secondResponse.statusCode).toBe(200);
+
+      const secondGetResponse = await app.inject({
+        method: "GET",
+        url: "/api/v1/settings",
+        headers: {
+          authorization: `Bearer ${adminToken}`,
+        },
+      });
+      expect(secondGetResponse.json().companyName).toBe(secondValue);
+      expect(secondGetResponse.json().companyName).not.toBe(firstValue);
+    });
+
     it("should return 400 for invalid key", async () => {
       const response = await app.inject({
         method: "PATCH",

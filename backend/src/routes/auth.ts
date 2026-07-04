@@ -4,8 +4,17 @@ import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client";
 import { admins } from "../db/schema";
-import { getAdminFromDb, signJwt } from "../lib/auth";
+import { getAdminFromDb, requireAdminJwt, signJwt } from "../lib/auth";
 import { rateLimit } from "../lib/rate-limit";
+
+const MIN_ADMIN_PASSWORD_LENGTH = 12;
+
+function validateAdminPassword(pw: string): string | null {
+  if (pw.length < MIN_ADMIN_PASSWORD_LENGTH) {
+    return `Password must be at least ${MIN_ADMIN_PASSWORD_LENGTH} characters`;
+  }
+  return null;
+}
 
 const SETUP_FLAG_FILE = process.env.SETUP_FLAG_PATH ?? "/tmp/admin-setup-used";
 
@@ -29,17 +38,18 @@ export function resetSetupState(): void {
 }
 
 export default async function authRoutes(fastify: FastifyInstance) {
-  // GET /auth/setup/status - Returns DB-aware bootstrap/setup state
+  // GET /auth/setup/status - Returns DB-aware setup state.
+  // Note: bootstrapPending is intentionally NOT exposed to unauthenticated
+  // callers — it would let an anonymous caller detect a live bootstrap
+  // window and target the confirm-bootstrap flow.
   fastify.get("/auth/setup/status", async (_request, reply) => {
     const allAdmins = await db.select().from(admins);
     const firstAdmin = allAdmins[0];
 
-    const bootstrapPending = allAdmins.length > 0 && !firstAdmin.setupConfirmed;
     const adminConfigured = allAdmins.length > 0 && !!firstAdmin.setupConfirmed;
     const requiresSetup = allAdmins.length === 0;
 
     return reply.code(200).send({
-      bootstrapPending,
       adminConfigured,
       requiresSetup,
     });
@@ -95,8 +105,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
           return reply.code(400).send({ error: "Username and password are required" });
         }
 
-        if (password.length < 8) {
-          return reply.code(400).send({ error: "Password must be at least 8 characters" });
+        const passwordError = validateAdminPassword(password);
+        if (passwordError) {
+          return reply.code(400).send({ error: passwordError });
         }
 
         let passwordHash: string;
@@ -138,7 +149,10 @@ export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post(
     "/auth/confirm-bootstrap",
     {
-      preHandler: rateLimit({ max: 3, windowMs: 15 * 60 * 1000 }), // 3 requests per 15 minutes
+      // Requires an authenticated admin JWT (obtained via /auth/login with the
+      // bootstrap password) so an anonymous caller can no longer finalize
+      // admin credentials.
+      preHandler: [requireAdminJwt, rateLimit({ max: 3, windowMs: 15 * 60 * 1000 })],
     },
     async (request, reply) => {
       const body = (request.body ?? {}) as Partial<LoginRequest>;
@@ -148,8 +162,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: "Username and password are required" });
       }
 
-      if (password.length < 8) {
-        return reply.code(400).send({ error: "Password must be at least 8 characters" });
+      const passwordError = validateAdminPassword(password);
+      if (passwordError) {
+        return reply.code(400).send({ error: passwordError });
       }
 
       const allAdmins = await db.select().from(admins);
@@ -208,9 +223,14 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return reply.code(401).send({ error: "Invalid credentials" });
       }
 
+      if (admin.active === false) {
+        fastify.log.warn({ username }, "Login attempt for deactivated admin");
+        return reply.code(403).send({ error: "Account is deactivated" });
+      }
+
       // Generate JWT token
       try {
-        const token = signJwt({ role: "admin" });
+        const token = signJwt({ role: "admin", sub: admin.id });
         const expiresIn = process.env.JWT_EXPIRY || "1h";
 
         fastify.log.info({ username }, "Successful admin login");
@@ -218,6 +238,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
         return reply.code(200).send({
           token,
           expiresIn,
+          bootstrapPending: admin.setupConfirmed !== true,
         });
       } catch (error) {
         fastify.log.error({ error }, "Error generating JWT token");

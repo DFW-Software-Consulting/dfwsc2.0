@@ -172,6 +172,27 @@ describe("createClientWithOnboardingToken", () => {
     });
   });
 
+  it("throws a 409 conflict when email already exists", async () => {
+    const email = `test-${randomUUID()}@example.com`;
+    const first = await createClientWithOnboardingToken({
+      name: "Test Client",
+      email,
+      workspace,
+    });
+    cleanupIds.clients.push(first.clientId);
+
+    await expect(
+      createClientWithOnboardingToken({
+        name: "Another Client",
+        email,
+        workspace,
+      })
+    ).rejects.toMatchObject({
+      message: "A client with this email already exists.",
+      statusCode: 409,
+    });
+  });
+
   it("throws error when groupId does not exist", async () => {
     await expect(
       createClientWithOnboardingToken({

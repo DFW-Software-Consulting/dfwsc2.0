@@ -283,15 +283,14 @@ describe("payments", () => {
       },
     });
 
-    // Platform payments are now allowed - client can pay without stripeAccountId
-    expect(response.statusCode).toBe(201);
-    expect(stripeMock.paymentIntents.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        amount: 1100,
-        currency: "usd",
-      }),
-      expect.objectContaining({ idempotencyKey: "no-connect" }) // No stripeAccount when null
-    );
+    // A client without a connected + charges-enabled Stripe account cannot
+    // accept payments (H1).
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: "Client Stripe account is not connected or cannot accept charges.",
+      code: "ACCOUNT_NOT_CONNECTED",
+    });
+    expect(stripeMock.paymentIntents.create).not.toHaveBeenCalled();
     await server.close();
   });
 
@@ -306,7 +305,7 @@ describe("payments", () => {
     const server = await createServer();
 
     const apiKey = "api-key-client_1";
-    seedClient({ id: "client_1", stripeAccountId: "acct_123", apiKey });
+    seedClient({ id: "client_1", stripeAccountId: "acct_123", chargesEnabled: true, apiKey });
 
     const response = await server.inject({
       method: "POST",
@@ -352,7 +351,12 @@ describe("payments", () => {
     const server = await createServer();
 
     const apiKey = "api-key-client_invalid_amount";
-    seedClient({ id: "client_invalid_amount", stripeAccountId: "acct_123", apiKey });
+    seedClient({
+      id: "client_invalid_amount",
+      stripeAccountId: "acct_123",
+      chargesEnabled: true,
+      apiKey,
+    });
 
     const response = await server.inject({
       method: "POST",
@@ -384,7 +388,7 @@ describe("payments", () => {
     const server = await createServer();
 
     const apiKey = "api-key-client_fee";
-    seedClient({ id: "client_fee", stripeAccountId: "acct_123", apiKey });
+    seedClient({ id: "client_fee", stripeAccountId: "acct_123", chargesEnabled: true, apiKey });
 
     const response = await server.inject({
       method: "POST",
@@ -416,7 +420,12 @@ describe("payments", () => {
     const server = await createServer();
 
     const apiKey = "api-key-client_checkout";
-    seedClient({ id: "client_checkout", stripeAccountId: "acct_checkout", apiKey });
+    seedClient({
+      id: "client_checkout",
+      stripeAccountId: "acct_checkout",
+      chargesEnabled: true,
+      apiKey,
+    });
 
     const response = await server.inject({
       method: "POST",
@@ -451,7 +460,12 @@ describe("payments", () => {
     const server = await createServer();
 
     const apiKey = "api-key-client_checkout";
-    seedClient({ id: "client_checkout", stripeAccountId: "acct_123", apiKey });
+    seedClient({
+      id: "client_checkout",
+      stripeAccountId: "acct_123",
+      chargesEnabled: true,
+      apiKey,
+    });
 
     const response = await server.inject({
       method: "POST",
@@ -486,6 +500,7 @@ describe("payments", () => {
       email: "custom@example.test",
       apiKey,
       stripeAccountId: "acct_custom",
+      chargesEnabled: true,
       paymentSuccessUrl: "https://myclient.com/thank-you",
       paymentCancelUrl: null,
     });
@@ -531,7 +546,12 @@ describe("payments", () => {
     const server = await createServer({ skipEnvValidation: true });
 
     const apiKey = "api-key-client_checkout";
-    seedClient({ id: "client_checkout", stripeAccountId: "acct_123", apiKey });
+    seedClient({
+      id: "client_checkout",
+      stripeAccountId: "acct_123",
+      chargesEnabled: true,
+      apiKey,
+    });
 
     const response = await server.inject({
       method: "POST",
@@ -580,8 +600,10 @@ describe("connect onboarding", () => {
 
     expect(response.statusCode).toBe(201);
     const body = response.json();
-    expect(body.onboardingToken).toBeDefined();
-    expect(body.onboardingUrlHint).toContain(body.onboardingToken);
+    // The raw onboarding token is no longer returned in the /accounts
+    // response (L24/M21) — only a non-secret hint URL is included.
+    expect(body.onboardingToken).toBeUndefined();
+    expect(body.onboardingUrlHint).toBeDefined();
     expect(body.apiKey).toBeDefined();
     expect(body.clientId).toBeDefined();
 
@@ -591,6 +613,12 @@ describe("connect onboarding", () => {
     expect(savedClient).toBeDefined();
     expect(savedClient?.apiKeyHash).toBe(`hashed:${body.apiKey}`);
     expect(savedClient?.id).toBe(body.clientId);
+
+    const savedToken = Array.from(dataStore.onboardingTokens.values()).find(
+      (token) => token.clientId === body.clientId
+    );
+    expect(savedToken).toBeDefined();
+    expect(body.onboardingUrlHint).toContain(savedToken?.token);
     await server.close();
   });
 
@@ -618,7 +646,8 @@ describe("connect onboarding", () => {
     expect(json.name).toBe("Ledger Client");
     expect(json.clientId).toBeDefined();
     expect(json.apiKey).toBeDefined();
-    expect(json.onboardingToken).toBeDefined();
+    expect(json.onboardingToken).toBeUndefined();
+    expect(json.onboardingUrlHint).toBeDefined();
     expect(json.workspace).toBe("client_portal");
 
     await server.close();
@@ -705,7 +734,8 @@ describe("connect onboarding", () => {
           card_payments: { requested: true },
           transfers: { requested: true },
         },
-      })
+      }),
+      expect.objectContaining({ idempotencyKey: `acct-create-${clientId}` })
     );
     const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
     expect(updatedToken?.status).toBe("in_progress");
@@ -716,7 +746,8 @@ describe("connect onboarding", () => {
         type: "account_onboarding",
         refresh_url: `https://api.example.com/api/v1/connect/refresh?token=${onboardingToken}`,
         return_url: `https://api.example.com/api/v1/connect/callback?client_id=client_onboard&state=${updatedToken?.state}`,
-      })
+      }),
+      expect.objectContaining({ idempotencyKey: expect.any(String) })
     );
 
     const updatedClient = dataStore.clients.get(clientId);
@@ -808,7 +839,7 @@ describe("connect callback", () => {
 
     expect(response.statusCode).toBe(302);
     expect(origin).toBeDefined();
-    expect(response.headers.location).toBe(`${origin}/onboarding-success`);
+    expect(response.headers.location).toBe(`${origin}/onboarding-success?status=completed`);
 
     const updatedClient = dataStore.clients.get(clientId);
     expect(updatedClient?.stripeAccountId).toBe("acct_789");
@@ -858,7 +889,7 @@ describe("connect callback", () => {
     });
 
     expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toBe(`${origin}/onboarding-success`);
+    expect(response.headers.location).toBe(`${origin}/onboarding-success?status=completed`);
     expect(stripeMock.accounts.retrieve).toHaveBeenCalledWith("acct_stored");
 
     const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
@@ -904,7 +935,7 @@ describe("connect callback", () => {
     });
 
     expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toBe(`${origin}/onboarding-success`);
+    expect(response.headers.location).toBe(`${origin}/onboarding-success?status=pending`);
 
     const updatedToken = dataStore.onboardingTokens.get(onboardingTokenId);
     expect(updatedToken?.status).toBe("in_progress");
@@ -1034,7 +1065,7 @@ describe("connect callback", () => {
 
     const origin = process.env.FRONTEND_ORIGIN;
     expect(response.statusCode).toBe(302);
-    expect(response.headers.location).toBe(`${origin}/onboarding-success`);
+    expect(response.headers.location).toBe(`${origin}/onboarding-success?status=pending`);
 
     const updatedClient = dataStore.clients.get(clientId);
     expect(updatedClient?.stripeAccountId).toBeNull();
@@ -1346,6 +1377,25 @@ describe("client groups", () => {
   it("creates a group", async () => {
     const server = await createServer();
     const adminToken = makeAdminToken();
+
+    // POST /groups now persists via `.insert(...).values(...).returning()`
+    // (L25). The shared db mock's insert() for client_groups doesn't chain a
+    // `.returning()` off `.values()`, so wrap it for this call: run the
+    // original side effect (which populates dataStore.clientGroups), then
+    // read the inserted row back for `.returning()`.
+    const originalInsertImpl = dbMock.insert.getMockImplementation();
+    dbMock.insert.mockImplementationOnce((table: any) => {
+      const original = originalInsertImpl?.(table);
+      return {
+        values: (payload: any) => {
+          const result = original?.values(payload);
+          return {
+            ...result,
+            returning: async () => [dataStore.clientGroups.get(payload.id)],
+          };
+        },
+      };
+    });
 
     const response = await server.inject({
       method: "POST",

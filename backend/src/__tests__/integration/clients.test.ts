@@ -730,7 +730,9 @@ describe("Clients API Integration", () => {
       });
 
       expect(response.statusCode).toBe(409);
-      expect(response.json().error).toMatch(/already exists/i);
+      expect(response.json().error).toBe(
+        "A client with this email already exists in this workspace."
+      );
     });
 
     it("returns 400 when defaultPaymentTermsDays is not a positive integer", async () => {
