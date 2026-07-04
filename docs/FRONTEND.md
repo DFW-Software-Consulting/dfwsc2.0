@@ -10,13 +10,13 @@ This document details the frontend implementation, state management, and UI patt
 - **Styling**: TailwindCSS v4
 
 ## 2. Directory Structure (`front/src/`)
-- **`api/`**: API client wrappers per domain (`auth`, `clients`, `groups`, `onboarding`, `payments`, `settings`, `subscriptions`).
+- **`api/`**: API client wrappers per domain (`auth`, `clients`, `groups`, `onboarding`, `payments`, `settings`), plus `client.js` as the shared fetch wrapper.
 - **`components/`**: UI components organized by domain:
   - **`admin/`**: Dashboard components (ClientList, EditClientModal, GroupPanel, PaymentReports, SettingsPanel, etc.).
   - **`admin/shared/`**: Reusable admin primitives (AdminTable, BaseModal, Button, FormInput, StatusBadge, etc.).
   - **Marketing components**: Banner, CaseStudies, Contact, Footer, Hero, Navbar, Process, Services, TechStrip, ValueProps, Values.
 - **`contexts/`**: `AuthContext` (admin JWT state), `ThemeContext` (light/dark toggle).
-- **`hooks/`**: TanStack Query hooks — `useClients`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSubscriptions`, `useSetupStatus`.
+- **`hooks/`**: TanStack Query hooks — `useClients`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus`.
 - **`pages/`**: Route-level components.
 - **`utils/`**: `scrollToSection`, `validation`, `logger`.
 
@@ -44,9 +44,9 @@ The app supports light and dark modes via `ThemeContext`. The active mode applie
 Glassmorphism surfaces use the `.glass` and `.glass-dark` utility classes.
 
 ## 6. Admin Dashboard
-`AdminPage` is self-contained and login-gated via `AuthContext`. It renders `AdminDashboard` on successful login, which includes:
-- **ClientList**: tabular client management with edit, onboard, and filter actions.
+`AdminPage` is a thin wrapper around `AdminDashboard`, which is login-gated via `AuthContext` — it renders `AdminLogin` (or `AdminSetup` on first run) until authenticated, then the dashboard tabs, which include:
+- **ClientList**: tabular client management with edit, resend-onboarding-link, and activate/deactivate actions.
 - **GroupPanel**: group creation and management.
 - **PaymentReports**: Stripe PaymentIntent history per client or group.
-- **SettingsPanel**: system settings (company name, default payment terms).
-- **ImportStripeCustomer**: import an existing Stripe customer into the portal.
+- **SettingsPanel**: system settings (company name, contact email, default processing fee in cents or percent).
+- **AddClientModal**: create a new client (name, email, phone).

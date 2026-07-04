@@ -4,6 +4,8 @@ This guide is for developers integrating the DFWSC payment API into their own ap
 
 **Prerequisites:** You have already been onboarded and received your API key. If you haven't, contact your DFWSC administrator.
 
+> **Important — check your portal's mode first.** This guide describes the embedded-payment-form integration, which is available only when the portal runs in **PaymentIntents mode** (`USE_CHECKOUT=false`). If your portal runs in **Checkout mode** (`USE_CHECKOUT=true` — the default in the portal's shipped configuration), the same endpoint instead requires a `lineItems` array and returns `{ "url": "..." }` — a Stripe-hosted payment page you redirect the customer to — and never returns a `clientSecret`. Confirm your portal's mode with your DFWSC administrator before following the steps below.
+
 ---
 
 ## What You Have
@@ -22,7 +24,7 @@ After onboarding you should have been given:
 3. The customer fills in their card and submits — Stripe handles the actual charge
 4. You get a webhook or redirect when the payment succeeds
 
-Your customers never leave your site.
+In this mode, your customers never leave your site. (In Checkout mode, customers are redirected to a Stripe-hosted payment page and back to your `success_url`/`cancel_url` afterwards.)
 
 ---
 
@@ -36,7 +38,7 @@ curl -X POST https://<your-api-base-url>/api/v1/payments/create \
   -d '{ "amount": 100, "currency": "usd" }'
 ```
 
-If your key is working you'll get back a `clientSecret`. A `401` means your API key is wrong.
+If your key is working and the portal is in PaymentIntents mode you'll get back a `clientSecret`. A `401` means your API key is wrong. A `400` with `"lineItems are required when USE_CHECKOUT=true."` means your key is fine but the portal is running in Checkout mode — this guide's flow won't apply; contact your DFWSC administrator.
 
 ---
 
@@ -93,6 +95,8 @@ If you accidentally send the same key twice, the second request returns the same
 ```
 
 Pass the `clientSecret` to your frontend — do not log or store it.
+
+> This response applies to PaymentIntents mode (`USE_CHECKOUT=false`). In Checkout mode the endpoint requires a `lineItems` array and responds with `{ "url": "..." }` instead — redirect the customer to that URL rather than using the Step 2 payment form.
 
 ---
 

@@ -43,10 +43,12 @@ All services can be deployed independently on Coolify while sharing the same mon
   SMTP_FROM=noreply@yourdomain.com
   API_BASE_URL=https://your-backend-domain.com
   ALLOW_ADMIN_SETUP=false  # Set to true only during initial admin setup
+  ENABLE_SWAGGER=false  # optional; set to true temporarily to expose Swagger UI at /docs — keep false in production
+  METRICS_TOKEN=your_metrics_token  # required to enable /api/v1/metrics — requests return 401 if unset or the token doesn't match
   ```
-- **Startup Command**: `npm run db:migrate && npm run start` (handled by Dockerfile)
+- **Startup Command**: `node dist/index.js` (Dockerfile default). Migrations are NOT run by the container — run them separately, e.g. a one-shot job/service running `npm run db:migrate` before the API starts (see the `migrator` service in `docker-compose.prod.yml`), or set a custom start command `npm run db:migrate && npm run start` in Coolify.
 - **Dependencies**: Database service must be healthy first
-- **Healthcheck**: `curl -f http://localhost:4242/api/v1/health || exit 1`
+- **Healthcheck**: `wget -qO- http://127.0.0.1:4242/api/v1/health || exit 1`
 
 ### 3. Frontend Service (React + Nginx)
 - **Source**: `./front` directory
@@ -57,7 +59,6 @@ All services can be deployed independently on Coolify while sharing the same mon
 - **Configuration**: Uses existing `front/nginx.conf` which:
   - Serves React static files from root path (`/`)
   - Proxies `/api/*` requests to backend service
-  - Proxies `/docs/*` requests to backend service (Swagger UI)
 - **Dependencies**: Backend service
 - **Healthcheck**: `curl -f http://localhost || exit 1`
 
@@ -95,13 +96,11 @@ COPY --from=builder /app/drizzle ./drizzle
 
 USER node
 
-CMD ["sh", "-c", "npm run db:migrate && npm run start"]
+CMD ["node", "dist/index.js"]
 ```
 
-### Frontend Dockerfile (recommended)
-Create this file at `front/Dockerfile`:
+### Frontend Dockerfile (already exists at `front/Dockerfile`)
 ```dockerfile
-# Build stage
 FROM node:20-alpine AS builder
 WORKDIR /app
 
@@ -109,14 +108,27 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+
+ARG VITE_API_URL=/api/v1
+ENV VITE_API_URL=$VITE_API_URL
+
 RUN npm run build
 
-# Serve stage
-FROM nginx:alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
+FROM nginx:alpine AS production
+COPY --from=builder /app/build-dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-EXPOSE 80 443
+# Run nginx as the non-root 'nginx' user. Make the paths nginx must write to
+# (static root, conf, and the cache/temp dirs) owned by that user and relocate
+# the pid file to a writable path. Without this the container crash-loops with
+# EACCES on /var/cache/nginx/client_temp and /run/nginx.pid, leaving Traefik
+# with no healthy backend (the site then returns a 404).
+RUN chown -R nginx:nginx /usr/share/nginx/html /etc/nginx/conf.d /var/cache/nginx \
+    && sed -i 's#pid .*nginx\.pid;#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf
+
+USER nginx
+
+EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]
 ```
@@ -125,8 +137,9 @@ CMD ["nginx", "-g", "daemon off;"]
 The existing `front/nginx.conf` is already configured correctly:
 - Serves React app from root
 - Proxies `/api/*` to backend service
-- Proxies `/docs/*` to backend service (Swagger UI)
 - Includes security headers and compression
+
+Note: Swagger UI is dev-only (`ENABLE_SWAGGER=true` in local dev) and is intentionally not exposed through the production frontend nginx.
 
 ## Deployment Sequence
 
@@ -143,7 +156,7 @@ The existing `front/nginx.conf` is already configured correctly:
    - Use existing Dockerfile
    - Add all environment variables from the list above
    - Set dependency on Database service
-   - Add healthcheck: `curl -f http://localhost:4242/api/v1/health || exit 1`
+   - Add healthcheck: `wget -qO- http://127.0.0.1:4242/api/v1/health || exit 1`
    - Save and deploy
 
 3. **Create Frontend Service**
@@ -161,7 +174,7 @@ The existing `front/nginx.conf` is already configured correctly:
 
 2. **Test API Endpoints**
    - Access backend health: `https://[backend-service].coolify.app/api/v1/health`
-   - Access Swagger docs: `https://[backend-service].coolify.app/docs/`
+   - Access Swagger docs (only if `ENABLE_SWAGGER=true`): `https://[backend-service].coolify.app/docs/` — returns 404 otherwise
 
 3. **Test Frontend**
    - Access frontend: `https://[frontend-service].coolify.app`
@@ -250,7 +263,7 @@ The existing `front/nginx.conf` is already configured correctly:
 
 Key files for Coolify deployment:
 - `backend/Dockerfile` - Production backend build
-- `front/Dockerfile` - Recommended frontend build (create this)
+- `front/Dockerfile` - Production frontend build (already exists)
 - `front/nginx.conf` - Already configured for API proxying
 - `backend/.env` - Reference for environment variable names (use values, don't commit file)
 - `docker-compose.base.yml` / `docker-compose.dev.yml` - Local dev stack reference for service relationships

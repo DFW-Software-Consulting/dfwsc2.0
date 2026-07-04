@@ -52,7 +52,7 @@ Idempotency table to de-duplicate Stripe webhook notifications.
 Admin accounts for the dashboard.
 
 - **Fields**: `id`, `username` (unique), `passwordHash`, `role` (default `"admin"`), `active`, `setupConfirmed`, `lastLoginAt`, `createdAt`, `updatedAt`.
-- Created via the bootstrap flow: `POST /auth/setup` → `POST /auth/confirm-bootstrap`.
+- Created at server startup by `bootstrapAdminIfNeeded()` from `ADMIN_USERNAME`/`ADMIN_PASSWORD` env vars. When `ALLOW_ADMIN_SETUP=true`, the row is created unconfirmed and finalized via `POST /auth/login` → `POST /auth/confirm-bootstrap` (admin JWT required); otherwise it is confirmed immediately at startup. `POST /auth/setup` is a legacy endpoint that does not create admin rows.
 
 ### `settings`
 Key-value store for system-wide configuration.
@@ -63,7 +63,7 @@ Key-value store for system-wide configuration.
 ## 3. Tooling & Migrations
 - **Schema Changes**: Edit `backend/src/db/schema.ts`.
 - **Generate**: `npm run db:generate` — creates SQL migration files in `backend/drizzle/`.
-- **Apply**: `npm run db:migrate` — runs `migrate.ts` to apply pending migrations.
+- **Apply**: `npm run db:migrate` — runs `drizzle-kit migrate` to apply pending migrations. In non-production environments, migrations are also applied automatically at server startup via `backend/src/lib/migrate.ts`.
 
 ## 4. Idempotency Strategy
 Stripe webhook handling is guarded by the `webhook_events` table. Payment creation uses `Idempotency-Key` headers (required for API key calls).

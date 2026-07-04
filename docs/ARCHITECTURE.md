@@ -52,8 +52,8 @@ sequenceDiagram
     A->>S: Create Express Account + Account Link
     S-->>C: Redirect to Stripe Onboarding
     C->>S: Completes Onboarding
-    S->>A: Redirect to /api/v1/connect/callback?client_id=...&account=...&state=...
-    A->>DB: Mark token 'completed' + store stripeAccountId on client
+    S->>A: Redirect to /api/v1/connect/callback?client_id=...&state=...
+    A->>DB: Mark token 'completed' + store stripeAccountId on client (account id resolved from the DB record; `account` accepted only as an optional legacy cross-check)
     A-->>C: Redirect to /onboarding-success
 ```
 
@@ -69,7 +69,7 @@ sequenceDiagram
 - **Admin Access:** JWT Bearer token obtained from `POST /api/v1/auth/login`.
 - **Client Access:** `X-Api-Key` header — `apiKeyLookup` (SHA256) for fast DB lookup + `apiKeyHash` (bcrypt) for verification.
 - **CSRF Protection:** State-based validation for Connect callbacks (32-byte random token, 30-minute expiry).
-- **Rate Limiting:** In-memory sliding-window per IP.
+- **Rate Limiting:** In-memory sliding-window, keyed per IP by default; `POST /api/v1/payments/create` keys by the authenticated client's connected Stripe account (`stripe:<accountId>`), falling back to IP when none is attached.
 
 ## 7. Architectural Rules
 - **Layered Architecture:**

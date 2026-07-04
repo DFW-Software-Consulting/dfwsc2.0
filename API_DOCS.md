@@ -20,9 +20,10 @@ This is the internal API for the DFWSC payment portal. It handles client onboard
    - [Reports](#reports)
    - [Clients](#clients)
    - [Groups](#groups)
-   - [Invoices](#invoices)
-   - [Subscriptions](#subscriptions)
    - [Webhooks](#webhooks)
+   - [Configuration](#configuration)
+   - [Products](#products)
+   - [Settings](#settings)
 7. [Flows](#flows)
    - [Onboarding a New Client](#onboarding-a-new-client)
    - [Processing a Payment](#processing-a-payment)
@@ -47,8 +48,8 @@ Clients are businesses that use the platform to accept payments through their ow
 ## Base URL & Environment Setup
 
 - **Dev:** `http://localhost:4242`
-- **All routes** are prefixed with `/api/v1` (except `/docs` and `/api/v1/health`)
-- **Swagger UI** (dev only): `http://localhost:4242/docs`
+- **All routes** are prefixed with `/api/v1` (except `/docs` and `/app-config.js`)
+- **Swagger UI** (opt-in, dev only): `http://localhost:4242/docs` — requires `ENABLE_SWAGGER=true`. Note: the Docker dev stack pins `ENABLE_SWAGGER: 'false'` in `docker-compose.base.yml`'s api `environment:` block, which overrides `.env`, so enabling `/docs` in Docker requires changing that compose value (or an override file).
 
 ### Starting the dev stack
 
@@ -99,6 +100,7 @@ Rate limiting is per-IP (or per Stripe account ID for payment routes).
 |----------|-------|
 | `POST /auth/login` | 5 req / 15 min |
 | `POST /auth/setup` | 3 req / 15 min |
+| `POST /auth/confirm-bootstrap` | 3 req / 15 min |
 | `POST /accounts` | 10 req / min |
 | `POST /onboard-client/initiate` | 10 req / min |
 | `POST /onboard-client/resend` | 5 req / min |
@@ -116,7 +118,7 @@ Status: `429`
 
 ## Error Format
 
-All errors return a consistent JSON body:
+All error responses include an `error` field with a human-readable message:
 
 ```json
 {
@@ -125,7 +127,9 @@ All errors return a consistent JSON body:
 }
 ```
 
-The `requestId` is also in the `X-Request-Id` response header — useful for debugging.
+Errors that reach the central error handler — thrown application errors, schema validation failures, and unexpected exceptions — also include a `requestId` (and thrown application errors include a `code` such as `NOT_FOUND` or `CONFLICT`). Guard- and handler-level errors (auth 401/403, rate-limit 429, inline validation 400s, and the 404 catch-all) return `{ "error": "..." }` only.
+
+The `X-Request-Id` response header is set on every response and is the reliable way to correlate requests for debugging.
 
 **Common status codes:**
 
@@ -148,11 +152,24 @@ The `requestId` is also in the `X-Request-Id` response header — useful for deb
 
 #### `GET /api/v1/health`
 
-No auth required. Use this to check if the API is running.
+No auth required. Use this to check if the API is running. Runs a real database query.
 
 **Response `200`:**
 ```json
-{ "status": "ok" }
+{
+  "status": "ok",
+  "database": "connected",
+  "timestamp": "2024-03-14T10:30:00.000Z"
+}
+```
+
+**Response `503`** (database unreachable):
+```json
+{
+  "status": "error",
+  "database": "disconnected",
+  "timestamp": "2024-03-14T10:30:00.000Z"
+}
 ```
 
 ---
@@ -193,8 +210,8 @@ Check whether first-run admin setup is available.
 **Response `200`:**
 ```json
 {
-  "setupAllowed": true,
-  "adminConfigured": false
+  "adminConfigured": false,
+  "requiresSetup": true
 }
 ```
 
@@ -215,38 +232,43 @@ X-Setup-Token: <your-setup-token>
 ```json
 {
   "username": "admin",
-  "password": "at-least-8-chars"
+  "password": "at-least-12-chars"
 }
 ```
+
+Passwords must be at least 12 characters.
 
 **Response `200`:**
 ```json
 {
   "username": "admin",
-  "passwordHash": "$2b$10$...",
   "instructions": [
-    "1. Copy the credentials above",
-    "2. Use these credentials with /auth/confirm-bootstrap to finalize setup",
+    "1. Use the username and the password you just entered to log in.",
+    "2. Follow the confirm-bootstrap flow to finalize your setup.",
     "3. (Recommended) Set ALLOW_ADMIN_SETUP=false in your environment."
   ]
 }
 ```
 
-> **Note:** This endpoint returns a password hash for verification. The admin account is not fully active until confirmed via `/auth/confirm-bootstrap`.
+> **Note:** The admin account is not fully active until confirmed via `/auth/confirm-bootstrap`.
 
 ---
 
 #### `POST /api/v1/auth/confirm-bootstrap`
 
-Finalizes the admin account setup after initial creation via `/auth/setup`. This stores the credentials in the database and enables login.
+**Auth: Admin JWT**
+
+Finalizes the admin account setup. Requires a Bearer token obtained by logging in with the bootstrap credentials first. Rate limited at 3 req / 15 min.
 
 **Request:**
 ```json
 {
   "username": "admin",
-  "password": "at-least-8-chars"
+  "password": "at-least-12-chars"
 }
 ```
+
+Passwords must be at least 12 characters.
 
 **Response `200`:**
 ```json
@@ -257,9 +279,10 @@ Finalizes the admin account setup after initial creation via `/auth/setup`. This
 
 **Errors:**
 - `400` — Missing username/password, or bootstrap already confirmed, or no bootstrap admin found
+- `401` — Missing or invalid Bearer token
 - `429` — Rate limited
 
-> **Setup Flow:** 1) Call `/auth/setup` to generate credentials → 2) Call `/auth/confirm-bootstrap` with same credentials to store in DB → 3) Login via `/auth/login`
+> **Setup Flow:** 1) On first deploy, the server seeds a bootstrap admin from `ADMIN_USERNAME`/`ADMIN_PASSWORD` (with `setupConfirmed=false` when `ALLOW_ADMIN_SETUP=true`) → 2) `POST /auth/login` with those bootstrap credentials — the response includes `bootstrapPending: true` → 3) `POST /auth/confirm-bootstrap` with the Bearer token and the final username/password to finalize setup → 4) log in with the confirmed credentials. (`/auth/setup` is legacy — it no longer persists credentials to the DB and returns `403` if any admin already exists.)
 
 ---
 
@@ -275,18 +298,24 @@ Creates a new client record and returns their credentials. Does **not** send an 
 ```json
 {
   "name": "Acme Corp",
-  "email": "billing@acmecorp.com"
+  "email": "billing@acmecorp.com",
+  "workspace": "client_portal",
+  "groupId": "grp_123"
 }
 ```
+
+- `workspace` — required; the only allowed value is `"client_portal"`
+- `groupId` — optional
 
 **Response `201`:**
 ```json
 {
   "name": "Acme Corp",
-  "clientId": "abc123",
+  "onboardingUrlHint": "http://localhost:5173/onboard?token=...",
   "apiKey": "64-hex-char-string",
-  "onboardingToken": "64-hex-char-string",
-  "onboardingUrlHint": "http://localhost:1919/onboard?token=..."
+  "clientId": "abc123",
+  "workspace": "client_portal",
+  "groupId": null
 }
 ```
 
@@ -304,16 +333,22 @@ Creates a new client and sends them an onboarding email with a link to connect t
 ```json
 {
   "name": "Acme Corp",
-  "email": "billing@acmecorp.com"
+  "email": "billing@acmecorp.com",
+  "workspace": "client_portal",
+  "groupId": "grp_123"
 }
 ```
+
+- `workspace` — required; the only allowed value is `"client_portal"`
+- `groupId` — optional; must reference an existing group in the same workspace or the request fails with `400`
 
 **Response `201`:**
 ```json
 {
   "message": "Onboarding email sent successfully.",
   "clientId": "abc123",
-  "apiKey": "64-hex-char-string"
+  "apiKey": "64-hex-char-string",
+  "groupId": null
 }
 ```
 
@@ -392,9 +427,11 @@ No auth. Regenerates a Stripe account link for an incomplete onboarding. Stripe 
 
 #### `POST /api/v1/payments/create`
 
-**Auth: Client API key (`X-Api-Key`)**
+**Auth: Client API key (`X-Api-Key`), or Admin JWT with a `clientId` in the body**
 
-Creates a payment. The client must have completed Stripe onboarding (have a `stripeAccountId`).
+Creates a payment. The client must have completed Stripe onboarding (have a `stripeAccountId`) **and** have `chargesEnabled` — otherwise the request fails with `409` `{ "error": ..., "code": "ACCOUNT_NOT_CONNECTED" }`. Note that `chargesEnabled` is set asynchronously by the Stripe `account.updated` webhook after onboarding completes, so there can be a window where `stripeAccountId` exists but payments still return `409`.
+
+For admin calls, pass `clientId` in the body (or `metadata.clientId`) along with a valid `workspace`; the `Idempotency-Key` header is only mandatory for `X-Api-Key` calls (auto-generated for admin calls).
 
 **Required header:**
 ```
@@ -407,7 +444,7 @@ The behavior depends on the `USE_CHECKOUT` environment variable:
 
 ---
 
-**PaymentIntent mode (`USE_CHECKOUT=false` — default)**
+**PaymentIntent mode (`USE_CHECKOUT=false`)**
 
 Use this when you want to embed a payment form in your own frontend using Stripe Elements.
 
@@ -473,13 +510,14 @@ Use this for a hosted Stripe Checkout page — the user is redirected to Stripe 
 }
 ```
 
-Redirect the user to this URL to complete payment. After payment, Stripe redirects to the client's configured `paymentSuccessUrl` (or `FRONTEND_ORIGIN/payment-success` as fallback).
+Redirect the user to this URL to complete payment. After payment, Stripe redirects to the client's configured `paymentSuccessUrl`, falling back to the client's group `paymentSuccessUrl`, then to `FRONTEND_ORIGIN/payment-success`. (The same three-tier chain applies to cancel URLs.)
 
 **Common payment errors:**
 - `400` — Missing or empty `Idempotency-Key`
 - `400` — Missing `amount` or `currency` (PaymentIntent mode)
 - `400` — Missing `lineItems` (Checkout mode)
 - `401` — Missing or invalid API key
+- `409` — Client's Stripe account is not connected/charges-enabled (`code: "ACCOUNT_NOT_CONNECTED"`)
 
 ---
 
@@ -491,15 +529,18 @@ Redirect the user to this URL to complete payment. After payment, Stripe redirec
 
 Retrieve payment history for a client or group.
 
-**Query params** (one of `clientId` or `groupId` required):
+**Query params** (`workspace` required; one of `clientId` or `groupId` required):
 
 | Param | Type | Description |
 |-------|------|-------------|
+| `workspace` | string | Required — must be `client_portal`; missing/invalid returns `400` "workspace query parameter is required (client_portal)." |
 | `clientId` | string | Get payments for a specific client |
 | `groupId` | string | Get aggregated payments for all clients in a group |
 | `limit` | number | 1–100, limits results |
 | `starting_after` | string | Stripe PaymentIntent ID for cursor-based pagination |
 | `ending_before` | string | Stripe PaymentIntent ID for cursor-based pagination |
+
+> `starting_after`/`ending_before` apply only to `clientId` queries — they are ignored for `groupId` queries (cursors are per-Stripe-account; only `limit` is applied per account, so a group response can contain up to `limit` × number-of-connected-clients rows).
 
 **Response `200` (by client):**
 ```json
@@ -527,9 +568,11 @@ Retrieve payment history for a client or group.
 }
 ```
 
+In group mode, each payment row additionally includes `clientId` and `clientName`.
+
 **Errors:**
-- `400` — Neither `clientId` nor `groupId` provided, or `limit` out of range
-- `404` — Client/group not found, or client has no linked Stripe account
+- `400` — Missing/invalid `workspace`, neither `clientId` nor `groupId` provided, `limit` out of range, invalid `groupId` ("Invalid groupId."), or a `clientId` that does not belong to the selected workspace
+- `404` — Client not found, or client has no linked Stripe account
 
 ---
 
@@ -539,9 +582,10 @@ Retrieve payment history for a client or group.
 
 **Auth: Admin JWT**
 
-List all clients.
+List clients in a workspace.
 
 **Query params:**
+- `workspace` (required) — the only accepted value is `client_portal`
 - `groupId` (optional) — filter to clients in a specific group
 
 **Response `200`:**
@@ -553,6 +597,7 @@ List all clients.
     "email": "billing@acmecorp.com",
     "stripeAccountId": "acct_xxx",
     "status": "active",
+    "workspace": "client_portal",
     "groupId": "grp_123",
     "processingFeePercent": "2.50",
     "processingFeeCents": null,
@@ -560,6 +605,12 @@ List all clients.
   }
 ]
 ```
+
+**Errors:**
+- `400` — `workspace` missing/invalid ("workspace query parameter is required (client_portal).")
+- `400` — `groupId` does not belong to the selected workspace ("groupId does not belong to the selected workspace.")
+
+> `GET /api/v1/clients/:id` requires the same `workspace` query param.
 
 ---
 
@@ -585,7 +636,7 @@ Update a client's configuration. All fields are optional — only send what you 
 - `status` — `"active"` or `"inactive"`
 - `groupId` — existing group ID, or `null` to remove from group
 - `paymentSuccessUrl` / `paymentCancelUrl` — must be HTTPS
-- `processingFeePercent` — 0–100, cannot be set alongside `processingFeeCents`
+- `processingFeePercent` — greater than 0 and at most 100 (use `null` to clear), cannot be set alongside `processingFeeCents`
 - `processingFeeCents` — non-negative integer in cents, cannot be set alongside `processingFeePercent`
 
 **Response `200`:** Updated client object (same shape as GET response)
@@ -606,14 +657,20 @@ Groups let you organize clients and apply shared fee/URL defaults.
 
 **Request:**
 ```json
-{ "name": "Enterprise Clients" }
+{
+  "name": "Enterprise Clients",
+  "workspace": "client_portal"
+}
 ```
+
+- `workspace` — required; missing/invalid returns `400` "workspace is required (client_portal)."
 
 **Response `201`:**
 ```json
 {
   "id": "grp_abc",
   "name": "Enterprise Clients",
+  "workspace": "client_portal",
   "status": "active",
   "processingFeePercent": null,
   "processingFeeCents": null,
@@ -630,7 +687,7 @@ Groups let you organize clients and apply shared fee/URL defaults.
 
 **Auth: Admin JWT**
 
-Returns all groups (same shape as POST response, as array).
+Returns groups for the given workspace (same shape as POST response, as array). Requires the `workspace` query param, e.g. `GET /api/v1/groups?workspace=client_portal` — returns `400` "workspace query parameter is required (client_portal)." if missing. All group responses (including PATCH) include the `workspace` field.
 
 ---
 
@@ -655,194 +712,6 @@ Same validation rules as `PATCH /clients/:id`. Returns updated group object.
 
 ---
 
-### Invoices
-
-Invoices represent one-time or subscription-generated billing records. Clients pay invoices via a public payment token URL.
-
-#### `GET /api/v1/invoices`
-
-**Auth: Admin JWT**
-
-List invoices. Supports optional filters.
-
-**Query params:**
-- `clientId` (optional) — filter to a specific client
-- `status` (optional) — `pending`, `paid`, or `cancelled`
-- `limit` (optional) — max results to return
-
-**Response `200`:** Array of invoice objects.
-
----
-
-#### `POST /api/v1/invoices`
-
-**Auth: Admin JWT**
-
-Create a new invoice.
-
-**Request:**
-```json
-{
-  "clientId": "abc123",
-  "amountCents": 15000,
-  "description": "March retainer",
-  "dueDate": "2026-04-01",
-  "subscriptionId": null
-}
-```
-
-- `clientId` — required
-- `amountCents` — required, positive integer
-- `description` — required
-- `dueDate` — optional ISO date string
-- `subscriptionId` — optional, links invoice to a subscription
-
-**Response `201`:** Created invoice object including `paymentToken`.
-
----
-
-#### `PATCH /api/v1/invoices/:id`
-
-**Auth: Admin JWT**
-
-Cancel a pending invoice.
-
-**Request:**
-```json
-{ "status": "cancelled" }
-```
-
-Only `pending` invoices can be cancelled.
-
-**Response `200`:** Updated invoice object.
-
-**Errors:**
-- `400` — Invoice is not in `pending` status
-- `404` — Invoice not found
-
----
-
-#### `GET /api/v1/invoices/pay/:token`
-
-No auth. Public endpoint for clients to fetch their invoice via the payment token.
-
-**Response `200`:** Invoice details including amount and description.
-
-**Errors:**
-- `404` — Token not found or invoice already paid/cancelled
-
----
-
-#### `POST /api/v1/invoices/pay/:token`
-
-No auth. Submit a mock payment for an invoice.
-
-**Request:** Card fields (not validated — mock only):
-```json
-{
-  "cardNumber": "4242424242424242",
-  "expiry": "12/27",
-  "cvc": "123"
-}
-```
-
-**Response `200`:** Confirmation that payment was recorded and invoice marked `paid`.
-
-**Errors:**
-- `404` — Token not found
-- `409` — Invoice already paid or cancelled
-
----
-
-### Subscriptions
-
-Subscriptions define recurring billing schedules. Each billing cycle generates an invoice automatically.
-
-#### `GET /api/v1/subscriptions`
-
-**Auth: Admin JWT**
-
-List all subscriptions.
-
-**Response `200`:** Array of subscription objects.
-
----
-
-#### `POST /api/v1/subscriptions`
-
-**Auth: Admin JWT**
-
-Create a new subscription.
-
-**Request:**
-```json
-{
-  "clientId": "abc123",
-  "amountCents": 15000,
-  "description": "Monthly retainer",
-  "interval": "monthly",
-  "totalPayments": 12
-}
-```
-
-- `clientId` — required
-- `amountCents` — required, positive integer
-- `description` — required
-- `interval` — required: `monthly`, `quarterly`, or `yearly`
-- `totalPayments` — optional; omit for indefinite billing
-
-**Response `201`:** Created subscription object with `nextBillingDate`.
-
----
-
-#### `GET /api/v1/subscriptions/:id`
-
-**Auth: Admin JWT**
-
-Get a single subscription and its associated invoices.
-
-**Response `200`:**
-```json
-{
-  "id": "sub_abc",
-  "clientId": "abc123",
-  "amountCents": 15000,
-  "description": "Monthly retainer",
-  "interval": "monthly",
-  "totalPayments": 12,
-  "paymentsMade": 3,
-  "status": "active",
-  "nextBillingDate": "2026-04-01",
-  "invoices": [...]
-}
-```
-
-**Errors:**
-- `404` — Subscription not found
-
----
-
-#### `PATCH /api/v1/subscriptions/:id`
-
-**Auth: Admin JWT**
-
-Update a subscription's status.
-
-**Request:**
-```json
-{ "status": "paused" }
-```
-
-Valid values: `active`, `paused`, `cancelled`.
-
-**Response `200`:** Updated subscription object.
-
-**Errors:**
-- `400` — Invalid status value
-- `404` — Subscription not found
-
----
-
 ### Webhooks
 
 #### `POST /api/v1/webhooks/stripe`
@@ -850,12 +719,18 @@ Valid values: `active`, `paused`, `cancelled`.
 Stripe calls this endpoint automatically. You don't call it manually. It requires a valid `Stripe-Signature` header and uses the raw request body.
 
 The server handles these events:
-- `account.updated` — syncs client name/email when Stripe onboarding is submitted
+- `account.updated` — syncs the client's onboarding readiness flags (`chargesEnabled`, `payoutsEnabled`, `detailsSubmitted`) by matching `stripeAccountId`
 - `payment_intent.succeeded` — logged
 - `payment_intent.payment_failed` — logged
 - `charge.refunded` — logged
+- `application_fee.refunded` — logged
 - `payout.paid` — logged
 - `payout.failed` — logged
+- `invoice.payment_succeeded` / `invoice.payment_failed` — logged
+- `invoice.paid` — increments `paymentsMade` metadata on the subscription and its schedule
+- `customer.subscription.updated` / `.paused` / `.resumed` / `.deleted` — logged
+- `subscription_schedule.completed` — marks schedule metadata completed
+- `subscription_schedule.canceled` — logged
 
 Events are stored in `webhook_events` for idempotency — duplicate events are ignored.
 
@@ -863,18 +738,16 @@ Events are stored in `webhook_events` for idempotency — duplicate events are i
 
 ### Configuration
 
-#### `GET /api/v1/config`
+#### `GET /app-config.js`
 
-No auth required. Returns public configuration used by the frontend.
+No auth required. Registered **without** the `/api/v1` prefix. Returns a JavaScript snippet (`Content-Type: application/javascript`) that the frontend loads to discover the API base URL:
 
-**Response `200`:**
-```json
-{
-  "useCheckout": true
-}
+```js
+window.API_URL = "<API_BASE_URL>";
 ```
 
-This indicates whether the backend is configured to use Stripe Checkout (`true`) or PaymentIntent (`false`) mode.
+**Errors:**
+- `500` — `API_BASE_URL` is not set
 
 ---
 
@@ -884,26 +757,44 @@ This indicates whether the backend is configured to use Stripe Checkout (`true`)
 
 **Auth: Admin JWT**
 
-List Stripe products for the workspace.
-
-**Query params:**
-- `workspace` (optional) — `"dfwsc_services"` or `"client_portal"` (default: `"client_portal"`)
-- `limit` (optional) — Max results (1-100, default: 10)
+List active Stripe products on the platform account (up to 100), with default price expanded. Takes no query params.
 
 **Response `200`:**
 ```json
-{
-  "workspace": "client_portal",
-  "data": [
-    {
-      "id": "prod_xxx",
-      "name": "Monthly Retainer",
-      "description": "...",
-      "active": true
+[
+  {
+    "id": "prod_xxx",
+    "name": "Monthly Retainer",
+    "description": "...",
+    "defaultPrice": {
+      "id": "price_xxx",
+      "amountCents": 50000,
+      "currency": "usd"
     }
-  ],
-  "hasMore": false
-}
+  }
+]
+```
+
+`description` and `defaultPrice` may be `null`.
+
+#### `GET /api/v1/tax-rates`
+
+**Auth: Admin JWT**
+
+List active platform tax rates (up to 100).
+
+**Response `200`:**
+```json
+[
+  {
+    "id": "txr_xxx",
+    "displayName": "Sales Tax",
+    "description": null,
+    "percentage": 8.25,
+    "inclusive": false,
+    "jurisdiction": "TX"
+  }
+]
 ```
 
 #### `POST /api/v1/products`
@@ -915,64 +806,19 @@ Create a new Stripe product.
 **Request:**
 ```json
 {
-  "workspace": "client_portal",
   "name": "Consulting Package",
   "description": "10 hours of consulting",
-  "unitAmount": 50000,
+  "amountCents": 50000,
   "currency": "usd"
 }
 ```
 
-**Response `201`:** Created product object.
+- `name` — required
+- `description` — optional
+- `amountCents` — required, positive integer
+- `currency` — optional, defaults to `"usd"`
 
----
-
-### Stripe Customers
-
-#### `GET /api/v1/stripe-customers`
-
-**Auth: Admin JWT**
-
-List Stripe customers linked to workspace clients.
-
-**Query params:**
-- `workspace` (optional) — Filter by workspace
-- `clientId` (optional) — Filter by specific client
-- `limit` (optional) — Max results (1-100, default: 10)
-
-**Response `200`:** Array of customer objects with `stripeCustomerId`, `email`, `name`, etc.
-
-#### `POST /api/v1/stripe-customers`
-
-**Auth: Admin JWT**
-
-Create a Stripe customer for a client.
-
-**Request:**
-```json
-{
-  "clientId": "abc123",
-  "email": "billing@example.com",
-  "name": "Acme Corp"
-}
-```
-
-**Response `201`:** Created customer object with `stripeCustomerId`.
-
----
-
-### DFWSC Clients
-
-#### `GET /api/v1/dfwsc-clients`
-
-**Auth: Admin JWT**
-
-List all clients in the `dfwsc_services` workspace (internal DFWSC clients). Same response format as `GET /api/v1/clients`.
-
-**Query params:**
-- `limit` (optional) — Max results
-- `starting_after` (optional) — Cursor for pagination
-- `ending_before` (optional) — Cursor for pagination
+**Response `201`:** Created product object, same shape as the `GET /api/v1/products` items (`{ id, name, description, defaultPrice }`).
 
 ---
 
@@ -982,15 +828,47 @@ List all clients in the `dfwsc_services` workspace (internal DFWSC clients). Sam
 
 **Auth: Admin JWT**
 
-Get system settings and billing defaults.
+Get system settings and billing defaults. Values are strings (settings are stored as text).
 
 **Response `200`:**
 ```json
 {
-  "defaultPaymentTermsDays": 30,
-  "processingFeePercent": 2.5
+  "defaultFeeCents": "0",
+  "defaultFeePercent": null,
+  "companyName": "DFW Software Consulting",
+  "contactEmail": "billing@example.com",
+  "smtpFrom": "billing@example.com"
 }
 ```
+
+- `defaultFeeCents` — falls back to the `DEFAULT_PROCESS_FEE_CENTS` env var, then `"0"`
+- `defaultFeePercent` — `null` when unset
+- `contactEmail` — falls back to `SMTP_FROM`
+
+#### `PATCH /api/v1/settings/:key`
+
+**Auth: Admin JWT**
+
+Update a single setting.
+
+**Request:**
+```json
+{ "value": "<string>" }
+```
+
+Allowed keys:
+- `default_fee_cents` — non-negative integer string
+- `default_fee_percent` — empty string or 0–100
+- `company_name` — 1–120 chars
+- `contact_email` — valid email or empty
+
+**Response `200`:**
+```json
+{ "message": "Setting updated successfully." }
+```
+
+**Errors:**
+- `400` — Invalid key or value
 
 ---
 
@@ -1002,7 +880,7 @@ Get system settings and billing defaults.
 
 ```
 POST /api/v1/auth/login         → get token
-POST /api/v1/onboard-client/initiate  → creates client + sends email
+POST /api/v1/onboard-client/initiate  → creates client + sends email (body requires workspace: "client_portal")
 ```
 
 Save the `apiKey` from the response. You will not see it again. The client receives an email with their onboarding link.
@@ -1063,7 +941,9 @@ When a payment is created, the platform fee is calculated using this priority or
 2. **Client `processingFeeCents`** — flat fee in cents
 3. **Group `processingFeePercent`** — if client belongs to a group
 4. **Group `processingFeeCents`** — if client belongs to a group
-5. **`DEFAULT_PROCESS_FEE_CENTS`** env var — global default (defaults to `0`)
+5. **Settings `default_fee_percent`** (DB) — global percentage default
+6. **Settings `default_fee_cents`** (DB) — global flat-fee default
+7. **`DEFAULT_PROCESS_FEE_CENTS`** env var — global default (defaults to `0`)
 
 Only one rule applies — whichever is first in the list. You cannot set both `processingFeePercent` and `processingFeeCents` on the same client or group.
 
@@ -1080,15 +960,13 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | `DATABASE_URL` | PostgreSQL connection string |
 | `STRIPE_SECRET_KEY` | Stripe secret key (`sk_test_...` or `sk_live_...`) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
-| `FRONTEND_ORIGIN` | Comma-separated allowed CORS origins (e.g., `http://localhost:1919`) |
+| `FRONTEND_ORIGIN` | Comma-separated allowed CORS origins (e.g., `http://localhost:5173`) |
 | `USE_CHECKOUT` | `"true"` or `"false"` — switches payment mode |
 | `SMTP_HOST` | SMTP server hostname |
 | `SMTP_PORT` | SMTP server port number |
 | `SMTP_USER` | SMTP username |
 | `SMTP_PASS` | SMTP password |
 | `JWT_SECRET` | At least 32 characters — used to sign admin JWTs |
-| `ADMIN_USERNAME` | Admin login username |
-| `ADMIN_PASSWORD` | Admin password (bcrypt hash in production) |
 
 ### Optional
 
@@ -1096,10 +974,12 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 |----------|---------|-------------|
 | `PORT` | `4242` | API server port |
 | `JWT_EXPIRY` | `1h` | JWT token expiry (e.g., `24h`, `7d`) |
-| `API_BASE_URL` | auto-detected | Public API base URL |
+| `API_BASE_URL` | auto-detected (non-production only) | Public API base URL. Required in production — Stripe onboarding-link generation fails with a 500 `CONFIGURATION_ERROR` if unset (header-based auto-detection is deliberately disabled in production to prevent Host-header spoofing). Also required for `GET /app-config.js`, which returns 500 without it in any environment. |
+| `ADMIN_USERNAME` | — | Seeds the first admin on startup; if unset, use the `/auth/setup` flow |
+| `ADMIN_PASSWORD` | — | Seeds the first admin on startup (plaintext; must be ≥12 chars and not a known default in production); if unset, use the `/auth/setup` flow |
 | `DEFAULT_PROCESS_FEE_CENTS` | `0` | Global default platform fee in cents |
 | `SMTP_FROM` | auto-generated | Sender email address |
-| `ENABLE_SWAGGER` | `true` (non-prod) | Set to `false` to disable `/docs` |
+| `ENABLE_SWAGGER` | unset (disabled) | Set to `true` to enable Swagger UI at `/docs` |
 | `NODE_ENV` | — | `production`, `development`, or `test` |
 
 ### First-run setup only

@@ -24,14 +24,15 @@ make down         # Stop
 make down-v       # Stop + remove volumes (destroys pgdata)
 make logs         # Tail API logs
 make sh           # Shell into API container
-make test         # Run backend tests inside running container
-make test-up      # Start stack then run backend tests
+make test         # Run all tests (frontend locally + backend inside container)
+make test-back    # Run backend tests inside running container
+make test-up      # Start stack then run all tests (backend in container + frontend locally)
 ```
 
 ### Running tests
 ```sh
-# Backend (must be inside container or with DATABASE_URL set):
-make test
+# Backend (runs inside the dev container; requires the stack up via `make up`):
+make test-back
 # Single test file:
 docker compose -f docker-compose.base.yml -f docker-compose.dev.yml exec api npx vitest run src/__tests__/app.test.ts
 
@@ -46,7 +47,7 @@ npm run db:migrate    # Apply migrations
 ```
 
 ## Architectural Overview (High-Level)
-For full details, see [ARCHITECTURE.md](./ARCHITECTURE.md).
+For full details, see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
 ### Request auth
 - **Client routes**: `X-Api-Key` header (Lookup: SHA256; Verification: bcrypt).

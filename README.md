@@ -23,7 +23,7 @@ dfwsc2.0/
 │   ├── package.json
 │   └── Dockerfile           # API-only Docker image
 │
-├── docker-compose.base.yml   # Base services config (extended by dev/prod)
+├── docker-compose.base.yml   # Base services config (extended by docker-compose.dev.yml; prod uses standalone docker-compose.prod.yml)
 ├── package.json              # Root monorepo scripts
 └── .gitignore                # Ignore node_modules, build outputs, etc.
 ```
@@ -62,9 +62,9 @@ dfwsc2.0/
 
 2. **Configure environment:**
    ```bash
-   # Backend configuration
-   cp backend/.env.example backend/.env
-   # Edit backend/.env with your Stripe keys, database URL, SMTP settings
+   # Environment configuration (run at the repo root)
+   cp .env.example .env
+   # Edit .env with your Stripe keys, database URL, SMTP settings
    ```
 
 3. **Run database migrations:**
@@ -89,27 +89,28 @@ npm run dev:frontend
 - **Backend:** http://localhost:4242
 - Frontend makes API calls to backend at http://localhost:4242/api/v1/*
 
-If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:1919`.
+If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:5173`.
 
 #### Option 2: Docker Dev Stack (Full stack in containers)
 ```bash
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-- **Web UI:** http://localhost:1919
+- **Web UI:** http://localhost:5173
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
 - **Stripe CLI:** forwards webhooks to `/api/v1/webhooks/stripe`
 
 ### Building for Production
 
-```bash
-# Build both frontend and backend
-npm run build
+Production builds run via Docker. The API image (`backend/Dockerfile`) compiles the backend with `npm run build:server` into `build-dist` and copies it to `dist` (`CMD node dist/index.js`); the frontend image (`front/Dockerfile`) builds the React app into `front/build-dist` and serves it with nginx. In deployment, the backend runs as a Coolify docker-compose app and the frontend is a separate nginx app serving dfwsc.com.
 
-# Start production server
-npm start
+```bash
+# Build both frontend and backend locally (output: backend/build-dist, front/build-dist)
+npm run build
 ```
+
+Note: a bare `npm start` after a local `npm run build` will not work — the backend `start` script expects `dist/`, which only the Docker image produces.
 
 ## 🐳 Docker Deployment
 
@@ -120,11 +121,11 @@ make up-build
 ```
 
 Services (default):
-- **Web UI:** http://localhost:8080
+- **Web UI:** http://localhost:5173
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
 
-For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:1919`.
+For the Docker dev setup in `docker-compose.dev.yml`, the UI runs at `http://localhost:5173`.
 
 If you want the UI on port 80, change the `web` service port mapping in `docker-compose.base.yml`.
 
@@ -143,32 +144,24 @@ All API routes are prefixed with `/api/v1`:
 | GET | `/api/v1/auth/setup/status` | Bootstrap setup status | Public |
 | POST | `/api/v1/auth/setup` | First-run admin setup | Optional token |
 | GET | `/api/v1/clients` | List all clients (includes CRM columns) | Admin (JWT) |
+| GET | `/api/v1/clients/:id` | Get a single client | Admin (JWT) |
 | PATCH | `/api/v1/clients/:id` | Update client config | Admin (JWT) |
 | POST | `/api/v1/accounts` | Create client account | Admin (JWT) |
-| POST | `/api/v1/clients/sync-payment-status` | Trigger Stripe payment status sync | Admin (JWT) |
-| POST | `/api/v1/clients/:id/suspend` | Suspend a client | Admin (JWT) |
-| POST | `/api/v1/clients/:id/reinstate` | Reinstate a suspended client | Admin (JWT) |
-| POST | `/api/v1/dfwsc/leads` | Create a lead (no Stripe) | Admin (JWT) |
-| POST | `/api/v1/dfwsc/leads/:id/convert` | Convert lead to client (creates Stripe customer) | Admin (JWT) |
 | POST | `/api/v1/onboard-client/initiate` | Send onboarding email | Admin (JWT) |
 | POST | `/api/v1/onboard-client/resend` | Resend onboarding email | Admin (JWT) |
 | GET | `/api/v1/onboard-client` | Get Stripe onboarding link | Public |
 | GET | `/api/v1/connect/callback` | Stripe Connect callback | Public |
 | GET | `/api/v1/connect/refresh` | Refresh Stripe account link | Public |
-| POST | `/api/v1/payments/create` | Create payment | Client (API key) |
+| POST | `/api/v1/payments/create` | Create payment | Client (API key) or Admin (JWT) with `clientId` |
 | GET | `/api/v1/reports/payments` | List payments | Admin (JWT) |
 | GET | `/api/v1/groups` | List client groups | Admin (JWT) |
 | POST | `/api/v1/groups` | Create client group | Admin (JWT) |
 | PATCH | `/api/v1/groups/:id` | Update group config | Admin (JWT) |
-| GET | `/api/v1/invoices` | List invoices | Admin (JWT) |
-| POST | `/api/v1/invoices` | Create invoice | Admin (JWT) |
-| PATCH | `/api/v1/invoices/:id` | Cancel invoice | Admin (JWT) |
-| GET | `/api/v1/invoices/pay/:token` | Fetch invoice by token | Public |
-| POST | `/api/v1/invoices/pay/:token` | Submit invoice payment | Public |
-| GET | `/api/v1/subscriptions` | List subscriptions | Admin (JWT) |
-| POST | `/api/v1/subscriptions` | Create subscription | Admin (JWT) |
-| GET | `/api/v1/subscriptions/:id` | Get subscription + invoices | Admin (JWT) |
-| PATCH | `/api/v1/subscriptions/:id` | Update subscription status | Admin (JWT) |
+| GET | `/api/v1/products` | List products | Admin (JWT) |
+| GET | `/api/v1/tax-rates` | List tax rates | Admin (JWT) |
+| GET | `/api/v1/settings` | Get portal settings | Admin (JWT) |
+| GET | `/api/v1/metrics` | Get metrics | Bearer `METRICS_TOKEN` (required; 401 if unset or mismatched) |
+| POST | `/api/v1/auth/confirm-bootstrap` | Confirm first-run admin setup | Admin (JWT) |
 | POST | `/api/v1/webhooks/stripe` | Stripe webhooks | Stripe |
 
 ## 🌐 Frontend Routes
@@ -191,9 +184,9 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 
 # Server
 PORT=4242
-# For local dev: http://localhost:5173 (npm)
-# For Docker dev/prod: http://localhost:8080
-FRONTEND_ORIGIN=http://localhost:8080
+# Local dev (npm or Docker): http://localhost:5173
+# Production: the deployed frontend origin, e.g. https://dfwsc.com
+FRONTEND_ORIGIN=http://localhost:5173
 API_BASE_URL=http://localhost:4242
 
 # Database
@@ -220,7 +213,7 @@ DEFAULT_PROCESS_FEE_CENTS=100
 
 ```
 
-**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, enable `ALLOW_ADMIN_SETUP=true`, use `/auth/setup` to create credentials, then confirm with `/auth/confirm-bootstrap`. After setup, set `ALLOW_ADMIN_SETUP=false`. See `.env.example` for detailed documentation.
+**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, set `ADMIN_USERNAME`/`ADMIN_PASSWORD` (with `ALLOW_ADMIN_SETUP=true` the seeded admin starts unconfirmed), then `POST /auth/login` with those credentials and finalize via `POST /auth/confirm-bootstrap` using the returned JWT. (`/auth/setup` is a legacy endpoint that does not persist credentials to the DB.) After setup, set `ALLOW_ADMIN_SETUP=false`. See `.env.example` for detailed documentation.
 
 ### Frontend (.env)
 
@@ -239,11 +232,11 @@ VITE_API_URL=/api/v1
 - `npm run dev:frontend` - Start frontend dev server
 - `npm run dev:backend` - Start backend dev server
 - `npm run build` - Build frontend + backend
-- `npm run build:frontend` - Build React app to backend/public
+- `npm run build:frontend` - Build React app to front/build-dist (served by nginx in the web container)
 - `npm run build:backend` - Compile TypeScript backend
-- `npm run start` - Start production server
+- `npm run start` - Start production API server (expects `dist/`; used inside the Docker image)
 - `npm run install:all` - Install all dependencies
-- `npm run test` - Run backend tests
+- `npm run test` - Run frontend + backend tests
 - `npm run db:generate` - Generate database migrations
 - `npm run db:migrate` - Run database migrations
 
@@ -263,7 +256,7 @@ VITE_API_URL=/api/v1
 ## 🧪 Testing
 
 ```bash
-# Run backend tests
+# Run frontend + backend tests
 npm run test
 
 # Run with UI
@@ -280,7 +273,8 @@ Detailed documentation lives in `docs/`:
 | [BACKEND.md](./docs/BACKEND.md) | API routes, auth, background jobs |
 | [DATABASE.md](./docs/DATABASE.md) | Schema, Drizzle, migrations |
 | [STRIPE.md](./docs/STRIPE.md) | Stripe Connect, webhooks, payment flows |
-| [CRM.md](./docs/CRM.md) | Lead pipeline, client lifecycle, payment sync |
+| [FRONTEND.md](./docs/FRONTEND.md) | React app, state, routing |
+| [COOLIFY_DEPLOYMENT.md](./docs/COOLIFY_DEPLOYMENT.md) | Production deployment on Coolify |
 | [STYLES.md](./docs/STYLES.md) | Tailwind v4, UI patterns |
 
 ## 🧯 Troubleshooting

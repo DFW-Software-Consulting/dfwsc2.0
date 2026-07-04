@@ -30,24 +30,26 @@ All payments resolve `application_fee_amount` via a 4-level priority chain:
 3. Group `processingFeePercent`
 4. Group `processingFeeCents`
 
-If none are set, no fee is applied (no global fallback).
+If none are set, global defaults apply: the `default_fee_percent` / `default_fee_cents` settings rows, then the `DEFAULT_PROCESS_FEE_CENTS` env var (0 if unset).
 
 ### Onboarding Flow
-1. **Create client**: `POST /api/v1/accounts` creates a client record + pending onboarding token in one transaction, returns `apiKey`, `clientId`, and `onboardingToken`.
+1. **Create client**: `POST /api/v1/accounts` creates a client record + pending onboarding token in one transaction, returns `apiKey`, `clientId`, and an `onboardingUrlHint` containing the onboarding link (the raw token is not returned as a separate field).
 2. **Send email**: `POST /api/v1/onboard-client/initiate` does the same but also emails the client.
 3. **Resend**: `POST /api/v1/onboard-client/resend` revokes active tokens and issues a new one with a fresh email.
 4. **Onboard**: `GET /api/v1/onboard-client?token=...` creates a Stripe Express Account (if not already) and returns an Account Link URL.
-5. **Callback**: Stripe redirects to `GET /api/v1/connect/callback` with `client_id`, `account`, and `state`. Validates CSRF state, links `stripeAccountId` to client, marks token `completed`, redirects browser to `/onboarding-success`.
+5. **Callback**: Stripe redirects to `GET /api/v1/connect/callback` with `client_id` and `state` (`account` is optional/legacy). Validates CSRF state, links `stripeAccountId` to client, marks the token `completed` if details are submitted (otherwise `in_progress`), and redirects the browser to `/onboarding-success?status=...`.
 6. **Refresh**: `GET /api/v1/connect/refresh?token=...` regenerates an expired account link and redirects the client.
 
 ## 4. Rate Limiting
 - **Implementation**: In-memory sliding-window limiter (`lib/rate-limit.ts`).
-- **Admin/Onboard Routes**: 10 req/min per IP.
+- **Onboarding/Connect Routes**: 10 req/min per IP.
 - **Resend Route**: 5 req/min per IP.
-- **Payment Routes**: 20 req/min per Stripe Account ID (fallback to IP).
+- **Auth Routes**: 3 req/15min (setup, confirm-bootstrap) and 5 req/15min (login).
+- **`POST /payments/create`**: 20 req/min per Stripe Account ID (fallback to IP).
+- Other admin CRUD routes are not rate-limited.
 
 ## 5. Workspace
-All clients and groups belong to the `client_portal` workspace. The `workspace` query parameter is required on all admin list endpoints and validated server-side.
+All clients and groups belong to the `client_portal` workspace. The `workspace` query parameter is required on all workspace-scoped admin list endpoints (clients, groups, payment reports) and validated server-side; Stripe platform listings (`/products`, `/tax-rates`) do not take a workspace parameter.
 
 ## 6. API Route Map
 All routes are prefixed with `/api/v1`.
@@ -56,7 +58,7 @@ All routes are prefixed with `/api/v1`.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| GET | `/config` | Public config (`useCheckout` flag) |
+| GET | `/app-config.js` | Runtime config script (`window.API_URL`) — registered without the `/api/v1` prefix |
 | GET | `/auth/setup/status` | Check if admin setup is needed |
 
 ### Authentication
@@ -64,7 +66,7 @@ All routes are prefixed with `/api/v1`.
 |--------|------|-------------|------|
 | POST | `/auth/login` | Admin login (returns JWT) | Public |
 | POST | `/auth/setup` | First-run admin creation | Public |
-| POST | `/auth/confirm-bootstrap` | Finalize admin setup | Public |
+| POST | `/auth/confirm-bootstrap` | Finalize admin setup | Admin JWT (obtained by logging in with the bootstrap password) |
 
 ### Clients
 | Method | Path | Description | Auth |
