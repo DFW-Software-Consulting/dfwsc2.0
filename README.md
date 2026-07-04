@@ -141,7 +141,8 @@ All API routes are prefixed with `/api/v1`:
 | GET | `/api/v1/health` | Health check | Public |
 | POST | `/api/v1/auth/login` | Admin login (returns JWT token) | Public |
 | GET | `/api/v1/auth/setup/status` | Bootstrap setup status | Public |
-| POST | `/api/v1/auth/setup` | First-run admin setup | Optional token |
+| POST | `/api/v1/auth/setup` | Deprecated — always returns 410 Gone | Public |
+| POST | `/api/v1/auth/confirm-bootstrap` | Confirm bootstrap admin credentials | Admin (JWT) |
 | GET | `/api/v1/clients` | List all clients (includes CRM columns) | Admin (JWT) |
 | PATCH | `/api/v1/clients/:id` | Update client config | Admin (JWT) |
 | POST | `/api/v1/accounts` | Create client account | Admin (JWT) |
@@ -209,10 +210,10 @@ SMTP_PASS=your-app-password
 JWT_SECRET=your_jwt_secret_minimum_32_characters_long
 JWT_EXPIRY=1h
 
-# First-run Admin Setup (remove after setup)
+# First-run Admin Bootstrap (remove after setup)
 ALLOW_ADMIN_SETUP=true
-ADMIN_SETUP_TOKEN=your_secure_setup_token
-SETUP_FLAG_PATH=/data/admin-setup-used
+ADMIN_USERNAME=your-admin-username
+ADMIN_PASSWORD=a-strong-password-12-chars-min
 
 # Payment Config
 USE_CHECKOUT=true
@@ -220,7 +221,7 @@ DEFAULT_PROCESS_FEE_CENTS=100
 
 ```
 
-**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, enable `ALLOW_ADMIN_SETUP=true`, use `/auth/setup` to create credentials, then confirm with `/auth/confirm-bootstrap`. After setup, set `ALLOW_ADMIN_SETUP=false`. See `.env.example` for detailed documentation.
+**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, set `ADMIN_USERNAME`/`ADMIN_PASSWORD` (with `ALLOW_ADMIN_SETUP=true`) to bootstrap the first admin from env vars, log in, then confirm the credentials via `/auth/confirm-bootstrap`. After confirming, set `ALLOW_ADMIN_SETUP=false`. The `/auth/setup` endpoint is deprecated and always returns 410 Gone. See `.env.example` for detailed documentation.
 
 ### Frontend (.env)
 

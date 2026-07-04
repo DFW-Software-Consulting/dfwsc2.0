@@ -169,7 +169,6 @@ describe("logMaskedEnvSummary (maskValue behaviour)", () => {
       DATABASE_URL: "postgresql://user:pass@host:5432/db",
       ADMIN_PASSWORD: "Str0ng-Adm1n-Passw0rd!",
       NEXTCLOUD_APP_PASSWORD: "some-app-password",
-      ADMIN_SETUP_TOKEN: "some-setup-token",
       CUSTOM_KEY: "custom-key-value",
     });
 
@@ -180,7 +179,6 @@ describe("logMaskedEnvSummary (maskValue behaviour)", () => {
     expect(env.DATABASE_URL).toBe("<redacted>");
     expect(env.ADMIN_PASSWORD).toBe("<redacted>");
     expect(env.NEXTCLOUD_APP_PASSWORD).toBe("<redacted>");
-    expect(env.ADMIN_SETUP_TOKEN).toBe("<redacted>");
     expect(env.CUSTOM_KEY).toBe("<redacted>");
   });
 

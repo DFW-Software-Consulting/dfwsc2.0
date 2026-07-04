@@ -63,8 +63,8 @@ All routes are prefixed with `/api/v1`.
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | POST | `/auth/login` | Admin login (returns JWT) | Public |
-| POST | `/auth/setup` | First-run admin creation | Public |
-| POST | `/auth/confirm-bootstrap` | Finalize admin setup | Public |
+| POST | `/auth/setup` | Deprecated — always returns 410 Gone | Public |
+| POST | `/auth/confirm-bootstrap` | Finalize admin setup (bootstrapped from `ADMIN_USERNAME`/`ADMIN_PASSWORD`) | Admin JWT |
 
 ### Clients
 | Method | Path | Description | Auth |

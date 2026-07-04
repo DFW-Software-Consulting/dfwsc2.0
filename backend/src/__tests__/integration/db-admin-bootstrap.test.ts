@@ -89,16 +89,17 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
   it("full setup → login → confirm → login flow", async () => {
     const server = await createServer();
 
-    // Step 1: POST /auth/setup to create the first admin
+    // Step 1: POST /auth/setup is deprecated and always returns 410 Gone.
     const setupRes = await server.inject({
       method: "POST",
       url: "/api/v1/auth/setup",
       payload: { username: bootstrapUsername, password: bootstrapPassword },
       headers: { "content-type": "application/json" },
     });
-    expect(setupRes.statusCode).toBe(200);
+    expect(setupRes.statusCode).toBe(410);
+    expect(setupRes.json().error).toMatch(/deprecated/i);
 
-    // The setup endpoint no longer persists to DB — it just returns credentials.
+    // The setup endpoint never persisted to DB and now does nothing at all.
     // Seed the mock DB directly using the known plaintext bootstrapPassword.
     const bcrypt = await import("bcryptjs");
     const hash = await bcrypt.hash(bootstrapPassword, 10);
@@ -178,7 +179,7 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
     await server.close();
   });
 
-  it("login returns 503 when no admin is in the database", async () => {
+  it("login returns a generic 401 when no admin is in the database", async () => {
     dbState.admins = [];
     const server = await createServer();
 
@@ -189,8 +190,8 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
       headers: { "content-type": "application/json" },
     });
 
-    expect(res.statusCode).toBe(503);
-    expect(res.json().setupRequired).toBe(true);
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: "Invalid credentials" });
 
     await server.close();
   });
