@@ -14,7 +14,7 @@ export async function apiFetch(path, { token, method = "GET", body, headers = {}
     data = await res.json();
   } else {
     const text = await res.text();
-    data = { error: text.slice(0, 200) || `HTTP ${res.status}` };
+    data = res.ok ? null : { error: text.slice(0, 200) || `HTTP ${res.status}` };
   }
   if (!res.ok) {
     const err = new Error(data.error || `HTTP ${res.status}`);

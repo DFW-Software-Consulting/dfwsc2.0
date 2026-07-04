@@ -1,11 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  createClient,
-  createDfwscClient,
-  getClient,
-  getClients,
-  patchClient,
-} from "../api/clients";
+import { getClient, getClients, initiateClientOnboarding, patchClient } from "../api/clients";
 import { resendOnboardingLink } from "../api/onboarding";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -29,11 +23,11 @@ export function useClients(params = {}) {
   });
 }
 
-export function useCreateClient() {
+export function useInitiateClientOnboarding() {
   const { token } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body) => createClient(token, body),
+    mutationFn: (body) => initiateClientOnboarding(token, body),
     onSuccess: () => {
       queryClient.invalidateQueries({
         predicate: (query) => query.queryKey[0] === "clients",
@@ -85,14 +79,5 @@ export function useResendOnboarding() {
   const { token } = useAuth();
   return useMutation({
     mutationFn: (body) => resendOnboardingLink(token, body),
-  });
-}
-
-export function useDfwscClient() {
-  const { token } = useAuth();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body) => createDfwscClient(token, body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["clients"] }),
   });
 }

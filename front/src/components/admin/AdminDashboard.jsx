@@ -9,6 +9,7 @@ import ClientList from "./ClientList";
 import GroupPanel from "./GroupPanel";
 import PaymentReports from "./PaymentReports";
 import SettingsPanel from "./SettingsPanel";
+import Button from "./shared/Button";
 import Toast from "./Toast";
 
 const TABS = [
@@ -24,8 +25,8 @@ export default function AdminDashboard() {
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState("clients");
-  const [showAddClientModal, setShowAddClientModal] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
+  const [showAddClient, setShowAddClient] = useState(false);
 
   const showToast = useCallback((message, type = "info") => {
     setToast({ show: true, message, type });
@@ -128,10 +129,19 @@ export default function AdminDashboard() {
       </div>
 
       {activeTab === "clients" && (
-        <ClientList
+        <>
+          <div className="flex justify-end mb-4">
+            <Button onClick={() => setShowAddClient(true)}>Add Client</Button>
+          </div>
+          <ClientList showToast={showToast} workspace="client_portal" />
+        </>
+      )}
+
+      {showAddClient && (
+        <AddClientModal
+          onClose={() => setShowAddClient(false)}
           showToast={showToast}
           workspace="client_portal"
-          onAddClient={() => setShowAddClientModal(true)}
         />
       )}
 
@@ -142,13 +152,6 @@ export default function AdminDashboard() {
       )}
 
       {activeTab === "settings" && <SettingsPanel showToast={showToast} />}
-
-      <AddClientModal
-        isOpen={showAddClientModal}
-        onClose={() => setShowAddClientModal(false)}
-        onCreated={() => setShowAddClientModal(false)}
-        showToast={showToast}
-      />
 
       <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
     </div>

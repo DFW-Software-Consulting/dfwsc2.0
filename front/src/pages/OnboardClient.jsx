@@ -26,6 +26,17 @@ export default function OnboardClient() {
           setMessage("Error: API did not return a 'url' field.");
           return;
         }
+        let u;
+        try {
+          u = new URL(data.url);
+        } catch {
+          setMessage("Error: Received an invalid redirect URL.");
+          return;
+        }
+        if (u.protocol !== "https:") {
+          setMessage("Error: Received an invalid redirect URL.");
+          return;
+        }
         setMessage("Redirecting to Stripe...");
         window.location.href = data.url;
       },

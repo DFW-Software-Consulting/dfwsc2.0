@@ -4,7 +4,6 @@
     "src/components/CaseStudies.jsx",
     "src/components/Process.jsx",
     "src/components/TechStrip.jsx",
-    "src/components/admin/GroupMembersModal.jsx",
     "src/components/admin/ImportStripeCustomer.jsx",
     "src/hooks/useSubscriptions.js"
   ],

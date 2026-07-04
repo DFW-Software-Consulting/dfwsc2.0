@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useCreateGroup, useGroups, usePatchGroup } from "../../hooks/useGroups";
 import { validateFeeValue, validateUrl } from "../../utils/validation";
@@ -282,8 +282,8 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                 const isToggling =
                   patchGroupMutation.isPending && patchGroupMutation.variables?.id === g.id;
                 return (
-                  <>
-                    <tr key={g.id} className="hover:bg-gray-700/50">
+                  <Fragment key={g.id}>
+                    <tr className="hover:bg-gray-700/50">
                       <td className="px-3 py-2">
                         <button
                           type="button"
@@ -389,7 +389,7 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>
