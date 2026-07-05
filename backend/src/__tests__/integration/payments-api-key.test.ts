@@ -26,6 +26,8 @@ describe("Payments API Key Authentication Integration", () => {
     process.env.SMTP_USER = "test";
     process.env.SMTP_PASS = "test";
 
+    process.env.USE_CHECKOUT = "true";
+
     // Ensure this suite uses real bcrypt/drizzle behavior even if other tests mock them.
     vi.unmock("bcryptjs");
     vi.unmock("drizzle-orm");
