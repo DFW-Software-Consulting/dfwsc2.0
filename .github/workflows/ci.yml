@@ -1,10 +1,10 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+  push:
+    branches:
+      - main
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
@@ -19,7 +19,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            front/package-lock.json
       - run: npm ci
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix front
       - run: npm run lint
 
   typecheck:
@@ -29,12 +36,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            front/package-lock.json
       - name: Install backend deps
         run: npm ci
         working-directory: backend
       - name: Backend type-check
         run: npx tsc --noEmit -p tsconfig.build.json
         working-directory: backend
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: front
+      - name: Frontend build check
+        run: npm run build
+        working-directory: front
 
   test:
     runs-on: ubuntu-latest
@@ -48,17 +65,32 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
+          --health-cmd "pg_isready -U postgres -d stripe_portal_test"
+          --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stripe_portal_test
+      STRIPE_SECRET_KEY: sk_test_ci
+      STRIPE_WEBHOOK_SECRET: whsec_ci
+      FRONTEND_ORIGIN: http://localhost:5173
+      USE_CHECKOUT: "false"
+      SMTP_HOST: localhost
+      SMTP_PORT: "1025"
+      SMTP_USER: ci
+      SMTP_PASS: ci
+      JWT_SECRET: ci_jwt_secret_min_32_chars_xxxxxxxxx
+      NODE_ENV: test
+      SMTP_FROM: noreply@example.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            front/package-lock.json
 
       # --- Backend ---
       - name: Install backend deps
@@ -67,8 +99,8 @@ jobs:
       - name: Run migrations
         run: npm run db:migrate
         working-directory: backend
-      - name: Backend tests (coverage)
-        run: npm run test:coverage
+      - name: Backend tests
+        run: npm test -- --run
         working-directory: backend
 
       # --- Frontend ---
@@ -76,7 +108,7 @@ jobs:
         run: npm ci
         working-directory: front
       - name: Frontend tests
-        run: npm test
+        run: npm test -- --run
         working-directory: front
 
   build:
@@ -84,7 +116,10 @@ jobs:
     needs: [lint, typecheck, test]
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose -f docker-compose.prod.yml build
+      - name: Build backend Docker image
+        run: docker build -t dfwsc-api:ci -f backend/Dockerfile backend
+      - name: Build frontend Docker image
+        run: docker build -t dfwsc-web:ci -f front/Dockerfile front
 
   # --- Checks mirrored from the local git hooks ---
 
@@ -170,7 +205,7 @@ jobs:
   # Fallow codebase-intelligence gate: fails only on NEW dead code / circular deps /
   # unresolved imports introduced beyond the committed baselines. Existing debt is
   # baselined (see fallow-baselines/), so touching a file with legacy findings does
-  # not fail CI — only regressions do. Regenerate a baseline after cleaning debt:
+  # not fail CI. Regenerate a baseline after cleaning debt:
   #   (cd backend && npx fallow@2.104.0 dead-code --save-baseline ../fallow-baselines/backend-dead-code.json --quiet)
   fallow:
     runs-on: ubuntu-latest

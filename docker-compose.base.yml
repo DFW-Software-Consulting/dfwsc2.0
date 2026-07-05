@@ -18,6 +18,11 @@ services:
         condition: service_started
     restart: unless-stopped
     command: sh -c "npx drizzle-kit migrate && npm run start"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
     networks:
       - frontend
       - backend
@@ -37,6 +42,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
     networks:
       - backend
 
@@ -49,6 +59,11 @@ services:
     command: listen --api-key $STRIPE_SECRET_KEY --forward-to api:4242/api/v1/webhooks/stripe
     depends_on:
       - api
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     networks:
       - backend
 
@@ -61,6 +76,11 @@ services:
     depends_on:
       - api
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
     networks:
       - frontend
 
@@ -68,6 +88,11 @@ services:
     image: mailhog/mailhog:latest
     ports:
       - "8025:8025"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
     networks:
       - backend
 
