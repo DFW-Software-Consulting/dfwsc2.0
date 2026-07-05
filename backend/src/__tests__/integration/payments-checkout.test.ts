@@ -41,7 +41,7 @@ function ensureBaseEnv() {
 }
 
 // ---------------------------------------------------------------------------
-// Checkout mode edge cases (USE_CHECKOUT=true)
+// Checkout edge cases
 // ---------------------------------------------------------------------------
 
 describe("POST /api/v1/payments/create — checkout mode", () => {
