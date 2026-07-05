@@ -43,7 +43,7 @@ async function redisSlidingWindow(
   client: Redis,
   key: string,
   maxHits: number,
-  windowMs: number,
+  windowMs: number
 ): Promise<boolean> {
   const now = Date.now();
   const windowStart = now - windowMs;
@@ -77,8 +77,7 @@ export function rateLimit(options: RateLimitOptions) {
           return reply.code(429).send({ error: "Too Many Requests" });
         }
         return;
-      } catch {
-      }
+      } catch {}
     }
 
     const now = Date.now();
