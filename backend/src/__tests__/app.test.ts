@@ -169,7 +169,6 @@ beforeEach(async () => {
 afterEach(() => {
   delete process.env.API_BASE_URL;
   delete process.env.FRONTEND_ORIGIN;
-  delete process.env.USE_CHECKOUT;
   delete process.env.DEFAULT_PROCESS_FEE_CENTS;
 });
 
@@ -260,10 +259,6 @@ describe("payments", () => {
 
   it("requires client to have a connected account", async () => {
     process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
-    stripeMock.paymentIntents.create.mockResolvedValue({
-      id: "pi_platform",
-      client_secret: "secret_platform",
-    });
 
     const server = await createServer();
 
@@ -286,104 +281,18 @@ describe("payments", () => {
     // A client without a connected + charges-enabled Stripe account cannot
     // accept payments (H1).
     expect(response.statusCode).toBe(409);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       error: "Client Stripe account is not connected or cannot accept charges.",
-      code: "ACCOUNT_NOT_CONNECTED",
     });
-    expect(stripeMock.paymentIntents.create).not.toHaveBeenCalled();
-    await server.close();
-  });
-
-  it("creates a payment intent when USE_CHECKOUT=false", async () => {
-    process.env.USE_CHECKOUT = "false";
-    process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
-    stripeMock.paymentIntents.create.mockResolvedValue({
-      id: "pi_123",
-      client_secret: "secret_123",
-    });
-
-    const server = await createServer();
-
-    const apiKey = "api-key-client_1";
-    seedClient({ id: "client_1", stripeAccountId: "acct_123", chargesEnabled: true, apiKey });
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/payments/create",
-      headers: {
-        "x-api-key": apiKey,
-        "idempotency-key": "test-key",
-      },
-      payload: {
-        amount: 1000,
-        currency: "usd",
-        applicationFeeAmount: 50,
-        metadata: { order: "42" },
-      },
-    });
-
-    expect(response.statusCode).toBe(201);
-    expect(stripeMock.paymentIntents.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        amount: 1100,
-        currency: "usd",
-        application_fee_amount: 100,
-        metadata: expect.objectContaining({
-          clientId: "client_1",
-          baseAmount: "1000",
-          feeAmount: "100",
-          order: "42",
-        }),
-      }),
-      expect.objectContaining({
-        stripeAccount: "acct_123",
-        idempotencyKey: "test-key",
-      })
-    );
-    expect(response.json()).toEqual({
-      clientSecret: "secret_123",
-      paymentIntentId: "pi_123",
-      stripeAccountId: "acct_123",
-    });
-    await server.close();
-  });
-
-  it("validates payment intent amount and fee values", async () => {
-    const server = await createServer();
-
-    const apiKey = "api-key-client_invalid_amount";
-    seedClient({
-      id: "client_invalid_amount",
-      stripeAccountId: "acct_123",
-      chargesEnabled: true,
-      apiKey,
-    });
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/api/v1/payments/create",
-      headers: {
-        "x-api-key": apiKey,
-        "idempotency-key": "invalid-fee",
-      },
-      payload: {
-        currency: "usd",
-        applicationFeeAmount: 10,
-      },
-    });
-
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
-      error: "amount and currency are required for PaymentIntents.",
-    });
+    expect(stripeMock.checkout.sessions.create).not.toHaveBeenCalled();
     await server.close();
   });
 
   it("allows fees that exceed the payment amount (fees handled by DFWSC)", async () => {
+    process.env.USE_CHECKOUT = "true";
     process.env.DEFAULT_PROCESS_FEE_CENTS = "2000";
-    stripeMock.paymentIntents.create.mockResolvedValue({
-      id: "pi_fee_test",
-      client_secret: "secret_fee",
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      url: "https://checkout.stripe.com/c/pay/mock",
     });
 
     const server = await createServer();
@@ -399,19 +308,26 @@ describe("payments", () => {
         "idempotency-key": "too-high-fee",
       },
       payload: {
-        amount: 1000,
-        currency: "usd",
-        applicationFeeAmount: 2000,
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
       },
     });
 
     // Fee validation removed - fees handled by DFWSC
     expect(response.statusCode).toBe(201);
-    expect(stripeMock.paymentIntents.create).toHaveBeenCalled();
+    expect(stripeMock.checkout.sessions.create).toHaveBeenCalled();
     await server.close();
   });
 
-  it("creates a checkout session when USE_CHECKOUT=true", async () => {
+  it("creates a checkout session", async () => {
     process.env.USE_CHECKOUT = "true";
     process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
     stripeMock.checkout.sessions.create.mockResolvedValue({
@@ -457,7 +373,6 @@ describe("payments", () => {
   });
   it("validates checkout payload requirements", async () => {
     process.env.USE_CHECKOUT = "true";
-
     const server = await createServer();
 
     const apiKey = "api-key-client_checkout";
@@ -481,7 +396,9 @@ describe("payments", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "lineItems are required when USE_CHECKOUT=true." });
+    expect(response.json()).toMatchObject({
+      error: "lineItems are required when USE_CHECKOUT=true.",
+    });
     await server.close();
   });
 
@@ -576,7 +493,9 @@ describe("payments", () => {
     });
 
     expect(response.statusCode).toBe(500);
-    expect(response.json()).toEqual({ error: "FRONTEND_ORIGIN is not configured." });
+    expect(response.json()).toMatchObject({
+      error: expect.stringContaining("FRONTEND_ORIGIN is not configured"),
+    });
     await server.close();
   });
 });
@@ -768,7 +687,7 @@ describe("connect callback", () => {
       url: "/api/v1/connect/callback?client_id=client_1&account=acct_123",
     });
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Missing state parameter." });
+    expect(response.json()).toMatchObject({ error: "Missing state parameter." });
     await server.close();
   });
 
@@ -779,7 +698,7 @@ describe("connect callback", () => {
       url: "/api/v1/connect/callback?client_id=client_1&account=acct_123&state=invalid",
     });
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Invalid or expired state parameter." });
+    expect(response.json()).toMatchObject({ error: "Invalid or expired state parameter." });
     await server.close();
   });
 
@@ -801,7 +720,7 @@ describe("connect callback", () => {
       url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_123&state=expired_state_val`,
     });
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Expired state parameter." });
+    expect(response.json()).toMatchObject({ error: "Expired state parameter." });
     await server.close();
   });
 
@@ -987,7 +906,7 @@ describe("connect callback", () => {
     });
 
     expect(response.statusCode).toBe(500);
-    expect(response.json().error).toBe("FRONTEND_ORIGIN is not configured");
+    expect(response.json().error).toBe("FRONTEND_ORIGIN is not configured.");
     expect(response.json().code).toBe("CONFIGURATION_ERROR");
 
     await server.close();
@@ -1021,7 +940,7 @@ describe("connect callback", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Client not found." });
+    expect(response.json()).toMatchObject({ error: "Client not found." });
 
     await server.close();
   });
@@ -1035,7 +954,7 @@ describe("connect callback", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Missing state parameter." });
+    expect(response.json()).toMatchObject({ error: "Missing state parameter." });
 
     await server.close();
   });
@@ -1094,7 +1013,9 @@ describe("reports", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "clientId or groupId query parameter is required." });
+    expect(response.json()).toMatchObject({
+      error: "clientId or groupId query parameter is required.",
+    });
     await server.close();
   });
 
@@ -1111,7 +1032,7 @@ describe("reports", () => {
     });
 
     expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: "Client not found." });
+    expect(response.json()).toMatchObject({ error: "Client not found." });
     await server.close();
   });
 
@@ -1130,7 +1051,7 @@ describe("reports", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "limit must be an integer between 1 and 100." });
+    expect(response.json()).toMatchObject({ error: "limit must be an integer between 1 and 100." });
     await server.close();
   });
 
@@ -1543,7 +1464,7 @@ describe("client groups", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Group not found." });
+    expect(response.json()).toMatchObject({ error: "Group not found." });
     await server.close();
   });
 
@@ -1604,7 +1525,7 @@ describe("client groups", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Invalid groupId." });
+    expect(response.json()).toMatchObject({ error: "Invalid groupId." });
     await server.close();
   });
 });

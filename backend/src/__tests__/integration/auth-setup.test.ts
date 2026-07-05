@@ -57,7 +57,6 @@ vi.mock("../../db/client", () => ({
 // Ensure all env vars required by validateEnv are set for every test in this file
 function ensureBaseEnv() {
   process.env.FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
-  process.env.USE_CHECKOUT = process.env.USE_CHECKOUT ?? "false";
   process.env.SMTP_HOST = process.env.SMTP_HOST ?? "mailhog";
   process.env.SMTP_PORT = process.env.SMTP_PORT ?? "1025";
   process.env.SMTP_USER = process.env.SMTP_USER ?? "test";
@@ -190,7 +189,7 @@ describe("POST /api/v1/auth/login — uncovered branches", () => {
     });
 
     expect(response.statusCode).toBe(401);
-    expect(response.json()).toEqual({ error: "Invalid credentials" });
+    expect(response.json()).toMatchObject({ error: "Invalid credentials" });
 
     await server.close();
   });

@@ -5,6 +5,8 @@ import type Stripe from "stripe";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
+import { resolveFrontendOrigin } from "../lib/config";
+import { errors } from "../lib/errors";
 import { adminRateLimit, rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
@@ -92,6 +94,7 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
   const useCheckout = (process.env.USE_CHECKOUT ?? "false").toLowerCase() === "true";
+
   fastify.post(
     "/payments/create",
     {
@@ -104,7 +107,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       const idempotencyKeyHeader = extractIdempotencyKey(request);
       const isApiCall = !!request.headers["x-api-key"];
       if (isApiCall && (!idempotencyKeyHeader || idempotencyKeyHeader.trim().length === 0)) {
-        return reply.code(400).send({ error: "Idempotency-Key header is required for API calls." });
+        throw errors.badRequest("Idempotency-Key header is required for API calls.");
       }
       const idempotencyKey = idempotencyKeyHeader ?? randomUUID();
 
@@ -133,15 +136,13 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         if (!validWorkspace) return;
         const bodyClientId = (request.body as { clientId?: string }).clientId || metadata?.clientId;
         if (!bodyClientId) {
-          return reply
-            .code(400)
-            .send({ error: "clientId is required when using Admin authentication." });
+          throw errors.badRequest("clientId is required when using Admin authentication.");
         }
         [client] = await db.select().from(clients).where(eq(clients.id, bodyClientId)).limit(1);
       }
 
       if (!client) {
-        return reply.code(404).send({ error: "Client not found." });
+        throw errors.notFound("Client");
       }
 
       if (!client.stripeAccountId || !client.chargesEnabled) {
@@ -154,9 +155,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       const effectiveWaiveFee = isApiCall ? false : waiveFee;
 
       if (!isApiCall && workspace && client.workspace !== workspace) {
-        return reply
-          .code(400)
-          .send({ error: "clientId does not belong to the selected workspace." });
+        throw errors.badRequest("clientId does not belong to the selected workspace.");
       }
 
       const clientId = client.id;
@@ -170,22 +169,20 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       if (!useCheckout) {
         if (typeof amount !== "number" || !currency) {
-          return reply
-            .code(400)
-            .send({ error: "amount and currency are required for PaymentIntents." });
+          throw errors.badRequest("amount and currency are required for PaymentIntents.");
         }
 
         if (!Number.isInteger(amount) || amount <= 0) {
-          return reply
-            .code(400)
-            .send({ error: "amount must be a positive integer (in the smallest currency unit)." });
+          throw errors.badRequest(
+            "amount must be a positive integer (in the smallest currency unit)."
+          );
         }
 
         let feeAmount: number;
         try {
           feeAmount = await resolveClientFee(client, group, amount);
         } catch (e: unknown) {
-          return reply.code(400).send({ error: (e as Error).message });
+          throw errors.badRequest((e as Error).message);
         }
 
         const totalAmount = effectiveWaiveFee ? amount : amount + feeAmount;
@@ -227,22 +224,19 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
               .code(429)
               .send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
           }
-          return reply.code(502).send({
-            error: "Payment processing failed. Please try again.",
-            code: "PAYMENT_FAILED",
-          });
+          throw errors.stripeFailed("Payment processing failed. Please try again.");
         }
       }
 
       if (!Array.isArray(lineItems) || lineItems.length === 0) {
-        return reply.code(400).send({ error: "lineItems are required when USE_CHECKOUT=true." });
+        throw errors.badRequest("lineItems are required when USE_CHECKOUT=true.");
       }
 
       const hasExplicitAmount = typeof amount === "number";
       if (hasExplicitAmount && (!Number.isInteger(amount) || (amount as number) <= 0)) {
-        return reply
-          .code(400)
-          .send({ error: "amount must be a positive integer (in the smallest currency unit)." });
+        throw errors.badRequest(
+          "amount must be a positive integer (in the smallest currency unit)."
+        );
       }
 
       let baseAmount = hasExplicitAmount ? (amount as number) : 0;
@@ -254,33 +248,28 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
               { item: { price_data: item.price_data, price: item.price } },
               "Line item missing unit_amount - using price ID requires explicit amount"
             );
-            return reply.code(400).send({
-              error:
-                "An explicit integer amount is required when any line item references a Stripe price ID.",
-            });
+            throw errors.badRequest(
+              "An explicit integer amount is required when any line item references a Stripe price ID."
+            );
           }
           baseAmount += unitAmount * (item.quantity || 1);
         }
       }
 
       if (baseAmount <= 0) {
-        return reply.code(400).send({
-          error:
-            "amount must be provided when line items use price IDs, or line items must have unit_amount.",
-        });
+        throw errors.badRequest(
+          "amount must be provided when line items use price IDs, or line items must have unit_amount."
+        );
       }
 
       let feeAmount: number;
       try {
         feeAmount = await resolveClientFee(client, group, baseAmount);
       } catch (e: unknown) {
-        return reply.code(400).send({ error: (e as Error).message });
+        throw errors.badRequest((e as Error).message);
       }
 
-      const frontendOrigin = process.env.FRONTEND_ORIGIN?.split(",")[0].trim().replace(/\/$/, "");
-      if (!frontendOrigin) {
-        return reply.code(500).send({ error: "FRONTEND_ORIGIN is not configured." });
-      }
+      const frontendOrigin = resolveFrontendOrigin();
 
       const checkoutLineItems = [...lineItems];
       if (feeAmount > 0 && !effectiveWaiveFee) {
@@ -294,9 +283,9 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           feeCurrency = currency;
         }
         if (!feeCurrency) {
-          return reply.code(400).send({
-            error: "Unable to determine a consistent currency for the processing fee line item.",
-          });
+          throw errors.badRequest(
+            "Unable to determine a consistent currency for the processing fee line item."
+          );
         }
         checkoutLineItems.push({
           price_data: {
@@ -353,9 +342,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
             .code(429)
             .send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
         }
-        return reply
-          .code(502)
-          .send({ error: "Payment processing failed. Please try again.", code: "PAYMENT_FAILED" });
+        throw errors.stripeFailed("Payment processing failed. Please try again.");
       }
     }
   );
@@ -386,14 +373,14 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       if (!validWorkspace) return;
 
       if (!clientId && !groupId) {
-        return reply.code(400).send({ error: "clientId or groupId query parameter is required." });
+        throw errors.badRequest("clientId or groupId query parameter is required.");
       }
 
       let parsedLimit: number | undefined;
       if (limit) {
         parsedLimit = Number(limit);
         if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 100) {
-          return reply.code(400).send({ error: "limit must be an integer between 1 and 100." });
+          throw errors.badRequest("limit must be an integer between 1 and 100.");
         }
       }
 
@@ -409,7 +396,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           .where(eq(clientGroups.id, groupId))
           .limit(1);
         if (!group) {
-          return reply.code(400).send({ error: "Invalid groupId." });
+          throw errors.badRequest("Invalid groupId.");
         }
         const groupClients = await db
           .select()
@@ -467,20 +454,18 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
 
       if (!clientId) {
-        return reply.code(400).send({ error: "clientId query parameter is required." });
+        throw errors.badRequest("clientId query parameter is required.");
       }
       const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
       if (!client) {
-        return reply.code(404).send({ error: "Client not found." });
+        throw errors.notFound("Client");
       }
       if (client.workspace !== workspace) {
-        return reply
-          .code(400)
-          .send({ error: "clientId does not belong to the selected workspace." });
+        throw errors.badRequest("clientId does not belong to the selected workspace.");
       }
 
       if (!client.stripeAccountId) {
-        return reply.code(404).send({ error: "Client with connected account not found." });
+        throw errors.notFound("Client with connected account");
       }
       const paymentIntents = await stripe.paymentIntents.list(listParams, {
         stripeAccount: client.stripeAccountId,

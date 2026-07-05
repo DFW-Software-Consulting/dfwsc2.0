@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { db } from "../db/client";
 import { clientGroups } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { errors } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
 import { isValidHttpsUrl, validateRequiredString, validateWorkspace } from "../lib/validation";
 import { isWorkspace, type Workspace } from "../lib/workspace";
@@ -82,9 +83,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
   app.get("/groups", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
     const { workspace } = req.query as { workspace?: string };
     if (!isWorkspace(workspace)) {
-      return res.status(400).send({
-        error: "workspace query parameter is required (client_portal).",
-      });
+      throw errors.badRequest("workspace query parameter is required (client_portal).");
     }
 
     const groups = await db
@@ -109,47 +108,32 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
       } = req.body;
 
       if (status !== undefined && status !== "active" && status !== "inactive") {
-        return res
-          .status(400)
-          .send({ error: 'Invalid status value. Must be "active" or "inactive".' });
+        throw errors.badRequest('Invalid status value. Must be "active" or "inactive".');
       }
       if (name !== undefined && (typeof name !== "string" || name.trim().length === 0)) {
-        return res.status(400).send({ error: "name must be a non-empty string." });
+        throw errors.badRequest("name must be a non-empty string.");
       }
 
       if (processingFeePercent != null && processingFeeCents != null) {
-        return res.status(400).send({ error: "Set one fee type, not both." });
+        throw errors.badRequest("Set one fee type, not both.");
       }
       if (
         processingFeePercent != null &&
         (processingFeePercent <= 0 || processingFeePercent > 100)
       ) {
-        return res
-          .status(400)
-          .send({ error: "processingFeePercent must be greater than 0 and at most 100." });
+        throw errors.badRequest("processingFeePercent must be greater than 0 and at most 100.");
       }
       if (
         processingFeeCents != null &&
         (!Number.isInteger(processingFeeCents) || processingFeeCents < 0)
       ) {
-        return res
-          .status(400)
-          .send({ error: "processingFeeCents must be a non-negative integer." });
+        throw errors.badRequest("processingFeeCents must be a non-negative integer.");
       }
       if (paymentSuccessUrl != null && !isValidHttpsUrl(paymentSuccessUrl)) {
-        return res.status(400).send({ error: "paymentSuccessUrl must be a valid HTTPS URL." });
+        throw errors.badRequest("paymentSuccessUrl must be a valid HTTPS URL.");
       }
       if (paymentCancelUrl != null && !isValidHttpsUrl(paymentCancelUrl)) {
-        return res.status(400).send({ error: "paymentCancelUrl must be a valid HTTPS URL." });
-      }
-
-      const [existing] = await db
-        .select()
-        .from(clientGroups)
-        .where(eq(clientGroups.id, id))
-        .limit(1);
-      if (!existing) {
-        return res.status(404).send({ error: "Group not found." });
+        throw errors.badRequest("paymentCancelUrl must be a valid HTTPS URL.");
       }
 
       const setValues: {
@@ -184,7 +168,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(clientGroups.id, id))
         .returning();
       if (!updated) {
-        return res.status(404).send({ error: "Group not found." });
+        throw errors.notFound("Group");
       }
       return res.status(200).send(formatGroupResponse(updated));
     }

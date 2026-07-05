@@ -3,7 +3,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
-import { isUniqueViolation } from "../lib/errors";
+import { errors, isUniqueViolation } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
 import { isValidHttpsUrl } from "../lib/validation";
 import { isWorkspace } from "../lib/workspace";
@@ -42,57 +42,48 @@ const adminCrudRateLimit = adminRateLimit({
 const clientRoutes: FastifyPluginAsync = async (app) => {
   // GET /clients - List all clients (admin only)
   app.get("/clients", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
-    try {
-      const { groupId, workspace } = req.query as { groupId?: string; workspace?: string };
+    const { groupId, workspace } = req.query as { groupId?: string; workspace?: string };
 
-      if (!isWorkspace(workspace)) {
-        return res.status(400).send({
-          error: "workspace query parameter is required (client_portal).",
-        });
-      }
-
-      const query = db
-        .select({
-          id: clients.id,
-          name: clients.name,
-          email: clients.email,
-          stripeAccountId: clients.stripeAccountId,
-          status: clients.status,
-          workspace: clients.workspace,
-          groupId: clients.groupId,
-          processingFeePercent: clients.processingFeePercent,
-          processingFeeCents: clients.processingFeeCents,
-          createdAt: clients.createdAt,
-        })
-        .from(clients);
-
-      if (groupId) {
-        const [group] = await db
-          .select({ id: clientGroups.id, workspace: clientGroups.workspace })
-          .from(clientGroups)
-          .where(eq(clientGroups.id, groupId))
-          .limit(1);
-        if (!group || group.workspace !== workspace) {
-          return res
-            .status(400)
-            .send({ error: "groupId does not belong to the selected workspace." });
-        }
-      }
-
-      const clientList = groupId
-        ? await query.where(and(eq(clients.groupId, groupId), eq(clients.workspace, workspace)))
-        : await query.where(eq(clients.workspace, workspace));
-
-      return res.status(200).send(
-        clientList.map((client) => ({
-          ...client,
-          createdAt: client.createdAt?.toISOString(),
-        }))
-      );
-    } catch (error) {
-      req.log.error(error, "Error fetching client list");
-      return res.status(500).send({ error: "Internal server error" });
+    if (!isWorkspace(workspace)) {
+      throw errors.badRequest("workspace query parameter is required (client_portal).");
     }
+
+    const query = db
+      .select({
+        id: clients.id,
+        name: clients.name,
+        email: clients.email,
+        stripeAccountId: clients.stripeAccountId,
+        status: clients.status,
+        workspace: clients.workspace,
+        groupId: clients.groupId,
+        processingFeePercent: clients.processingFeePercent,
+        processingFeeCents: clients.processingFeeCents,
+        createdAt: clients.createdAt,
+      })
+      .from(clients);
+
+    if (groupId) {
+      const [group] = await db
+        .select({ id: clientGroups.id, workspace: clientGroups.workspace })
+        .from(clientGroups)
+        .where(eq(clientGroups.id, groupId))
+        .limit(1);
+      if (!group || group.workspace !== workspace) {
+        throw errors.badRequest("groupId does not belong to the selected workspace.");
+      }
+    }
+
+    const clientList = groupId
+      ? await query.where(eq(clients.groupId, groupId))
+      : await query.where(eq(clients.workspace, workspace));
+
+    return res.status(200).send(
+      clientList.map((client) => ({
+        ...client,
+        createdAt: client.createdAt?.toISOString(),
+      }))
+    );
   });
 
   // GET /clients/:id - Get a single client (admin only)
@@ -100,38 +91,31 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
     "/clients/:id",
     { preHandler: [requireAdminJwt, adminCrudRateLimit] },
     async (req, res) => {
-      try {
-        const { id } = req.params;
-        const { workspace } = req.query;
+      const { id } = req.params;
+      const { workspace } = req.query;
 
-        if (!isWorkspace(workspace)) {
-          return res.status(400).send({
-            error: "workspace query parameter is required (client_portal).",
-          });
-        }
-
-        const [client] = await db
-          .select()
-          .from(clients)
-          .where(and(eq(clients.id, id), eq(clients.workspace, workspace)))
-          .limit(1);
-
-        if (!client) {
-          return res.status(404).send({ error: "Client not found." });
-        }
-
-        const { apiKeyHash, apiKeyLookup, ...safeClient } = client;
-        return res.status(200).send({
-          client: {
-            ...safeClient,
-            createdAt: client.createdAt?.toISOString(),
-            updatedAt: client.updatedAt?.toISOString(),
-          },
-        });
-      } catch (error) {
-        req.log.error(error, "Error fetching client");
-        return res.status(500).send({ error: "Internal server error" });
+      if (!isWorkspace(workspace)) {
+        throw errors.badRequest("workspace query parameter is required (client_portal).");
       }
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, id), eq(clients.workspace, workspace)))
+        .limit(1);
+
+      if (!client) {
+        throw errors.notFound("Client");
+      }
+
+      const { apiKeyHash, apiKeyLookup, ...safeClient } = client;
+      return res.status(200).send({
+        client: {
+          ...safeClient,
+          createdAt: client.createdAt?.toISOString(),
+          updatedAt: client.updatedAt?.toISOString(),
+        },
+      });
     }
   );
 
@@ -140,199 +124,177 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
     Params: ClientParams;
     Body: ClientPatchBody;
   }>("/clients/:id", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
-    try {
-      const { id } = req.params;
-      const body = req.body;
-      const {
-        status,
-        groupId,
-        paymentSuccessUrl,
-        paymentCancelUrl,
-        processingFeePercent,
-        processingFeeCents,
-        name,
-        email,
-        defaultPaymentTermsDays,
-      } = body;
+    const { id } = req.params;
+    const body = req.body;
+    const {
+      status,
+      groupId,
+      paymentSuccessUrl,
+      paymentCancelUrl,
+      processingFeePercent,
+      processingFeeCents,
+      name,
+      email,
+      defaultPaymentTermsDays,
+    } = body;
 
-      if (status !== undefined && status !== "active" && status !== "inactive") {
-        return res.status(400).send({
-          error: 'Invalid status value. Must be "active" or "inactive".',
-        });
-      }
-
-      if (paymentSuccessUrl != null && !isValidHttpsUrl(paymentSuccessUrl)) {
-        return res.status(400).send({ error: "paymentSuccessUrl must be a valid HTTPS URL." });
-      }
-
-      if (paymentCancelUrl != null && !isValidHttpsUrl(paymentCancelUrl)) {
-        return res.status(400).send({ error: "paymentCancelUrl must be a valid HTTPS URL." });
-      }
-
-      if (processingFeePercent != null && processingFeeCents != null) {
-        return res.status(400).send({ error: "Set one fee type, not both." });
-      }
-
-      if (
-        processingFeePercent != null &&
-        (processingFeePercent <= 0 || processingFeePercent > 100)
-      ) {
-        return res
-          .status(400)
-          .send({ error: "processingFeePercent must be greater than 0 and at most 100." });
-      }
-
-      if (
-        processingFeeCents != null &&
-        (!Number.isInteger(processingFeeCents) || processingFeeCents < 0)
-      ) {
-        return res
-          .status(400)
-          .send({ error: "processingFeeCents must be a non-negative integer." });
-      }
-
-      if (name !== undefined && (!name || !name.trim())) {
-        return res.status(400).send({ error: "name must not be empty." });
-      }
-
-      if (email !== undefined && !EMAIL_RE.test(email)) {
-        return res.status(400).send({ error: "email must be a valid email address." });
-      }
-
-      if (
-        defaultPaymentTermsDays !== undefined &&
-        defaultPaymentTermsDays !== null &&
-        (!Number.isInteger(defaultPaymentTermsDays) || defaultPaymentTermsDays <= 0)
-      ) {
-        return res
-          .status(400)
-          .send({ error: "defaultPaymentTermsDays must be a positive integer." });
-      }
-
-      const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
-
-      if (!existingClient) {
-        return res.status(404).send({ error: "Client not found." });
-      }
-
-      if (groupId != null) {
-        const [group] = await db
-          .select({ id: clientGroups.id, workspace: clientGroups.workspace })
-          .from(clientGroups)
-          .where(eq(clientGroups.id, groupId))
-          .limit(1);
-        if (!group) {
-          return res.status(400).send({ error: "Group not found." });
-        }
-        if (group.workspace !== existingClient.workspace) {
-          return res
-            .status(400)
-            .send({ error: "groupId workspace does not match client workspace." });
-        }
-      }
-
-      if (email !== undefined) {
-        const [conflict] = await db
-          .select({ id: clients.id })
-          .from(clients)
-          .where(
-            and(
-              eq(clients.email, email),
-              eq(clients.workspace, existingClient.workspace),
-              ne(clients.id, id)
-            )
-          )
-          .limit(1);
-        if (conflict) {
-          return res
-            .status(409)
-            .send({ error: "A client with this email already exists in this workspace." });
-        }
-      }
-
-      const setValues: {
-        updatedAt: Date;
-        status?: "active" | "inactive";
-        groupId?: string | null;
-        paymentSuccessUrl?: string | null;
-        paymentCancelUrl?: string | null;
-        processingFeePercent?: string | null;
-        processingFeeCents?: number | null;
-        name?: string;
-        email?: string;
-        phone?: string | null;
-        billingContactName?: string | null;
-        addressLine1?: string | null;
-        addressLine2?: string | null;
-        city?: string | null;
-        state?: string | null;
-        postalCode?: string | null;
-        country?: string | null;
-        notes?: string | null;
-        defaultPaymentTermsDays?: number | null;
-      } = { updatedAt: new Date() };
-
-      if (status !== undefined) setValues.status = status;
-      if ("groupId" in body) setValues.groupId = groupId;
-      if ("paymentSuccessUrl" in body) setValues.paymentSuccessUrl = paymentSuccessUrl;
-      if ("paymentCancelUrl" in body) setValues.paymentCancelUrl = paymentCancelUrl;
-      if ("processingFeePercent" in body) {
-        setValues.processingFeePercent =
-          processingFeePercent != null ? String(processingFeePercent) : null;
-        // Setting a non-null percent fee clears the flat cents fee to keep them mutually exclusive.
-        if (processingFeePercent != null) setValues.processingFeeCents = null;
-      }
-      if ("processingFeeCents" in body) {
-        setValues.processingFeeCents = processingFeeCents;
-        // Setting a non-null cents fee clears the percent fee to keep them mutually exclusive.
-        if (processingFeeCents != null) setValues.processingFeePercent = null;
-      }
-      if (name !== undefined) setValues.name = name;
-      if (email !== undefined) setValues.email = email;
-      if ("phone" in body) setValues.phone = body.phone;
-      if ("billingContactName" in body) setValues.billingContactName = body.billingContactName;
-      if ("addressLine1" in body) setValues.addressLine1 = body.addressLine1;
-      if ("addressLine2" in body) setValues.addressLine2 = body.addressLine2;
-      if ("city" in body) setValues.city = body.city;
-      if ("state" in body) setValues.state = body.state;
-      if ("postalCode" in body) setValues.postalCode = body.postalCode;
-      if ("country" in body) setValues.country = body.country;
-      if ("notes" in body) setValues.notes = body.notes;
-      if ("defaultPaymentTermsDays" in body)
-        setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
-
-      let updatedClients: (typeof clients.$inferSelect)[];
-      try {
-        updatedClients = await db
-          .update(clients)
-          .set(setValues)
-          .where(eq(clients.id, id))
-          .returning();
-      } catch (updateError) {
-        if (isUniqueViolation(updateError)) {
-          return res
-            .status(409)
-            .send({ error: "A client with this email already exists in this workspace." });
-        }
-        throw updateError;
-      }
-
-      if (updatedClients.length === 0) {
-        return res.status(500).send({ error: "Failed to update client." });
-      }
-
-      const updatedClient = updatedClients[0];
-
-      const { apiKeyHash, apiKeyLookup, ...safeUpdatedClient } = updatedClient;
-      return res.status(200).send({
-        ...safeUpdatedClient,
-        createdAt: updatedClient.createdAt?.toISOString(),
-        updatedAt: updatedClient.updatedAt?.toISOString(),
-      });
-    } catch (error) {
-      req.log.error(error, "Error updating client");
-      return res.status(500).send({ error: "Internal server error" });
+    if (status !== undefined && status !== "active" && status !== "inactive") {
+      throw errors.badRequest('Invalid status value. Must be "active" or "inactive".');
     }
+
+    if (paymentSuccessUrl != null && !isValidHttpsUrl(paymentSuccessUrl)) {
+      throw errors.badRequest("paymentSuccessUrl must be a valid HTTPS URL.");
+    }
+
+    if (paymentCancelUrl != null && !isValidHttpsUrl(paymentCancelUrl)) {
+      throw errors.badRequest("paymentCancelUrl must be a valid HTTPS URL.");
+    }
+
+    if (processingFeePercent != null && processingFeeCents != null) {
+      throw errors.badRequest("Set one fee type, not both.");
+    }
+
+    if (processingFeePercent != null && (processingFeePercent <= 0 || processingFeePercent > 100)) {
+      throw errors.badRequest("processingFeePercent must be greater than 0 and at most 100.");
+    }
+
+    if (
+      processingFeeCents != null &&
+      (!Number.isInteger(processingFeeCents) || processingFeeCents < 0)
+    ) {
+      throw errors.badRequest("processingFeeCents must be a non-negative integer.");
+    }
+
+    if (name !== undefined && (!name || !name.trim())) {
+      throw errors.badRequest("name must not be empty.");
+    }
+
+    if (email !== undefined && !EMAIL_RE.test(email)) {
+      throw errors.badRequest("email must be a valid email address.");
+    }
+
+    if (
+      defaultPaymentTermsDays !== undefined &&
+      defaultPaymentTermsDays !== null &&
+      (!Number.isInteger(defaultPaymentTermsDays) || defaultPaymentTermsDays <= 0)
+    ) {
+      throw errors.badRequest("defaultPaymentTermsDays must be a positive integer.");
+    }
+
+    const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
+
+    if (!existingClient) {
+      throw errors.notFound("Client");
+    }
+
+    if (groupId != null) {
+      const [group] = await db
+        .select({ id: clientGroups.id, workspace: clientGroups.workspace })
+        .from(clientGroups)
+        .where(eq(clientGroups.id, groupId))
+        .limit(1);
+      if (!group) {
+        throw errors.badRequest("Group not found.");
+      }
+      if (group.workspace !== existingClient.workspace) {
+        throw errors.badRequest("groupId workspace does not match client workspace.");
+      }
+    }
+
+    if (email !== undefined) {
+      const [conflict] = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(
+          and(
+            eq(clients.email, email),
+            eq(clients.workspace, existingClient.workspace),
+            ne(clients.id, id)
+          )
+        )
+        .limit(1);
+      if (conflict) {
+        throw errors.conflict("A client with this email already exists in this workspace.");
+      }
+    }
+
+    const setValues: {
+      updatedAt: Date;
+      status?: "active" | "inactive";
+      groupId?: string | null;
+      paymentSuccessUrl?: string | null;
+      paymentCancelUrl?: string | null;
+      processingFeePercent?: string | null;
+      processingFeeCents?: number | null;
+      name?: string;
+      email?: string;
+      phone?: string | null;
+      billingContactName?: string | null;
+      addressLine1?: string | null;
+      addressLine2?: string | null;
+      city?: string | null;
+      state?: string | null;
+      postalCode?: string | null;
+      country?: string | null;
+      notes?: string | null;
+      defaultPaymentTermsDays?: number | null;
+    } = { updatedAt: new Date() };
+
+    if (status !== undefined) setValues.status = status;
+    if ("groupId" in body) setValues.groupId = groupId;
+    if ("paymentSuccessUrl" in body) setValues.paymentSuccessUrl = paymentSuccessUrl;
+    if ("paymentCancelUrl" in body) setValues.paymentCancelUrl = paymentCancelUrl;
+    if ("processingFeePercent" in body) {
+      setValues.processingFeePercent =
+        processingFeePercent != null ? String(processingFeePercent) : null;
+      // Setting a non-null percent fee clears the flat cents fee to keep them mutually exclusive.
+      if (processingFeePercent != null) setValues.processingFeeCents = null;
+    }
+    if ("processingFeeCents" in body) {
+      setValues.processingFeeCents = processingFeeCents;
+      // Setting a non-null cents fee clears the percent fee to keep them mutually exclusive.
+      if (processingFeeCents != null) setValues.processingFeePercent = null;
+    }
+    if (name !== undefined) setValues.name = name;
+    if (email !== undefined) setValues.email = email;
+    if ("phone" in body) setValues.phone = body.phone;
+    if ("billingContactName" in body) setValues.billingContactName = body.billingContactName;
+    if ("addressLine1" in body) setValues.addressLine1 = body.addressLine1;
+    if ("addressLine2" in body) setValues.addressLine2 = body.addressLine2;
+    if ("city" in body) setValues.city = body.city;
+    if ("state" in body) setValues.state = body.state;
+    if ("postalCode" in body) setValues.postalCode = body.postalCode;
+    if ("country" in body) setValues.country = body.country;
+    if ("notes" in body) setValues.notes = body.notes;
+    if ("defaultPaymentTermsDays" in body)
+      setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
+
+    let updatedClients: (typeof clients.$inferSelect)[];
+    try {
+      updatedClients = await db
+        .update(clients)
+        .set(setValues)
+        .where(eq(clients.id, id))
+        .returning();
+    } catch (updateError) {
+      if (isUniqueViolation(updateError)) {
+        throw errors.conflict("A client with this email already exists in this workspace.");
+      }
+      throw updateError;
+    }
+
+    if (updatedClients.length === 0) {
+      throw errors.internal("Failed to update client.");
+    }
+
+    const updatedClient = updatedClients[0];
+
+    const { apiKeyHash, apiKeyLookup, ...safeUpdatedClient } = updatedClient;
+    return res.status(200).send({
+      ...safeUpdatedClient,
+      createdAt: updatedClient.createdAt?.toISOString(),
+      updatedAt: updatedClient.updatedAt?.toISOString(),
+    });
   });
 };
 

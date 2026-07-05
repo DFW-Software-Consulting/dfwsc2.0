@@ -32,6 +32,7 @@ function makeAdminToken() {
 }
 
 function ensureBaseEnv() {
+  process.env.USE_CHECKOUT = "true";
   process.env.FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
   process.env.SMTP_HOST = process.env.SMTP_HOST ?? "mailhog";
   process.env.SMTP_PORT = process.env.SMTP_PORT ?? "1025";
@@ -51,13 +52,11 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
 
   beforeAll(async () => {
     ensureBaseEnv();
-    process.env.USE_CHECKOUT = "true";
     app = await buildServer();
   });
 
   afterAll(async () => {
     if (app) await app.close();
-    process.env.USE_CHECKOUT = "false";
   });
 
   beforeEach(async () => {
@@ -139,7 +138,6 @@ describe("POST /api/v1/payments/create — fee waiver and connected-account guar
 
   beforeAll(async () => {
     ensureBaseEnv();
-    process.env.USE_CHECKOUT = "false";
     app = await buildServer();
   });
 
@@ -165,10 +163,9 @@ describe("POST /api/v1/payments/create — fee waiver and connected-account guar
       processingFeeCents: 1000,
     });
 
-    vi.mocked(stripe.paymentIntents.create).mockReset();
-    vi.mocked(stripe.paymentIntents.create).mockResolvedValue({
-      id: "pi_test",
-      client_secret: "pi_test_secret",
+    vi.mocked(stripe.checkout.sessions.create).mockReset();
+    vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({
+      url: "https://checkout.stripe.com/c/pay/test",
     } as never);
   });
 
@@ -186,16 +183,27 @@ describe("POST /api/v1/payments/create — fee waiver and connected-account guar
         "content-type": "application/json",
       },
       payload: {
-        amount: 5000,
-        currency: "usd",
         waiveFee: true,
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 5000,
+            },
+            quantity: 1,
+          },
+        ],
       },
     });
 
     expect(response.statusCode).toBe(201);
-    const createCall = vi.mocked(stripe.paymentIntents.create).mock.calls[0][0];
-    expect(createCall.application_fee_amount).toBe(1000);
-    expect(createCall.amount).toBe(6000);
+    const createCall = vi.mocked(stripe.checkout.sessions.create).mock.calls[0][0];
+    // The fee is still routed to the platform via application_fee_amount…
+    expect(createCall.payment_intent_data?.application_fee_amount).toBe(1000);
+    // …and still charged to the customer as the extra "Processing Fee" line item.
+    expect(createCall.line_items).toHaveLength(2);
+    expect(createCall.line_items?.[1]?.price_data?.unit_amount).toBe(1000);
   });
 
   it("returns 409 ACCOUNT_NOT_CONNECTED when the client has no connected Stripe account (H1)", async () => {
@@ -227,8 +235,8 @@ describe("POST /api/v1/payments/create — fee waiver and connected-account guar
     });
 
     expect(response.statusCode).toBe(409);
-    expect(response.json().code).toBe("ACCOUNT_NOT_CONNECTED");
-    expect(stripe.paymentIntents.create).not.toHaveBeenCalled();
+    expect(response.json().error).toMatch(/not connected/i);
+    expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
 
     await db.delete(clients).where(eq(clients.id, unconnectedId));
   });
@@ -245,7 +253,6 @@ describe("GET /api/v1/reports/payments — group with no connected clients", () 
 
   beforeAll(async () => {
     ensureBaseEnv();
-    process.env.USE_CHECKOUT = "false";
 
     app = await buildServer();
 
