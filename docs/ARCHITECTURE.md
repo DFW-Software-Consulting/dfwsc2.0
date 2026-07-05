@@ -69,7 +69,7 @@ sequenceDiagram
 - **Admin Access:** JWT Bearer token obtained from `POST /api/v1/auth/login`.
 - **Client Access:** `X-Api-Key` header — `apiKeyLookup` (SHA256) for fast DB lookup + `apiKeyHash` (bcrypt) for verification.
 - **CSRF Protection:** State-based validation for Connect callbacks (32-byte random token, 30-minute expiry).
-- **Rate Limiting:** In-memory sliding-window per IP.
+- **Rate Limiting:** Redis-backed sliding window per IP when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets (logs a one-time startup warning, since limits are then multiplied by replica count under horizontal scaling).
 
 ## 7. Architectural Rules
 - **Layered Architecture:**

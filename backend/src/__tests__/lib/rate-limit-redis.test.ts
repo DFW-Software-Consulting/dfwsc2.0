@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -130,5 +130,47 @@ describe("rateLimit - Redis path", () => {
     expect(reply.code).not.toHaveBeenCalled();
     await guard(request as any, reply as any);
     expect(reply.code).toHaveBeenCalledWith(429);
+  });
+});
+
+describe("rateLimit - startup warning", () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it("warns once at module load when REDIS_URL is unset", async () => {
+    delete process.env.REDIS_URL;
+
+    await import("../../lib/rate-limit");
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const [message] = warnSpy.mock.calls[0];
+    expect(message).toMatch(/REDIS_URL/);
+    expect(message).toMatch(/in-memory/i);
+    expect(message).toMatch(/replica/i);
+  });
+
+  it("does not warn at module load when REDIS_URL is set", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    vi.doMock("ioredis", () => ({
+      default: vi.fn().mockImplementation(() => ({
+        on: vi.fn(),
+        pipeline: vi.fn(),
+      })),
+    }));
+
+    try {
+      await import("../../lib/rate-limit");
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.REDIS_URL;
+    }
   });
 });
