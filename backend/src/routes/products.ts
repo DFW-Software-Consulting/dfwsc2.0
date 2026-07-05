@@ -131,7 +131,9 @@ const productRoutes: FastifyPluginAsync = async (app) => {
           })
         );
 
-        await withStripeCircuit(() => stripe.products.update(product.id, { default_price: price.id }));
+        await withStripeCircuit(() =>
+          stripe.products.update(product.id, { default_price: price.id })
+        );
       } catch (err) {
         if (isCircuitOpenError(err)) {
           return res.status(503).send({ error: "Stripe service temporarily unavailable." });

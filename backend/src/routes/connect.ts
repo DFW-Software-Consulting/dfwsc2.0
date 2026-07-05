@@ -629,7 +629,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       let verifiedAccount: Stripe.Account;
       try {
-        verifiedAccount = await withStripeCircuit(() => stripe.accounts.retrieve(effectiveAccountId));
+        verifiedAccount = await withStripeCircuit(() =>
+          stripe.accounts.retrieve(effectiveAccountId)
+        );
       } catch (err) {
         if (isCircuitOpenError(err)) {
           request.log.warn(

@@ -65,7 +65,7 @@ export async function sendMail(payload: MailPayload): Promise<void> {
     });
   } catch (error) {
     if (isCircuitOpenError(error)) {
-      console.warn("SMTP circuit breaker is open; email send skipped.");
+      process.stderr.write("SMTP circuit breaker is open; email send skipped.\n");
     }
     throw error;
   }

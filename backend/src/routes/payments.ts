@@ -228,9 +228,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         } catch (err) {
           request.log.error({ err }, "Stripe PaymentIntent creation failed");
           if (isCircuitOpenError(err)) {
-            return reply
-              .code(503)
-              .send({ error: "Payment service is temporarily unavailable.", code: "STRIPE_CIRCUIT_OPEN" });
+            return reply.code(503).send({
+              error: "Payment service is temporarily unavailable.",
+              code: "STRIPE_CIRCUIT_OPEN",
+            });
           }
           if (err instanceof Error && err.name === "StripeCardError") {
             return reply.code(402).send({ error: err.message, code: "CARD_DECLINED" });
@@ -353,9 +354,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       } catch (err) {
         request.log.error({ err }, "Stripe Checkout session creation failed");
         if (isCircuitOpenError(err)) {
-          return reply
-            .code(503)
-            .send({ error: "Payment service is temporarily unavailable.", code: "STRIPE_CIRCUIT_OPEN" });
+          return reply.code(503).send({
+            error: "Payment service is temporarily unavailable.",
+            code: "STRIPE_CIRCUIT_OPEN",
+          });
         }
         if (err instanceof Error && err.name === "StripeCardError") {
           return reply.code(402).send({ error: err.message, code: "CARD_DECLINED" });
@@ -509,9 +511,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       } catch (err) {
         request.log.error({ err, clientId }, "Stripe PaymentIntent list failed");
         if (isCircuitOpenError(err)) {
-          return reply
-            .code(503)
-            .send({ error: "Payment service is temporarily unavailable.", code: "STRIPE_CIRCUIT_OPEN" });
+          return reply.code(503).send({
+            error: "Payment service is temporarily unavailable.",
+            code: "STRIPE_CIRCUIT_OPEN",
+          });
         }
         return reply.code(502).send({ error: "Failed to list payments." });
       }

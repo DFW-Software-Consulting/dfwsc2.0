@@ -21,10 +21,13 @@ const stripeCircuitBreaker = new CircuitBreaker<[AsyncAction<unknown>], unknown>
   { ...breakerOptions, name: "stripe" }
 );
 
-const smtpCircuitBreaker = new CircuitBreaker<[AsyncAction<unknown>], unknown>((action) => action(), {
-  ...breakerOptions,
-  name: "smtp",
-});
+const smtpCircuitBreaker = new CircuitBreaker<[AsyncAction<unknown>], unknown>(
+  (action) => action(),
+  {
+    ...breakerOptions,
+    name: "smtp",
+  }
+);
 
 function openAfterFiveFailures(breaker: CircuitBreaker<[AsyncAction<unknown>], unknown>) {
   let consecutiveFailures = 0;

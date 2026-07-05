@@ -15,7 +15,10 @@ vi.mock("../../lib/stripe", () => ({
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
-import { openStripeCircuitForTests, resetCircuitBreakersForTests } from "../../lib/circuit-breakers";
+import {
+  openStripeCircuitForTests,
+  resetCircuitBreakersForTests,
+} from "../../lib/circuit-breakers";
 import { stripe } from "../../lib/stripe";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
