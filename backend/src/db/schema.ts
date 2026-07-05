@@ -149,6 +149,31 @@ export const onboardingTokens = pgTable(
   })
 );
 
+export const apiKeyRegenerationTokens = pgTable(
+  "api_key_regeneration_tokens",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    status: text("status", { enum: ["pending", "completed", "revoked"] }).notNull(),
+    email: text("email").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    clientIdIdx: index("api_key_regeneration_tokens_client_id_idx").on(table.clientId),
+    statusCheck: check(
+      "api_key_regeneration_tokens_status_check",
+      sql`${table.status} IN ('pending', 'completed', 'revoked')`
+    ),
+  })
+);
+
 export const admins = pgTable("admins", {
   id: text("id").primaryKey(),
   username: text("username").unique().notNull(),

@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { useRequestApiKeyRegenerationAdmin } from "../../hooks/useApiKey";
 import {
   useClients,
   useDeleteClient,
@@ -43,6 +44,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
   const patchClientStatusMutation = usePatchClientStatus();
   const deleteClientMutation = useDeleteClient();
   const resendMutation = useResendOnboarding();
+  const regenerateKeyMutation = useRequestApiKeyRegenerationAdmin();
 
   const [editingClient, setEditingClient] = useState(null);
   const [confirmModal, setConfirmModal] = useState({
@@ -122,6 +124,22 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
     [resendMutation, showToast]
   );
 
+  const handleRegenerateKey = useCallback(
+    (client) => {
+      regenerateKeyMutation.mutate(client.id, {
+        onSuccess: () => {
+          showToast?.("Regeneration email sent successfully!", "success");
+          logger.info(`Sent API key regeneration email for client: ${client.email}`);
+        },
+        onError: (err) => {
+          logger.error("Error sending regeneration email:", err);
+          showToast?.(`Error: ${err.message}`, "error");
+        },
+      });
+    },
+    [regenerateKeyMutation, showToast]
+  );
+
   const columns = [
     { header: "Name", key: "name" },
     { header: "Email", key: "email" },
@@ -199,6 +217,19 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
                 onClick={() => handleResendLink(client)}
               >
                 Resend Link
+              </Button>
+            )}
+            {!isDfwscMode && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                disabled={
+                  regenerateKeyMutation.isPending && regenerateKeyMutation.variables === client.id
+                }
+                onClick={() => handleRegenerateKey(client)}
+              >
+                Regen Key
               </Button>
             )}
             <Button size="sm" onClick={() => setEditingClient(client)}>
