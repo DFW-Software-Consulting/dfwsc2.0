@@ -9,11 +9,11 @@ The platform uses **Stripe Connect** with **Express Accounts**.
 
 ## 2. Onboarding Flow
 1. **Initiate**: Admin calls `POST /api/v1/onboard-client/initiate` (or `POST /api/v1/accounts`). Creates a client record + `pending` onboarding token. `/accounts` returns the plaintext `apiKey` to the admin; `/onboard-client/initiate` does **not** — it delivers the API key via an emailed link instead.
-2. **Email**: Client receives an email containing two links: `/onboard?token=...` (Stripe onboarding) and `/regenerate-key?token=...` (reveals the API key once, expires in 15 minutes).
-3. **Account Link**: `GET /api/v1/onboard-client?token=...` creates a Stripe Express Account (if not yet created) and returns an Account Link URL. Token moves to `in_progress`.
+2. **Email**: Client receives an email containing two links: `/onboard#token=...` (Stripe onboarding) and `/regenerate-key#token=...` (reveals the API key once, expires in 15 minutes).
+3. **Account Link**: `POST /api/v1/onboard-client` with body `{ "token": "..." }` creates a Stripe Express Account (if not yet created) and returns an Account Link URL. Token moves to `in_progress`.
 4. **Stripe Redirect**: Client completes onboarding on Stripe-hosted pages.
 5. **Callback**: Stripe redirects to the platform-registered return URL, `GET /api/v1/connect/callback?client_id=...&state=...` — Stripe does **not** append `account`. `state` is CSRF-validated (32-byte, 30-min expiry) and is the actual security binding; the client's `stripeAccountId` is looked up from the DB (source of truth). An `account` query param is accepted only as an optional legacy/manual cross-check when present. Token is marked `completed`. Browser is redirected to `/onboarding-success`.
-6. **Refresh**: If the account link expires before the client completes it, `GET /api/v1/connect/refresh?token=...` generates a new link and redirects.
+6. **Refresh**: If the account link expires before the client completes it, `GET /api/v1/connect/refresh?client_id=...&state=...` generates a new link and redirects.
 7. **Resend**: `POST /api/v1/onboard-client/resend` revokes all active tokens for the client and issues a new one with a fresh email.
 
 ## 3. Payment Strategy (`USE_CHECKOUT`)

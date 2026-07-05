@@ -269,8 +269,7 @@ Creates a new client record and returns their credentials. Does **not** send an 
   "name": "Acme Corp",
   "clientId": "abc123",
   "apiKey": "64-hex-char-string",
-  "onboardingToken": "64-hex-char-string",
-  "onboardingUrlHint": "http://localhost:1919/onboard?token=..."
+  "onboardingUrlHint": "http://localhost:1919/onboard#token=..."
 }
 ```
 
@@ -303,8 +302,8 @@ Creates a new client and sends them an onboarding email with a link to connect t
 ```
 
 The email contains two links:
-- `<FRONTEND_ORIGIN>/onboard?token=<token>` — Stripe onboarding (24h).
-- `<FRONTEND_ORIGIN>/regenerate-key?token=<token>` — reveals the API key once. Expires in **15 minutes**. Visiting it calls `GET /api/v1/api-key/regenerate?token=<token>`, which rotates and returns the plaintext key.
+- `<FRONTEND_ORIGIN>/onboard#token=<token>` — Stripe onboarding (24h).
+- `<FRONTEND_ORIGIN>/regenerate-key#token=<token>` — reveals the API key once. Expires in **15 minutes**. The frontend redeems it with `POST /api/v1/api-key/regenerate` and body `{ "token": "<token>" }`, which rotates and returns the plaintext key.
 
 > If the 15-minute retrieval link expires before the client opens it, an admin can re-issue one via `POST /api/v1/api-key/regenerate-request/admin`.
 
@@ -339,9 +338,9 @@ or:
 
 ---
 
-#### `GET /api/v1/onboard-client?token=<token>`
+#### `POST /api/v1/onboard-client`
 
-No auth. Called by the frontend when a client visits their onboarding link.
+No auth. Called by the frontend when a client visits their onboarding link. Send `{ "token": "<token>" }` in the JSON body.
 
 Validates the token, creates a Stripe Express account (if not already created), and returns the Stripe account link URL.
 
@@ -371,7 +370,7 @@ After successful validation, the client's `stripeAccountId` is saved and the use
 
 ---
 
-#### `GET /api/v1/connect/refresh?token=<token>`
+#### `GET /api/v1/connect/refresh?client_id=<client_id>&state=<state>`
 
 No auth. Regenerates a Stripe account link for an incomplete onboarding. Stripe calls this when an account link expires. Redirects (302) directly to the new Stripe account link.
 
@@ -995,7 +994,7 @@ Save the `apiKey` from the response. You will not see it again. The client recei
 
 **Step 2 — Client connects Stripe (client action)**
 
-The client clicks the link in their email, which opens the frontend at `/onboard?token=...`. The frontend calls `GET /api/v1/onboard-client?token=...` to get a Stripe Connect URL, then redirects the client to Stripe.
+The client clicks the link in their email, which opens the frontend at `/onboard#token=...`. The frontend calls `POST /api/v1/onboard-client` with the token in the JSON body to get a Stripe Connect URL, then redirects the client to Stripe.
 
 **Step 3 — Stripe redirects back**
 

@@ -31,7 +31,7 @@ import { sendMail } from "../../lib/mailer";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
 
-const REGEN_LINK_REGEX = /\/regenerate-key\?token=([a-f0-9]+)/;
+const REGEN_LINK_REGEX = /\/regenerate-key#token=([a-f0-9]+)/;
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -86,9 +86,9 @@ describe("Onboard Initiate — API key via email link", () => {
     const mailCall = (sendMail as any).mock.calls.at(-1)?.[0];
     expect(mailCall).toBeTruthy();
     expect(mailCall.to).toBe(email);
-    expect(mailCall.html).toContain("/onboard?token=");
+    expect(mailCall.html).toContain("/onboard#token=");
     expect(mailCall.html).toMatch(REGEN_LINK_REGEX);
-    expect(mailCall.text).toContain("/onboard?token=");
+    expect(mailCall.text).toContain("/onboard#token=");
     expect(mailCall.text).toMatch(REGEN_LINK_REGEX);
     expect(mailCall.html).toMatch(/15 minutes/i);
 
@@ -142,8 +142,10 @@ describe("Onboard Initiate — API key via email link", () => {
     const rawToken = mailCall.text.match(REGEN_LINK_REGEX)[1];
 
     const regenerate = await app.inject({
-      method: "GET",
-      url: `/api/v1/api-key/regenerate?token=${rawToken}`,
+      method: "POST",
+      url: "/api/v1/api-key/regenerate",
+      headers: { "content-type": "application/json" },
+      payload: { token: rawToken },
     });
 
     expect(regenerate.statusCode).toBe(200);
