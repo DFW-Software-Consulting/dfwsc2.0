@@ -100,6 +100,9 @@ docker compose -f docker-compose.dev.yml up --build
 - **API:** http://localhost:4242
 - **Mailhog:** http://localhost:8025
 - **Stripe CLI:** forwards webhooks to `/api/v1/webhooks/stripe`
+- **Loki:** http://localhost:3100 (Promtail ships Docker container logs to Loki)
+
+The Fastify backend uses pino's structured JSON logs by default; Promtail forwards those container logs without changing application logging.
 
 ### Building for Production
 

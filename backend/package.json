@@ -52,6 +52,7 @@
     "jsonwebtoken": "^9.0.3",
     "nanoid": "^5.1.7",
     "nodemailer": "^7.0.10",
+    "opossum": "^8.5.0",
     "pg": "^8.16.3",
     "stripe": "^19.1.0",
     "uuid": "^11.1.1",
@@ -61,6 +62,7 @@
   "devDependencies": {
     "@types/node": "^24.9.1",
     "@types/nodemailer": "^7.0.3",
+    "@types/opossum": "^8.1.9",
     "@vitest/coverage-v8": "^3.2.4",
     "@vitest/ui": "^3.2.4",
     "nodemon": "^3.1.4",

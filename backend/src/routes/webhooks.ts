@@ -4,6 +4,7 @@ import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clients, webhookEvents } from "../db/schema";
+import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
 import { isUniqueViolation } from "../lib/errors";
 import { stripe } from "../lib/stripe";
 
@@ -127,7 +128,7 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
       if (subId) {
         // Let failures propagate to the outer catch so the webhook returns
         // 500 and processedAt stays unset, prompting Stripe to retry.
-        const sub = await stripe.subscriptions.retrieve(subId);
+        const sub = await withStripeCircuit(() => stripe.subscriptions.retrieve(subId));
 
         // Derive the paid-invoice count from Stripe itself rather than a
         // read-modify-write increment. This makes the handler idempotent:
@@ -138,12 +139,14 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
         const paidInvoiceIds = new Set<string>();
         let startingAfter: string | undefined;
         for (;;) {
-          const page = await stripe.invoices.list({
-            subscription: subId,
-            status: "paid",
-            limit: 100,
-            ...(startingAfter ? { starting_after: startingAfter } : {}),
-          });
+          const page = await withStripeCircuit(() =>
+            stripe.invoices.list({
+              subscription: subId,
+              status: "paid",
+              limit: 100,
+              ...(startingAfter ? { starting_after: startingAfter } : {}),
+            })
+          );
           for (const item of page.data) {
             if (item.id) paidInvoiceIds.add(item.id);
           }
@@ -159,28 +162,34 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
         // partial failure (subscription updated, schedule not) is a no-op on
         // the side that already holds the derived value.
         if (sub.metadata?.paymentsMade !== paymentsMade) {
-          await stripe.subscriptions.update(subId, {
-            metadata: {
-              ...sub.metadata,
-              paymentsMade,
-              lastPaidAt: nowIso,
-            },
-          });
+          await withStripeCircuit(() =>
+            stripe.subscriptions.update(subId, {
+              metadata: {
+                ...sub.metadata,
+                paymentsMade,
+                lastPaidAt: nowIso,
+              },
+            })
+          );
         }
 
         const scheduleId = typeof sub.schedule === "string" ? sub.schedule : null;
         if (scheduleId) {
-          const schedule = await stripe.subscriptionSchedules.retrieve(scheduleId);
+          const schedule = await withStripeCircuit(() =>
+            stripe.subscriptionSchedules.retrieve(scheduleId)
+          );
           // Independent guard: apply the SAME derived count to the schedule
           // regardless of whether the subscription side was already updated.
           if (schedule.metadata?.paymentsMade !== paymentsMade) {
-            await stripe.subscriptionSchedules.update(scheduleId, {
-              metadata: {
-                ...schedule.metadata,
-                paymentsMade,
-                lastPaidAt: nowIso,
-              },
-            });
+            await withStripeCircuit(() =>
+              stripe.subscriptionSchedules.update(scheduleId, {
+                metadata: {
+                  ...schedule.metadata,
+                  paymentsMade,
+                  lastPaidAt: nowIso,
+                },
+              })
+            );
           }
         }
       }
@@ -193,13 +202,15 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
         "Subscription schedule completed - all payments made."
       );
 
-      await stripe.subscriptionSchedules.update(schedule.id, {
-        metadata: {
-          ...schedule.metadata,
-          status: "completed",
-          completedAt: new Date().toISOString(),
-        },
-      });
+      await withStripeCircuit(() =>
+        stripe.subscriptionSchedules.update(schedule.id, {
+          metadata: {
+            ...schedule.metadata,
+            status: "completed",
+            completedAt: new Date().toISOString(),
+          },
+        })
+      );
       break;
     }
     case "subscription_schedule.canceled": {
@@ -320,6 +331,9 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           { err, eventId: event.id, eventType: event.type },
           "Webhook event processing failed; released claim so Stripe can retry"
         );
+        if (isCircuitOpenError(err)) {
+          return reply.code(503).send({ error: "Stripe service temporarily unavailable" });
+        }
         return reply.code(500).send({ error: "Webhook processing failed" });
       }
     }

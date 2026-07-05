@@ -1,4 +1,5 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import { isCircuitOpenError, withSmtpCircuit } from "./circuit-breakers";
 
 type MailPayload = {
   to: string;
@@ -52,13 +53,22 @@ export async function sendMail(payload: MailPayload): Promise<void> {
     process.env.SMTP_FROM ??
     `${process.env.SMTP_USER ?? "noreply"}@${process.env.SMTP_HOST ?? "localhost"}`;
 
-  await transporter.sendMail({
-    from,
-    to: payload.to,
-    subject: payload.subject,
-    text: payload.text,
-    html: payload.html,
-  });
+  try {
+    await withSmtpCircuit(async () => {
+      await transporter.sendMail({
+        from,
+        to: payload.to,
+        subject: payload.subject,
+        text: payload.text,
+        html: payload.html,
+      });
+    });
+  } catch (error) {
+    if (isCircuitOpenError(error)) {
+      console.warn("SMTP circuit breaker is open; email send skipped.");
+    }
+    throw error;
+  }
 }
 
 export function clearTransporterCache() {
