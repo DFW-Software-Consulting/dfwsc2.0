@@ -301,16 +301,19 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const settings = await getSettings();
       const companyName = settings.company_name || "DFW Software Consulting";
 
-      const { clientId, apiKey, token } = await createClientWithOnboardingToken({
+      const { clientId, token } = await createClientWithOnboardingToken({
         name,
         email,
         workspace: workspaceParam,
         groupId,
       });
 
+      const rawRegenToken = await createRegenerationToken({ clientId, email });
+
       const frontendOrigin = resolveFrontendOrigin();
 
       const onboardingUrl = `${frontendOrigin}/onboard?token=${token}`;
+      const regenerateUrl = `${frontendOrigin}/regenerate-key?token=${rawRegenToken}`;
 
       const safeName = he.encode(name);
       const mailHtml = `
@@ -318,6 +321,8 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         <p>Hi ${safeName},</p>
         <p>Click the link below to start your Stripe onboarding process.</p>
         <a href="${onboardingUrl}">Onboard Now</a>
+        <p>You will also need an API key to integrate with our services. Use the link below to retrieve it. This link expires in 15 minutes.</p>
+        <a href="${regenerateUrl}">Retrieve Your API Key</a>
         <p>If you did not request this, please ignore this email.</p>
       `;
 
@@ -326,6 +331,8 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         Hi ${name},
         Click the link below to start your Stripe onboarding process.
         ${onboardingUrl}
+        You will also need an API key to integrate with our services. Use the link below to retrieve it. This link expires in 15 minutes.
+        ${regenerateUrl}
         If you did not request this, please ignore this email.
       `;
 
@@ -343,7 +350,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       return reply.code(201).send({
         message: "Onboarding email sent successfully.",
         clientId,
-        apiKey,
+        apiKey: null,
         groupId: groupId ?? null,
       });
     }
