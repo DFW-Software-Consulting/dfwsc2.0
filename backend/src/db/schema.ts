@@ -59,7 +59,7 @@ export const clients = pgTable(
     apiKeyLookup: text("api_key_lookup").unique(),
     stripeAccountId: text("stripe_account_id"),
     stripeCustomerId: text("stripe_customer_id"),
-    status: text("status", { enum: ["active", "inactive", "pending", "failed"] })
+    status: text("status", { enum: ["active", "inactive", "pending", "failed", "archived"] })
       .default("active")
       .notNull(),
     chargesEnabled: boolean("charges_enabled").default(false).notNull(),
@@ -97,7 +97,7 @@ export const clients = pgTable(
     workspaceCheck: check("clients_workspace_check", sql`${table.workspace} IN ('client_portal')`),
     statusCheck: check(
       "clients_status_check",
-      sql`${table.status} IN ('active', 'inactive', 'pending', 'failed')`
+      sql`${table.status} IN ('active', 'inactive', 'pending', 'failed', 'archived')`
     ),
   })
 );

@@ -141,6 +141,20 @@
       "when": 1783213832083,
       "tag": "0019_brave_ravenous",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783217600000,
+      "tag": "0019_hash_onboarding_tokens",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1783217700000,
+      "tag": "0020_clients_archived_status",
+      "breakpoints": true
     }
   ]
 }

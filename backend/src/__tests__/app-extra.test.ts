@@ -31,7 +31,7 @@ describe("app.ts extra coverage", () => {
 
     expect(response.statusCode).toBe(400);
     // The custom formatter should join missing properties
-    expect(response.json().error).toMatch(/name, email are required/);
+    expect(response.json().error).toBe("name, email, workspace are required.");
     await server.close();
   });
 
@@ -48,15 +48,15 @@ describe("app.ts extra coverage", () => {
       headers: {
         authorization: `Bearer ${adminToken}`,
       },
-      payload: { name: "Test" }, // Missing only email
+      payload: { name: "Test" }, // Missing email and workspace
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().error).toBe("email is required.");
+    expect(response.json().error).toBe("email, workspace are required.");
     await server.close();
   });
 
-  it("handles generic validation error messages from AJV", async () => {
+  it("handles generic validation error messages", async () => {
     const server = await buildServer();
     const adminToken = require("jsonwebtoken").sign(
       { role: "admin" },
@@ -73,7 +73,7 @@ describe("app.ts extra coverage", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().error).toMatch(/must match format "email"/);
+    expect(response.json().error).toBe("email must be a valid email address.");
     await server.close();
   });
 

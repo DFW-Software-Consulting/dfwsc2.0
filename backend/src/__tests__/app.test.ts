@@ -13,7 +13,9 @@ vi.mock("bcryptjs", () => ({
 }));
 
 vi.mock("drizzle-orm", () => ({
+  count: () => ({ fn: "count" }),
   eq: (field: unknown, value: unknown) => ({ value, field }),
+  ne: (field: unknown, value: unknown) => ({ not: true, value, field }),
   inArray: (field: unknown, values: unknown[]) => ({ inArray: true, field, values }),
   and: (...conditions: any[]) => ({ all: conditions }),
   isNull: (field: unknown) => ({ isNull: true, field }),
@@ -1367,8 +1369,8 @@ describe("client groups", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.length).toBe(1);
-    expect(body[0].id).toBe("grp_1");
+    expect(body.data.length).toBe(1);
+    expect(body.data[0].id).toBe("grp_1");
     await server.close();
   });
 
@@ -1426,8 +1428,8 @@ describe("client groups", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.length).toBe(2);
-    expect(body.every((c: any) => c.groupId === "grp_3")).toBe(true);
+    expect(body.data.length).toBe(2);
+    expect(body.data.every((c: any) => c.groupId === "grp_3")).toBe(true);
     await server.close();
   });
 

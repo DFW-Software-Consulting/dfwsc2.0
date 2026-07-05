@@ -1,8 +1,9 @@
 import { Fragment, useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
-import { useCreateGroup, useGroups, usePatchGroup } from "../../hooks/useGroups";
+import { useCreateGroup, useDeleteGroup, useGroups, usePatchGroup } from "../../hooks/useGroups";
 import { validateFeeValue, validateUrl } from "../../utils/validation";
 import ClientProfileView from "./ClientProfileView";
+import ConfirmModal from "./ConfirmModal";
 import BaseModal from "./shared/BaseModal";
 import Button from "./shared/Button";
 import ErrorMessage from "./shared/ErrorMessage";
@@ -168,11 +169,13 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
   const { data: clients = [] } = useClients({ workspace });
   const createGroupMutation = useCreateGroup();
   const patchGroupMutation = usePatchGroup();
+  const deleteGroupMutation = useDeleteGroup();
 
   const [newGroupName, setNewGroupName] = useState("");
   const [editingGroup, setEditingGroup] = useState(null);
   const [managingGroup, setManagingGroup] = useState(null);
   const [expandedGroupId, setExpandedGroupId] = useState(null);
+  const [deleteGroup, setDeleteGroup] = useState(null);
 
   const handleCreate = useCallback(
     (e) => {
@@ -216,6 +219,17 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
     (groupId) => clients.filter((c) => c.groupId === groupId),
     [clients]
   );
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!deleteGroup) return;
+    deleteGroupMutation.mutate(deleteGroup.id, {
+      onSuccess: () => {
+        showToast?.(`Group "${deleteGroup.name}" deleted`, "success");
+        setDeleteGroup(null);
+      },
+      onError: (err) => showToast?.(err.message, "error"),
+    });
+  }, [deleteGroup, deleteGroupMutation, showToast]);
 
   return (
     <div>
@@ -281,6 +295,8 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                 const isExpanded = expandedGroupId === g.id;
                 const isToggling =
                   patchGroupMutation.isPending && patchGroupMutation.variables?.id === g.id;
+                const isDeleting =
+                  deleteGroupMutation.isPending && deleteGroupMutation.variables === g.id;
                 return (
                   <Fragment key={g.id}>
                     <tr className="hover:bg-gray-700/50">
@@ -337,6 +353,14 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                             onClick={() => handleToggleStatus(g)}
                           >
                             {isToggling ? "..." : g.status === "active" ? "Deactivate" : "Activate"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            disabled={isDeleting}
+                            onClick={() => setDeleteGroup(g)}
+                          >
+                            {isDeleting ? "..." : "Delete"}
                           </Button>
                         </div>
                       </td>
@@ -413,6 +437,16 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
           workspace={workspace}
         />
       )}
+      <ConfirmModal
+        isOpen={!!deleteGroup}
+        title="Delete Group"
+        message={`Are you sure you want to delete "${deleteGroup?.name ?? "this group"}"? Clients in this group will remain but no longer belong to a group.`}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteGroup(null)}
+        confirmText="Delete"
+        cancelText="Cancel"
+        confirmVariant="danger"
+      />
     </div>
   );
 }

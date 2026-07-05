@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getClient, getClients, initiateClientOnboarding, patchClient } from "../api/clients";
+import {
+  deleteClient,
+  getClient,
+  getClients,
+  initiateClientOnboarding,
+  patchClient,
+} from "../api/clients";
 import { resendOnboardingLink } from "../api/onboarding";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -20,6 +26,14 @@ export function useClients(params = {}) {
     queryKey: ["clients", effectiveParams],
     queryFn: () => getClients(token, effectiveParams),
     enabled: !!token,
+    select: (response) => {
+      const data = Array.isArray(response) ? response : response.data;
+      return Object.assign(data ?? [], {
+        pagination: Array.isArray(response)
+          ? { total: response.length, limit: response.length, offset: 0 }
+          : { total: response.total, limit: response.limit, offset: response.offset },
+      });
+    },
   });
 }
 
@@ -72,6 +86,19 @@ export function usePatchClientStatus() {
     },
     onSettled: () =>
       queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "clients" }),
+  });
+}
+
+export function useDeleteClient() {
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => deleteClient(token, id),
+    onSuccess: (_data, id) => {
+      queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "clients" });
+      queryClient.invalidateQueries({ queryKey: ["client", id] });
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
+    },
   });
 }
 

@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import type Stripe from "stripe";
+import { z } from "zod";
 import { requireAdminJwt } from "../lib/auth";
-import { errors } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
+import { parseBody } from "../lib/validation";
 
 interface CreateProductBody {
   name: string;
@@ -27,6 +28,16 @@ function formatProduct(product: Stripe.Product, price: Stripe.Price | null) {
 const adminCrudRateLimit = adminRateLimit({
   max: 120,
   windowMs: 60_000,
+});
+
+const createProductBodySchema = z.object({
+  name: z.string({ error: "name is required." }).trim().min(1, "name is required."),
+  description: z.string().optional(),
+  amountCents: z
+    .number({ error: "amountCents must be a positive integer." })
+    .int("amountCents must be a positive integer.")
+    .positive("amountCents must be a positive integer."),
+  currency: z.string().optional(),
 });
 
 const productRoutes: FastifyPluginAsync = async (app) => {
@@ -77,14 +88,9 @@ const productRoutes: FastifyPluginAsync = async (app) => {
     "/products",
     { preHandler: [requireAdminJwt, adminCrudRateLimit] },
     async (req, res) => {
-      const { name, description, amountCents, currency = "usd" } = req.body;
-
-      if (!name?.trim()) {
-        throw errors.badRequest("name is required.");
-      }
-      if (!Number.isInteger(amountCents) || amountCents <= 0) {
-        throw errors.badRequest("amountCents must be a positive integer.");
-      }
+      const body = parseBody(createProductBodySchema, req.body, res) as CreateProductBody | null;
+      if (!body) return;
+      const { name, description, amountCents, currency = "usd" } = body;
 
       const product = await stripe.products.create({
         name: name.trim(),
