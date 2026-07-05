@@ -13,6 +13,7 @@ const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
 const PaymentCancel = lazy(() => import("./pages/PaymentCancel"));
 const OnboardingSuccess = lazy(() => import("./pages/OnboardingSuccess"));
 const RegenerateApiKey = lazy(() => import("./pages/RegenerateApiKey"));
+const RequestApiKeyRegeneration = lazy(() => import("./pages/RequestApiKeyRegeneration"));
 
 export default function App() {
   return (
@@ -44,6 +45,7 @@ export default function App() {
               <Route path="/payment-cancel" element={<PaymentCancel />} />
               <Route path="/onboarding-success" element={<OnboardingSuccess />} />
               <Route path="/regenerate-key" element={<RegenerateApiKey />} />
+              <Route path="/request-key-regeneration" element={<RequestApiKeyRegeneration />} />
             </Routes>
           </Suspense>
         </main>
