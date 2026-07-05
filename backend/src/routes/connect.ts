@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients, onboardingTokens } from "../db/schema";
+import { createRegenerationToken, validateAndRegenerate } from "../lib/api-key-regeneration";
 import { requireAdminJwt } from "../lib/auth";
 import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
 import { createClientWithOnboardingToken, hashOnboardingToken } from "../lib/client-factory";
@@ -61,6 +62,14 @@ const resendBodySchema = z
   .refine((body) => !!body.email || !!body.clientId, {
     message: "Either email or clientId is required.",
   });
+
+const regenerateRequestSchema = z.object({
+  email: z.string({ error: "email is required." }).email("email must be a valid email address."),
+});
+
+const regenerateRequestAdminSchema = z.object({
+  clientId: z.string({ error: "clientId is required." }).min(1, "clientId is required."),
+});
 
 async function createAccountLinkForToken(
   request: FastifyRequest,
@@ -755,6 +764,178 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       return reply.redirect(
         `${redirectBase}?status=${tokenStatus === "completed" ? "completed" : "pending"}`
       );
+    }
+  );
+
+  fastify.post(
+    "/api-key/regenerate-request",
+    {
+      preHandler: [rateLimit({ max: AUTH_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS })],
+      schema: {
+        body: {
+          type: "object",
+          required: ["email"],
+          properties: {
+            email: { type: "string", format: "email" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const body = parseBody(regenerateRequestSchema, request.body, reply);
+      if (!body) return;
+      const { email } = body;
+
+      const [clientRecord] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.email, email), eq(clients.status, "active")))
+        .limit(1);
+
+      if (clientRecord) {
+        const rawToken = await createRegenerationToken({
+          clientId: clientRecord.id,
+          email: clientRecord.email,
+        });
+
+        const settings = await getSettings();
+        const companyName = settings.company_name || "DFW Software Consulting";
+        const frontendOrigin = resolveFrontendOrigin();
+        const regenerateUrl = `${frontendOrigin}/regenerate-key?token=${rawToken}`;
+
+        const safeName = he.encode(clientRecord.name);
+        const mailHtml = `
+          <h1>API Key Regeneration</h1>
+          <p>Hi ${safeName},</p>
+          <p>A request was made to regenerate your API key.</p>
+          <p>Click the link below to generate a new key. This link will expire in 15 minutes.</p>
+          <a href="${regenerateUrl}">Regenerate API Key</a>
+          <p>If you did not request this, please ignore this email. Your current API key will remain valid.</p>
+        `;
+
+        const mailText = `
+          API Key Regeneration
+          Hi ${clientRecord.name},
+          A request was made to regenerate your API key.
+          Click the link below to generate a new key. This link will expire in 15 minutes.
+          ${regenerateUrl}
+          If you did not request this, please ignore this email. Your current API key will remain valid.
+        `;
+
+        try {
+          await sendMail({
+            to: clientRecord.email,
+            subject: `${companyName} - Regenerate API Key`,
+            html: mailHtml,
+            text: mailText,
+          });
+        } catch (err) {
+          request.log.error(
+            { err, clientId: clientRecord.id },
+            "Failed to send regeneration email"
+          );
+        }
+      }
+
+      return reply.code(200).send({
+        message: "If an account with that email exists, a regeneration link has been sent.",
+      });
+    }
+  );
+
+  fastify.post(
+    "/api-key/regenerate-request/admin",
+    {
+      preHandler: [
+        rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS }),
+        requireAdminJwt,
+      ],
+      schema: {
+        body: {
+          type: "object",
+          required: ["clientId"],
+          properties: {
+            clientId: { type: "string", minLength: 1 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const body = parseBody(regenerateRequestAdminSchema, request.body, reply);
+      if (!body) return;
+      const { clientId } = body;
+
+      const [clientRecord] = await db
+        .select()
+        .from(clients)
+        .where(eq(clients.id, clientId))
+        .limit(1);
+
+      if (!clientRecord) {
+        throw errors.notFound("Client");
+      }
+
+      const rawToken = await createRegenerationToken({
+        clientId: clientRecord.id,
+        email: clientRecord.email,
+      });
+
+      const settings = await getSettings();
+      const companyName = settings.company_name || "DFW Software Consulting";
+      const frontendOrigin = resolveFrontendOrigin();
+      const regenerateUrl = `${frontendOrigin}/regenerate-key?token=${rawToken}`;
+
+      const safeName = he.encode(clientRecord.name);
+      const mailHtml = `
+        <h1>API Key Regeneration</h1>
+        <p>Hi ${safeName},</p>
+        <p>An administrator has initiated a regeneration of your API key.</p>
+        <p>Click the link below to generate a new key. This link will expire in 15 minutes.</p>
+        <a href="${regenerateUrl}">Regenerate API Key</a>
+        <p>If you did not expect this, please contact your administrator.</p>
+      `;
+
+      const mailText = `
+        API Key Regeneration
+        Hi ${clientRecord.name},
+        An administrator has initiated a regeneration of your API key.
+        Click the link below to generate a new key. This link will expire in 15 minutes.
+        ${regenerateUrl}
+        If you did not expect this, please contact your administrator.
+      `;
+
+      try {
+        await sendMail({
+          to: clientRecord.email,
+          subject: `${companyName} - Regenerate API Key`,
+          html: mailHtml,
+          text: mailText,
+        });
+      } catch (err) {
+        request.log.error({ err, clientId: clientRecord.id }, "Failed to send regeneration email");
+      }
+
+      return reply.code(200).send({
+        message: "Regeneration email sent successfully.",
+        clientId: clientRecord.id,
+      });
+    }
+  );
+
+  fastify.get(
+    "/api-key/regenerate",
+    {
+      preHandler: [rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS })],
+    },
+    async (request, reply) => {
+      const { token } = request.query as { token: string };
+      if (typeof token !== "string" || token.trim().length === 0) {
+        throw errors.badRequest("token is required.");
+      }
+
+      const newApiKey = await validateAndRegenerate(token);
+
+      return reply.code(200).send({ apiKey: newApiKey });
     }
   );
 }
