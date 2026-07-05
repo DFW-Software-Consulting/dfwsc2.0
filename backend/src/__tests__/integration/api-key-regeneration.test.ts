@@ -171,6 +171,47 @@ describe("API Key Regeneration Routes", () => {
       );
     });
 
+    it("returns 502 when the regeneration email cannot be sent", async () => {
+      const token = makeAdminToken();
+      (sendMail as any).mockRejectedValueOnce(new Error("smtp down"));
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/api-key/regenerate-request/admin",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { clientId },
+      });
+
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toMatchObject({
+        error: "Failed to send regeneration email. Please try again.",
+        code: "EMAIL_DELIVERY_FAILED",
+      });
+      expect(sendMail).toHaveBeenCalledTimes(1);
+
+      const pendingTokens = await db
+        .select()
+        .from(apiKeyRegenerationTokens)
+        .where(
+          and(
+            eq(apiKeyRegenerationTokens.clientId, clientId),
+            eq(apiKeyRegenerationTokens.status, "pending")
+          )
+        );
+      expect(pendingTokens).toHaveLength(0);
+
+      const revokedTokens = await db
+        .select()
+        .from(apiKeyRegenerationTokens)
+        .where(
+          and(
+            eq(apiKeyRegenerationTokens.clientId, clientId),
+            eq(apiKeyRegenerationTokens.status, "revoked")
+          )
+        );
+      expect(revokedTokens).toHaveLength(1);
+    });
+
     it("returns 404 for non-existent clientId", async () => {
       const token = makeAdminToken();
 
