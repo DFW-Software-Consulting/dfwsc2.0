@@ -7,3 +7,6 @@ export const createGroup = (token, body) => apiFetch("/groups", { token, method:
 
 export const patchGroup = (token, id, body) =>
   apiFetch(`/groups/${id}`, { token, method: "PATCH", body });
+
+export const deleteGroup = (token, id) =>
+  apiFetch(`/groups/${id}`, { token, method: "DELETE" });

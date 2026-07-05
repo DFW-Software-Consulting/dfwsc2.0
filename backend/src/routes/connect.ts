@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import he from "he";
 import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
+import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
@@ -13,7 +14,8 @@ import { AppError, errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { getSettings, stripe } from "../lib/stripe-billing";
-import { isWorkspace, type Workspace } from "../lib/workspace";
+import { parseBody } from "../lib/validation";
+import type { Workspace } from "../lib/workspace";
 
 // Onboarding tokens are single-use links minted by an admin action; they
 // should not remain valid indefinitely. This bounds the window (based on
@@ -28,6 +30,34 @@ function hashToken(token: string): string {
 interface AccountLinkContext {
   accountLinkUrl: string;
 }
+
+const accountBodySchema = z.object({
+  name: z.string({ error: "name is required." }).trim().min(1, "name is required."),
+  email: z
+    .string({ error: "email is required." })
+    .email("email must be a valid email address."),
+  groupId: z.string().optional(),
+  workspace: z.literal("client_portal", { error: "workspace must be client_portal." }),
+});
+
+const initiateBodySchema = z.object({
+  name: z.string({ error: "name is required." }).trim().min(1, "name is required."),
+  email: z
+    .string({ error: "email is required." })
+    .email("email must be a valid email address."),
+  groupId: z.string().optional(),
+  workspace: z.literal("client_portal", { error: "workspace is required." }),
+});
+
+const resendBodySchema = z
+  .object({
+    email: z.email({ error: "email must be a valid email address." }).optional(),
+    clientId: z.string().optional(),
+    workspace: z.literal("client_portal", { error: "Invalid workspace." }).optional(),
+  })
+  .refine((body) => !!body.email || !!body.clientId, {
+    message: "Either email or clientId is required.",
+  });
 
 async function createAccountLinkForToken(
   request: FastifyRequest,
@@ -146,29 +176,13 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     "/accounts",
     {
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
-      schema: {
-        body: {
-          type: "object",
-          required: ["name", "email", "workspace"],
-          properties: {
-            name: { type: "string", minLength: 1 },
-            email: { type: "string", format: "email" },
-            groupId: { type: "string" },
-            workspace: { type: "string", enum: ["client_portal"] },
-          },
-        },
-      },
     },
     async (request, reply) => {
-      const { name, email, groupId, workspace } = request.body as {
-        name: string;
-        email: string;
-        groupId?: string;
-        workspace: Workspace;
-      };
-      if (!isWorkspace(workspace)) {
-        throw errors.badRequest("workspace must be client_portal.");
-      }
+      const body = parseBody(accountBodySchema, request.body, reply) as
+        | (z.infer<typeof accountBodySchema> & { workspace: Workspace })
+        | null;
+      if (!body) return;
+      const { name, email, groupId, workspace } = body;
 
       request.log.info({ groupId, workspace }, "Received request in /accounts handler");
 
@@ -218,35 +232,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     "/onboard-client/initiate",
     {
       preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
-      schema: {
-        body: {
-          type: "object",
-          required: ["name", "email"],
-          properties: {
-            name: { type: "string", minLength: 1 },
-            email: { type: "string", format: "email" },
-            groupId: { type: "string" },
-            workspace: { type: "string" },
-          },
-        },
-      },
     },
     async (request, reply) => {
-      const {
-        name,
-        email,
-        groupId,
-        workspace: workspaceParam,
-      } = request.body as {
-        name: string;
-        email: string;
-        groupId?: string;
-        workspace?: string;
-      };
-
-      if (!isWorkspace(workspaceParam)) {
-        throw errors.badRequest("workspace is required.");
-      }
+      const body = parseBody(initiateBodySchema, request.body, reply);
+      if (!body) return;
+      const { name, email, groupId, workspace: workspaceParam } = body;
 
       if (groupId) {
         const [group] = await db
@@ -317,35 +307,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     "/onboard-client/resend",
     {
       preHandler: [rateLimit({ max: 5, windowMs: 60_000 }), requireAdminJwt],
-      schema: {
-        body: {
-          type: "object",
-          properties: {
-            email: { type: "string", format: "email" },
-            clientId: { type: "string" },
-            workspace: { type: "string" },
-          },
-        },
-      },
     },
     async (request, reply) => {
-      const {
-        email,
-        clientId,
-        workspace: workspaceParam,
-      } = request.body as {
-        email?: string;
-        clientId?: string;
-        workspace?: string;
-      };
-
-      if (!email && !clientId) {
-        throw errors.badRequest("Either email or clientId is required.");
-      }
-
-      if (workspaceParam && !isWorkspace(workspaceParam)) {
-        throw errors.badRequest("Invalid workspace.");
-      }
+      const body = parseBody(resendBodySchema, request.body, reply);
+      if (!body) return;
+      const { email, clientId, workspace: workspaceParam } = body;
 
       const [clientRecord] = clientId
         ? await db.select().from(clients).where(eq(clients.id, clientId))

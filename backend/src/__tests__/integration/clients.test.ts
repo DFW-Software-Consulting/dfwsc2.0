@@ -86,8 +86,11 @@ describe("Clients API Integration", () => {
 
       expect(response.statusCode).toBe(200);
       const body = response.json();
-      expect(body.some((c: any) => c.id === clientId)).toBe(true);
-      expect(body.every((c: any) => c.workspace === workspace)).toBe(true);
+      expect(body.data.some((c: any) => c.id === clientId)).toBe(true);
+      expect(body.data.every((c: any) => c.workspace === workspace)).toBe(true);
+      expect(body.limit).toBe(20);
+      expect(body.offset).toBe(0);
+      expect(body.total).toBeGreaterThanOrEqual(1);
     });
 
     it("lists clients filtered by workspace", async () => {
@@ -110,8 +113,8 @@ describe("Clients API Integration", () => {
 
       expect(response.statusCode).toBe(200);
       const body = response.json();
-      expect(body.length).toBeGreaterThanOrEqual(1);
-      expect(body.some((c: any) => c.id === clientId)).toBe(true);
+      expect(body.data.length).toBeGreaterThanOrEqual(1);
+      expect(body.data.some((c: any) => c.id === clientId)).toBe(true);
     });
 
     it("lists clients filtered by groupId", async () => {
@@ -144,7 +147,77 @@ describe("Clients API Integration", () => {
 
       expect(response.statusCode).toBe(200);
       const body = response.json();
-      expect(body.every((c: any) => c.groupId === groupId)).toBe(true);
+      expect(body.data.every((c: any) => c.groupId === groupId)).toBe(true);
+    });
+
+    it("paginates clients", async () => {
+      const clientIds = [randomUUID(), randomUUID()];
+      cleanupIds.push(...clientIds);
+
+      await db.insert(clients).values(
+        clientIds.map((id, index) => ({
+          id,
+          name: `Paged Client ${index}`,
+          email: `paged-${index}@example.com`,
+          workspace,
+          status: "active",
+        }))
+      );
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients?workspace=${workspace}&limit=1&offset=0`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.data).toHaveLength(1);
+      expect(body.limit).toBe(1);
+      expect(body.offset).toBe(0);
+      expect(body.total).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe("DELETE /api/v1/clients/:id", () => {
+    it("archives a client and excludes it from client list", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Delete Me",
+        email: "delete-me@example.com",
+        workspace,
+        status: "active",
+      });
+
+      const deleteResponse = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/clients/${clientId}`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+
+      expect(deleteResponse.statusCode).toBe(204);
+      const [archived] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+      expect(archived.status).toBe("archived");
+
+      const listResponse = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients?workspace=${workspace}`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+      expect(listResponse.json().data.some((c: any) => c.id === clientId)).toBe(false);
+    });
+
+    it("returns 404 when client does not exist", async () => {
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/clients/${randomUUID()}`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error).toBe("Client not found.");
     });
   });
 

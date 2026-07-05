@@ -1,4 +1,5 @@
 import type { FastifyReply } from "fastify";
+import type { z } from "zod";
 import { stripe } from "./stripe";
 import { isWorkspace, type Workspace } from "./workspace";
 
@@ -169,4 +170,24 @@ export function isValidHttpsUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+export function parseBody<T extends z.ZodTypeAny>(
+  schema: T,
+  body: unknown,
+  res: FastifyReply
+): z.infer<T> | null {
+  const parsed = schema.safeParse(body ?? {});
+  if (!parsed.success) {
+    const requiredFields = parsed.error.issues
+      .filter((issue) => issue.message.endsWith("is required."))
+      .map((issue) => String(issue.path[0]));
+    const error =
+      requiredFields.length > 1
+        ? `${requiredFields.join(", ")} are required.`
+        : (parsed.error.issues[0]?.message ?? "Invalid request body.");
+    res.status(400).send({ error });
+    return null;
+  }
+  return parsed.data;
 }

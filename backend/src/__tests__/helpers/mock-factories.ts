@@ -36,7 +36,13 @@ function isColumn(column: any, name: string): boolean {
 
 function createWhereResult(rowsPromise: Promise<any[]>) {
   return {
-    limit: async () => (await rowsPromise).slice(0, 1),
+    limit: (n: number) => ({
+      offset: async (offset: number) => (await rowsPromise).slice(offset, offset + n),
+      then: (resolve: any, reject: any) =>
+        rowsPromise.then((rows) => rows.slice(0, n)).then(resolve, reject),
+      catch: rowsPromise.catch.bind(rowsPromise),
+      finally: rowsPromise.finally.bind(rowsPromise),
+    }),
     then: rowsPromise.then.bind(rowsPromise),
     catch: rowsPromise.catch.bind(rowsPromise),
     finally: rowsPromise.finally.bind(rowsPromise),
@@ -61,6 +67,7 @@ function filterByExpr(rows: any[], expr: any): any[] {
           const colName = resolveColumnName(cond.field);
           if (!colName) return true;
           const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+          if (cond.not) return r[colName] !== cond.value && r[camel] !== cond.value;
           return r[colName] === cond.value || r[camel] === cond.value;
         }
         if (cond.field && cond.values !== undefined) {
@@ -78,6 +85,7 @@ function filterByExpr(rows: any[], expr: any): any[] {
     if (!colName) return rows;
     return rows.filter((r) => {
       const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+      if (expr.not) return r[colName] !== expr.value && r[camel] !== expr.value;
       return r[colName] === expr.value || r[camel] === expr.value;
     });
   }
@@ -125,16 +133,22 @@ export function createAppDbMock(dataStore: AppDataStore) {
   }
 
   const mock = {
-    select: vi.fn(() => ({
+    select: vi.fn((selection?: any) => ({
       from: (table: any) => ({
         ...(() => {
           const rowsPromise = (async () => {
-            if (isTable(table, "clients")) return Array.from(dataStore.clients.values());
+            if (isTable(table, "clients")) {
+              const rows = Array.from(dataStore.clients.values());
+              return selection?.total ? [{ total: rows.length }] : rows;
+            }
             if (isTable(table, "onboarding_tokens"))
               return Array.from(dataStore.onboardingTokens.values());
             if (isTable(table, "webhook_events"))
               return Array.from(dataStore.webhookEvents.values());
-            if (isTable(table, "client_groups")) return Array.from(dataStore.clientGroups.values());
+            if (isTable(table, "client_groups")) {
+              const rows = Array.from(dataStore.clientGroups.values());
+              return selection?.total ? [{ total: rows.length }] : rows;
+            }
             if (isTable(table, "admins")) return Array.from(dataStore.admins.values());
             return [];
           })();
@@ -147,6 +161,9 @@ export function createAppDbMock(dataStore: AppDataStore) {
         where: (expr: any) => {
           const rowsPromise = (async () => {
             if (isTable(table, "clients")) {
+              if (selection?.total) {
+                return [{ total: filterByExpr(Array.from(dataStore.clients.values()), expr).length }];
+              }
               if (isColumn(expr?.field, "api_key")) {
                 const client = findClientByApiKey(expr?.value);
                 return client ? [client] : [];
@@ -178,6 +195,9 @@ export function createAppDbMock(dataStore: AppDataStore) {
               return row ? [row] : [];
             }
             if (isTable(table, "client_groups")) {
+              if (selection?.total) {
+                return [{ total: filterByExpr(Array.from(dataStore.clientGroups.values()), expr).length }];
+              }
               if (isColumn(expr?.field, "workspace")) {
                 return Array.from(dataStore.clientGroups.values()).filter(
                   (g) => g.workspace === expr?.value

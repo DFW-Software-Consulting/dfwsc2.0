@@ -1,5 +1,10 @@
 import { useCallback, useState } from "react";
-import { useClients, usePatchClientStatus, useResendOnboarding } from "../../hooks/useClients";
+import {
+  useClients,
+  useDeleteClient,
+  usePatchClientStatus,
+  useResendOnboarding,
+} from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import logger from "../../utils/logger";
 import ConfirmModal from "./ConfirmModal";
@@ -36,6 +41,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
   const { data: clients = [], isLoading, isError, error, refetch } = useClients({ workspace });
   const { data: groups = [] } = useGroups(workspace);
   const patchClientStatusMutation = usePatchClientStatus();
+  const deleteClientMutation = useDeleteClient();
   const resendMutation = useResendOnboarding();
 
   const [editingClient, setEditingClient] = useState(null);
@@ -45,6 +51,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
     clientName: "",
     currentStatus: "",
   });
+  const [deleteModal, setDeleteModal] = useState({ isOpen: false, clientId: null, clientName: "" });
 
   const handleStatusToggle = useCallback(
     (client) => {
@@ -85,6 +92,16 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
   const handleCancelDeactivate = () => {
     setConfirmModal({ isOpen: false, clientId: null, clientName: "", currentStatus: "" });
   };
+
+  const handleConfirmDelete = useCallback(() => {
+    const { clientId } = deleteModal;
+    setDeleteModal({ isOpen: false, clientId: null, clientName: "" });
+    if (!clientId) return;
+    deleteClientMutation.mutate(clientId, {
+      onSuccess: () => showToast?.("Client deleted successfully", "success"),
+      onError: (err) => showToast?.(`Error deleting client: ${err.message}`, "error"),
+    });
+  }, [deleteClientMutation, deleteModal, showToast]);
 
   const handleResendLink = useCallback(
     (client) => {
@@ -168,6 +185,8 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
         const isTogglingStatus =
           patchClientStatusMutation.isPending &&
           patchClientStatusMutation.variables?.id === client.id;
+        const isDeleting =
+          deleteClientMutation.isPending && deleteClientMutation.variables === client.id;
         return (
           <div className="flex gap-2">
             {!isDfwscMode && (
@@ -193,6 +212,17 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
               onClick={() => handleStatusToggle(client)}
             >
               {isTogglingStatus ? "..." : client.status === "active" ? "Deactivate" : "Activate"}
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={isDeleting}
+              isLoading={isDeleting}
+              onClick={() =>
+                setDeleteModal({ isOpen: true, clientId: client.id, clientName: client.name })
+              }
+            >
+              {isDeleting ? "..." : "Delete"}
             </Button>
           </div>
         );
@@ -220,6 +250,17 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
         onConfirm={handleConfirmDeactivate}
         onCancel={handleCancelDeactivate}
         confirmText="Deactivate"
+        cancelText="Cancel"
+        confirmVariant="danger"
+      />
+
+      <ConfirmModal
+        isOpen={deleteModal.isOpen}
+        title="Delete Client"
+        message={`Are you sure you want to delete "${deleteModal.clientName}"? This will archive the client and hide them from the client list.`}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteModal({ isOpen: false, clientId: null, clientName: "" })}
+        confirmText="Delete"
         cancelText="Cancel"
         confirmVariant="danger"
       />

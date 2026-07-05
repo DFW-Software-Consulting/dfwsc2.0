@@ -15,7 +15,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
-import { clientGroups } from "../../db/schema";
+import { clientGroups, clients } from "../../db/schema";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
 
@@ -122,7 +122,77 @@ describe("Groups API", () => {
       });
 
       expect(response.statusCode).toBe(200);
-      expect(Array.isArray(response.json())).toBe(true);
+      const body = response.json();
+      expect(Array.isArray(body.data)).toBe(true);
+      expect(body.limit).toBe(20);
+      expect(body.offset).toBe(0);
+      expect(body.total).toBeGreaterThanOrEqual(body.data.length);
+    });
+
+    it("paginates groups", async () => {
+      const ids = [randomUUID(), randomUUID()];
+      createdGroupIds.push(...ids);
+      await db.insert(clientGroups).values(
+        ids.map((id, index) => ({
+          id,
+          name: `Paged Group ${index}`,
+          workspace,
+          status: "active",
+        }))
+      );
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/groups?workspace=${workspace}&limit=1&offset=0`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.data).toHaveLength(1);
+      expect(body.limit).toBe(1);
+      expect(body.offset).toBe(0);
+      expect(body.total).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe("DELETE /api/v1/groups/:id", () => {
+    it("deletes a group and clears client group references", async () => {
+      const token = makeAdminToken();
+      const groupId = randomUUID();
+      const clientId = randomUUID();
+      createdGroupIds.push(groupId);
+
+      await db.insert(clientGroups).values({ id: groupId, name: "Delete Group", workspace });
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Grouped Client",
+        email: `grouped-${clientId}@example.com`,
+        workspace,
+        status: "active",
+        groupId,
+      });
+
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/groups/${groupId}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(204);
+      const [client] = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
+      expect(client.groupId).toBeNull();
+      await db.delete(clients).where(eq(clients.id, clientId));
+    });
+
+    it("returns 404 when group does not exist", async () => {
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/api/v1/groups/${randomUUID()}`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error).toBe("Group not found.");
     });
   });
 

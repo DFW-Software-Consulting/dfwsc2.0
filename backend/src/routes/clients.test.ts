@@ -74,12 +74,14 @@ describe("Client Management API", () => {
         .set("Authorization", `Bearer ${mockAdminToken}`)
         .expect(200);
 
-      expect(Array.isArray(response.body)).toBe(true);
-      expect(response.body.length).toBeGreaterThanOrEqual(2); // At least our 2 test clients
+      expect(Array.isArray(response.body.data)).toBe(true);
+      expect(response.body.data.length).toBeGreaterThanOrEqual(2); // At least our 2 test clients
 
       // Find our test clients in the response
-      const testClient = response.body.find((client: any) => client.id === mockClientId);
-      const secondClient = response.body.find((client: any) => client.id === mockSecondClientId);
+      const testClient = response.body.data.find((client: any) => client.id === mockClientId);
+      const secondClient = response.body.data.find(
+        (client: any) => client.id === mockSecondClientId
+      );
 
       expect(testClient).toBeDefined();
       expect(secondClient).toBeDefined();
@@ -114,9 +116,9 @@ describe("Client Management API", () => {
         .set("Authorization", `Bearer ${mockAdminToken}`)
         .expect(200);
 
-      expect(Array.isArray(response.body)).toBe(true);
-      const hasMockClient = response.body.some((client: any) => client.id === mockClientId);
-      const hasSecondMockClient = response.body.some(
+      expect(Array.isArray(response.body.data)).toBe(true);
+      const hasMockClient = response.body.data.some((client: any) => client.id === mockClientId);
+      const hasSecondMockClient = response.body.data.some(
         (client: any) => client.id === mockSecondClientId
       );
       expect(hasMockClient).toBe(false);

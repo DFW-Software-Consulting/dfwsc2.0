@@ -1,11 +1,13 @@
 import bcrypt from "bcryptjs";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { db } from "../db/client";
 import { admins } from "../db/schema";
 import { getAdminFromDb, requireAdminJwt, signJwt } from "../lib/auth";
 import { errors } from "../lib/errors";
 import { rateLimit } from "../lib/rate-limit";
+import { parseBody } from "../lib/validation";
 
 const MIN_ADMIN_PASSWORD_LENGTH = 12;
 
@@ -25,6 +27,11 @@ interface LoginRequest {
   username: string;
   password: string;
 }
+
+const credentialsSchema = z.object({
+  username: z.string({ error: "Username and password are required" }).min(1, "Username and password are required"),
+  password: z.string({ error: "Username and password are required" }).min(1, "Username and password are required"),
+});
 
 // For testing purposes only. The deprecated /auth/setup handler no longer holds
 // any setup state, so this is now a no-op retained for backward compatibility
@@ -79,13 +86,13 @@ export default async function authRoutes(fastify: FastifyInstance) {
       preHandler: [requireAdminJwt, rateLimit({ max: 3, windowMs: 15 * 60 * 1000 })],
     },
     async (request, reply) => {
-      const body = (request.body ?? {}) as Partial<LoginRequest>;
+      const body = parseBody(credentialsSchema, request.body, reply) as LoginRequest | null;
+      if (!body) return;
       const { username, password } = body;
 
       if (!username || !password) {
         throw errors.badRequest("Username and password are required");
       }
-
       const passwordError = validateAdminPassword(password);
       if (passwordError) {
         throw errors.badRequest(passwordError);
@@ -127,7 +134,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
       preHandler: rateLimit({ max: 5, windowMs: 15 * 60 * 1000 }), // 5 requests per 15 minutes
     },
     async (request, reply) => {
-      const { username, password } = request.body as LoginRequest;
+      const body = parseBody(credentialsSchema, request.body, reply) as LoginRequest | null;
+      if (!body) return;
+      const { username, password } = body;
 
       if (!username || !password) {
         throw errors.badRequest("Username and password are required");

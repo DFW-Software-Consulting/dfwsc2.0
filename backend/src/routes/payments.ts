@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
+import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
@@ -10,7 +11,7 @@ import { errors } from "../lib/errors";
 import { adminRateLimit, rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
-import { validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
+import { parseBody, validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
 
 interface RequestWithClient extends FastifyRequest {
   client?: typeof clients.$inferSelect;
@@ -92,6 +93,17 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
   return request.ip || "unknown";
 }
 
+const paymentCreateBodySchema = z.object({
+  amount: z.number().optional(),
+  currency: z.string().optional(),
+  description: z.string().optional(),
+  metadata: z.record(z.string(), z.string()).optional(),
+  lineItems: z.array(z.any()).optional(),
+  waiveFee: z.boolean().optional(),
+  workspace: z.string().optional(),
+  clientId: z.string().optional(),
+});
+
 export default async function paymentsRoutes(fastify: FastifyInstance) {
   const useCheckout = (process.env.USE_CHECKOUT ?? "false").toLowerCase() === "true";
 
@@ -111,6 +123,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
       const idempotencyKey = idempotencyKeyHeader ?? randomUUID();
 
+      const body = parseBody(paymentCreateBodySchema, request.body, reply);
+      if (!body) return;
       const {
         amount,
         currency,
@@ -119,14 +133,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         lineItems,
         waiveFee = false,
         workspace,
-      } = request.body as {
-        amount?: number;
-        currency?: string;
-        description?: string;
-        metadata?: Record<string, string>;
+      } = body as Omit<typeof body, "lineItems"> & {
         lineItems?: Stripe.Checkout.SessionCreateParams.LineItem[];
-        waiveFee?: boolean;
-        workspace?: string;
       };
 
       let client = (request as RequestWithClient).client;
@@ -134,7 +142,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       if (!client) {
         const validWorkspace = validateWorkspace(workspace, reply);
         if (!validWorkspace) return;
-        const bodyClientId = (request.body as { clientId?: string }).clientId || metadata?.clientId;
+        const bodyClientId = body.clientId || metadata?.clientId;
         if (!bodyClientId) {
           throw errors.badRequest("clientId is required when using Admin authentication.");
         }
