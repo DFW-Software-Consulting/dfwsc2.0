@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { admins } from "../db/schema";
 import { getAdminFromDb, requireAdminJwt, signJwt } from "../lib/auth";
+import { AUTH_RATE_LIMIT_MAX, BCRYPT_SALT_ROUNDS } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { rateLimit } from "../lib/rate-limit";
 import { parseBody } from "../lib/validation";
@@ -113,7 +114,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
         throw errors.badRequest("Bootstrap already confirmed");
       }
 
-      const passwordHash = await bcrypt.hash(password, 10);
+      const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
       await db
         .update(admins)
@@ -135,7 +136,8 @@ export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post(
     "/auth/login",
     {
-      preHandler: rateLimit({ max: 5, windowMs: 15 * 60 * 1000 }), // 5 requests per 15 minutes
+      preHandler: rateLimit({ max: AUTH_RATE_LIMIT_MAX, windowMs: 15 * 60 * 1000 }),
+      // 5 requests per 15 minutes
     },
     async (request, reply) => {
       const body = parseBody(credentialsSchema, request.body, reply) as LoginRequest | null;

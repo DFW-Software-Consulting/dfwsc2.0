@@ -4,6 +4,12 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { settings } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import {
+  MAX_COMPANY_NAME_LENGTH,
+  MAX_FEE_PERCENT,
+  RATE_LIMIT_MAX,
+  RATE_LIMIT_WINDOW_MS,
+} from "../lib/constants";
 import { adminRateLimit } from "../lib/rate-limit";
 import { clearSettingsCache } from "../lib/stripe-billing";
 import { parseBody } from "../lib/validation";
@@ -16,8 +22,8 @@ const ALLOWED_SETTING_KEYS = new Set([
 ]);
 
 const adminCrudRateLimit = adminRateLimit({
-  max: 120,
-  windowMs: 60_000,
+  max: RATE_LIMIT_MAX,
+  windowMs: RATE_LIMIT_WINDOW_MS,
 });
 
 const settingPatchBodySchema = z.object({
@@ -79,17 +85,19 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
         if (key === "default_fee_percent") {
           if (value !== "") {
             const percent = parseFloat(String(value));
-            if (Number.isNaN(percent) || percent < 0 || percent > 100) {
-              return res.status(400).send({ error: "Fee percent must be between 0 and 100." });
+            if (Number.isNaN(percent) || percent < 0 || percent > MAX_FEE_PERCENT) {
+              return res
+                .status(400)
+                .send({ error: `Fee percent must be between 0 and ${MAX_FEE_PERCENT}.` });
             }
           }
         }
         if (key === "company_name") {
           finalValue = String(value).trim();
-          if (finalValue.length === 0 || finalValue.length > 120) {
-            return res
-              .status(400)
-              .send({ error: "Company name must be between 1 and 120 characters." });
+          if (finalValue.length === 0 || finalValue.length > MAX_COMPANY_NAME_LENGTH) {
+            return res.status(400).send({
+              error: `Company name must be between 1 and ${MAX_COMPANY_NAME_LENGTH} characters.`,
+            });
           }
         }
         if (key === "contact_email") {

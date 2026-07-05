@@ -1,9 +1,10 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import { DEFAULT_DB_POOL_MAX } from "../lib/constants";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: parseInt(process.env.DB_POOL_MAX ?? "10", 10),
+  max: parseInt(process.env.DB_POOL_MAX ?? String(DEFAULT_DB_POOL_MAX), 10),
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
 });

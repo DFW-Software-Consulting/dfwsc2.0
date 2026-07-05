@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { MAX_FEE_PERCENT, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
 import { isValidHttpsUrl, parseBody } from "../lib/validation";
@@ -44,8 +45,8 @@ function formatGroupResponse(g: typeof clientGroups.$inferSelect) {
 }
 
 const adminCrudRateLimit = adminRateLimit({
-  max: 120,
-  windowMs: 60_000,
+  max: RATE_LIMIT_MAX,
+  windowMs: RATE_LIMIT_WINDOW_MS,
 });
 
 const groupBodySchema = z.object({
@@ -206,9 +207,11 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
       }
       if (
         processingFeePercent != null &&
-        (processingFeePercent <= 0 || processingFeePercent > 100)
+        (processingFeePercent <= 0 || processingFeePercent > MAX_FEE_PERCENT)
       ) {
-        throw errors.badRequest("processingFeePercent must be greater than 0 and at most 100.");
+        throw errors.badRequest(
+          `processingFeePercent must be greater than 0 and at most ${MAX_FEE_PERCENT}.`
+        );
       }
       if (
         processingFeeCents != null &&
