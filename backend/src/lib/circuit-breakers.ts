@@ -10,9 +10,10 @@ class CircuitOpenError extends Error {
 }
 
 const breakerOptions = {
-  errorThresholdPercentage: 100,
+  // Disable opossum's percentage trip path; the consecutive-failure policy below is authoritative.
+  errorThresholdPercentage: 101,
   resetTimeout: 30_000,
-  timeout: false as const,
+  timeout: 25_000,
   volumeThreshold: 5,
 };
 
@@ -29,8 +30,13 @@ const smtpCircuitBreaker = new CircuitBreaker<[AsyncAction<unknown>], unknown>(
   }
 );
 
-function openAfterFiveFailures(breaker: CircuitBreaker<[AsyncAction<unknown>], unknown>) {
+function openAfterFiveConsecutiveFailures(
+  breaker: CircuitBreaker<[AsyncAction<unknown>], unknown>
+) {
+  // Authoritative trip policy: open after five consecutive failures.
+  // Opossum still provides state, metrics, half-open handling, and hung-call timeouts.
   let consecutiveFailures = 0;
+
   breaker.on("success", () => {
     consecutiveFailures = 0;
   });
@@ -43,10 +49,14 @@ function openAfterFiveFailures(breaker: CircuitBreaker<[AsyncAction<unknown>], u
       breaker.open();
     }
   });
+
+  return () => {
+    consecutiveFailures = 0;
+  };
 }
 
-openAfterFiveFailures(stripeCircuitBreaker);
-openAfterFiveFailures(smtpCircuitBreaker);
+const resetStripeFailureCount = openAfterFiveConsecutiveFailures(stripeCircuitBreaker);
+const resetSmtpFailureCount = openAfterFiveConsecutiveFailures(smtpCircuitBreaker);
 
 function normalizeCircuitError(error: unknown, service: string): never {
   if (CircuitBreaker.isOurError(error as Error)) {
@@ -102,6 +112,8 @@ export function getCircuitBreakerStates() {
 }
 
 export function resetCircuitBreakersForTests() {
+  resetStripeFailureCount();
+  resetSmtpFailureCount();
   stripeCircuitBreaker.close();
   smtpCircuitBreaker.close();
 }
