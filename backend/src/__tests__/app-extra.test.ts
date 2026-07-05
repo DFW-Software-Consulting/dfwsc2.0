@@ -31,7 +31,7 @@ describe("app.ts extra coverage", () => {
 
     expect(response.statusCode).toBe(400);
     // The custom formatter should join missing properties
-    expect(response.json().error).toBe("name, email, workspace are required.");
+    expect(response.json().error).toBe("name, email are required.");
     await server.close();
   });
 
@@ -48,11 +48,11 @@ describe("app.ts extra coverage", () => {
       headers: {
         authorization: `Bearer ${adminToken}`,
       },
-      payload: { name: "Test" }, // Missing email and workspace
+      payload: { name: "Test" }, // Missing email
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().error).toBe("email, workspace are required.");
+    expect(response.json().error).toBe("email is required.");
     await server.close();
   });
 
@@ -73,7 +73,7 @@ describe("app.ts extra coverage", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json().error).toBe("email must be a valid email address.");
+    expect(response.json().error).toBe('must match format "email"');
     await server.close();
   });
 

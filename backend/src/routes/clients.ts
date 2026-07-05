@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
-import { MAX_FEE_PERCENT, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
+import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { errors, isUniqueViolation } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
 import { isValidHttpsUrl, parseBody } from "../lib/validation";
@@ -270,8 +270,6 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         email,
         defaultPaymentTermsDays,
       } = body;
-
-
 
       const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
 
