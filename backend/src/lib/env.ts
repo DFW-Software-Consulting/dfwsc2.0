@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
-import { MIN_JWT_SECRET_LENGTH } from "./constants";
 import type { FastifyInstance } from "fastify";
+import { MIN_JWT_SECRET_LENGTH } from "./constants";
 
 const REQUIRED_ENV_VARS = [
   "STRIPE_SECRET_KEY",

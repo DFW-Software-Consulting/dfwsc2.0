@@ -272,6 +272,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       } = body;
 
 
+
       const [existingClient] = await db.select().from(clients).where(eq(clients.id, id)).limit(1);
 
       if (!existingClient) {

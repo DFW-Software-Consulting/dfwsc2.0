@@ -95,11 +95,9 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
         if (key === "company_name") {
           finalValue = String(value).trim();
           if (finalValue.length === 0 || finalValue.length > MAX_COMPANY_NAME_LENGTH) {
-            return res
-              .status(400)
-              .send({
-                error: `Company name must be between 1 and ${MAX_COMPANY_NAME_LENGTH} characters.`,
-              });
+            return res.status(400).send({
+              error: `Company name must be between 1 and ${MAX_COMPANY_NAME_LENGTH} characters.`,
+            });
           }
         }
         if (key === "contact_email") {
