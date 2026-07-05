@@ -65,5 +65,8 @@ Key-value store for system-wide configuration.
 - **Generate**: `npm run db:generate` — creates SQL migration files in `backend/drizzle/`.
 - **Apply**: `npm run db:migrate` — runs the `drizzle-kit migrate` CLI to apply pending migrations. (Separately, `runMigrations` in `src/lib/migrate.ts` applies the same migrations automatically at app startup in non-production environments.)
 
+### Migration authoring policy
+Always create migrations with `npx drizzle-kit generate` (or `npx drizzle-kit generate --custom` for hand-written/data-only SQL) so file numbering, `meta/_journal.json`, and `meta/*_snapshot.json` stay tool-managed. Never hand-number a migration file and never hand-edit `_journal.json` — review every generated diff line-by-line before committing. `backend/drizzle/` is applied-in-production history: existing files, tags, and journal entries must never be renamed or renumbered after the fact. The tree carries a few grandfathered anomalies predating this policy (duplicate `0019_*` prefixes, a skipped `0021` prefix, and some historical migrations missing a `meta/*_snapshot.json`); these are enumerated and guarded against further drift by `backend/src/__tests__/lib/migration-journal.test.ts`.
+
 ## 4. Idempotency Strategy
 Stripe webhook handling is guarded by the `webhook_events` table. Payment creation uses `Idempotency-Key` headers (required for API key calls).
