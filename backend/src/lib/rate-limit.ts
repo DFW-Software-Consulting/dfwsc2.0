@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
+import Redis from "ioredis";
 
 type RateLimitOptions = {
   max: number;
@@ -9,7 +10,21 @@ type RateLimitOptions = {
 
 type AdminScopedRequest = FastifyRequest & { admin?: { id?: string } };
 
-// In-memory limiter — assumes a single API instance. Pin the api service to 1 replica in prod.
+let redis: Redis | null = null;
+try {
+  if (process.env.REDIS_URL) {
+    redis = new Redis(process.env.REDIS_URL, {
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: false,
+      lazyConnect: true,
+      retryStrategy: (times) => Math.min(times * 200, 2000),
+    });
+    redis.on("error", () => {});
+  }
+} catch {
+  redis = null;
+}
+
 export const hitBuckets = new Map<string, number[]>();
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 let maxRegisteredWindowMs = 0;
@@ -24,6 +39,29 @@ setInterval(() => {
   }
 }, SWEEP_INTERVAL_MS).unref();
 
+async function redisSlidingWindow(
+  client: Redis,
+  key: string,
+  maxHits: number,
+  windowMs: number
+): Promise<boolean> {
+  const now = Date.now();
+  const windowStart = now - windowMs;
+  const pipeline = client.pipeline();
+  pipeline.zremrangebyscore(key, 0, windowStart);
+  pipeline.zcard(key);
+  pipeline.zadd(key, now.toString(), `${now}:${Math.random()}`);
+  pipeline.pexpire(key, windowMs);
+  const results = await pipeline.exec();
+  if (!results) return false;
+  const count = results[1]?.[1] as number;
+  if (count >= maxHits) {
+    await client.zremrangebyscore(key, now, now);
+    return false;
+  }
+  return true;
+}
+
 export function rateLimit(options: RateLimitOptions) {
   const { max, windowMs } = options;
   maxRegisteredWindowMs = Math.max(maxRegisteredWindowMs, windowMs);
@@ -31,9 +69,19 @@ export function rateLimit(options: RateLimitOptions) {
   return async function rateLimitGuard(request: FastifyRequest, reply: FastifyReply) {
     const key = `ratelimit:${options.keyGenerator ? options.keyGenerator(request) : request.ip || "unknown"}`;
     const maxForRequest = options.maxGenerator ? options.maxGenerator(request) : max;
+
+    if (redis) {
+      try {
+        const allowed = await redisSlidingWindow(redis, key, maxForRequest, windowMs);
+        if (!allowed) {
+          return reply.code(429).send({ error: "Too Many Requests" });
+        }
+        return;
+      } catch {}
+    }
+
     const now = Date.now();
     const windowStart = now - windowMs;
-
     const hits = hitBuckets.get(key) ?? [];
     const recentHits = hits.filter((timestamp) => timestamp > windowStart);
     if (recentHits.length >= maxForRequest) {

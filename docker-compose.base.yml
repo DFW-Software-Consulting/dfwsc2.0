@@ -14,6 +14,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
     command: sh -c "npx drizzle-kit migrate && npm run start"
     networks:
@@ -66,6 +68,13 @@ services:
     image: mailhog/mailhog:latest
     ports:
       - "8025:8025"
+    networks:
+      - backend
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
     networks:
       - backend
 
