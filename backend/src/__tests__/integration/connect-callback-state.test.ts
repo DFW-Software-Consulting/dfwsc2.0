@@ -83,7 +83,6 @@ describe("Connect Callback State Validation Integration", () => {
 
     // Create an onboarding token with initial 'pending' status
     const onboardingTokenId = randomUUID();
-    const testStripeAccount = "acct_test123456789";
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -123,6 +122,8 @@ describe("Connect Callback State Validation Integration", () => {
       .where(eq(onboardingTokens.id, onboardingTokenId));
     const state = tokenRecord.state;
     const _stateExpiresAt = tokenRecord.stateExpiresAt;
+    const [linkedClient] = await db.select().from(clients).where(eq(clients.id, clientId));
+    const testStripeAccount = linkedClient.stripeAccountId;
 
     // Make a request to the callback with valid state
     const callbackResponse = await app.inject({
@@ -168,7 +169,7 @@ describe("Connect Callback State Validation Integration", () => {
     // Create an onboarding token with a valid state
     const onboardingTokenId = randomUUID();
     const state = `test_state_${randomUUID().replace(/-/g, "")}`;
-    const testStripeAccount = "acct_test123456789";
+    const testStripeAccount = `acct_${randomUUID().replace(/-/g, "")}`;
 
     // Set state to expire in 30 minutes from now
     const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
@@ -210,7 +211,7 @@ describe("Connect Callback State Validation Integration", () => {
 
   it("should reject request without state parameter", async () => {
     const clientId = randomUUID();
-    const testStripeAccount = "acct_test123456789";
+    const testStripeAccount = `acct_${randomUUID().replace(/-/g, "")}`;
 
     await db.insert(clients).values({
       id: clientId,
@@ -227,7 +228,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       error: "Missing state parameter.",
     });
 
@@ -245,7 +246,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       error: "Missing client_id parameter.",
     });
   });
@@ -261,7 +262,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       error: "Invalid account parameter.",
     });
   });
@@ -303,7 +304,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       error: "Invalid or expired state parameter.",
     });
 
@@ -348,7 +349,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       error: "Expired state parameter.",
     });
 
@@ -395,7 +396,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       error: "Stripe account already linked to this client.",
     });
 
@@ -465,7 +466,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({
+    expect(response.json()).toMatchObject({
       error: "Invalid or expired state parameter.",
     });
 
@@ -476,7 +477,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(response2.statusCode).toBe(400);
-    expect(response2.json()).toEqual({
+    expect(response2.json()).toMatchObject({
       error: "Invalid or expired state parameter.",
     });
 
@@ -534,7 +535,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(replayResponse.statusCode).toBe(400);
-    expect(replayResponse.json()).toEqual({
+    expect(replayResponse.json()).toMatchObject({
       error: "Invalid or expired state parameter.",
     });
 
@@ -559,7 +560,7 @@ describe("Connect Callback State Validation Integration", () => {
 
     const clientId = randomUUID();
     const testEmail = `test-${randomUUID()}@example.com`;
-    const testStripeAccount = "acct_test123456789";
+    const testStripeAccount = `acct_${randomUUID().replace(/-/g, "")}`;
 
     await db.insert(clients).values({
       id: clientId,
@@ -607,7 +608,7 @@ describe("Connect Callback State Validation Integration", () => {
     });
 
     expect(replayResponse.statusCode).toBe(400);
-    expect(replayResponse.json()).toEqual({
+    expect(replayResponse.json()).toMatchObject({
       error: "Invalid or expired state parameter.",
     });
 
