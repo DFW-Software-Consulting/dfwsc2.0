@@ -2,7 +2,6 @@ import type { FastifyPluginAsync } from "fastify";
 import type Stripe from "stripe";
 import { z } from "zod";
 import { requireAdminJwt } from "../lib/auth";
-import { errors } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { parseBody } from "../lib/validation";

@@ -4,7 +4,6 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { settings } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
-import { errors } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
 import { clearSettingsCache } from "../lib/stripe-billing";
 import { parseBody } from "../lib/validation";
@@ -27,7 +26,7 @@ const settingPatchBodySchema = z.object({
 
 const settingsRoutes: FastifyPluginAsync = async (app) => {
   // GET /settings - Fetch all global settings (Admin only)
-  app.get("/settings", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
+  app.get("/settings", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (_req, res) => {
     const allSettings = await db.select().from(settings);
 
     const settingsMap = allSettings.reduce(
@@ -115,6 +114,7 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
         req.log.error(error, "Error updating setting");
         return res.status(500).send({ error: "Internal server error" });
       }
+    }
   );
 };
 

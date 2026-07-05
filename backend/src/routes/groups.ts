@@ -231,7 +231,6 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
       if (!existing) {
         return res.status(404).send({ error: "Group not found." });
       }
-      }
 
       const setValues: {
         updatedAt: Date;
