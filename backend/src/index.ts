@@ -22,7 +22,7 @@ async function start() {
     }
     await verifyDatabaseSchema();
     await bootstrapAdminIfNeeded(server);
-    await server.listen({ port: Number(process.env.PORT) || 4242, host: "0.0.0.0" });
+    await server.listen({ port: Number(process.env.PORT) || 4242, host: process.env.HOST || "0.0.0.0" });
   } catch (err) {
     server.log.error(err);
     process.exit(1);
