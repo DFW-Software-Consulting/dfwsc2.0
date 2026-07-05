@@ -2,7 +2,7 @@ import CircuitBreaker from "opossum";
 
 type AsyncAction<T> = () => Promise<T>;
 
-export class CircuitOpenError extends Error {
+class CircuitOpenError extends Error {
   constructor(service: string) {
     super(`${service} circuit breaker is open`);
     this.name = "CircuitOpenError";
