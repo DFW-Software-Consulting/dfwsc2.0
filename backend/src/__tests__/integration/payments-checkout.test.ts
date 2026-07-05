@@ -32,7 +32,6 @@ function makeAdminToken() {
 }
 
 function ensureBaseEnv() {
-  process.env.USE_CHECKOUT = "true";
   process.env.FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN ?? "http://localhost:5173";
   process.env.SMTP_HOST = process.env.SMTP_HOST ?? "mailhog";
   process.env.SMTP_PORT = process.env.SMTP_PORT ?? "1025";
