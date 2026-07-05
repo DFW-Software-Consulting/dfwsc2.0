@@ -31,7 +31,6 @@ export default defineConfig({
       JWT_SECRET: 'test_jwt_secret_minimum_32_characters_long_random_string',
       JWT_EXPIRY: '1h',
       FRONTEND_ORIGIN: 'http://localhost:5173',
-      USE_CHECKOUT: 'false',
       SMTP_HOST: 'localhost',
       SMTP_PORT: '1025',
       SMTP_USER: 'test',

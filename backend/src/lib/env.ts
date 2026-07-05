@@ -5,7 +5,6 @@ const REQUIRED_ENV_VARS = [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "FRONTEND_ORIGIN",
-  "USE_CHECKOUT",
   "DATABASE_URL",
   "SMTP_HOST",
   "SMTP_PORT",
@@ -81,11 +80,6 @@ export function validateEnv(): Record<string, string> {
   const jwtSecret = env.JWT_SECRET;
   if (jwtSecret.length < 32) {
     throw new Error("JWT_SECRET must be at least 32 characters long");
-  }
-
-  const useCheckout = env.USE_CHECKOUT;
-  if (useCheckout && !["true", "false"].includes(useCheckout.toLowerCase())) {
-    throw new Error('USE_CHECKOUT must be either "true" or "false".');
   }
 
   // Set default for optional env vars
