@@ -162,7 +162,9 @@ export function createAppDbMock(dataStore: AppDataStore) {
           const rowsPromise = (async () => {
             if (isTable(table, "clients")) {
               if (selection?.total) {
-                return [{ total: filterByExpr(Array.from(dataStore.clients.values()), expr).length }];
+                return [
+                  { total: filterByExpr(Array.from(dataStore.clients.values()), expr).length },
+                ];
               }
               if (isColumn(expr?.field, "api_key")) {
                 const client = findClientByApiKey(expr?.value);
@@ -196,7 +198,9 @@ export function createAppDbMock(dataStore: AppDataStore) {
             }
             if (isTable(table, "client_groups")) {
               if (selection?.total) {
-                return [{ total: filterByExpr(Array.from(dataStore.clientGroups.values()), expr).length }];
+                return [
+                  { total: filterByExpr(Array.from(dataStore.clientGroups.values()), expr).length },
+                ];
               }
               if (isColumn(expr?.field, "workspace")) {
                 return Array.from(dataStore.clientGroups.values()).filter(

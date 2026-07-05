@@ -29,8 +29,12 @@ interface LoginRequest {
 }
 
 const credentialsSchema = z.object({
-  username: z.string({ error: "Username and password are required" }).min(1, "Username and password are required"),
-  password: z.string({ error: "Username and password are required" }).min(1, "Username and password are required"),
+  username: z
+    .string({ error: "Username and password are required" })
+    .min(1, "Username and password are required"),
+  password: z
+    .string({ error: "Username and password are required" })
+    .min(1, "Username and password are required"),
 });
 
 // For testing purposes only. The deprecated /auth/setup handler no longer holds

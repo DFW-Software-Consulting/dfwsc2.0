@@ -17,8 +17,7 @@ export const getClients = (token, { groupId, workspace, limit, offset } = {}) =>
 export const patchClient = (token, id, body) =>
   apiFetch(`/clients/${id}`, { token, method: "PATCH", body });
 
-export const deleteClient = (token, id) =>
-  apiFetch(`/clients/${id}`, { token, method: "DELETE" });
+export const deleteClient = (token, id) => apiFetch(`/clients/${id}`, { token, method: "DELETE" });
 
 export const initiateClientOnboarding = (token, body) =>
   apiFetch("/onboard-client/initiate", { token, method: "POST", body });

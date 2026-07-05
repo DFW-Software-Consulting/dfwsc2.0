@@ -33,18 +33,14 @@ interface AccountLinkContext {
 
 const accountBodySchema = z.object({
   name: z.string({ error: "name is required." }).trim().min(1, "name is required."),
-  email: z
-    .string({ error: "email is required." })
-    .email("email must be a valid email address."),
+  email: z.string({ error: "email is required." }).email("email must be a valid email address."),
   groupId: z.string().optional(),
   workspace: z.literal("client_portal", { error: "workspace must be client_portal." }),
 });
 
 const initiateBodySchema = z.object({
   name: z.string({ error: "name is required." }).trim().min(1, "name is required."),
-  email: z
-    .string({ error: "email is required." })
-    .email("email must be a valid email address."),
+  email: z.string({ error: "email is required." }).email("email must be a valid email address."),
   groupId: z.string().optional(),
   workspace: z.literal("client_portal", { error: "workspace is required." }),
 });

@@ -56,9 +56,11 @@ const groupBodySchema = z.object({
 const groupPatchBodySchema = z
   .object({
     name: z.string().optional(),
-    status: z.enum(["active", "inactive"], {
-      error: 'Invalid status value. Must be "active" or "inactive".',
-    }).optional(),
+    status: z
+      .enum(["active", "inactive"], {
+        error: 'Invalid status value. Must be "active" or "inactive".',
+      })
+      .optional(),
     processingFeePercent: z.number().nullable().optional(),
     processingFeeCents: z.number().nullable().optional(),
     paymentSuccessUrl: z.string().nullable().optional(),
@@ -69,19 +71,45 @@ const groupPatchBodySchema = z
       ctx.addIssue({ code: "custom", message: "name must be a non-empty string.", path: ["name"] });
     }
     if (body.processingFeePercent != null && body.processingFeeCents != null) {
-      ctx.addIssue({ code: "custom", message: "Set one fee type, not both.", path: ["processingFeePercent"] });
+      ctx.addIssue({
+        code: "custom",
+        message: "Set one fee type, not both.",
+        path: ["processingFeePercent"],
+      });
     }
-    if (body.processingFeePercent != null && (body.processingFeePercent <= 0 || body.processingFeePercent > 100)) {
-      ctx.addIssue({ code: "custom", message: "processingFeePercent must be greater than 0 and at most 100.", path: ["processingFeePercent"] });
+    if (
+      body.processingFeePercent != null &&
+      (body.processingFeePercent <= 0 || body.processingFeePercent > 100)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "processingFeePercent must be greater than 0 and at most 100.",
+        path: ["processingFeePercent"],
+      });
     }
-    if (body.processingFeeCents != null && (!Number.isInteger(body.processingFeeCents) || body.processingFeeCents < 0)) {
-      ctx.addIssue({ code: "custom", message: "processingFeeCents must be a non-negative integer.", path: ["processingFeeCents"] });
+    if (
+      body.processingFeeCents != null &&
+      (!Number.isInteger(body.processingFeeCents) || body.processingFeeCents < 0)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "processingFeeCents must be a non-negative integer.",
+        path: ["processingFeeCents"],
+      });
     }
     if (body.paymentSuccessUrl != null && !isValidHttpsUrl(body.paymentSuccessUrl)) {
-      ctx.addIssue({ code: "custom", message: "paymentSuccessUrl must be a valid HTTPS URL.", path: ["paymentSuccessUrl"] });
+      ctx.addIssue({
+        code: "custom",
+        message: "paymentSuccessUrl must be a valid HTTPS URL.",
+        path: ["paymentSuccessUrl"],
+      });
     }
     if (body.paymentCancelUrl != null && !isValidHttpsUrl(body.paymentCancelUrl)) {
-      ctx.addIssue({ code: "custom", message: "paymentCancelUrl must be a valid HTTPS URL.", path: ["paymentCancelUrl"] });
+      ctx.addIssue({
+        code: "custom",
+        message: "paymentCancelUrl must be a valid HTTPS URL.",
+        path: ["paymentCancelUrl"],
+      });
     }
   });
 
@@ -121,16 +149,26 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
   );
 
   app.get("/groups", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
-    const { workspace, limit, offset } = req.query as { workspace?: string; limit?: string; offset?: string };
+    const { workspace, limit, offset } = req.query as {
+      workspace?: string;
+      limit?: string;
+      offset?: string;
+    };
     if (!isWorkspace(workspace)) {
       throw errors.badRequest("workspace query parameter is required (client_portal).");
     }
     const pagination = parsePagination({ limit, offset });
     if (!pagination) {
-      return res.status(400).send({ error: "limit must be an integer between 1 and 100 and offset must be a non-negative integer." });
+      return res.status(400).send({
+        error:
+          "limit must be an integer between 1 and 100 and offset must be a non-negative integer.",
+      });
     }
 
-    const [{ total }] = await db.select({ total: count() }).from(clientGroups).where(eq(clientGroups.workspace, workspace));
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(clientGroups)
+      .where(eq(clientGroups.workspace, workspace));
     const groups = await db
       .select()
       .from(clientGroups)
@@ -238,7 +276,10 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
     { preHandler: [requireAdminJwt, adminCrudRateLimit] },
     async (req, res) => {
       const { id } = req.params;
-      const deleted = await db.delete(clientGroups).where(eq(clientGroups.id, id)).returning({ id: clientGroups.id });
+      const deleted = await db
+        .delete(clientGroups)
+        .where(eq(clientGroups.id, id))
+        .returning({ id: clientGroups.id });
       if (deleted.length === 0) {
         return res.status(404).send({ error: "Group not found." });
       }

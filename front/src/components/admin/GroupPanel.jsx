@@ -295,7 +295,8 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                 const isExpanded = expandedGroupId === g.id;
                 const isToggling =
                   patchGroupMutation.isPending && patchGroupMutation.variables?.id === g.id;
-                const isDeleting = deleteGroupMutation.isPending && deleteGroupMutation.variables === g.id;
+                const isDeleting =
+                  deleteGroupMutation.isPending && deleteGroupMutation.variables === g.id;
                 return (
                   <Fragment key={g.id}>
                     <tr className="hover:bg-gray-700/50">

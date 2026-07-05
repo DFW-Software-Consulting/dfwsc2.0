@@ -43,9 +43,11 @@ const adminCrudRateLimit = adminRateLimit({
 const nullableString = z.string().nullable();
 const clientPatchBodySchema = z
   .object({
-    status: z.enum(["active", "inactive"], {
-      error: 'Invalid status value. Must be "active" or "inactive".',
-    }).optional(),
+    status: z
+      .enum(["active", "inactive"], {
+        error: 'Invalid status value. Must be "active" or "inactive".',
+      })
+      .optional(),
     groupId: nullableString.optional(),
     paymentSuccessUrl: nullableString.optional(),
     paymentCancelUrl: nullableString.optional(),
@@ -66,28 +68,66 @@ const clientPatchBodySchema = z
   })
   .superRefine((body, ctx) => {
     if (body.paymentSuccessUrl != null && !isValidHttpsUrl(body.paymentSuccessUrl)) {
-      ctx.addIssue({ code: "custom", message: "paymentSuccessUrl must be a valid HTTPS URL.", path: ["paymentSuccessUrl"] });
+      ctx.addIssue({
+        code: "custom",
+        message: "paymentSuccessUrl must be a valid HTTPS URL.",
+        path: ["paymentSuccessUrl"],
+      });
     }
     if (body.paymentCancelUrl != null && !isValidHttpsUrl(body.paymentCancelUrl)) {
-      ctx.addIssue({ code: "custom", message: "paymentCancelUrl must be a valid HTTPS URL.", path: ["paymentCancelUrl"] });
+      ctx.addIssue({
+        code: "custom",
+        message: "paymentCancelUrl must be a valid HTTPS URL.",
+        path: ["paymentCancelUrl"],
+      });
     }
     if (body.processingFeePercent != null && body.processingFeeCents != null) {
-      ctx.addIssue({ code: "custom", message: "Set one fee type, not both.", path: ["processingFeePercent"] });
+      ctx.addIssue({
+        code: "custom",
+        message: "Set one fee type, not both.",
+        path: ["processingFeePercent"],
+      });
     }
-    if (body.processingFeePercent != null && (body.processingFeePercent <= 0 || body.processingFeePercent > 100)) {
-      ctx.addIssue({ code: "custom", message: "processingFeePercent must be greater than 0 and at most 100.", path: ["processingFeePercent"] });
+    if (
+      body.processingFeePercent != null &&
+      (body.processingFeePercent <= 0 || body.processingFeePercent > 100)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "processingFeePercent must be greater than 0 and at most 100.",
+        path: ["processingFeePercent"],
+      });
     }
-    if (body.processingFeeCents != null && (!Number.isInteger(body.processingFeeCents) || body.processingFeeCents < 0)) {
-      ctx.addIssue({ code: "custom", message: "processingFeeCents must be a non-negative integer.", path: ["processingFeeCents"] });
+    if (
+      body.processingFeeCents != null &&
+      (!Number.isInteger(body.processingFeeCents) || body.processingFeeCents < 0)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "processingFeeCents must be a non-negative integer.",
+        path: ["processingFeeCents"],
+      });
     }
     if (body.name !== undefined && (!body.name || !body.name.trim())) {
       ctx.addIssue({ code: "custom", message: "name must not be empty.", path: ["name"] });
     }
     if (body.email !== undefined && !EMAIL_RE.test(body.email)) {
-      ctx.addIssue({ code: "custom", message: "email must be a valid email address.", path: ["email"] });
+      ctx.addIssue({
+        code: "custom",
+        message: "email must be a valid email address.",
+        path: ["email"],
+      });
     }
-    if (body.defaultPaymentTermsDays !== undefined && body.defaultPaymentTermsDays !== null && (!Number.isInteger(body.defaultPaymentTermsDays) || body.defaultPaymentTermsDays <= 0)) {
-      ctx.addIssue({ code: "custom", message: "defaultPaymentTermsDays must be a positive integer.", path: ["defaultPaymentTermsDays"] });
+    if (
+      body.defaultPaymentTermsDays !== undefined &&
+      body.defaultPaymentTermsDays !== null &&
+      (!Number.isInteger(body.defaultPaymentTermsDays) || body.defaultPaymentTermsDays <= 0)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "defaultPaymentTermsDays must be a positive integer.",
+        path: ["defaultPaymentTermsDays"],
+      });
     }
   });
 
@@ -153,7 +193,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const where = groupId
-        ? and(eq(clients.groupId, groupId), eq(clients.workspace, workspace), ne(clients.status, "archived"))
+        ? and(
+            eq(clients.groupId, groupId),
+            eq(clients.workspace, workspace),
+            ne(clients.status, "archived")
+          )
         : and(eq(clients.workspace, workspace), ne(clients.status, "archived"));
       const [{ total }] = await db.select({ total: count() }).from(clients).where(where);
       const clientList = await query.where(where).limit(pagination.limit).offset(pagination.offset);
