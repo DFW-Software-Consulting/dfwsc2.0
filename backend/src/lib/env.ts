@@ -24,6 +24,7 @@ const OPTIONAL_ENV_VARS = [
   "ALLOW_ADMIN_SETUP",
   "ADMIN_PASSWORD",
   "NEXTCLOUD_APP_PASSWORD",
+  "REDIS_URL",
 ];
 
 // Vars whose values must never appear in logs, even partially — presence only.
