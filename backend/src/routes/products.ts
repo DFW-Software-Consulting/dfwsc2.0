@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import type Stripe from "stripe";
 import { z } from "zod";
 import { requireAdminJwt } from "../lib/auth";
+import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
 import { adminRateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { parseBody } from "../lib/validation";
@@ -46,10 +47,20 @@ const productRoutes: FastifyPluginAsync = async (app) => {
     "/tax-rates",
     { preHandler: [requireAdminJwt, adminCrudRateLimit] },
     async (_req, res) => {
-      const { data: taxRates } = await stripe.taxRates.list({
-        active: true,
-        limit: 100,
-      });
+      let taxRates: Stripe.TaxRate[];
+      try {
+        ({ data: taxRates } = await withStripeCircuit(() =>
+          stripe.taxRates.list({
+            active: true,
+            limit: 100,
+          })
+        ));
+      } catch (err) {
+        if (isCircuitOpenError(err)) {
+          return res.status(503).send({ error: "Stripe service temporarily unavailable." });
+        }
+        throw err;
+      }
 
       return res.send(
         taxRates.map((rate) => ({
@@ -66,11 +77,21 @@ const productRoutes: FastifyPluginAsync = async (app) => {
 
   // GET /products — list active Stripe products (platform account)
   app.get("/products", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (_req, res) => {
-    const { data: products } = await stripe.products.list({
-      active: true,
-      limit: 100,
-      expand: ["data.default_price"],
-    });
+    let products: Stripe.Product[];
+    try {
+      ({ data: products } = await withStripeCircuit(() =>
+        stripe.products.list({
+          active: true,
+          limit: 100,
+          expand: ["data.default_price"],
+        })
+      ));
+    } catch (err) {
+      if (isCircuitOpenError(err)) {
+        return res.status(503).send({ error: "Stripe service temporarily unavailable." });
+      }
+      throw err;
+    }
 
     return res.send(
       products.map((p) => {
@@ -92,18 +113,33 @@ const productRoutes: FastifyPluginAsync = async (app) => {
       if (!body) return;
       const { name, description, amountCents, currency = "usd" } = body;
 
-      const product = await stripe.products.create({
-        name: name.trim(),
-        ...(description?.trim() ? { description: description.trim() } : {}),
-      });
+      let product: Stripe.Product;
+      let price: Stripe.Price;
+      try {
+        product = await withStripeCircuit(() =>
+          stripe.products.create({
+            name: name.trim(),
+            ...(description?.trim() ? { description: description.trim() } : {}),
+          })
+        );
 
-      const price = await stripe.prices.create({
-        product: product.id,
-        unit_amount: amountCents,
-        currency,
-      });
+        price = await withStripeCircuit(() =>
+          stripe.prices.create({
+            product: product.id,
+            unit_amount: amountCents,
+            currency,
+          })
+        );
 
-      await stripe.products.update(product.id, { default_price: price.id });
+        await withStripeCircuit(() =>
+          stripe.products.update(product.id, { default_price: price.id })
+        );
+      } catch (err) {
+        if (isCircuitOpenError(err)) {
+          return res.status(503).send({ error: "Stripe service temporarily unavailable." });
+        }
+        throw err;
+      }
 
       return res.status(201).send(formatProduct(product, price));
     }

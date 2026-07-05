@@ -8,6 +8,7 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
+import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
 import { createClientWithOnboardingToken, hashOnboardingToken } from "../lib/client-factory";
 import { resolveFrontendOrigin, resolveServerBaseUrl } from "../lib/config";
 import { AppError, errors } from "../lib/errors";
@@ -94,17 +95,19 @@ async function createAccountLinkForToken(
   let stripeAccountId = clientRecord.stripeAccountId;
 
   if (!stripeAccountId) {
-    const account = await stripe.accounts.create(
-      {
-        type: "express",
-        email: clientRecord.email,
-        metadata: { clientId: clientRecord.id },
-        capabilities: {
-          card_payments: { requested: true },
-          transfers: { requested: true },
+    const account = await withStripeCircuit(() =>
+      stripe.accounts.create(
+        {
+          type: "express",
+          email: clientRecord.email,
+          metadata: { clientId: clientRecord.id },
+          capabilities: {
+            card_payments: { requested: true },
+            transfers: { requested: true },
+          },
         },
-      },
-      { idempotencyKey: `acct-create-${clientRecord.id}` }
+        { idempotencyKey: `acct-create-${clientRecord.id}` }
+      )
     );
 
     // Conditional claim: only persist if no other concurrent request already
@@ -135,14 +138,16 @@ async function createAccountLinkForToken(
   const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
   const refreshUrl = `${baseUrl}/api/v1/connect/refresh?token=${encodeURIComponent(token)}`;
 
-  const accountLink = await stripe.accountLinks.create(
-    {
-      account: stripeAccountId,
-      refresh_url: refreshUrl,
-      return_url: callbackUrl,
-      type: "account_onboarding",
-    },
-    { idempotencyKey: `acct-link-${clientRecord.id}-${state}` }
+  const accountLink = await withStripeCircuit(() =>
+    stripe.accountLinks.create(
+      {
+        account: stripeAccountId,
+        refresh_url: refreshUrl,
+        return_url: callbackUrl,
+        type: "account_onboarding",
+      },
+      { idempotencyKey: `acct-link-${clientRecord.id}-${state}` }
+    )
   );
 
   request.log.info(
@@ -443,6 +448,13 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           throw error;
         }
 
+        if (isCircuitOpenError(error)) {
+          return reply.code(503).send({
+            error: "Stripe onboarding service is temporarily unavailable.",
+            code: "STRIPE_CIRCUIT_OPEN",
+          });
+        }
+
         throw errors.stripeFailed("Failed to create Stripe account link. Please try again.");
       }
     }
@@ -474,6 +486,13 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
         if (error instanceof AppError) {
           throw error;
+        }
+
+        if (isCircuitOpenError(error)) {
+          return reply.code(503).send({
+            error: "Stripe onboarding service is temporarily unavailable.",
+            code: "STRIPE_CIRCUIT_OPEN",
+          });
         }
 
         throw errors.stripeFailed("Failed to create Stripe account link. Please try again.");
@@ -610,8 +629,20 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       let verifiedAccount: Stripe.Account;
       try {
-        verifiedAccount = await stripe.accounts.retrieve(effectiveAccountId);
+        verifiedAccount = await withStripeCircuit(() =>
+          stripe.accounts.retrieve(effectiveAccountId)
+        );
       } catch (err) {
+        if (isCircuitOpenError(err)) {
+          request.log.warn(
+            { account: effectiveAccountId, err },
+            "Stripe circuit open while verifying account; leaving token in_progress"
+          );
+          return reply.code(503).send({
+            error: "Stripe onboarding service is temporarily unavailable.",
+            code: "STRIPE_CIRCUIT_OPEN",
+          });
+        }
         // Transient Stripe failure on a user-facing return: don't dead-end the
         // user. The account.updated webhook reconciles readiness authoritatively.
         request.log.warn(

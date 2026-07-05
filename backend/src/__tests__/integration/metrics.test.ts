@@ -1,20 +1,24 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
+import { resetCircuitBreakersForTests } from "../../lib/circuit-breakers";
+import { ensureBaseEnv } from "../helpers/env";
 
 describe("Metrics API Integration", () => {
   // biome-ignore lint/suspicious/noExplicitAny: Fastify instance type is inferred at build time.
   let app: any;
 
   beforeAll(async () => {
+    ensureBaseEnv();
     app = await buildServer();
   });
 
   afterAll(async () => {
-    await app.close();
+    if (app) await app.close();
   });
 
   afterEach(() => {
     delete process.env.METRICS_TOKEN;
+    resetCircuitBreakersForTests();
   });
 
   it("returns 404 (endpoint disabled) when METRICS_TOKEN is unset", async () => {
@@ -64,5 +68,8 @@ describe("Metrics API Integration", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toContain("dfwsc_clients_total");
+    expect(response.body).toContain('dfwsc_circuit_open{service="stripe"} 0');
+    expect(response.body).toContain('dfwsc_circuit_open{service="smtp"} 0');
+    expect(response.body).toContain('dfwsc_circuit_failures_total{service="stripe"}');
   });
 });

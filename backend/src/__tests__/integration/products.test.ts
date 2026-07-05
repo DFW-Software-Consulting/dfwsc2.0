@@ -15,6 +15,10 @@ vi.mock("../../lib/stripe", () => ({
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
+import {
+  openStripeCircuitForTests,
+  resetCircuitBreakersForTests,
+} from "../../lib/circuit-breakers";
 import { stripe } from "../../lib/stripe";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
@@ -33,10 +37,12 @@ describe("Products API", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetCircuitBreakersForTests();
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    resetCircuitBreakersForTests();
   });
 
   // ── GET /products ─────────────────────────────────────────────────────────
@@ -134,6 +140,20 @@ describe("Products API", () => {
       });
 
       expect(response.statusCode).toBe(401);
+    });
+
+    it("returns 503 when the Stripe circuit is open", async () => {
+      const token = makeAdminToken();
+      openStripeCircuitForTests();
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/products",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toEqual({ error: "Stripe service temporarily unavailable." });
     });
   });
 
