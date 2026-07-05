@@ -22,9 +22,7 @@ const adminCrudRateLimit = adminRateLimit({
 });
 
 const settingPatchBodySchema = z.object({
-  value: z
-    .unknown({ error: "value is required." })
-    .refine((value) => value !== null, "Value is required."),
+  value: z.unknown().refine((value) => value !== null, "Value is required."),
 });
 
 const settingsRoutes: FastifyPluginAsync = async (app) => {
