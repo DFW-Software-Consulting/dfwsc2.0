@@ -1,0 +1,11 @@
+export const RATE_LIMIT_MAX = 120;
+export const RATE_LIMIT_WINDOW_MS = 60_000;
+export const MAX_FEE_PERCENT = 100;
+export const MAX_COMPANY_NAME_LENGTH = 120;
+export const REPORT_MAX_CONCURRENCY = 3;
+export const BCRYPT_SALT_ROUNDS = 10;
+export const MIN_JWT_SECRET_LENGTH = 32;
+export const OAUTH_STATE_EXPIRY_MS = 1_800_000;
+export const STRICT_RATE_LIMIT_MAX = 10;
+export const AUTH_RATE_LIMIT_MAX = 5;
+export const DEFAULT_DB_POOL_MAX = 10;

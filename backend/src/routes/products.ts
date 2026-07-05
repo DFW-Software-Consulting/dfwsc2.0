@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { z } from "zod";
 import { requireAdminJwt } from "../lib/auth";
 import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
+import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { adminRateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { parseBody } from "../lib/validation";
@@ -27,8 +28,8 @@ function formatProduct(product: Stripe.Product, price: Stripe.Price | null) {
 }
 
 const adminCrudRateLimit = adminRateLimit({
-  max: 120,
-  windowMs: 60_000,
+  max: RATE_LIMIT_MAX,
+  windowMs: RATE_LIMIT_WINDOW_MS,
 });
 
 const createProductBodySchema = z.object({

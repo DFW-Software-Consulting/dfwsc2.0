@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { MIN_JWT_SECRET_LENGTH } from "./constants";
 import type { FastifyInstance } from "fastify";
 
 const REQUIRED_ENV_VARS = [
@@ -80,8 +81,8 @@ export function validateEnv(): Record<string, string> {
   }
 
   const jwtSecret = env.JWT_SECRET;
-  if (jwtSecret.length < 32) {
-    throw new Error("JWT_SECRET must be at least 32 characters long");
+  if (jwtSecret.length < MIN_JWT_SECRET_LENGTH) {
+    throw new Error(`JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters long`);
   }
 
   const useCheckout = env.USE_CHECKOUT;

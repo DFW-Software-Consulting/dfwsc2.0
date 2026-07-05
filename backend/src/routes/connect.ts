@@ -11,6 +11,12 @@ import { requireAdminJwt } from "../lib/auth";
 import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
 import { createClientWithOnboardingToken, hashOnboardingToken } from "../lib/client-factory";
 import { resolveFrontendOrigin, resolveServerBaseUrl } from "../lib/config";
+import {
+  AUTH_RATE_LIMIT_MAX,
+  OAUTH_STATE_EXPIRY_MS,
+  RATE_LIMIT_WINDOW_MS,
+  STRICT_RATE_LIMIT_MAX,
+} from "../lib/constants";
 import { AppError, errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
@@ -132,7 +138,7 @@ async function createAccountLinkForToken(
   }
 
   const state = crypto.randomBytes(32).toString("hex");
-  const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+  const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
   const baseUrl = resolveServerBaseUrl(request);
   const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
@@ -176,7 +182,22 @@ export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.post(
     "/accounts",
     {
-      preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
+      preHandler: [
+        rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS }),
+        requireAdminJwt,
+      ],
+      schema: {
+        body: {
+          type: "object",
+          required: ["name", "email", "workspace"],
+          properties: {
+            name: { type: "string", minLength: 1 },
+            email: { type: "string", format: "email" },
+            groupId: { type: "string" },
+            workspace: { type: "string", enum: ["client_portal"] },
+          },
+        },
+      },
     },
     async (request, reply) => {
       const body = parseBody(accountBodySchema, request.body, reply) as
@@ -232,7 +253,22 @@ export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.post(
     "/onboard-client/initiate",
     {
-      preHandler: [rateLimit({ max: 10, windowMs: 60_000 }), requireAdminJwt],
+      preHandler: [
+        rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS }),
+        requireAdminJwt,
+      ],
+      schema: {
+        body: {
+          type: "object",
+          required: ["name", "email"],
+          properties: {
+            name: { type: "string", minLength: 1 },
+            email: { type: "string", format: "email" },
+            groupId: { type: "string" },
+            workspace: { type: "string" },
+          },
+        },
+      },
     },
     async (request, reply) => {
       const body = parseBody(initiateBodySchema, request.body, reply);
@@ -307,7 +343,20 @@ export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.post(
     "/onboard-client/resend",
     {
-      preHandler: [rateLimit({ max: 5, windowMs: 60_000 }), requireAdminJwt],
+      preHandler: [
+        rateLimit({ max: AUTH_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS }),
+        requireAdminJwt,
+      ],
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            email: { type: "string", format: "email" },
+            clientId: { type: "string" },
+            workspace: { type: "string" },
+          },
+        },
+      },
     },
     async (request, reply) => {
       const body = parseBody(resendBodySchema, request.body, reply);
@@ -424,7 +473,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.get(
     "/onboard-client",
     {
-      preHandler: [rateLimit({ max: 10, windowMs: 60_000 })],
+      preHandler: [rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS })],
     },
     async (request, reply) => {
       const { token } = request.query as { token: string };
@@ -463,7 +512,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.get(
     "/connect/refresh",
     {
-      preHandler: [rateLimit({ max: 10, windowMs: 60_000 })],
+      preHandler: [rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS })],
     },
     async (request, reply) => {
       const { token } = request.query as { token: string };
@@ -502,7 +551,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
   fastify.get(
     "/connect/callback",
-    { preHandler: [rateLimit({ max: 10, windowMs: 60_000 })] },
+    {
+      preHandler: [rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS })],
+    },
     async (request, reply) => {
       const { client_id, account, state } = request.query as {
         client_id?: string;

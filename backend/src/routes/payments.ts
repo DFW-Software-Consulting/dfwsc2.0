@@ -8,6 +8,7 @@ import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
 import { resolveFrontendOrigin } from "../lib/config";
+import { REPORT_MAX_CONCURRENCY } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { adminRateLimit, rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
@@ -439,7 +440,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         const perAccountParams: Stripe.PaymentIntentListParams = {};
         if (parsedLimit !== undefined) perAccountParams.limit = parsedLimit;
 
-        const maxConcurrency = 3;
+        const maxConcurrency = REPORT_MAX_CONCURRENCY;
         const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
         const failedAccounts: string[] = [];
         let hasMore = false;
