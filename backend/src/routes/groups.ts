@@ -121,9 +121,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
         processingFeePercent != null &&
         (processingFeePercent <= 0 || processingFeePercent > 100)
       ) {
-        throw errors.badRequest(
-          "processingFeePercent must be greater than 0 and at most 100."
-        );
+        throw errors.badRequest("processingFeePercent must be greater than 0 and at most 100.");
       }
       if (
         processingFeeCents != null &&

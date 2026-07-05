@@ -393,7 +393,9 @@ describe("payments", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ error: "lineItems are required when USE_CHECKOUT=true." });
+    expect(response.json()).toMatchObject({
+      error: "lineItems are required when USE_CHECKOUT=true.",
+    });
     await server.close();
   });
 
@@ -1006,7 +1008,9 @@ describe("reports", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ error: "clientId or groupId query parameter is required." });
+    expect(response.json()).toMatchObject({
+      error: "clientId or groupId query parameter is required.",
+    });
     await server.close();
   });
 

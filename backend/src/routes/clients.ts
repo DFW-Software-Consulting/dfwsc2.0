@@ -154,13 +154,8 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       throw errors.badRequest("Set one fee type, not both.");
     }
 
-    if (
-      processingFeePercent != null &&
-      (processingFeePercent <= 0 || processingFeePercent > 100)
-    ) {
-      throw errors.badRequest(
-        "processingFeePercent must be greater than 0 and at most 100."
-      );
+    if (processingFeePercent != null && (processingFeePercent <= 0 || processingFeePercent > 100)) {
+      throw errors.badRequest("processingFeePercent must be greater than 0 and at most 100.");
     }
 
     if (
@@ -223,83 +218,83 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
-      const setValues: {
-        updatedAt: Date;
-        status?: "active" | "inactive";
-        groupId?: string | null;
-        paymentSuccessUrl?: string | null;
-        paymentCancelUrl?: string | null;
-        processingFeePercent?: string | null;
-        processingFeeCents?: number | null;
-        name?: string;
-        email?: string;
-        phone?: string | null;
-        billingContactName?: string | null;
-        addressLine1?: string | null;
-        addressLine2?: string | null;
-        city?: string | null;
-        state?: string | null;
-        postalCode?: string | null;
-        country?: string | null;
-        notes?: string | null;
-        defaultPaymentTermsDays?: number | null;
-      } = { updatedAt: new Date() };
+    const setValues: {
+      updatedAt: Date;
+      status?: "active" | "inactive";
+      groupId?: string | null;
+      paymentSuccessUrl?: string | null;
+      paymentCancelUrl?: string | null;
+      processingFeePercent?: string | null;
+      processingFeeCents?: number | null;
+      name?: string;
+      email?: string;
+      phone?: string | null;
+      billingContactName?: string | null;
+      addressLine1?: string | null;
+      addressLine2?: string | null;
+      city?: string | null;
+      state?: string | null;
+      postalCode?: string | null;
+      country?: string | null;
+      notes?: string | null;
+      defaultPaymentTermsDays?: number | null;
+    } = { updatedAt: new Date() };
 
-      if (status !== undefined) setValues.status = status;
-      if ("groupId" in body) setValues.groupId = groupId;
-      if ("paymentSuccessUrl" in body) setValues.paymentSuccessUrl = paymentSuccessUrl;
-      if ("paymentCancelUrl" in body) setValues.paymentCancelUrl = paymentCancelUrl;
-      if ("processingFeePercent" in body) {
-        setValues.processingFeePercent =
-          processingFeePercent != null ? String(processingFeePercent) : null;
-        // Setting a non-null percent fee clears the flat cents fee to keep them mutually exclusive.
-        if (processingFeePercent != null) setValues.processingFeeCents = null;
+    if (status !== undefined) setValues.status = status;
+    if ("groupId" in body) setValues.groupId = groupId;
+    if ("paymentSuccessUrl" in body) setValues.paymentSuccessUrl = paymentSuccessUrl;
+    if ("paymentCancelUrl" in body) setValues.paymentCancelUrl = paymentCancelUrl;
+    if ("processingFeePercent" in body) {
+      setValues.processingFeePercent =
+        processingFeePercent != null ? String(processingFeePercent) : null;
+      // Setting a non-null percent fee clears the flat cents fee to keep them mutually exclusive.
+      if (processingFeePercent != null) setValues.processingFeeCents = null;
+    }
+    if ("processingFeeCents" in body) {
+      setValues.processingFeeCents = processingFeeCents;
+      // Setting a non-null cents fee clears the percent fee to keep them mutually exclusive.
+      if (processingFeeCents != null) setValues.processingFeePercent = null;
+    }
+    if (name !== undefined) setValues.name = name;
+    if (email !== undefined) setValues.email = email;
+    if ("phone" in body) setValues.phone = body.phone;
+    if ("billingContactName" in body) setValues.billingContactName = body.billingContactName;
+    if ("addressLine1" in body) setValues.addressLine1 = body.addressLine1;
+    if ("addressLine2" in body) setValues.addressLine2 = body.addressLine2;
+    if ("city" in body) setValues.city = body.city;
+    if ("state" in body) setValues.state = body.state;
+    if ("postalCode" in body) setValues.postalCode = body.postalCode;
+    if ("country" in body) setValues.country = body.country;
+    if ("notes" in body) setValues.notes = body.notes;
+    if ("defaultPaymentTermsDays" in body)
+      setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
+
+    let updatedClients: (typeof clients.$inferSelect)[];
+    try {
+      updatedClients = await db
+        .update(clients)
+        .set(setValues)
+        .where(eq(clients.id, id))
+        .returning();
+    } catch (updateError) {
+      if (isUniqueViolation(updateError)) {
+        throw errors.conflict("A client with this email already exists in this workspace.");
       }
-      if ("processingFeeCents" in body) {
-        setValues.processingFeeCents = processingFeeCents;
-        // Setting a non-null cents fee clears the percent fee to keep them mutually exclusive.
-        if (processingFeeCents != null) setValues.processingFeePercent = null;
-      }
-      if (name !== undefined) setValues.name = name;
-      if (email !== undefined) setValues.email = email;
-      if ("phone" in body) setValues.phone = body.phone;
-      if ("billingContactName" in body) setValues.billingContactName = body.billingContactName;
-      if ("addressLine1" in body) setValues.addressLine1 = body.addressLine1;
-      if ("addressLine2" in body) setValues.addressLine2 = body.addressLine2;
-      if ("city" in body) setValues.city = body.city;
-      if ("state" in body) setValues.state = body.state;
-      if ("postalCode" in body) setValues.postalCode = body.postalCode;
-      if ("country" in body) setValues.country = body.country;
-      if ("notes" in body) setValues.notes = body.notes;
-      if ("defaultPaymentTermsDays" in body)
-        setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
+      throw updateError;
+    }
 
-      let updatedClients: (typeof clients.$inferSelect)[];
-      try {
-        updatedClients = await db
-          .update(clients)
-          .set(setValues)
-          .where(eq(clients.id, id))
-          .returning();
-      } catch (updateError) {
-        if (isUniqueViolation(updateError)) {
-          throw errors.conflict("A client with this email already exists in this workspace.");
-        }
-        throw updateError;
-      }
+    if (updatedClients.length === 0) {
+      throw errors.internal("Failed to update client.");
+    }
 
-      if (updatedClients.length === 0) {
-        throw errors.internal("Failed to update client.");
-      }
+    const updatedClient = updatedClients[0];
 
-      const updatedClient = updatedClients[0];
-
-      const { apiKeyHash, apiKeyLookup, ...safeUpdatedClient } = updatedClient;
-      return res.status(200).send({
-        ...safeUpdatedClient,
-        createdAt: updatedClient.createdAt?.toISOString(),
-        updatedAt: updatedClient.updatedAt?.toISOString(),
-      });
+    const { apiKeyHash, apiKeyLookup, ...safeUpdatedClient } = updatedClient;
+    return res.status(200).send({
+      ...safeUpdatedClient,
+      createdAt: updatedClient.createdAt?.toISOString(),
+      updatedAt: updatedClient.updatedAt?.toISOString(),
+    });
   });
 };
 

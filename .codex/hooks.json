@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/messyginger0804/dfwsc/dfwsc2.0/.claude/sync-docs.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
