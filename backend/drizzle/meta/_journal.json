@@ -134,6 +134,13 @@
       "when": 1783192636848,
       "tag": "0018_open_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783213832083,
+      "tag": "0019_brave_ravenous",
+      "breakpoints": true
     }
   ]
 }

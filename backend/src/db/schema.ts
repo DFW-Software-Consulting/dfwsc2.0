@@ -87,8 +87,6 @@ export const clients = pgTable(
       .$onUpdate(() => new Date()),
   },
   (table) => ({
-    apiKeyHashIdx: index("clients_api_key_hash_idx").on(table.apiKeyHash),
-    apiKeyLookupIdx: index("clients_api_key_lookup_idx").on(table.apiKeyLookup),
     emailWorkspaceUnique: unique("clients_email_workspace_unique").on(table.email, table.workspace),
     stripeAccountIdUnique: unique("clients_stripe_account_id_unique").on(table.stripeAccountId),
     stripeCustomerIdUniqueIdx: uniqueIndex("clients_stripe_customer_id_unique_idx")
