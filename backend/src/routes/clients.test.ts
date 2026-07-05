@@ -19,7 +19,6 @@ describe("Client Management API", () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_12345";
     process.env.FRONTEND_ORIGIN = "http://localhost:5173";
     process.env.API_BASE_URL = "http://localhost:4242";
-    process.env.USE_CHECKOUT = "false";
     process.env.JWT_SECRET = "test_jwt_secret_minimum_32_characters_long";
 
     // MailHog config

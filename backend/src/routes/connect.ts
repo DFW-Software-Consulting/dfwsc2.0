@@ -9,6 +9,7 @@ import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { createClientWithOnboardingToken, hashOnboardingToken } from "../lib/client-factory";
 import { resolveFrontendOrigin, resolveServerBaseUrl } from "../lib/config";
+import { AppError, errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { getSettings, stripe } from "../lib/stripe-billing";
@@ -39,32 +40,20 @@ async function createAccountLinkForToken(
     .limit(1);
 
   if (!onboardingRecord) {
-    throw Object.assign(
-      new Error("Onboarding token not found, is invalid, or has already been used."),
-      { statusCode: 404 }
-    );
+    throw errors.notFound("Onboarding token");
   }
 
   if (onboardingRecord.status === "revoked") {
-    throw Object.assign(
-      new Error("This onboarding link has been replaced. Please check your email for a new link."),
-      { statusCode: 404 }
-    );
+    throw errors.notFound("Onboarding link");
   }
 
   if (onboardingRecord.status !== "pending" && onboardingRecord.status !== "in_progress") {
-    throw Object.assign(
-      new Error("Onboarding token not found, is invalid, or has already been used."),
-      { statusCode: 404 }
-    );
+    throw errors.notFound("Onboarding token");
   }
 
   const createdAt = onboardingRecord.createdAt ? new Date(onboardingRecord.createdAt) : null;
   if (createdAt && Date.now() - createdAt.getTime() > ONBOARDING_TOKEN_TTL_MS) {
-    throw Object.assign(
-      new Error("This onboarding link has expired. Please request a new onboarding link."),
-      { statusCode: 404 }
-    );
+    throw errors.notFound("Onboarding link expired");
   }
 
   const [clientRecord] = await db
@@ -73,7 +62,7 @@ async function createAccountLinkForToken(
     .where(eq(clients.id, onboardingRecord.clientId));
 
   if (!clientRecord) {
-    throw Object.assign(new Error("Client record not found."), { statusCode: 404 });
+    throw errors.notFound("Client record");
   }
 
   let stripeAccountId = clientRecord.stripeAccountId;
@@ -178,7 +167,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         workspace: Workspace;
       };
       if (!isWorkspace(workspace)) {
-        return reply.code(400).send({ error: "workspace must be client_portal." });
+        throw errors.badRequest("workspace must be client_portal.");
       }
 
       request.log.info({ groupId, workspace }, "Received request in /accounts handler");
@@ -190,10 +179,10 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           .where(eq(clientGroups.id, groupId))
           .limit(1);
         if (!group) {
-          return reply.code(400).send({ error: "Invalid groupId." });
+          throw errors.badRequest("Invalid groupId.");
         }
         if (group.workspace !== workspace) {
-          return reply.code(400).send({ error: "groupId workspace does not match workspace." });
+          throw errors.badRequest("groupId workspace does not match workspace.");
         }
       }
 
@@ -256,7 +245,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       };
 
       if (!isWorkspace(workspaceParam)) {
-        return reply.code(400).send({ error: "workspace is required." });
+        throw errors.badRequest("workspace is required.");
       }
 
       if (groupId) {
@@ -266,10 +255,10 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           .where(eq(clientGroups.id, groupId))
           .limit(1);
         if (!group) {
-          return reply.code(400).send({ error: "Invalid groupId." });
+          throw errors.badRequest("Invalid groupId.");
         }
         if (group.workspace !== workspaceParam) {
-          return reply.code(400).send({ error: "groupId must belong to the specified workspace." });
+          throw errors.badRequest("groupId must belong to the specified workspace.");
         }
       }
 
@@ -351,11 +340,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       };
 
       if (!email && !clientId) {
-        return reply.code(400).send({ error: "Either email or clientId is required." });
+        throw errors.badRequest("Either email or clientId is required.");
       }
 
       if (workspaceParam && !isWorkspace(workspaceParam)) {
-        return reply.code(400).send({ error: "Invalid workspace." });
+        throw errors.badRequest("Invalid workspace.");
       }
 
       const [clientRecord] = clientId
@@ -365,13 +354,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           : [];
 
       if (!clientRecord) {
-        return reply.code(404).send({ error: "Client not found." });
+        throw errors.notFound("Client");
       }
 
       if (workspaceParam && clientRecord.workspace !== workspaceParam) {
-        return reply
-          .code(400)
-          .send({ error: "Client does not belong to the specified workspace." });
+        throw errors.badRequest("Client does not belong to the specified workspace.");
       }
 
       // Client is already fully onboarded (has a Stripe account and can
@@ -475,17 +462,13 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const { token } = request.query as { token: string };
       if (typeof token !== "string" || token.trim().length === 0) {
-        return reply.code(400).send({ error: "token is required." });
+        throw errors.badRequest("token is required.");
       }
       try {
         const { accountLinkUrl } = await createAccountLinkForToken(request, token);
         return reply.send({ url: accountLinkUrl });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        const statusCode =
-          error instanceof Error && "statusCode" in error && typeof error.statusCode === "number"
-            ? error.statusCode
-            : 502;
         request.log.error(
           {
             error: errorMessage,
@@ -494,14 +477,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           "Stripe accountLinks.create failed"
         );
 
-        if (statusCode === 404) {
-          return reply.code(404).send({ error: errorMessage });
+        if (error instanceof AppError) {
+          throw error;
         }
 
-        return reply.code(502).send({
-          error: "Failed to create Stripe account link. Please try again.",
-          code: "STRIPE_ACCOUNT_LINK_FAILED",
-        });
+        throw errors.stripeFailed("Failed to create Stripe account link. Please try again.");
       }
     }
   );
@@ -514,7 +494,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const { token } = request.query as { token: string };
       if (typeof token !== "string" || token.trim().length === 0) {
-        return reply.code(400).send({ error: "token is required." });
+        throw errors.badRequest("token is required.");
       }
 
       try {
@@ -522,10 +502,6 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         return reply.redirect(accountLinkUrl);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        const statusCode =
-          error instanceof Error && "statusCode" in error && typeof error.statusCode === "number"
-            ? error.statusCode
-            : 502;
         request.log.error(
           {
             error: errorMessage,
@@ -534,14 +510,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           "Stripe accountLinks.create failed during refresh"
         );
 
-        if (statusCode === 404) {
-          return reply.code(404).send({ error: errorMessage });
+        if (error instanceof AppError) {
+          throw error;
         }
 
-        return reply.code(502).send({
-          error: "Failed to create Stripe account link. Please try again.",
-          code: "STRIPE_ACCOUNT_LINK_FAILED",
-        });
+        throw errors.stripeFailed("Failed to create Stripe account link. Please try again.");
       }
     }
   );
@@ -561,12 +534,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       if (!normalizedState) {
         request.log.warn({ client_id, account }, "Missing state parameter");
-        return reply.code(400).send({ error: "Missing state parameter." });
+        throw errors.badRequest("Missing state parameter.");
       }
 
       if (!normalizedClientId) {
         request.log.warn({ account, state }, "Missing client_id parameter");
-        return reply.code(400).send({ error: "Missing client_id parameter." });
+        throw errors.badRequest("Missing client_id parameter.");
       }
 
       // Stripe does NOT append `account` (or any state) to the Account Link
@@ -577,7 +550,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           { client_id: normalizedClientId, account: normalizedAccount },
           "Invalid account parameter format"
         );
-        return reply.code(400).send({ error: "Invalid account parameter." });
+        throw errors.badRequest("Invalid account parameter.");
       }
 
       // The (clientId, state) pair is the security binding: `state` is a
@@ -598,7 +571,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           { client_id: normalizedClientId, account: normalizedAccount, state: normalizedState },
           "Invalid or expired state parameter"
         );
-        return reply.code(400).send({ error: "Invalid or expired state parameter." });
+        throw errors.badRequest("Invalid or expired state parameter.");
       }
 
       // `state` is meant to be single-use. Once a token has reached a
@@ -615,7 +588,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           },
           "Replayed or already-consumed state parameter"
         );
-        return reply.code(400).send({ error: "Invalid or expired state parameter." });
+        throw errors.badRequest("Invalid or expired state parameter.");
       }
 
       if (
@@ -626,7 +599,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           { client_id: normalizedClientId, account: normalizedAccount, state: normalizedState },
           "Expired state parameter"
         );
-        return reply.code(400).send({ error: "Expired state parameter." });
+        throw errors.badRequest("Expired state parameter.");
       }
 
       const [clientRecord] = await db
@@ -639,7 +612,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           { client_id: normalizedClientId, account: normalizedAccount },
           "Client record not found during callback"
         );
-        return reply.code(400).send({ error: "Client not found." });
+        throw errors.badRequest("Client not found.");
       }
 
       const storedAccountId = clientRecord.stripeAccountId ?? null;
@@ -655,7 +628,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           },
           "Attempt to overwrite existing stripeAccountId"
         );
-        return reply.code(400).send({ error: "Stripe account already linked to this client." });
+        throw errors.badRequest("Stripe account already linked to this client.");
       }
 
       const frontendOrigin = resolveFrontendOrigin();
@@ -688,7 +661,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       if (verifiedAccount.type !== "express") {
         request.log.warn({ account: effectiveAccountId }, "Account is not an Express account");
-        return reply.code(400).send({ error: "Invalid account type." });
+        throw errors.badRequest("Invalid account type.");
       }
 
       const chargesEnabled = verifiedAccount.charges_enabled ?? false;

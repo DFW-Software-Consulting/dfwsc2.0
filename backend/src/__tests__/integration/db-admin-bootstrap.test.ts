@@ -191,7 +191,7 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
     });
 
     expect(res.statusCode).toBe(401);
-    expect(res.json()).toEqual({ error: "Invalid credentials" });
+    expect(res.json()).toMatchObject({ error: "Invalid credentials" });
 
     await server.close();
   });

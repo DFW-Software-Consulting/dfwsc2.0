@@ -4,6 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { db } from "../db/client";
 import { admins } from "../db/schema";
 import { getAdminFromDb, requireAdminJwt, signJwt } from "../lib/auth";
+import { errors } from "../lib/errors";
 import { rateLimit } from "../lib/rate-limit";
 
 const MIN_ADMIN_PASSWORD_LENGTH = 12;
@@ -82,23 +83,23 @@ export default async function authRoutes(fastify: FastifyInstance) {
       const { username, password } = body;
 
       if (!username || !password) {
-        return reply.code(400).send({ error: "Username and password are required" });
+        throw errors.badRequest("Username and password are required");
       }
 
       const passwordError = validateAdminPassword(password);
       if (passwordError) {
-        return reply.code(400).send({ error: passwordError });
+        throw errors.badRequest(passwordError);
       }
 
       const allAdmins = await db.select().from(admins);
       const firstAdmin = allAdmins[0];
 
       if (!firstAdmin) {
-        return reply.code(400).send({ error: "No bootstrap admin found" });
+        throw errors.badRequest("No bootstrap admin found");
       }
 
       if (firstAdmin.setupConfirmed) {
-        return reply.code(400).send({ error: "Bootstrap already confirmed" });
+        throw errors.badRequest("Bootstrap already confirmed");
       }
 
       const passwordHash = await bcrypt.hash(password, 10);
@@ -129,7 +130,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
       const { username, password } = request.body as LoginRequest;
 
       if (!username || !password) {
-        return reply.code(400).send({ error: "Username and password are required" });
+        throw errors.badRequest("Username and password are required");
       }
 
       const admin = await getAdminFromDb(username);
@@ -143,22 +144,21 @@ export default async function authRoutes(fastify: FastifyInstance) {
       if (!admin) {
         await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
         fastify.log.warn({ username }, "Failed login attempt (unknown user)");
-        return reply.code(401).send({ error: "Invalid credentials" });
+        throw errors.unauthorized("Invalid credentials");
       }
 
       const isValid = await bcrypt.compare(password, admin.passwordHash);
 
       if (!isValid) {
         fastify.log.warn({ username }, "Failed login attempt");
-        return reply.code(401).send({ error: "Invalid credentials" });
+        throw errors.unauthorized("Invalid credentials");
       }
 
       if (admin.active === false) {
         fastify.log.warn({ username }, "Login attempt for deactivated admin");
-        return reply.code(403).send({ error: "Account is deactivated" });
+        throw errors.forbidden("Account is deactivated");
       }
 
-      // Generate JWT token
       try {
         const token = signJwt({ role: "admin", sub: admin.id });
         const expiresIn = process.env.JWT_EXPIRY || "1h";
@@ -172,7 +172,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
         });
       } catch (error) {
         fastify.log.error({ error }, "Error generating JWT token");
-        return reply.code(500).send({ error: "Authentication error" });
+        throw errors.internal("Authentication error");
       }
     }
   );

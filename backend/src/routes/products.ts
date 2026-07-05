@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type Stripe from "stripe";
 import { requireAdminJwt } from "../lib/auth";
+import { errors } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 
@@ -79,10 +80,10 @@ const productRoutes: FastifyPluginAsync = async (app) => {
       const { name, description, amountCents, currency = "usd" } = req.body;
 
       if (!name?.trim()) {
-        return res.status(400).send({ error: "name is required." });
+        throw errors.badRequest("name is required.");
       }
       if (!Number.isInteger(amountCents) || amountCents <= 0) {
-        return res.status(400).send({ error: "amountCents must be a positive integer." });
+        throw errors.badRequest("amountCents must be a positive integer.");
       }
 
       const product = await stripe.products.create({
