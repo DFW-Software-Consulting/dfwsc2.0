@@ -282,7 +282,7 @@ Creates a new client record and returns their credentials. Does **not** send an 
 
 **Auth: Admin JWT**
 
-Creates a new client and sends them an onboarding email with a link to connect their Stripe account.
+Creates a new client and sends them an onboarding email with a link to connect their Stripe account. The client's API key is **not** returned to the admin; instead the email includes a separate, time-limited link that reveals the API key when clicked.
 
 **Request:**
 ```json
@@ -297,11 +297,16 @@ Creates a new client and sends them an onboarding email with a link to connect t
 {
   "message": "Onboarding email sent successfully.",
   "clientId": "abc123",
-  "apiKey": "64-hex-char-string"
+  "apiKey": null,
+  "groupId": null
 }
 ```
 
-The email contains a link like: `<FRONTEND_ORIGIN>/onboard?token=<token>`
+The email contains two links:
+- `<FRONTEND_ORIGIN>/onboard?token=<token>` — Stripe onboarding (24h).
+- `<FRONTEND_ORIGIN>/regenerate-key?token=<token>` — reveals the API key once. Expires in **15 minutes**. Visiting it calls `GET /api/v1/api-key/regenerate?token=<token>`, which rotates and returns the plaintext key.
+
+> If the 15-minute retrieval link expires before the client opens it, an admin can re-issue one via `POST /api/v1/api-key/regenerate-request/admin`.
 
 ---
 

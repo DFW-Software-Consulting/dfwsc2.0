@@ -32,6 +32,7 @@ const dataStore = {
 
 type MailhogMessage = {
   Content: {
+    Body: string;
     Headers: {
       Subject: string[];
       To: string[];
@@ -135,6 +136,7 @@ const nodemailerMock = createNodemailerMock(mailhogMessages, (options: any) => {
   const recipients = Array.isArray(to) ? to.map(String) : [String(to ?? "")];
   return {
     Content: {
+      Body: options.html ?? "",
       Headers: {
         Subject: [options.subject ?? ""],
         To: recipients,
@@ -601,18 +603,20 @@ describe("connect onboarding", () => {
     ).toBe(201);
     const body = response.json();
     expect(body).toMatchObject({ message: "Onboarding email sent successfully." });
-    expect(body.apiKey).toBeDefined();
+    expect(body.apiKey).toBeNull();
     expect(body.clientId).toBeDefined();
     const savedClient = Array.from(dataStore.clients.values()).find(
       (client) => client.email === "client@example.com"
     );
-    expect(savedClient?.apiKeyHash).toBe(`hashed:${body.apiKey}`);
+    expect(savedClient?.apiKeyHash).toMatch(/^hashed:.+/);
     expect(savedClient?.id).toBe(body.clientId);
     expect(mailhogMessages.length).toBe(1);
     expect(mailhogMessages[0].Content.Headers.Subject[0]).toBe(
       "DFW Software Consulting - Stripe Onboarding"
     );
     expect(mailhogMessages[0].Content.Headers.To[0]).toBe("client@example.com");
+    expect(mailhogMessages[0].Content.Body).toContain("/onboard?token=");
+    expect(mailhogMessages[0].Content.Body).toContain("/regenerate-key?token=");
     await server.close();
   });
 
@@ -1291,11 +1295,13 @@ describe("email", () => {
 
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({ message: "Onboarding email sent successfully." });
+    expect(response.json().apiKey).toBeNull();
     expect(mailhogMessages.length).toBe(1);
     expect(mailhogMessages[0].Content.Headers.Subject[0]).toBe(
       "DFW Software Consulting - Stripe Onboarding"
     );
     expect(mailhogMessages[0].Content.Headers.To[0]).toBe("test@example.com");
+    expect(mailhogMessages[0].Content.Body).toContain("/regenerate-key?token=");
     await server.close();
   });
 });
