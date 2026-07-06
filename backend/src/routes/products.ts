@@ -2,10 +2,11 @@ import type { FastifyPluginAsync } from "fastify";
 import type Stripe from "stripe";
 import { z } from "zod";
 import { requireAdminJwt } from "../lib/auth";
-import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
+import { withStripeCircuit } from "../lib/circuit-breakers";
 import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { adminRateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
+import { mapStripeError } from "../lib/stripe-errors";
 import { parseBody } from "../lib/validation";
 
 interface CreateProductBody {
@@ -32,6 +33,8 @@ const adminCrudRateLimit = adminRateLimit({
   windowMs: RATE_LIMIT_WINDOW_MS,
 });
 
+const CIRCUIT_OPEN_ERROR = { error: "Stripe service temporarily unavailable." };
+
 const createProductBodySchema = z.object({
   name: z.string({ error: "name is required." }).trim().min(1, "name is required."),
   description: z.string().optional(),
@@ -57,9 +60,7 @@ const productRoutes: FastifyPluginAsync = async (app) => {
           })
         ));
       } catch (err) {
-        if (isCircuitOpenError(err)) {
-          return res.status(503).send({ error: "Stripe service temporarily unavailable." });
-        }
+        if (mapStripeError(err, res, { circuitOpen: CIRCUIT_OPEN_ERROR })) return;
         throw err;
       }
 
@@ -88,9 +89,7 @@ const productRoutes: FastifyPluginAsync = async (app) => {
         })
       ));
     } catch (err) {
-      if (isCircuitOpenError(err)) {
-        return res.status(503).send({ error: "Stripe service temporarily unavailable." });
-      }
+      if (mapStripeError(err, res, { circuitOpen: CIRCUIT_OPEN_ERROR })) return;
       throw err;
     }
 
@@ -136,9 +135,7 @@ const productRoutes: FastifyPluginAsync = async (app) => {
           stripe.products.update(product.id, { default_price: price.id })
         );
       } catch (err) {
-        if (isCircuitOpenError(err)) {
-          return res.status(503).send({ error: "Stripe service temporarily unavailable." });
-        }
+        if (mapStripeError(err, res, { circuitOpen: CIRCUIT_OPEN_ERROR })) return;
         throw err;
       }
 
