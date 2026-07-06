@@ -31,7 +31,6 @@ Create a `.env` file based on `.env.example`.
 | `JWT_SECRET` | ✅ | Secret key for signing JWT tokens. Must be minimum 32 characters. Generate with: `openssl rand -base64 32` |
 | `JWT_EXPIRY` | ❌ | JWT token expiration time. Defaults to `1h`. Supported formats: `1h`, `30m`, `7d`, `24h`. |
 | `ALLOW_ADMIN_SETUP` | ❌ | Set to `true` to enable browser-based admin credential setup. Only works when `ADMIN_PASSWORD` is not set. |
-| `ADMIN_SETUP_TOKEN` | ❌ | Optional secret token required in `X-Setup-Token` header when using the setup endpoint. Adds extra protection. |
 
 ## Database Schema
 
@@ -147,10 +146,6 @@ If you lose access to your admin credentials or need to set up admin access on a
    ```
    ALLOW_ADMIN_SETUP=true
    ```
-   Optionally, add a setup token for extra security:
-   ```
-   ADMIN_SETUP_TOKEN=your-secret-token
-   ```
 
 2. **Remove or unset the existing `ADMIN_PASSWORD`** variable (the setup endpoint only works when no admin password is configured).
 
@@ -172,6 +167,5 @@ If you lose access to your admin credentials or need to set up admin access on a
 
 - The setup endpoint is **rate limited** to 3 requests per 15 minutes.
 - Setup can only be used **once per server session**. After a successful setup, the endpoint returns 403 until the server restarts.
-- The `ADMIN_SETUP_TOKEN` header protection is optional but recommended for production deployments.
 - **Never leave `ALLOW_ADMIN_SETUP=true` in production** after completing setup.
 - The generated password hash is bcrypt, which is secure for production use.

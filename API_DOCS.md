@@ -1051,4 +1051,3 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | Variable | Description |
 |----------|-------------|
 | `ALLOW_ADMIN_SETUP` | Set to `true` to enable the `/auth/setup` endpoint |
-| `ADMIN_SETUP_TOKEN` | Optional token required to call `/auth/setup` |
