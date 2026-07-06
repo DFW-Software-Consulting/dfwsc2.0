@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 beforeAll(() => {
   vi.useFakeTimers();
@@ -134,30 +134,25 @@ describe("rateLimit - Redis path", () => {
 });
 
 describe("rateLimit - startup warning", () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-
   beforeEach(() => {
     vi.resetModules();
-    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
-  afterEach(() => {
-    warnSpy.mockRestore();
-  });
-
-  it("warns once at module load when REDIS_URL is unset", async () => {
+  it("warns via the provided logger when REDIS_URL is unset", async () => {
     delete process.env.REDIS_URL;
+    const logger = { warn: vi.fn() };
 
-    await import("../../lib/rate-limit");
+    const { warnIfInMemoryRateLimit } = await import("../../lib/rate-limit");
+    warnIfInMemoryRateLimit(logger);
 
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    const [message] = warnSpy.mock.calls[0];
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const [message] = logger.warn.mock.calls[0];
     expect(message).toMatch(/REDIS_URL/);
     expect(message).toMatch(/in-memory/i);
     expect(message).toMatch(/replica/i);
   });
 
-  it("does not warn at module load when REDIS_URL is set", async () => {
+  it("does not warn when REDIS_URL is set", async () => {
     process.env.REDIS_URL = "redis://localhost:6379";
     vi.doMock("ioredis", () => ({
       default: vi.fn().mockImplementation(() => ({
@@ -165,10 +160,12 @@ describe("rateLimit - startup warning", () => {
         pipeline: vi.fn(),
       })),
     }));
+    const logger = { warn: vi.fn() };
 
     try {
-      await import("../../lib/rate-limit");
-      expect(warnSpy).not.toHaveBeenCalled();
+      const { warnIfInMemoryRateLimit } = await import("../../lib/rate-limit");
+      warnIfInMemoryRateLimit(logger);
+      expect(logger.warn).not.toHaveBeenCalled();
     } finally {
       delete process.env.REDIS_URL;
     }

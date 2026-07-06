@@ -4,6 +4,7 @@ import fastify from "fastify";
 import fastifyRawBody from "fastify-raw-body";
 import { logMaskedEnvSummary, validateEnv } from "./lib/env";
 import { AppError } from "./lib/errors";
+import { warnIfInMemoryRateLimit } from "./lib/rate-limit";
 import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
@@ -73,6 +74,7 @@ export async function buildServer() {
   });
   const env = validateEnv();
   logMaskedEnvSummary(server, env);
+  warnIfInMemoryRateLimit(server.log);
 
   const frontendOrigin = env.FRONTEND_ORIGIN ?? "";
 

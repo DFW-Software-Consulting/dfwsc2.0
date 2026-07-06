@@ -28,10 +28,11 @@ try {
 // One-time startup signal: without REDIS_URL, rate limiting silently falls back
 // to the per-process in-memory buckets below. That's fine for a single instance,
 // but under horizontal scaling every limit is effectively multiplied by the
-// number of replicas, since each process tracks its own hit counts. Logged once
-// here at module load (not per-request) so it surfaces at boot.
-if (!redis) {
-  console.warn(
+// number of replicas, since each process tracks its own hit counts. Called once
+// from createServer with the app logger so it surfaces at boot.
+export function warnIfInMemoryRateLimit(logger: { warn: (msg: string) => void }): void {
+  if (redis) return;
+  logger.warn(
     "[rate-limit] REDIS_URL is not set — rate limiting is falling back to per-process " +
       "in-memory buckets. Limits are NOT shared across replicas: horizontally scaling " +
       "this service multiplies every limit by the replica count. Set REDIS_URL to enable " +
