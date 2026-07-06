@@ -98,6 +98,7 @@ export default function OnboardClient() {
 
           {message && (
             <p
+              role={isError ? "alert" : undefined}
               className={`mt-4 text-center text-sm font-medium ${isError ? "text-red-500 dark:text-red-400" : "text-brand-600 dark:text-brand-400"} transition-colors`}
             >
               {message}
