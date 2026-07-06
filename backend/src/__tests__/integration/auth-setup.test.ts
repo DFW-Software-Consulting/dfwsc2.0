@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeAdminToken } from "../helpers/auth";
+import { TEST_JWT_SECRET } from "../helpers/constants";
 
 // Mock Stripe to avoid real API calls
 vi.mock("../../lib/stripe", () => ({
@@ -567,13 +568,15 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
 
     const server = await createServer();
 
+    // sub must match the seeded admin's id: confirm-bootstrap now scopes to
+    // the JWT-authenticated caller's own row rather than an arbitrary row.
     const response = await server.inject({
       method: "POST",
       url: "/api/v1/auth/confirm-bootstrap",
       payload: { username: "admin", password: "newpassword123" },
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${makeAdminToken()}`,
+        authorization: `Bearer ${makeAdminToken(TEST_JWT_SECRET, { sub: "admin-1" })}`,
       },
     });
 
@@ -601,8 +604,10 @@ describe("POST /api/v1/auth/confirm-bootstrap", () => {
     // Mirrors the intended flow: the operator first logs in with the
     // bootstrap admin's credentials to obtain a JWT, then uses it to
     // confirm bootstrap. We issue an equivalent token via the shared test
-    // helper instead of driving a full login round-trip here.
-    const token = makeAdminToken();
+    // helper instead of driving a full login round-trip here. The sub must
+    // match the seeded admin's id since confirm-bootstrap now scopes to the
+    // JWT-authenticated caller's own row rather than an arbitrary row.
+    const token = makeAdminToken(TEST_JWT_SECRET, { sub: "admin-1" });
 
     const response = await server.inject({
       method: "POST",

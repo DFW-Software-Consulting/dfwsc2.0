@@ -16,7 +16,6 @@ Handles admin authentication via JWT tokens and provides a one-time browser-base
 | `JWT_SECRET` | ✅ | Secret key for JWT signing (min 32 chars) |
 | `JWT_EXPIRY` | ❌ | Token expiration (default: `1h`) |
 | `ALLOW_ADMIN_SETUP` | ❌ | Enable browser-based setup (`true` to enable) |
-| `ADMIN_SETUP_TOKEN` | ❌ | Optional token for extra setup protection |
 | `SETUP_FLAG_PATH` | ❌ | Path to persist setup flag (default: `/tmp/admin-setup-used`) |
 | `NODE_ENV` | ❌ | `production` enforces bcrypt password requirement |
 
@@ -80,14 +79,9 @@ Checks if admin setup is allowed (for browser-based credential configuration).
 ### POST `/api/v1/auth/setup`
 One-time endpoint to generate admin credentials via browser interface.
 
-**Authentication**: None (public endpoint, but requires `X-Setup-Token` header if `ADMIN_SETUP_TOKEN` is configured)
+**Authentication**: None (public endpoint)
 
 **Rate Limiting**: 3 requests per 15 minutes per IP
-
-**Request Headers**:
-```
-X-Setup-Token: <your-secret-token>  // Only if ADMIN_SETUP_TOKEN is set
-```
 
 **Request Body**:
 ```json
@@ -143,10 +137,9 @@ curl -X POST http://localhost:4242/api/v1/auth/login \
 # Check setup status
 curl http://localhost:4242/api/v1/auth/setup/status
 
-# Initiate setup (with optional token)
+# Initiate setup
 curl -X POST http://localhost:4242/api/v1/auth/setup \
   -H "Content-Type: application/json" \
-  -H "X-Setup-Token: your-secret-token" \
   -d '{"username":"admin","password":"secure_password_123"}'
 ```
 
