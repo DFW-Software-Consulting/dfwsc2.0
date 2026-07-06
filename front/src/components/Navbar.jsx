@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext.jsx";
 import { scrollToSection } from "../utils/scrollToSection.js";
@@ -10,43 +10,8 @@ const navItems = [
   { type: "route", href: "/team", label: "Meet our team" },
 ];
 
-export default function Navbar() {
-  const { theme, toggleTheme } = useTheme();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  // Unified clickable pill style
-  const desktopItemClasses =
-    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-slate-200 dark:border-white/5 px-4 py-2 text-sm font-medium text-[var(--text-muted)] dark:text-slate-300 transition-all duration-300 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
-  const desktopGlow =
-    "pointer-events-none absolute inset-0 rounded-full bg-gradient-to-r from-brand-500/0 via-brand-500/5 to-brand-500/0 opacity-0 transition-opacity duration-500 group-hover:opacity-100";
-
-  const mobileItemClasses =
-    "group relative overflow-hidden rounded-xl border border-slate-200 dark:border-white/5 px-4 py-3 text-left text-[var(--text-muted)] dark:text-slate-200 transition-all duration-200 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
-  const mobileGlow =
-    "pointer-events-none absolute inset-0 rounded-xl bg-brand-500/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-brand-500/5";
-
-  useEffect(() => {
-    setMenuOpen(false);
-  }, []);
-
-  const handleScroll = (id) => {
-    if (location.pathname !== "/") {
-      navigate("/", { state: { scrollTo: id } });
-      return;
-    }
-
-    scrollToSection(id);
-    setMenuOpen(false);
-  };
-
-  const handleLogoClick = (e) => {
-    e.preventDefault();
-    handleScroll("top");
-  };
-
-  const ThemeToggle = ({ mobile = false }) => (
+function ThemeToggle({ theme, toggleTheme, mobile = false }) {
+  return (
     <button
       type="button"
       onClick={toggleTheme}
@@ -103,6 +68,48 @@ export default function Navbar() {
       )}
     </button>
   );
+}
+
+export default function Navbar() {
+  const { theme, toggleTheme } = useTheme();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [prevPathname, setPrevPathname] = useState(location.pathname);
+
+  // Unified clickable pill style
+  const desktopItemClasses =
+    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-slate-200 dark:border-white/5 px-4 py-2 text-sm font-medium text-[var(--text-muted)] dark:text-slate-300 transition-all duration-300 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
+  const desktopGlow =
+    "pointer-events-none absolute inset-0 rounded-full bg-gradient-to-r from-brand-500/0 via-brand-500/5 to-brand-500/0 opacity-0 transition-opacity duration-500 group-hover:opacity-100";
+
+  const mobileItemClasses =
+    "group relative overflow-hidden rounded-xl border border-slate-200 dark:border-white/5 px-4 py-3 text-left text-[var(--text-muted)] dark:text-slate-200 transition-all duration-200 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
+  const mobileGlow =
+    "pointer-events-none absolute inset-0 rounded-xl bg-brand-500/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-brand-500/5";
+
+  // Close the mobile menu whenever the route changes (e.g. browser back/forward).
+  // Adjusted during render (rather than in an effect) since it only needs to
+  // react to location.pathname changing.
+  if (location.pathname !== prevPathname) {
+    setPrevPathname(location.pathname);
+    setMenuOpen(false);
+  }
+
+  const handleScroll = (id) => {
+    if (location.pathname !== "/") {
+      navigate("/", { state: { scrollTo: id } });
+      return;
+    }
+
+    scrollToSection(id);
+    setMenuOpen(false);
+  };
+
+  const handleLogoClick = (e) => {
+    e.preventDefault();
+    handleScroll("top");
+  };
 
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200 dark:border-white/[0.08] bg-[var(--bg-main)] dark:bg-[var(--bg-main)]/80 backdrop-blur-xl transition-colors duration-300">
@@ -153,7 +160,7 @@ export default function Navbar() {
         </nav>
 
         <div className="hidden items-center gap-4 sm:flex">
-          <ThemeToggle />
+          <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
           <Link
             to="/"
             state={{ scrollTo: "contact" }}
@@ -165,7 +172,7 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-4 sm:hidden">
-          <ThemeToggle />
+          <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
           <button
             type="button"
             onClick={() => setMenuOpen((prev) => !prev)}

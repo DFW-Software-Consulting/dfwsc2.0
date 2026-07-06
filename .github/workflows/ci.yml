@@ -28,6 +28,12 @@ jobs:
       - run: npm ci --prefix backend
       - run: npm ci --prefix front
       - run: npm run lint
+      # Non-blocking dependency vulnerability scan (tighten later by dropping `|| true`
+      # once existing findings are triaged).
+      - name: Backend dependency audit
+        run: npm audit --prefix backend --audit-level=high || true
+      - name: Frontend dependency audit
+        run: npm audit --prefix front --audit-level=high || true
 
   typecheck:
     runs-on: ubuntu-latest
@@ -74,7 +80,6 @@ jobs:
       STRIPE_SECRET_KEY: sk_test_ci
       STRIPE_WEBHOOK_SECRET: whsec_ci
       FRONTEND_ORIGIN: http://localhost:5173
-      USE_CHECKOUT: "false"
       SMTP_HOST: localhost
       SMTP_PORT: "1025"
       SMTP_USER: ci
@@ -99,8 +104,8 @@ jobs:
       - name: Run migrations
         run: npm run db:migrate
         working-directory: backend
-      - name: Backend tests
-        run: npm test -- --run
+      - name: Backend tests (coverage-enforced)
+        run: npm run test:coverage
         working-directory: backend
 
       # --- Frontend ---

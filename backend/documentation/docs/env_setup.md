@@ -12,7 +12,6 @@ PORT=4242
 # Local dev: http://localhost:5173 (npm)
 # Docker dev/prod: http://localhost:8080
 FRONTEND_ORIGIN=http://localhost:5173
-USE_CHECKOUT=false
 # Optional when the public URL differs from the local host header
 # API_BASE_URL=https://api.example.com
 
@@ -98,7 +97,6 @@ JWT_EXPIRY=1h
 ```
 
 ## Notes
-- `USE_CHECKOUT` accepts only `true` or `false`; invalid values will halt server startup.
 - `FRONTEND_ORIGIN` should match the origin serving your frontend so CORS and redirect URLs align.
 - `API_BASE_URL` is required for the `/app-config.js` helper route; set it if that route is used.
 - Ensure `DATABASE_URL` points to a PostgreSQL instance accessible from the server environment.
@@ -112,7 +110,7 @@ JWT_EXPIRY=1h
 | --- | --- | --- | --- | --- |
 | Local (npm) | `http://localhost:5173` | `http://localhost:4242` | Test (`sk_test_...`) | Use `.env` in `backend/` |
 | Local (Docker) | `http://localhost:8080` | `http://localhost:4242` | Test (`sk_test_...`) | Use `docker-compose.dev.yml` |
-| Staging | `https://staging.example.com` | `https://api-staging.example.com` | Test or live | Prefer `USE_CHECKOUT=true` |
+| Staging | `https://staging.example.com` | `https://api-staging.example.com` | Test or live | Mirror production config |
 | Production | `https://your-frontend-domain.com` | `https://your-api-domain.com` | Live (`sk_live_...`) | Use `.env.prod` |
 
 ## Verification Steps

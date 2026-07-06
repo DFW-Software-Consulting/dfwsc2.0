@@ -127,7 +127,10 @@ export default function RegenerateApiKey() {
           )}
 
           {error && (
-            <p className="mt-4 text-center text-sm font-medium text-red-500 dark:text-red-400 transition-colors">
+            <p
+              role="alert"
+              className="mt-4 text-center text-sm font-medium text-red-500 dark:text-red-400 transition-colors"
+            >
               {error}
             </p>
           )}

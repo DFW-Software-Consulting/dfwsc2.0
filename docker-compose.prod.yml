@@ -19,6 +19,7 @@ services:
       - backend
 
   api:
+    container_name: dfwsc-api
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -39,7 +40,6 @@ services:
       # every redeploy. The DB-level `setupConfirmed` guard is the
       # authoritative protection against re-running admin setup; the file
       # flag is only a secondary, non-persistent safeguard.
-      USE_CHECKOUT: ${USE_CHECKOUT}
       DEFAULT_PROCESS_FEE_CENTS: ${DEFAULT_PROCESS_FEE_CENTS}
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT}

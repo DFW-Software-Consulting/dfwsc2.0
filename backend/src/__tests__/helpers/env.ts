@@ -11,7 +11,6 @@ export function ensureBaseEnv(): void {
   setIfMissing("STRIPE_SECRET_KEY", "sk_test_12345");
   setIfMissing("STRIPE_WEBHOOK_SECRET", TEST_WEBHOOK_SECRET);
   setIfMissing("FRONTEND_ORIGIN", "http://localhost:5173");
-  setIfMissing("USE_CHECKOUT", "false");
   setIfMissing("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/postgres");
   setIfMissing("SMTP_HOST", "mailhog");
   setIfMissing("SMTP_PORT", "1025");
@@ -32,7 +31,6 @@ export function setTestEnv(): void {
   process.env.STRIPE_WEBHOOK_SECRET = TEST_WEBHOOK_SECRET;
   process.env.FRONTEND_ORIGIN = "http://localhost:5173";
   process.env.API_BASE_URL = "http://localhost:4242";
-  process.env.USE_CHECKOUT = "false";
   process.env.DATABASE_URL = "postgres://postgres:postgres@localhost:5432/postgres";
   process.env.SMTP_HOST = "mailhog";
   process.env.SMTP_PORT = "1025";
