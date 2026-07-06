@@ -75,11 +75,28 @@ export async function validateAndRegenerate(rawToken: string): Promise<string> {
     throw errors.badRequest("This regeneration link has expired.");
   }
 
-  const newApiKey = crypto.randomBytes(32).toString("hex");
-  const newApiKeyHash = await hashApiKey(newApiKey);
-  const newApiKeyLookup = sha256Lookup(newApiKey);
+  let newApiKey: string | undefined;
 
   await db.transaction(async (tx) => {
+    const [completedToken] = await tx
+      .update(apiKeyRegenerationTokens)
+      .set({ status: "completed", updatedAt: new Date() })
+      .where(
+        and(
+          eq(apiKeyRegenerationTokens.id, record.id),
+          eq(apiKeyRegenerationTokens.status, "pending")
+        )
+      )
+      .returning({ clientId: apiKeyRegenerationTokens.clientId });
+
+    if (!completedToken) {
+      throw errors.badRequest("This regeneration link has already been used.");
+    }
+
+    newApiKey = crypto.randomBytes(32).toString("hex");
+    const newApiKeyHash = await hashApiKey(newApiKey);
+    const newApiKeyLookup = sha256Lookup(newApiKey);
+
     await tx
       .update(clients)
       .set({
@@ -87,13 +104,12 @@ export async function validateAndRegenerate(rawToken: string): Promise<string> {
         apiKeyLookup: newApiKeyLookup,
         updatedAt: new Date(),
       })
-      .where(eq(clients.id, record.clientId));
-
-    await tx
-      .update(apiKeyRegenerationTokens)
-      .set({ status: "completed", updatedAt: new Date() })
-      .where(eq(apiKeyRegenerationTokens.id, record.id));
+      .where(eq(clients.id, completedToken.clientId));
   });
+
+  if (!newApiKey) {
+    throw errors.badRequest("This regeneration link has already been used.");
+  }
 
   return newApiKey;
 }

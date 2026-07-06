@@ -57,6 +57,10 @@ const REQUIRED_TABLES: TableColumns[] = [
     table: "client_groups",
     columns: ["id", "workspace", "name", "status", "created_at", "updated_at"],
   },
+  {
+    table: "api_key_regeneration_tokens",
+    columns: ["id", "client_id", "token", "status", "email", "created_at", "updated_at"],
+  },
 ];
 
 export async function verifyDatabaseSchema(): Promise<void> {

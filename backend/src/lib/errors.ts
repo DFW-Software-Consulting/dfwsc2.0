@@ -16,6 +16,7 @@ export const errors = {
   badRequest: (msg: string) => new AppError(msg, 400, "BAD_REQUEST"),
   conflict: (msg: string) => new AppError(msg, 409, "CONFLICT"),
   internal: (msg = "Internal server error") => new AppError(msg, 500, "INTERNAL_ERROR"),
+  emailFailed: (msg: string) => new AppError(msg, 502, "EMAIL_DELIVERY_FAILED"),
   stripeFailed: (msg: string) => new AppError(msg, 502, "STRIPE_FAILED"),
 };
 

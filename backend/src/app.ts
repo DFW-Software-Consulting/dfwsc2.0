@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fastifyCors from "@fastify/cors";
+import fastifyHelmet from "@fastify/helmet";
 import fastify from "fastify";
 import fastifyRawBody from "fastify-raw-body";
 import { logMaskedEnvSummary, validateEnv } from "./lib/env";
@@ -95,6 +96,15 @@ export async function buildServer() {
   server.register(fastifyCors, {
     origin: allowedOrigins.length > 0 ? allowedOrigins : false,
     credentials: true,
+  });
+
+  // Security headers (HSTS, X-Content-Type-Options, frame protections, referrer
+  // policy, etc.) at the API layer. CSP is left to the frontend (front/nginx.conf)
+  // since this is a JSON API, not an HTML document — CSP mainly governs document
+  // capabilities (script/style sources, framing of *this* document), and a
+  // restrictive default CSP here risks breaking the Swagger UI served at /docs.
+  server.register(fastifyHelmet, {
+    contentSecurityPolicy: false,
   });
 
   server.register(fastifyRawBody, {

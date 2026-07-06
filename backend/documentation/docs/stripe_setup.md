@@ -21,13 +21,13 @@ Configure your Stripe account and developer tooling so the portal can create con
    - Keep the dashboard in Test mode while validating flows; the API automatically uses test data when the secret key begins with `sk_test_`.
 5. **Client onboarding settings**
    - Optional: configure email templates or verification options in Stripe → Connect → Settings to match your brand.
-6. **Checkout settings (if `USE_CHECKOUT=true`)**
+6. **Checkout settings**
    - Enable the relevant payment methods in Stripe Dashboard → Settings → Payment methods.
    - Configure success/cancel URLs to match `FRONTEND_ORIGIN` if you later use hosted Checkout links directly.
 
 ## Sandbox Testing Checklist
 - Create a new connected account via the admin flow and complete onboarding using Stripe’s test identity data.
-- Generate a PaymentIntent (`USE_CHECKOUT=false`) and confirm it appears under the connected account in the dashboard.
+- Create a Checkout Session via `POST /payments/create` and confirm the resulting payment appears under the connected account in the dashboard.
 - Trigger payouts or refund events using `stripe trigger` commands to verify webhook handling.
 
 ## Production Cutover
