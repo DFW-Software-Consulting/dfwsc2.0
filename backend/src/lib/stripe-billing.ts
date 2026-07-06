@@ -1,4 +1,3 @@
-import { inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import { type clientGroups, type clients, settings } from "../db/schema";
 import { stripe } from "./stripe";
@@ -190,13 +189,9 @@ export async function resolveClientFee(
     return group.processingFeeCents;
   }
 
-  const dbDefaults = await db
-    .select({ key: settings.key, value: settings.value })
-    .from(settings)
-    .where(inArray(settings.key, ["default_fee_percent", "default_fee_cents"]));
-  const dbDefaultsMap = new Map(dbDefaults.map((row) => [row.key, row.value]));
+  const dbDefaults = await getSettings();
 
-  const dbPercent = dbDefaultsMap.get("default_fee_percent");
+  const dbPercent = dbDefaults.default_fee_percent;
   if (dbPercent && dbPercent.trim().length > 0) {
     if (typeof amount !== "number") {
       throw new Error("amount is required when using a percentage-based default fee.");
@@ -205,7 +200,7 @@ export async function resolveClientFee(
     return Math.round((amount * validatedPercent) / 100);
   }
 
-  const dbCents = dbDefaultsMap.get("default_fee_cents");
+  const dbCents = dbDefaults.default_fee_cents;
   if (dbCents) {
     return parseInt(dbCents, 10);
   }

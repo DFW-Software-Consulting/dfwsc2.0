@@ -32,6 +32,9 @@ describe("mailer", () => {
         port: 587,
         secure: false,
         auth: { user: "user@example.com", pass: "secret" },
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 10_000,
       });
     });
 
