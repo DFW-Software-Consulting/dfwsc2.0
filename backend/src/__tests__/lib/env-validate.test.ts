@@ -12,7 +12,6 @@ const BASE_ENV: Record<string, string> = {
   STRIPE_SECRET_KEY: "sk_test_validkey",
   STRIPE_WEBHOOK_SECRET: "whsec_validwebhook",
   FRONTEND_ORIGIN: "http://localhost:5173",
-  USE_CHECKOUT: "false",
   DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/stripe_portal",
   SMTP_HOST: "localhost",
   SMTP_PORT: "1025",
@@ -47,33 +46,6 @@ describe("validateEnv", () => {
     }
 
     // Should not throw — admin creds are optional
-    expect(() => validateEnv()).not.toThrow();
-  });
-
-  it("throws when USE_CHECKOUT has an invalid value", () => {
-    for (const [k, v] of Object.entries(BASE_ENV)) {
-      process.env[k] = v;
-    }
-    process.env.USE_CHECKOUT = "maybe";
-
-    expect(() => validateEnv()).toThrow('USE_CHECKOUT must be either "true" or "false"');
-  });
-
-  it("accepts USE_CHECKOUT=true as a valid value", () => {
-    for (const [k, v] of Object.entries(BASE_ENV)) {
-      process.env[k] = v;
-    }
-    process.env.USE_CHECKOUT = "true";
-
-    expect(() => validateEnv()).not.toThrow();
-  });
-
-  it("accepts USE_CHECKOUT=false as a valid value", () => {
-    for (const [k, v] of Object.entries(BASE_ENV)) {
-      process.env[k] = v;
-    }
-    process.env.USE_CHECKOUT = "false";
-
     expect(() => validateEnv()).not.toThrow();
   });
 

@@ -33,19 +33,19 @@ describe("Environment Variable Loading Order", () => {
     }
   });
 
-  it("should throw clear error when USE_CHECKOUT is missing", () => {
+  it("should throw clear error when SMTP_HOST is missing", () => {
     // Mock dotenv.config to do nothing
     const dotenvSpy = vi.spyOn(dotenv, "config").mockImplementation(() => ({ parsed: {} }));
 
-    // Temporarily remove USE_CHECKOUT to test error handling
-    const originalValue = process.env.USE_CHECKOUT;
-    delete process.env.USE_CHECKOUT;
+    // Temporarily remove SMTP_HOST to test error handling
+    const originalValue = process.env.SMTP_HOST;
+    delete process.env.SMTP_HOST;
 
     try {
-      expect(() => validateEnv()).toThrow(/Missing required environment variables:.*USE_CHECKOUT/);
+      expect(() => validateEnv()).toThrow(/Missing required environment variables:.*SMTP_HOST/);
     } finally {
       // Restore the original value and mock
-      process.env.USE_CHECKOUT = originalValue;
+      process.env.SMTP_HOST = originalValue;
       dotenvSpy.mockRestore();
     }
   });
