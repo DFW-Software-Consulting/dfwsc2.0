@@ -392,52 +392,11 @@ Idempotency-Key: <unique-string>
 
 Use a unique key per payment attempt (e.g., a UUID). This prevents duplicate charges if the request is retried.
 
-The behavior depends on the `USE_CHECKOUT` environment variable:
-
----
-
-**PaymentIntent mode (`USE_CHECKOUT=false` — default)**
-
-Use this when you want to embed a payment form in your own frontend using Stripe Elements.
+All payments use a hosted Stripe Checkout page — the user is redirected to Stripe to complete payment.
 
 **Request:**
 ```json
 {
-  "amount": 5000,
-  "currency": "usd",
-  "description": "Invoice #1234",
-  "metadata": {
-    "invoiceId": "1234"
-  }
-}
-```
-
-- `amount` — in cents (e.g., `5000` = $50.00)
-- `currency` — ISO 4217 currency code (e.g., `"usd"`)
-- `description` — optional
-- `metadata` — optional key/value pairs passed to Stripe
-
-**Response `201`:**
-```json
-{
-  "clientSecret": "pi_xxx_secret_yyy",
-  "paymentIntentId": "pi_xxx"
-}
-```
-
-Pass `clientSecret` to `stripe.confirmPayment()` in your frontend.
-
----
-
-**Checkout mode (`USE_CHECKOUT=true`)**
-
-Use this for a hosted Stripe Checkout page — the user is redirected to Stripe to complete payment.
-
-**Request:**
-```json
-{
-  "amount": 5000,
-  "currency": "usd",
   "description": "Invoice #1234",
   "metadata": { "invoiceId": "1234" },
   "lineItems": [
@@ -453,7 +412,10 @@ Use this for a hosted Stripe Checkout page — the user is redirected to Stripe 
 }
 ```
 
-- `lineItems` — required in Checkout mode, must be non-empty
+- `lineItems` — required, must be non-empty. `unit_amount` is in cents (e.g., `5000` = $50.00)
+- `description` — optional
+- `metadata` — optional key/value pairs passed to Stripe
+- `amount` — optional explicit total in cents; required only when line items reference Stripe price IDs instead of `price_data`
 
 **Response `201`:**
 ```json
@@ -466,8 +428,7 @@ Redirect the user to this URL to complete payment. After payment, Stripe redirec
 
 **Common payment errors:**
 - `400` — Missing or empty `Idempotency-Key`
-- `400` — Missing `amount` or `currency` (PaymentIntent mode)
-- `400` — Missing `lineItems` (Checkout mode)
+- `400` — Missing or empty `lineItems`
 - `401` — Missing or invalid API key
 
 ---
@@ -860,8 +821,6 @@ No auth required. Registered without the `/api/v1` prefix. Returns a small JavaS
 window.API_URL = "https://api.example.com";
 ```
 
-> The `USE_CHECKOUT` flag is read only server-side inside the payments handler; it is **not** exposed by any endpoint.
-
 ---
 
 ### Products
@@ -1067,7 +1026,6 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | `STRIPE_SECRET_KEY` | Stripe secret key (`sk_test_...` or `sk_live_...`) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
 | `FRONTEND_ORIGIN` | Comma-separated allowed CORS origins (e.g., `http://localhost:1919`) |
-| `USE_CHECKOUT` | `"true"` or `"false"` — switches payment mode |
 | `SMTP_HOST` | SMTP server hostname |
 | `SMTP_PORT` | SMTP server port number |
 | `SMTP_USER` | SMTP username |

@@ -293,7 +293,6 @@ describe("payments", () => {
   });
 
   it("allows fees that exceed the payment amount (fees handled by DFWSC)", async () => {
-    process.env.USE_CHECKOUT = "true";
     process.env.DEFAULT_PROCESS_FEE_CENTS = "2000";
     stripeMock.checkout.sessions.create.mockResolvedValue({
       url: "https://checkout.stripe.com/c/pay/mock",
@@ -332,7 +331,6 @@ describe("payments", () => {
   });
 
   it("creates a checkout session", async () => {
-    process.env.USE_CHECKOUT = "true";
     process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
     stripeMock.checkout.sessions.create.mockResolvedValue({
       url: "https://checkout.stripe.com/c/pay/mock",
@@ -376,7 +374,6 @@ describe("payments", () => {
     await server.close();
   });
   it("validates checkout payload requirements", async () => {
-    process.env.USE_CHECKOUT = "true";
     const server = await createServer();
 
     const apiKey = "api-key-client_checkout";
@@ -400,14 +397,11 @@ describe("payments", () => {
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({
-      error: "lineItems are required when USE_CHECKOUT=true.",
-    });
+    expect(response.json()).toMatchObject({ error: "lineItems are required." });
     await server.close();
   });
 
   it("uses client paymentSuccessUrl as checkout success_url when set", async () => {
-    process.env.USE_CHECKOUT = "true";
     process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
     stripeMock.checkout.sessions.create.mockResolvedValue({
       url: "https://checkout.stripe.com/c/pay/mock",
@@ -462,7 +456,6 @@ describe("payments", () => {
   });
 
   it("fails when checkout requires a frontend origin but it is not configured", async () => {
-    process.env.USE_CHECKOUT = "true";
     delete process.env.FRONTEND_ORIGIN;
 
     const server = await createServer({ skipEnvValidation: true });
