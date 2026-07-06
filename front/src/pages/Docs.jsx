@@ -6,7 +6,7 @@ const sidebarSections = [
   { id: "how-it-works", label: "How It Works" },
   { id: "quick-start", label: "Quick Start" },
   { id: "step-1", label: "Step 1 — Create a Payment" },
-  { id: "step-2", label: "Step 2 — Show the Payment Form" },
+  { id: "step-2", label: "Step 2 — Redirect to Checkout" },
   { id: "code-examples", label: "Code Examples" },
   { id: "error-handling", label: "Error Handling" },
   { id: "rules", label: "Rules" },
@@ -61,8 +61,16 @@ async function createPayment(amountCents, description) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        amount: amountCents,
-        currency: 'usd',
+        lineItems: [
+          {
+            price_data: {
+              currency: 'usd',
+              product_data: { name: description },
+              unit_amount: amountCents,
+            },
+            quantity: 1,
+          },
+        ],
         description,
       }),
     }
@@ -73,7 +81,7 @@ async function createPayment(amountCents, description) {
     throw new Error(\`Payment error: \${err.error}\`);
   }
 
-  return response.json(); // { clientSecret, paymentIntentId, stripeAccountId }
+  return response.json(); // { url }
 }`;
 
 const PYTHON_CODE = `import requests
@@ -90,13 +98,21 @@ def create_payment(amount_cents: int, description: str) -> dict:
             'Content-Type': 'application/json',
         },
         json={
-            'amount': amount_cents,
-            'currency': 'usd',
+            'lineItems': [
+                {
+                    'price_data': {
+                        'currency': 'usd',
+                        'product_data': {'name': description},
+                        'unit_amount': amount_cents,
+                    },
+                    'quantity': 1,
+                }
+            ],
             'description': description,
         }
     )
     response.raise_for_status()
-    return response.json()  # { 'clientSecret': ..., 'paymentIntentId': ..., 'stripeAccountId': ... }`;
+    return response.json()  # { 'url': ... }`;
 
 const PHP_CODE = `function createPayment(int $amountCents, string $description): array {
     $ch = curl_init(
@@ -111,15 +127,20 @@ const PHP_CODE = `function createPayment(int $amountCents, string $description):
             'Content-Type: application/json',
         ],
         CURLOPT_POSTFIELDS => json_encode([
-            'amount'      => $amountCents,
-            'currency'    => 'usd',
+            'lineItems' => [[
+                'price_data' => [
+                    'currency'     => 'usd',
+                    'product_data' => ['name' => $description],
+                    'unit_amount'  => $amountCents,
+                ],
+                'quantity' => 1,
+            ]],
             'description' => $description,
         ]),
     ]);
     $result = curl_exec($ch);
     curl_close($ch);
-    return json_decode($result, true);
-    // ['clientSecret' => ..., 'paymentIntentId' => ..., 'stripeAccountId' => ...]
+    return json_decode($result, true); // ['url' => ...]
 }`;
 
 const LANG_TABS = [
@@ -159,8 +180,8 @@ export default function Docs() {
           Connect Your App
         </h1>
         <p className="mt-8 max-w-2xl text-xl text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
-          Everything you need to accept payments through the DFWSC platform — from your backend
-          server to your customer-facing checkout form.
+          Everything you need to accept payments through the DFWSC platform — your backend creates
+          the payment and your customer pays on a secure Stripe-hosted checkout page.
         </p>
         <div className="mt-8 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400 transition-colors">
           <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
@@ -259,37 +280,42 @@ export default function Docs() {
             <div className="mt-8 space-y-6">
               {[
                 {
-                  id: "backend-secret",
+                  id: "backend-url",
                   content: (
                     <>
-                      Your backend calls the DFWSC API with the payment amount — it returns a{" "}
+                      Your backend calls the DFWSC API with a{" "}
                       <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
-                        clientSecret
+                        lineItems
+                      </code>{" "}
+                      array — it returns a Stripe-hosted Checkout{" "}
+                      <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
+                        url
                       </code>
                       .
                     </>
                   ),
                 },
                 {
-                  id: "frontend-stripejs",
+                  id: "frontend-redirect",
                   content: (
                     <>
-                      Your frontend uses Stripe.js with that{" "}
+                      You redirect the customer to that{" "}
                       <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
-                        clientSecret
-                      </code>{" "}
-                      to show a payment form.
+                        url
+                      </code>
+                      .
                     </>
                   ),
                 },
                 {
                   id: "customer-submits",
                   content:
-                    "The customer fills in their card and submits — Stripe handles the actual charge.",
+                    "The customer enters their card on Stripe's hosted page — Stripe handles the actual charge.",
                 },
                 {
                   id: "webhook-redirect",
-                  content: "You get a webhook or redirect when the payment succeeds.",
+                  content:
+                    "Stripe sends the customer back to your success or cancel URL when they finish.",
                 },
               ].map((step, i) => (
                 <div key={step.id} className="flex items-start gap-6 group">
@@ -303,7 +329,7 @@ export default function Docs() {
               ))}
             </div>
             <div className="mt-10 p-6 rounded-2xl border border-brand-500/10 bg-brand-500/5 text-brand-600 dark:text-brand-200 font-bold text-center transition-colors">
-              Your customers never leave your site.
+              Stripe hosts the payment page — you never touch card data.
             </div>
           </section>
 
@@ -316,13 +342,13 @@ export default function Docs() {
             </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 transition-colors">
               Run this curl command to confirm your key works. A successful response includes a
-              clientSecret.
+              Stripe Checkout url.
             </p>
             <CodeBlock language="bash">{`curl -X POST https://<your-api-base-url>/api/v1/payments/create \\
   -H "X-Api-Key: <your-api-key>" \\
   -H "Idempotency-Key: test-001" \\
   -H "Content-Type: application/json" \\
-  -d '{ "amount": 100, "currency": "usd" }'`}</CodeBlock>
+  -d '{ "lineItems": [{ "price_data": { "currency": "usd", "product_data": { "name": "Test" }, "unit_amount": 100 }, "quantity": 1 }] }'`}</CodeBlock>
           </section>
 
           {/* Step 1 */}
@@ -397,8 +423,16 @@ export default function Docs() {
               Request Body
             </h3>
             <CodeBlock language="json">{`{
-  "amount": 5000,
-  "currency": "usd",
+  "lineItems": [
+    {
+      "price_data": {
+        "currency": "usd",
+        "product_data": { "name": "Invoice #1234" },
+        "unit_amount": 5000
+      },
+      "quantity": 1
+    }
+  ],
   "description": "Invoice #1234",
   "metadata": {
     "invoiceId": "1234",
@@ -423,10 +457,18 @@ export default function Docs() {
                 </thead>
                 <tbody>
                   {[
-                    ["amount", "Yes", "Amount in cents — 5000 = $50.00"],
-                    ["currency", "Yes", '3-letter currency code, e.g. "usd"'],
+                    [
+                      "lineItems",
+                      "Yes",
+                      "Non-empty array of items to charge — unit_amount is in cents (5000 = $50.00)",
+                    ],
                     ["description", "No", "Shows up in your Stripe dashboard"],
                     ["metadata", "No", "Any key/value pairs you want attached to the payment"],
+                    [
+                      "amount",
+                      "No",
+                      "Explicit total in cents — required only when line items reference Stripe price IDs",
+                    ],
                   ].map(([field, req, desc]) => (
                     <tr
                       key={field}
@@ -455,65 +497,38 @@ export default function Docs() {
             <SectionAnchor id="step-2" />
             <SectionBadge>Frontend</SectionBadge>
             <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
-              Step 2 — Show the Payment Form
+              Step 2 — Redirect to Checkout
             </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
-              Use Stripe.js to collect and submit the card. Stripe handles PCI compliance — you
-              never touch raw card numbers.
+              Send the customer&apos;s browser to the url from Step 1. Stripe hosts the payment form
+              and handles PCI compliance — you never touch raw card numbers.
             </p>
 
             <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
-              Add Stripe.js to your page
+              Response from Step 1
             </h3>
-            <CodeBlock language="html">{`<script src="https://js.stripe.com/v3/"></script>`}</CodeBlock>
+            <CodeBlock language="json">{`{
+  "url": "https://checkout.stripe.com/c/pay/cs_test_..."
+}`}</CodeBlock>
 
             <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
-              Mount the payment form
+              Redirect the customer
             </h3>
-            <div className="space-y-4">
-              <CodeBlock language="javascript">{`// stripeAccountId comes from the /payments/create response (Step 1)
-const stripe = Stripe('<your-stripe-publishable-key>', { stripeAccount: stripeAccountId });
+            <CodeBlock language="javascript">{`// After your backend gets { url } from Step 1:
+window.location.href = url;`}</CodeBlock>
 
-// clientSecret comes from your backend (Step 1)
-const elements = stripe.elements({ clientSecret });
-
-const paymentElement = elements.create('payment');
-paymentElement.mount('#payment-element');`}</CodeBlock>
-              <CodeBlock language="html">{`<form id="payment-form">
-  <div id="payment-element"></div>
-  <button type="submit">Pay Now</button>
-  <div id="error-message"></div>
-</form>`}</CodeBlock>
-            </div>
-
-            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
-              Handle form submission
-            </h3>
-            <CodeBlock language="javascript">{`document.getElementById('payment-form')
-  .addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const { error } = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        return_url: 'https://yoursite.com/payment-complete',
-      },
-    });
-
-    if (error) {
-      document.getElementById('error-message').textContent =
-        error.message;
-    }
-  });`}</CodeBlock>
+            <p className="mt-8 text-base text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
+              The customer completes payment on Stripe&apos;s hosted page and is then sent back to
+              your configured success or cancel URL.
+            </p>
 
             <div className="mt-8 p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] text-sm text-slate-700 dark:text-slate-300 transition-colors shadow-sm">
               <span className="font-bold text-slate-900 dark:text-white uppercase text-[10px] tracking-widest block mb-2 transition-colors">
                 Pro Tip:
               </span>
-              Your <strong>Stripe publishable key</strong> (pk_live_... or pk_test_...) is different
-              from your DFWSC API key. Find it in your Stripe dashboard under Developers &gt; API
-              keys. The <strong>stripeAccountId</strong> returned in the payment response is
-              required to initialize Stripe.js for this direct-charge Elements flow.
+              Ask your DFWSC administrator to configure your{" "}
+              <strong>post-payment redirect URLs</strong> (success and cancel) so customers land
+              back on the right pages of your site after checkout.
             </div>
           </section>
 

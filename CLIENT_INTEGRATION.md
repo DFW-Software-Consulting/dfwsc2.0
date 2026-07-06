@@ -4,11 +4,7 @@ This guide is for developers integrating the DFWSC payment API into their own ap
 
 **Prerequisites:** You have already been onboarded and received your API key. If you haven't, contact your DFWSC administrator.
 
-> **Two payment modes.** The API supports two flows, selected by the `USE_CHECKOUT` server setting:
-> - **Checkout redirect (`USE_CHECKOUT=true`) — the shipped default.** `POST /api/v1/payments/create` requires a `lineItems` array and returns a Stripe-hosted `url`. You redirect the customer to that URL; they complete payment on Stripe and are then sent back to your site. See [How It Works](#how-it-works).
-> - **Elements / PaymentIntents (`USE_CHECKOUT=false`).** The endpoint returns a `clientSecret` and you embed Stripe Elements so customers stay on your site. See [Step 2](#step-2--show-the-payment-form-frontend-elements-mode-only).
->
-> Confirm which mode your DFWSC server runs before integrating — the request body and response differ between them. The current committed configuration ships with `USE_CHECKOUT=true` (Checkout redirect).
+> **One payment flow: Stripe Checkout.** `POST /api/v1/payments/create` requires a `lineItems` array and returns a Stripe-hosted `url`. You redirect the customer to that URL; they complete payment on Stripe and are then sent back to your site. There is no embedded (Stripe Elements) mode.
 
 ---
 
@@ -23,51 +19,26 @@ After onboarding you should have been given:
 
 ## How It Works
 
-**Checkout redirect mode (`USE_CHECKOUT=true`, the shipped default):**
-
 1. Your backend calls the DFWSC API with a `lineItems` array — it returns a Stripe-hosted Checkout `url`
 2. You redirect the customer to that `url`
 3. The customer enters and submits their card on Stripe's hosted page — Stripe handles the actual charge
 4. Stripe redirects the customer back to your success/cancel URL, and you get a webhook when the payment succeeds
 
-In this mode the customer is briefly redirected off your site to Stripe Checkout.
-
-**Elements mode (`USE_CHECKOUT=false`):**
-
-1. Your backend calls the DFWSC API with the payment amount — it returns a `clientSecret`
-2. Your frontend uses Stripe.js with that `clientSecret` to show a payment form to the customer
-3. The customer fills in their card and submits — Stripe handles the actual charge
-4. You get a webhook or redirect when the payment succeeds
-
-In Elements mode your customers never leave your site.
+The customer is briefly redirected off your site to Stripe Checkout — Stripe hosts the payment form, so you never touch card data.
 
 ---
 
 ## Quick Start — Test Your API Key
 
-**If your server runs Checkout redirect mode (`USE_CHECKOUT=true`, the default):**
-
 ```bash
 curl -X POST https://<your-api-base-url>/api/v1/payments/create \
   -H "X-Api-Key: <your-api-key>" \
   -H "Idempotency-Key: test-001" \
   -H "Content-Type: application/json" \
-  -d '{ "lineItems": [{ "name": "Test", "amount": 100, "currency": "usd", "quantity": 1 }] }'
+  -d '{ "lineItems": [{ "price_data": { "currency": "usd", "product_data": { "name": "Test" }, "unit_amount": 100 }, "quantity": 1 }] }'
 ```
 
-If your key is working you'll get back a Stripe Checkout `url`. A `401` means your API key is wrong. Sending only `{ "amount": 100, "currency": "usd" }` in this mode returns `400 "lineItems are required when USE_CHECKOUT=true."`.
-
-**If your server runs Elements mode (`USE_CHECKOUT=false`):**
-
-```bash
-curl -X POST https://<your-api-base-url>/api/v1/payments/create \
-  -H "X-Api-Key: <your-api-key>" \
-  -H "Idempotency-Key: test-001" \
-  -H "Content-Type: application/json" \
-  -d '{ "amount": 100, "currency": "usd" }'
-```
-
-If your key is working you'll get back a `clientSecret`. A `401` means your API key is wrong.
+If your key is working you'll get back a Stripe Checkout `url`. A `401` means your API key is wrong. Sending only `{ "amount": 100, "currency": "usd" }` returns `400 "lineItems are required."`.
 
 ---
 
@@ -93,12 +64,19 @@ Every request needs a unique `Idempotency-Key`. It prevents double-charges if a 
 
 If you accidentally send the same key twice, the second request returns the same result — no duplicate charge.
 
-### Request Body (Checkout redirect mode — `USE_CHECKOUT=true`, the default)
+### Request Body
 
 ```json
 {
   "lineItems": [
-    { "name": "Invoice #1234", "amount": 5000, "currency": "usd", "quantity": 1 }
+    {
+      "price_data": {
+        "currency": "usd",
+        "product_data": { "name": "Invoice #1234" },
+        "unit_amount": 5000
+      },
+      "quantity": 1
+    }
   ],
   "metadata": {
     "invoiceId": "1234",
@@ -109,33 +87,14 @@ If you accidentally send the same key twice, the second request returns the same
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `lineItems` | Yes | Non-empty array of items to charge. A bare `{ "amount", "currency" }` body returns `400 "lineItems are required when USE_CHECKOUT=true."` |
-| `metadata` | No | Any key/value pairs you want attached to the payment |
-
-Amounts inside line items are in **cents** (`5000` = $50.00).
-
-### Request Body (Elements mode — `USE_CHECKOUT=false`)
-
-```json
-{
-  "amount": 5000,
-  "currency": "usd",
-  "description": "Invoice #1234",
-  "metadata": {
-    "invoiceId": "1234",
-    "customerName": "Jane Smith"
-  }
-}
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `amount` | Yes | Amount in **cents** — `5000` = $50.00 |
-| `currency` | Yes | 3-letter currency code, e.g. `"usd"` |
+| `lineItems` | Yes | Non-empty array of items to charge, in Stripe Checkout `price_data` form. A bare `{ "amount", "currency" }` body returns `400 "lineItems are required."` |
 | `description` | No | Shows up in your Stripe dashboard |
 | `metadata` | No | Any key/value pairs you want attached to the payment |
+| `amount` | Only with price IDs | Explicit total in cents; required only when a line item references a Stripe price ID (`"price": "price_..."`) instead of `price_data` |
 
-### Response (Checkout redirect mode — `USE_CHECKOUT=true`)
+Amounts inside line items (`unit_amount`) are in **cents** (`5000` = $50.00).
+
+### Response
 
 ```json
 {
@@ -143,82 +102,24 @@ Amounts inside line items are in **cents** (`5000` = $50.00).
 }
 ```
 
-Redirect the customer to `url`. They complete payment on Stripe's hosted page and are returned to your success/cancel URL. There is no `clientSecret` in this mode — skip Step 2 (Elements) entirely.
-
-### Response (Elements mode — `USE_CHECKOUT=false`)
-
-```json
-{
-  "clientSecret": "pi_3OxyzABC_secret_def456",
-  "paymentIntentId": "pi_3OxyzABC"
-}
-```
-
-Pass the `clientSecret` to your frontend — do not log or store it. Continue with Step 2.
+Redirect the customer to `url`. They complete payment on Stripe's hosted page and are returned to your success/cancel URL.
 
 ---
 
-## Step 2 — Show the Payment Form (Frontend, Elements mode only)
+## Step 2 — Redirect the Customer (Frontend)
 
-> This step applies only in Elements mode (`USE_CHECKOUT=false`). In the shipped Checkout redirect mode you redirect the customer to the `url` from Step 1 instead — Stripe hosts the payment form.
-
-Use Stripe.js to collect and submit the card. Stripe handles PCI compliance — you never touch raw card numbers.
-
-### Add Stripe.js to your page
-
-```html
-<script src="https://js.stripe.com/v3/"></script>
-```
-
-### Mount the payment form
+Send the customer's browser to the `url` from Step 1 — Stripe hosts the payment form:
 
 ```javascript
-const stripe = Stripe('<your-stripe-publishable-key>');
-
-// clientSecret comes from your backend (Step 1)
-const elements = stripe.elements({ clientSecret });
-
-const paymentElement = elements.create('payment');
-paymentElement.mount('#payment-element'); // mounts inside this div
+// After your backend gets { url } from Step 1:
+window.location.href = url;
 ```
 
-```html
-<form id="payment-form">
-  <div id="payment-element"></div>
-  <button type="submit">Pay Now</button>
-  <div id="error-message"></div>
-</form>
-```
-
-### Handle the form submission
-
-```javascript
-document.getElementById('payment-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  const { error } = await stripe.confirmPayment({
-    elements,
-    confirmParams: {
-      return_url: 'https://yoursite.com/payment-complete',
-    },
-  });
-
-  if (error) {
-    document.getElementById('error-message').textContent = error.message;
-  }
-  // On success, Stripe redirects to return_url automatically
-});
-```
-
-After successful payment, Stripe redirects the customer to your `return_url` with the payment status in the query string.
-
-> Your **Stripe publishable key** (`pk_live_...` or `pk_test_...`) is different from your DFWSC API key. Find it in your Stripe dashboard under Developers > API keys.
+After payment, Stripe redirects the customer to your configured success URL (or the DFWSC default `/payment-success` page). Ask your DFWSC administrator to set your post-payment redirect URLs if you haven't already.
 
 ---
 
 ## Code Examples (Backend)
-
-> The examples below show the Elements-mode contract (`USE_CHECKOUT=false`): they send `{ amount, currency }` and read back `{ clientSecret, paymentIntentId }`. For the shipped Checkout redirect mode (`USE_CHECKOUT=true`), send a `lineItems` array instead and read the returned `url` (see Step 1).
 
 ### Node.js
 
@@ -234,8 +135,16 @@ async function createPayment(amountCents, description) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      amount: amountCents,
-      currency: 'usd',
+      lineItems: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: { name: description },
+            unit_amount: amountCents,
+          },
+          quantity: 1,
+        },
+      ],
       description,
     }),
   });
@@ -245,7 +154,7 @@ async function createPayment(amountCents, description) {
     throw new Error(`Payment error: ${err.error}`);
   }
 
-  return response.json(); // { clientSecret, paymentIntentId }
+  return response.json(); // { url }
 }
 ```
 
@@ -266,13 +175,21 @@ def create_payment(amount_cents: int, description: str) -> dict:
             'Content-Type': 'application/json',
         },
         json={
-            'amount': amount_cents,
-            'currency': 'usd',
+            'lineItems': [
+                {
+                    'price_data': {
+                        'currency': 'usd',
+                        'product_data': {'name': description},
+                        'unit_amount': amount_cents,
+                    },
+                    'quantity': 1,
+                }
+            ],
             'description': description,
         }
     )
     response.raise_for_status()
-    return response.json()  # { 'clientSecret': ..., 'paymentIntentId': ... }
+    return response.json()  # { 'url': ... }
 ```
 
 ### PHP
@@ -289,14 +206,20 @@ function createPayment(int $amountCents, string $description): array {
             'Content-Type: application/json',
         ],
         CURLOPT_POSTFIELDS => json_encode([
-            'amount'      => $amountCents,
-            'currency'    => 'usd',
+            'lineItems' => [[
+                'price_data' => [
+                    'currency'     => 'usd',
+                    'product_data' => ['name' => $description],
+                    'unit_amount'  => $amountCents,
+                ],
+                'quantity' => 1,
+            ]],
             'description' => $description,
         ]),
     ]);
     $result = curl_exec($ch);
     curl_close($ch);
-    return json_decode($result, true); // ['clientSecret' => ..., 'paymentIntentId' => ...]
+    return json_decode($result, true); // ['url' => ...]
 }
 ```
 

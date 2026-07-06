@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useInitiateOnboarding } from "../hooks/useOnboarding";
 import logger from "../utils/logger";
 
 export default function OnboardClient() {
-  const [token, setToken] = useState("");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [token, setToken] = useState(() => {
+    const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+    return hashParams.get("token") || "";
+  });
   const [message, setMessage] = useState("");
   const { mutate, isPending } = useInitiateOnboarding();
 
   useEffect(() => {
     document.title = "Client Stripe Onboarding";
-    const urlParams = new URLSearchParams(window.location.search);
-    const tokenFromUrl = urlParams.get("token");
-    if (tokenFromUrl) setToken(tokenFromUrl);
-  }, []);
+    if (location.search || location.hash) {
+      navigate(location.pathname, { replace: true });
+    }
+  }, [location.hash, location.pathname, location.search, navigate]);
 
   const handleSubmit = useCallback(() => {
     if (!token) {
@@ -98,6 +104,7 @@ export default function OnboardClient() {
 
           {message && (
             <p
+              role={isError ? "alert" : undefined}
               className={`mt-4 text-center text-sm font-medium ${isError ? "text-red-500 dark:text-red-400" : "text-brand-600 dark:text-brand-400"} transition-colors`}
             >
               {message}

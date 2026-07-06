@@ -307,9 +307,10 @@ describe("Onboard Resend + Connect Refresh", () => {
     // Helper: seed a fresh client + token pair; tracks clientId for cleanup
     async function seedRefreshPair(
       tokenStatus: "pending" | "in_progress" | "revoked" | "completed"
-    ): Promise<{ clientId: string; tokenValue: string }> {
+    ): Promise<{ clientId: string; tokenValue: string; state: string }> {
       const cId = randomUUID();
       const tValue = randomBytes(32).toString("hex");
+      const state = randomBytes(32).toString("hex");
 
       await db.insert(clients).values({
         id: cId,
@@ -323,14 +324,16 @@ describe("Onboard Resend + Connect Refresh", () => {
         token: hashOnboardingToken(tValue),
         status: tokenStatus,
         email: `refresh-${cId}@example.com`,
+        state,
+        stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
       });
 
       extraClientIds.push(cId);
-      return { clientId: cId, tokenValue: tValue };
+      return { clientId: cId, tokenValue: tValue, state };
     }
 
     it("returns 302 redirect to Stripe account link for valid pending token", async () => {
-      const { tokenValue } = await seedRefreshPair("pending");
+      const { clientId, state } = await seedRefreshPair("pending");
 
       (stripe.accounts.create as any).mockResolvedValueOnce({ id: "acct_test_refresh" });
       (stripe.accountLinks.create as any).mockResolvedValueOnce({
@@ -339,7 +342,7 @@ describe("Onboard Resend + Connect Refresh", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+        url: `/api/v1/connect/refresh?client_id=${clientId}&state=${state}`,
       });
 
       expect(response.statusCode).toBe(302);
@@ -347,7 +350,7 @@ describe("Onboard Resend + Connect Refresh", () => {
     });
 
     it("returns 302 redirect for in_progress token", async () => {
-      const { tokenValue } = await seedRefreshPair("in_progress");
+      const { clientId, state } = await seedRefreshPair("in_progress");
 
       (stripe.accounts.create as any).mockResolvedValueOnce({ id: "acct_test_inprogress" });
       (stripe.accountLinks.create as any).mockResolvedValueOnce({
@@ -356,7 +359,7 @@ describe("Onboard Resend + Connect Refresh", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+        url: `/api/v1/connect/refresh?client_id=${clientId}&state=${state}`,
       });
 
       expect(response.statusCode).toBe(302);
@@ -364,7 +367,7 @@ describe("Onboard Resend + Connect Refresh", () => {
     });
 
     it("updates token status to in_progress after redirect", async () => {
-      const { clientId, tokenValue } = await seedRefreshPair("pending");
+      const { clientId, state } = await seedRefreshPair("pending");
 
       (stripe.accounts.create as any).mockResolvedValueOnce({ id: "acct_test_statuscheck" });
       (stripe.accountLinks.create as any).mockResolvedValueOnce({
@@ -373,7 +376,7 @@ describe("Onboard Resend + Connect Refresh", () => {
 
       await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+        url: `/api/v1/connect/refresh?client_id=${clientId}&state=${state}`,
       });
 
       const [updatedToken] = await db
@@ -385,34 +388,32 @@ describe("Onboard Resend + Connect Refresh", () => {
       expect(updatedToken.status).toBe("in_progress");
     });
 
-    it("returns 404 when token does not exist", async () => {
-      const fakeToken = randomBytes(32).toString("hex");
-
+    it("returns 404 when state does not exist", async () => {
       const response = await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${fakeToken}`,
+        url: `/api/v1/connect/refresh?client_id=${randomUUID()}&state=${randomBytes(32).toString("hex")}`,
       });
 
       expect(response.statusCode).toBe(404);
     });
 
     it("returns 404 when token is revoked", async () => {
-      const { tokenValue } = await seedRefreshPair("revoked");
+      const { clientId, state } = await seedRefreshPair("revoked");
 
       const response = await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+        url: `/api/v1/connect/refresh?client_id=${clientId}&state=${state}`,
       });
 
       expect(response.statusCode).toBe(404);
     });
 
     it("returns 404 when token is completed", async () => {
-      const { tokenValue } = await seedRefreshPair("completed");
+      const { clientId, state } = await seedRefreshPair("completed");
 
       const response = await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+        url: `/api/v1/connect/refresh?client_id=${clientId}&state=${state}`,
       });
 
       expect(response.statusCode).toBe(404);
@@ -421,6 +422,7 @@ describe("Onboard Resend + Connect Refresh", () => {
     it("returns 404 when the onboarding token has exceeded its TTL", async () => {
       const cId = randomUUID();
       const tValue = randomBytes(32).toString("hex");
+      const state = randomBytes(32).toString("hex");
 
       await db.insert(clients).values({
         id: cId,
@@ -436,12 +438,14 @@ describe("Onboard Resend + Connect Refresh", () => {
         status: "pending",
         email: `expired-${cId}@example.com`,
         createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+        state,
+        stateExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
       });
       extraClientIds.push(cId);
 
       const response = await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${tValue}`,
+        url: `/api/v1/connect/refresh?client_id=${cId}&state=${state}`,
       });
 
       expect(response.statusCode).toBe(404);
@@ -449,7 +453,7 @@ describe("Onboard Resend + Connect Refresh", () => {
     });
 
     it("mints a fresh idempotency key on each refresh attempt for the same token", async () => {
-      const { clientId, tokenValue } = await seedRefreshPair("pending");
+      const { clientId, state } = await seedRefreshPair("pending");
 
       (stripe.accounts.create as any).mockResolvedValue({ id: "acct_test_freshkey" });
       (stripe.accountLinks.create as any).mockResolvedValue({
@@ -458,12 +462,18 @@ describe("Onboard Resend + Connect Refresh", () => {
 
       await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+        url: `/api/v1/connect/refresh?client_id=${clientId}&state=${state}`,
       });
+
+      const [updatedToken] = await db
+        .select()
+        .from(onboardingTokens)
+        .where(eq(onboardingTokens.clientId, clientId))
+        .limit(1);
 
       await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+        url: `/api/v1/connect/refresh?client_id=${clientId}&state=${updatedToken.state}`,
       });
 
       const calls = (stripe.accountLinks.create as any).mock.calls;
@@ -478,7 +488,7 @@ describe("Onboard Resend + Connect Refresh", () => {
     });
 
     it("returns 502 when stripe.accountLinks.create throws", async () => {
-      const { tokenValue } = await seedRefreshPair("pending");
+      const { clientId, state } = await seedRefreshPair("pending");
 
       (stripe.accounts.create as any).mockResolvedValueOnce({ id: "acct_test_502" });
       (stripe.accountLinks.create as any).mockRejectedValueOnce(
@@ -487,7 +497,7 @@ describe("Onboard Resend + Connect Refresh", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: `/api/v1/connect/refresh?token=${tokenValue}`,
+        url: `/api/v1/connect/refresh?client_id=${clientId}&state=${state}`,
       });
 
       expect(response.statusCode).toBe(502);

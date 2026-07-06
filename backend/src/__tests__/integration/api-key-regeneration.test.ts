@@ -171,6 +171,47 @@ describe("API Key Regeneration Routes", () => {
       );
     });
 
+    it("returns 502 when the regeneration email cannot be sent", async () => {
+      const token = makeAdminToken();
+      (sendMail as any).mockRejectedValueOnce(new Error("smtp down"));
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/api-key/regenerate-request/admin",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { clientId },
+      });
+
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toMatchObject({
+        error: "Failed to send regeneration email. Please try again.",
+        code: "EMAIL_DELIVERY_FAILED",
+      });
+      expect(sendMail).toHaveBeenCalledTimes(1);
+
+      const pendingTokens = await db
+        .select()
+        .from(apiKeyRegenerationTokens)
+        .where(
+          and(
+            eq(apiKeyRegenerationTokens.clientId, clientId),
+            eq(apiKeyRegenerationTokens.status, "pending")
+          )
+        );
+      expect(pendingTokens).toHaveLength(0);
+
+      const revokedTokens = await db
+        .select()
+        .from(apiKeyRegenerationTokens)
+        .where(
+          and(
+            eq(apiKeyRegenerationTokens.clientId, clientId),
+            eq(apiKeyRegenerationTokens.status, "revoked")
+          )
+        );
+      expect(revokedTokens).toHaveLength(1);
+    });
+
     it("returns 404 for non-existent clientId", async () => {
       const token = makeAdminToken();
 
@@ -224,7 +265,7 @@ describe("API Key Regeneration Routes", () => {
     });
   });
 
-  describe("GET /api/v1/api-key/regenerate", () => {
+  describe("POST /api/v1/api-key/regenerate", () => {
     async function seedRegenToken(
       status: "pending" | "completed" | "revoked",
       opts?: { expired?: boolean }
@@ -244,13 +285,18 @@ describe("API Key Regeneration Routes", () => {
       return rawToken;
     }
 
+    const redeemToken = (token?: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/v1/api-key/regenerate",
+        headers: { "content-type": "application/json" },
+        ...(token ? { payload: { token } } : {}),
+      });
+
     it("returns 200 with new apiKey for a valid token", async () => {
       const rawToken = await seedRegenToken("pending");
 
-      const response = await app.inject({
-        method: "GET",
-        url: `/api/v1/api-key/regenerate?token=${rawToken}`,
-      });
+      const response = await redeemToken(rawToken);
 
       expect(response.statusCode).toBe(200);
       expect(response.json().apiKey).toBeDefined();
@@ -258,10 +304,7 @@ describe("API Key Regeneration Routes", () => {
     });
 
     it("returns 400 for missing token", async () => {
-      const response = await app.inject({
-        method: "GET",
-        url: "/api/v1/api-key/regenerate",
-      });
+      const response = await redeemToken();
 
       expect(response.statusCode).toBe(400);
     });
@@ -269,10 +312,7 @@ describe("API Key Regeneration Routes", () => {
     it("returns 404 for invalid token", async () => {
       const fakeToken = crypto.randomBytes(32).toString("hex");
 
-      const response = await app.inject({
-        method: "GET",
-        url: `/api/v1/api-key/regenerate?token=${fakeToken}`,
-      });
+      const response = await redeemToken(fakeToken);
 
       expect(response.statusCode).toBe(404);
     });
@@ -280,10 +320,7 @@ describe("API Key Regeneration Routes", () => {
     it("returns 400 for expired token", async () => {
       const rawToken = await seedRegenToken("pending", { expired: true });
 
-      const response = await app.inject({
-        method: "GET",
-        url: `/api/v1/api-key/regenerate?token=${rawToken}`,
-      });
+      const response = await redeemToken(rawToken);
 
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/expired/i);
@@ -292,10 +329,7 @@ describe("API Key Regeneration Routes", () => {
     it("returns 400 for already-used token (completed)", async () => {
       const rawToken = await seedRegenToken("completed");
 
-      const response = await app.inject({
-        method: "GET",
-        url: `/api/v1/api-key/regenerate?token=${rawToken}`,
-      });
+      const response = await redeemToken(rawToken);
 
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/already been used/i);
@@ -304,10 +338,7 @@ describe("API Key Regeneration Routes", () => {
     it("returns 400 for revoked token", async () => {
       const rawToken = await seedRegenToken("revoked");
 
-      const response = await app.inject({
-        method: "GET",
-        url: `/api/v1/api-key/regenerate?token=${rawToken}`,
-      });
+      const response = await redeemToken(rawToken);
 
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/invalidated/i);
@@ -319,10 +350,7 @@ describe("API Key Regeneration Routes", () => {
       const clientBefore = await db.select().from(clients).where(eq(clients.id, clientId)).limit(1);
       const oldHash = clientBefore[0].apiKeyHash;
 
-      const response = await app.inject({
-        method: "GET",
-        url: `/api/v1/api-key/regenerate?token=${rawToken}`,
-      });
+      const response = await redeemToken(rawToken);
 
       expect(response.statusCode).toBe(200);
 
@@ -334,10 +362,7 @@ describe("API Key Regeneration Routes", () => {
     it("marks the token as completed after use", async () => {
       const rawToken = await seedRegenToken("pending");
 
-      await app.inject({
-        method: "GET",
-        url: `/api/v1/api-key/regenerate?token=${rawToken}`,
-      });
+      await redeemToken(rawToken);
 
       const tokenHash = hashToken(rawToken);
       const tokens = await db
@@ -352,16 +377,10 @@ describe("API Key Regeneration Routes", () => {
     it("cannot be used twice", async () => {
       const rawToken = await seedRegenToken("pending");
 
-      const first = await app.inject({
-        method: "GET",
-        url: `/api/v1/api-key/regenerate?token=${rawToken}`,
-      });
+      const first = await redeemToken(rawToken);
       expect(first.statusCode).toBe(200);
 
-      const second = await app.inject({
-        method: "GET",
-        url: `/api/v1/api-key/regenerate?token=${rawToken}`,
-      });
+      const second = await redeemToken(rawToken);
       expect(second.statusCode).toBe(400);
     });
   });

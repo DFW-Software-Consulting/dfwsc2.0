@@ -12,6 +12,8 @@ async function start() {
   const { runMigrations } = await import("./lib/migrate");
   const { bootstrapAdminIfNeeded } = await import("./lib/bootstrap");
   const { verifyDatabaseSchema } = await import("./lib/schema-check");
+  const { pruneProcessedWebhookEvents } = await import("./lib/webhook-retention");
+  const { WEBHOOK_PRUNE_INTERVAL_MS } = await import("./lib/constants");
   const { pool } = await import("./db/client");
 
   const server = await buildServer();
@@ -22,6 +24,23 @@ async function start() {
     }
     await verifyDatabaseSchema();
     await bootstrapAdminIfNeeded(server);
+
+    // Prune processed webhook_events past their retention window: once at
+    // boot, then on a recurring sweep. Failures here are logged, not fatal —
+    // this is maintenance, not a request-serving dependency.
+    const runWebhookPrune = async () => {
+      try {
+        const deleted = await pruneProcessedWebhookEvents();
+        if (deleted > 0) {
+          server.log.info({ deleted }, "Pruned processed webhook_events past retention window.");
+        }
+      } catch (err) {
+        server.log.error({ err }, "Failed to prune processed webhook_events.");
+      }
+    };
+    await runWebhookPrune();
+    setInterval(runWebhookPrune, WEBHOOK_PRUNE_INTERVAL_MS).unref();
+
     await server.listen({
       port: Number(process.env.PORT) || 4242,
       host: process.env.HOST || "0.0.0.0",
