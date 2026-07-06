@@ -34,7 +34,6 @@ All services can be deployed independently on Coolify while sharing the same mon
   DATABASE_URL=<postgres-connection-url>
   FRONTEND_ORIGIN=https://your-frontend-domain.com
   JWT_SECRET=your_jwt_secret_minimum_32_chars
-  USE_CHECKOUT=true
   DEFAULT_PROCESS_FEE_CENTS=100
   SMTP_HOST=your_smtp_host
   SMTP_PORT=your_smtp_port

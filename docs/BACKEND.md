@@ -20,9 +20,7 @@ The payment route also accepts Admin JWT as a fallback (for admin-initiated paym
 ## 3. Core Flows
 
 ### Payment Flow
-The `USE_CHECKOUT` environment variable toggles between two modes:
-- **`USE_CHECKOUT=true`**: Creates a **Checkout Session** and returns a redirect URL.
-- **`USE_CHECKOUT=false`**: Creates a **PaymentIntent** and returns `clientSecret`, `paymentIntentId`, and `stripeAccountId` for Stripe Elements. Integrators must initialize Stripe.js with `{ stripeAccount: stripeAccountId }` for this direct-charge flow.
+`POST /api/v1/payments/create` always creates a **Stripe Checkout Session** from the required `lineItems` array and returns a `url` for browser redirect to the Stripe-hosted checkout page. (The former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.)
 
 All payments resolve `application_fee_amount` via a 6-level priority chain:
 1. Client `processingFeePercent`
