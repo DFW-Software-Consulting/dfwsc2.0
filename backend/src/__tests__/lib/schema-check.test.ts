@@ -76,6 +76,10 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "value" },
             // client_groups columns
             { column_name: "name" },
+            // api_key_regeneration_tokens columns
+            { column_name: "client_id" },
+            { column_name: "token" },
+            { column_name: "status" },
           ],
         };
       }
@@ -84,7 +88,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(6);
+    expect(mockDb.execute).toHaveBeenCalledTimes(7);
   });
 
   it("throws when a table is missing required columns", async () => {
@@ -197,5 +201,169 @@ describe("verifyDatabaseSchema", () => {
     await expect(verifyDatabaseSchema()).rejects.toThrow(
       /Database schema incomplete for table "clients"/
     );
+  });
+
+  it("throws when api_key_regeneration_tokens table is missing required columns", async () => {
+    // clients, webhook_events, onboarding_tokens, admins, settings, client_groups all complete;
+    // api_key_regeneration_tokens (added by migration 0022) is missing 'token' and 'status'.
+    mockDb.execute
+      .mockResolvedValueOnce({
+        rows: [
+          { column_name: "id" },
+          { column_name: "name" },
+          { column_name: "email" },
+          { column_name: "api_key_hash" },
+          { column_name: "api_key_lookup" },
+          { column_name: "stripe_account_id" },
+          { column_name: "stripe_customer_id" },
+          { column_name: "status" },
+          { column_name: "charges_enabled" },
+          { column_name: "payouts_enabled" },
+          { column_name: "details_submitted" },
+          { column_name: "workspace" },
+          { column_name: "group_id" },
+          { column_name: "created_at" },
+          { column_name: "updated_at" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { column_name: "id" },
+          { column_name: "stripe_event_id" },
+          { column_name: "type" },
+          { column_name: "processed_at" },
+          { column_name: "created_at" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { column_name: "id" },
+          { column_name: "client_id" },
+          { column_name: "token" },
+          { column_name: "status" },
+          { column_name: "email" },
+          { column_name: "created_at" },
+          { column_name: "updated_at" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { column_name: "id" },
+          { column_name: "username" },
+          { column_name: "password_hash" },
+          { column_name: "role" },
+          { column_name: "active" },
+          { column_name: "setup_confirmed" },
+          { column_name: "last_login_at" },
+          { column_name: "created_at" },
+          { column_name: "updated_at" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [{ column_name: "key" }, { column_name: "value" }, { column_name: "updated_at" }],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { column_name: "id" },
+          { column_name: "workspace" },
+          { column_name: "name" },
+          { column_name: "status" },
+          { column_name: "created_at" },
+          { column_name: "updated_at" },
+        ],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { column_name: "id" },
+          { column_name: "client_id" },
+          { column_name: "email" },
+          { column_name: "created_at" },
+          { column_name: "updated_at" },
+        ],
+      });
+
+    await expect(verifyDatabaseSchema()).rejects.toThrow(
+      /Database schema incomplete for table "api_key_regeneration_tokens"/
+    );
+    await expect(
+      (async () => {
+        mockDb.execute
+          .mockResolvedValueOnce({
+            rows: [
+              { column_name: "id" },
+              { column_name: "name" },
+              { column_name: "email" },
+              { column_name: "api_key_hash" },
+              { column_name: "api_key_lookup" },
+              { column_name: "stripe_account_id" },
+              { column_name: "stripe_customer_id" },
+              { column_name: "status" },
+              { column_name: "charges_enabled" },
+              { column_name: "payouts_enabled" },
+              { column_name: "details_submitted" },
+              { column_name: "workspace" },
+              { column_name: "group_id" },
+              { column_name: "created_at" },
+              { column_name: "updated_at" },
+            ],
+          })
+          .mockResolvedValueOnce({
+            rows: [
+              { column_name: "id" },
+              { column_name: "stripe_event_id" },
+              { column_name: "type" },
+              { column_name: "processed_at" },
+              { column_name: "created_at" },
+            ],
+          })
+          .mockResolvedValueOnce({
+            rows: [
+              { column_name: "id" },
+              { column_name: "client_id" },
+              { column_name: "token" },
+              { column_name: "status" },
+              { column_name: "email" },
+              { column_name: "created_at" },
+              { column_name: "updated_at" },
+            ],
+          })
+          .mockResolvedValueOnce({
+            rows: [
+              { column_name: "id" },
+              { column_name: "username" },
+              { column_name: "password_hash" },
+              { column_name: "role" },
+              { column_name: "active" },
+              { column_name: "setup_confirmed" },
+              { column_name: "last_login_at" },
+              { column_name: "created_at" },
+              { column_name: "updated_at" },
+            ],
+          })
+          .mockResolvedValueOnce({
+            rows: [{ column_name: "key" }, { column_name: "value" }, { column_name: "updated_at" }],
+          })
+          .mockResolvedValueOnce({
+            rows: [
+              { column_name: "id" },
+              { column_name: "workspace" },
+              { column_name: "name" },
+              { column_name: "status" },
+              { column_name: "created_at" },
+              { column_name: "updated_at" },
+            ],
+          })
+          .mockResolvedValueOnce({
+            rows: [
+              { column_name: "id" },
+              { column_name: "client_id" },
+              { column_name: "email" },
+              { column_name: "created_at" },
+              { column_name: "updated_at" },
+            ],
+          });
+        await verifyDatabaseSchema();
+      })()
+    ).rejects.toThrow(/Missing columns: token, status/);
   });
 });

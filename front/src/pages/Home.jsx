@@ -32,7 +32,6 @@ export default function Home() {
         className="mt-16"
         message="🔧 Need specialized skills mid-project? Tap into our on-demand engineers to keep your roadmap moving."
       />
-      {/* <CaseStudies /> */}
       <Values />
       <Banner
         className="mt-16 mb-16"

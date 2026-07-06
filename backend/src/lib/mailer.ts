@@ -1,5 +1,10 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { isCircuitOpenError, withSmtpCircuit } from "./circuit-breakers";
+import {
+  SMTP_CONNECTION_TIMEOUT_MS,
+  SMTP_GREETING_TIMEOUT_MS,
+  SMTP_SOCKET_TIMEOUT_MS,
+} from "./constants";
 
 type MailPayload = {
   to: string;
@@ -35,6 +40,9 @@ export function createTransport(): Transporter {
       user,
       pass,
     },
+    connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
+    greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+    socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
   });
 }
 

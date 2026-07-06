@@ -80,11 +80,11 @@ const groupPatchBodySchema = z
     }
     if (
       body.processingFeePercent != null &&
-      (body.processingFeePercent <= 0 || body.processingFeePercent > 100)
+      (body.processingFeePercent <= 0 || body.processingFeePercent > MAX_FEE_PERCENT)
     ) {
       ctx.addIssue({
         code: "custom",
-        message: "processingFeePercent must be greater than 0 and at most 100.",
+        message: `processingFeePercent must be greater than 0 and at most ${MAX_FEE_PERCENT}.`,
         path: ["processingFeePercent"],
       });
     }

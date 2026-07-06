@@ -16,7 +16,6 @@ export function AuthProvider({ children, initialToken }) {
   const isLoggedIn = !!token;
 
   const login = useCallback((newToken, pending = false) => {
-    sessionStorage.removeItem("adminToken");
     setToken(newToken);
     setBootstrapPending(pending);
     if (pending) {
@@ -32,7 +31,6 @@ export function AuthProvider({ children, initialToken }) {
   }, []);
 
   const logout = useCallback(() => {
-    sessionStorage.removeItem("adminToken");
     sessionStorage.removeItem("adminBootstrapPending");
     setToken(null);
     setBootstrapPending(false);

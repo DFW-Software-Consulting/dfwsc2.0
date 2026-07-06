@@ -30,6 +30,7 @@ vi.mock("../../lib/stripe", () => ({
 describe("resolveClientFee", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearSettingsCache();
     delete process.env.DEFAULT_PROCESS_FEE_CENTS;
   });
 
@@ -153,6 +154,28 @@ describe("resolveClientFee", () => {
     await expect(resolveClientFee(client, null, 1000)).rejects.toThrow(
       "client processingFeePercent must be between 0 and 100."
     );
+  });
+
+  it("falls back to the cached settings default when client and group have no fee", async () => {
+    const client = {
+      id: "client_1",
+      processingFeePercent: null,
+      processingFeeCents: null,
+    } as any;
+
+    const mockSelect = vi.fn().mockReturnValue({
+      from: vi.fn().mockResolvedValue([{ key: "default_fee_cents", value: "250" }]),
+    });
+    (db.select as any) = mockSelect;
+
+    const first = await resolveClientFee(client, null);
+    const second = await resolveClientFee(client, null);
+
+    expect(first).toBe(250);
+    expect(second).toBe(250);
+    // getSettings() has a 30s TTL cache, so the payment hot path should hit
+    // the DB once, not once per resolveClientFee call.
+    expect(mockSelect).toHaveBeenCalledTimes(1);
   });
 });
 

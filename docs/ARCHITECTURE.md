@@ -47,8 +47,8 @@ sequenceDiagram
 
     Admin->>A: POST /api/v1/onboard-client/initiate
     A->>DB: Create client + onboarding token (pending)
-    A->>C: Send email with /onboard?token=...
-    C->>A: GET /api/v1/onboard-client?token=...
+    A->>C: Send email with /onboard#token=...
+    C->>A: POST /api/v1/onboard-client { token }
     A->>S: Create Express Account + Account Link
     S-->>C: Redirect to Stripe Onboarding
     C->>S: Completes Onboarding

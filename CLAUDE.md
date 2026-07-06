@@ -54,8 +54,8 @@ For full details, see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 - **Admin routes**: JWT Bearer token obtained from `POST /api/v1/auth/login`.
 
 ### Payment flow
-`USE_CHECKOUT=true` uses Stripe Checkout redirects; `false` uses Stripe Elements with PaymentIntents. Both support `application_fee_amount`.
+All payments use Stripe Checkout redirects (`POST /payments/create` requires `lineItems` and returns a hosted `url`), with `application_fee_amount` support. The former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.
 
 ### Environment variables
-Required: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `FRONTEND_ORIGIN`, `USE_CHECKOUT`, `DATABASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `JWT_SECRET`.
+Required: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `FRONTEND_ORIGIN`, `DATABASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `JWT_SECRET`.
 

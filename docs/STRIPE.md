@@ -9,27 +9,20 @@ The platform uses **Stripe Connect** with **Express Accounts**.
 
 ## 2. Onboarding Flow
 1. **Initiate**: Admin calls `POST /api/v1/onboard-client/initiate` (or `POST /api/v1/accounts`). Creates a client record + `pending` onboarding token. `/accounts` returns the plaintext `apiKey` to the admin; `/onboard-client/initiate` does **not** — it delivers the API key via an emailed link instead.
-2. **Email**: Client receives an email containing two links: `/onboard?token=...` (Stripe onboarding) and `/regenerate-key?token=...` (reveals the API key once, expires in 15 minutes).
-3. **Account Link**: `GET /api/v1/onboard-client?token=...` creates a Stripe Express Account (if not yet created) and returns an Account Link URL. Token moves to `in_progress`.
+2. **Email**: Client receives an email containing two links: `/onboard#token=...` (Stripe onboarding) and `/regenerate-key#token=...` (reveals the API key once, expires in 15 minutes).
+3. **Account Link**: `POST /api/v1/onboard-client` with body `{ "token": "..." }` creates a Stripe Express Account (if not yet created) and returns an Account Link URL. Token moves to `in_progress`.
 4. **Stripe Redirect**: Client completes onboarding on Stripe-hosted pages.
 5. **Callback**: Stripe redirects to the platform-registered return URL, `GET /api/v1/connect/callback?client_id=...&state=...` — Stripe does **not** append `account`. `state` is CSRF-validated (32-byte, 30-min expiry) and is the actual security binding; the client's `stripeAccountId` is looked up from the DB (source of truth). An `account` query param is accepted only as an optional legacy/manual cross-check when present. Token is marked `completed`. Browser is redirected to `/onboarding-success`.
-6. **Refresh**: If the account link expires before the client completes it, `GET /api/v1/connect/refresh?token=...` generates a new link and redirects.
+6. **Refresh**: If the account link expires before the client completes it, `GET /api/v1/connect/refresh?client_id=...&state=...` generates a new link and redirects.
 7. **Resend**: `POST /api/v1/onboard-client/resend` revokes all active tokens for the client and issues a new one with a fresh email.
 
-## 3. Payment Strategy (`USE_CHECKOUT`)
-Controlled by the `USE_CHECKOUT` environment variable.
+## 3. Payment Strategy (Stripe Checkout)
+All payments go through **Stripe Checkout** — the former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.
 
-### Stripe Elements (`USE_CHECKOUT=false`)
-- Creates a **PaymentIntent** on behalf of the client's Express Account.
-- Returns `clientSecret`, `paymentIntentId`, and `stripeAccountId` for the frontend to render `@stripe/react-stripe-js` Elements.
-- Integrators must initialize Stripe.js with `{ stripeAccount: stripeAccountId }` (direct-charge Elements requires the connected account context).
-- Requires `amount` (cents) and `currency` in the request body.
-- `Idempotency-Key` header is required for API key calls.
-
-### Stripe Checkout (`USE_CHECKOUT=true`)
-- Creates a **Checkout Session** with `lineItems`.
+- Creates a **Checkout Session** with `lineItems` on behalf of the client's Express Account (direct charge).
 - Returns a `url` for browser redirect to Stripe-hosted checkout.
 - Success/cancel URLs resolve from: client config → group config → `FRONTEND_ORIGIN` default.
+- `Idempotency-Key` header is required for API key calls.
 
 ## 4. Fee Resolution
 `application_fee_amount` is collected on every transaction via a 6-level priority chain (first non-null wins):
@@ -55,5 +48,4 @@ Pass `waiveFee: true` in the payment request body to skip the platform fee for a
 |----------|-------------|
 | `STRIPE_SECRET_KEY` | Stripe secret key (platform account) |
 | `STRIPE_WEBHOOK_SECRET` | Webhook endpoint signing secret |
-| `USE_CHECKOUT` | `"true"` for Checkout Sessions, `"false"` for PaymentIntents |
 | `DEFAULT_PROCESS_FEE_CENTS` | (optional) Last-resort fallback fee (cents) when no client/group/DB default is configured |

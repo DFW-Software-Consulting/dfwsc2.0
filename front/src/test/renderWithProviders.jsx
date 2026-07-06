@@ -3,7 +3,10 @@ import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider } from "../contexts/AuthContext";
 
-export function renderWithProviders(ui, { token = "test-token", ...options } = {}) {
+export function renderWithProviders(
+  ui,
+  { token = "test-token", initialEntries = ["/"], ...options } = {}
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -12,7 +15,7 @@ export function renderWithProviders(ui, { token = "test-token", ...options } = {
     return (
       <QueryClientProvider client={queryClient}>
         <AuthProvider initialToken={token}>
-          <MemoryRouter>{children}</MemoryRouter>
+          <MemoryRouter initialEntries={initialEntries}>{children}</MemoryRouter>
         </AuthProvider>
       </QueryClientProvider>
     );
