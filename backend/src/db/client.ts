@@ -18,3 +18,8 @@ pool.on("error", (err) => {
 
 export const db = drizzle(pool);
 export { pool };
+
+/** A Drizzle handle: either the top-level `db` or an in-flight `tx` from `db.transaction(...)`. */
+export type DbOrTx =
+  | typeof db
+  | (Parameters<typeof db.transaction>[0] extends (tx: infer T) => unknown ? T : never);

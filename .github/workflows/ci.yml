@@ -28,6 +28,9 @@ jobs:
       - run: npm ci --prefix backend
       - run: npm ci --prefix front
       - run: npm run lint
+      - name: Frontend ESLint (react-hooks)
+        run: npx eslint src
+        working-directory: front
       # Non-blocking dependency vulnerability scan (tighten later by dropping `|| true`
       # once existing findings are triaged).
       - name: Backend dependency audit

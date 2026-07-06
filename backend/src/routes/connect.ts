@@ -9,7 +9,7 @@ import { db } from "../db/client";
 import { apiKeyRegenerationTokens, clientGroups, clients, onboardingTokens } from "../db/schema";
 import { createRegenerationToken, validateAndRegenerate } from "../lib/api-key-regeneration";
 import { requireAdminJwt } from "../lib/auth";
-import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
+import { withStripeCircuit } from "../lib/circuit-breakers";
 import { createClientWithOnboardingToken, hashOnboardingToken } from "../lib/client-factory";
 import { resolveFrontendOrigin, resolveServerBaseUrl } from "../lib/config";
 import {
@@ -22,6 +22,7 @@ import { AppError, errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { getSettings, stripe } from "../lib/stripe-billing";
+import { mapStripeError } from "../lib/stripe-errors";
 import { parseBody } from "../lib/validation";
 import type { Workspace } from "../lib/workspace";
 
@@ -30,6 +31,11 @@ import type { Workspace } from "../lib/workspace";
 // the token's `createdAt`) after which the recipient must request a fresh
 // link via the resend flow.
 const ONBOARDING_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+const STRIPE_ONBOARDING_CIRCUIT_OPEN_ERROR = {
+  error: "Stripe onboarding service is temporarily unavailable.",
+  code: "STRIPE_CIRCUIT_OPEN",
+};
 
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex").slice(0, 12);
@@ -318,14 +324,25 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const settings = await getSettings();
       const companyName = settings.company_name || "DFW Software Consulting";
 
-      const { clientId, token } = await createClientWithOnboardingToken({
-        name,
-        email,
-        workspace: workspaceParam,
-        groupId,
-      });
+      // Both writes must land atomically: if the regeneration-token insert
+      // fails after the client row is created, a bare retry would otherwise
+      // hit "client already exists" with no delivered key ever having gone
+      // out. Wrapping them in one transaction rolls back the client row too.
+      const { clientId, token, rawRegenToken } = await db.transaction(async (tx) => {
+        const created = await createClientWithOnboardingToken(
+          {
+            name,
+            email,
+            workspace: workspaceParam,
+            groupId,
+          },
+          tx
+        );
 
-      const rawRegenToken = await createRegenerationToken({ clientId, email });
+        const regenToken = await createRegenerationToken({ clientId: created.clientId, email }, tx);
+
+        return { clientId: created.clientId, token: created.token, rawRegenToken: regenToken };
+      });
 
       const frontendOrigin = resolveFrontendOrigin();
 
@@ -555,12 +572,8 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           throw error;
         }
 
-        if (isCircuitOpenError(error)) {
-          return reply.code(503).send({
-            error: "Stripe onboarding service is temporarily unavailable.",
-            code: "STRIPE_CIRCUIT_OPEN",
-          });
-        }
+        if (mapStripeError(error, reply, { circuitOpen: STRIPE_ONBOARDING_CIRCUIT_OPEN_ERROR }))
+          return;
 
         throw errors.stripeFailed("Failed to create Stripe account link. Please try again.");
       }
@@ -625,12 +638,8 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           throw error;
         }
 
-        if (isCircuitOpenError(error)) {
-          return reply.code(503).send({
-            error: "Stripe onboarding service is temporarily unavailable.",
-            code: "STRIPE_CIRCUIT_OPEN",
-          });
-        }
+        if (mapStripeError(error, reply, { circuitOpen: STRIPE_ONBOARDING_CIRCUIT_OPEN_ERROR }))
+          return;
 
         throw errors.stripeFailed("Failed to create Stripe account link. Please try again.");
       }
@@ -772,15 +781,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           stripe.accounts.retrieve(effectiveAccountId)
         );
       } catch (err) {
-        if (isCircuitOpenError(err)) {
+        if (mapStripeError(err, reply, { circuitOpen: STRIPE_ONBOARDING_CIRCUIT_OPEN_ERROR })) {
           request.log.warn(
             { account: effectiveAccountId, err },
             "Stripe circuit open while verifying account; leaving token in_progress"
           );
-          return reply.code(503).send({
-            error: "Stripe onboarding service is temporarily unavailable.",
-            code: "STRIPE_CIRCUIT_OPEN",
-          });
+          return;
         }
         // Transient Stripe failure on a user-facing return: don't dead-end the
         // user. The account.updated webhook reconciles readiness authoritatively.

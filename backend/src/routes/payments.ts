@@ -6,13 +6,14 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
-import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
+import { withStripeCircuit } from "../lib/circuit-breakers";
 import { resolveFrontendOrigin } from "../lib/config";
 import { REPORT_MAX_CONCURRENCY } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { adminRateLimit, rateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
+import { mapStripeError } from "../lib/stripe-errors";
 import { parseBody, validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
 
 interface RequestWithClient extends FastifyRequest {
@@ -94,6 +95,11 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
   }
   return request.ip || "unknown";
 }
+
+const STRIPE_CIRCUIT_OPEN_ERROR = {
+  error: "Payment service is temporarily unavailable.",
+  code: "STRIPE_CIRCUIT_OPEN",
+};
 
 const paymentCreateBodySchema = z.object({
   amount: z.number().optional(),
@@ -283,20 +289,14 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         return reply.code(201).send({ url: session.url });
       } catch (err) {
         request.log.error({ err }, "Stripe Checkout session creation failed");
-        if (isCircuitOpenError(err)) {
-          return reply.code(503).send({
-            error: "Payment service is temporarily unavailable.",
-            code: "STRIPE_CIRCUIT_OPEN",
-          });
-        }
-        if (err instanceof Error && err.name === "StripeCardError") {
-          return reply.code(402).send({ error: err.message, code: "CARD_DECLINED" });
-        }
-        if (err instanceof Error && err.name === "StripeRateLimitError") {
-          return reply
-            .code(429)
-            .send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
-        }
+        if (
+          mapStripeError(err, reply, {
+            circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+            cardDeclinedCode: "CARD_DECLINED",
+            rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
+          })
+        )
+          return;
         throw errors.stripeFailed("Payment processing failed. Please try again.");
       }
     }
@@ -393,12 +393,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
               results.push(pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name })));
             } else {
               const c = batch[j];
-              if (isCircuitOpenError(outcome.reason)) {
-                return reply.code(503).send({
-                  error: "Payment service is temporarily unavailable.",
-                  code: "STRIPE_CIRCUIT_OPEN",
-                });
-              }
+              if (mapStripeError(outcome.reason, reply, { circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR }))
+                return;
               failedAccounts.push(c.id);
               request.log.error(
                 { err: outcome.reason, clientId: c.id, stripeAccountId: c.stripeAccountId },
@@ -440,12 +436,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         );
       } catch (err) {
         request.log.error({ err, clientId }, "Stripe PaymentIntent list failed");
-        if (isCircuitOpenError(err)) {
-          return reply.code(503).send({
-            error: "Payment service is temporarily unavailable.",
-            code: "STRIPE_CIRCUIT_OPEN",
-          });
-        }
+        if (mapStripeError(err, reply, { circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR })) return;
         return reply.code(502).send({ error: "Failed to list payments." });
       }
 
