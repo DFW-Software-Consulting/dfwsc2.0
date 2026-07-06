@@ -17,7 +17,6 @@ Create a `.env` file based on `.env.example`.
 | `STRIPE_SECRET_KEY` | ✅ | Stripe API key used for all server-side requests. |
 | `STRIPE_WEBHOOK_SECRET` | ✅ | Signing secret for `/webhooks/stripe`. |
 | `FRONTEND_ORIGIN` | ✅ | Origin allowed by CORS and used for Checkout redirects. |
-| `USE_CHECKOUT` | ✅ | `true` to use Checkout Sessions, `false` to create PaymentIntents directly. |
 | `DEFAULT_PROCESS_FEE_CENTS` | ❌ | Platform fee applied when the request omits `applicationFeeAmount`. Must be a non-negative integer. |
 | `DATABASE_URL` | ✅ | PostgreSQL connection string used by Drizzle. |
 | `PORT` | ❌ | Server port (defaults to `4242`). |
@@ -32,7 +31,6 @@ Create a `.env` file based on `.env.example`.
 | `JWT_SECRET` | ✅ | Secret key for signing JWT tokens. Must be minimum 32 characters. Generate with: `openssl rand -base64 32` |
 | `JWT_EXPIRY` | ❌ | JWT token expiration time. Defaults to `1h`. Supported formats: `1h`, `30m`, `7d`, `24h`. |
 | `ALLOW_ADMIN_SETUP` | ❌ | Set to `true` to enable browser-based admin credential setup. Only works when `ADMIN_PASSWORD` is not set. |
-| `ADMIN_SETUP_TOKEN` | ❌ | Optional secret token required in `X-Setup-Token` header when using the setup endpoint. Adds extra protection. |
 
 ## Database Schema
 
@@ -67,8 +65,7 @@ Non-listed endpoints from earlier versions have been removed (invoices, refunds,
 ## Payments and Fees
 
 - The caller supplies the desired `application_fee_amount` for each payment request.
-- When `USE_CHECKOUT=false`, the API creates a PaymentIntent with automatic payment methods and returns the `client_secret`.
-- When `USE_CHECKOUT=true`, the API creates a Checkout Session with platform fees applied via `payment_intent_data.application_fee_amount` and returns the hosted session URL.
+- The API always creates a Checkout Session from the required `lineItems`, applies platform fees via `payment_intent_data.application_fee_amount`, and returns the hosted session URL.
 - Idempotency is enforced via the standard `Idempotency-Key` request header on write routes.
 
 Refunds are **not** exposed through this API. Handle all refunds directly in the Stripe Dashboard so Stripe remains the source of truth.
@@ -149,10 +146,6 @@ If you lose access to your admin credentials or need to set up admin access on a
    ```
    ALLOW_ADMIN_SETUP=true
    ```
-   Optionally, add a setup token for extra security:
-   ```
-   ADMIN_SETUP_TOKEN=your-secret-token
-   ```
 
 2. **Remove or unset the existing `ADMIN_PASSWORD`** variable (the setup endpoint only works when no admin password is configured).
 
@@ -174,6 +167,5 @@ If you lose access to your admin credentials or need to set up admin access on a
 
 - The setup endpoint is **rate limited** to 3 requests per 15 minutes.
 - Setup can only be used **once per server session**. After a successful setup, the endpoint returns 403 until the server restarts.
-- The `ADMIN_SETUP_TOKEN` header protection is optional but recommended for production deployments.
 - **Never leave `ALLOW_ADMIN_SETUP=true` in production** after completing setup.
 - The generated password hash is bcrypt, which is secure for production use.

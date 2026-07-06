@@ -16,20 +16,13 @@ The platform uses **Stripe Connect** with **Express Accounts**.
 6. **Refresh**: If the account link expires before the client completes it, `GET /api/v1/connect/refresh?token=...` generates a new link and redirects.
 7. **Resend**: `POST /api/v1/onboard-client/resend` revokes all active tokens for the client and issues a new one with a fresh email.
 
-## 3. Payment Strategy (`USE_CHECKOUT`)
-Controlled by the `USE_CHECKOUT` environment variable.
+## 3. Payment Strategy (Stripe Checkout)
+All payments go through **Stripe Checkout** — the former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.
 
-### Stripe Elements (`USE_CHECKOUT=false`)
-- Creates a **PaymentIntent** on behalf of the client's Express Account.
-- Returns `clientSecret`, `paymentIntentId`, and `stripeAccountId` for the frontend to render `@stripe/react-stripe-js` Elements.
-- Integrators must initialize Stripe.js with `{ stripeAccount: stripeAccountId }` (direct-charge Elements requires the connected account context).
-- Requires `amount` (cents) and `currency` in the request body.
-- `Idempotency-Key` header is required for API key calls.
-
-### Stripe Checkout (`USE_CHECKOUT=true`)
-- Creates a **Checkout Session** with `lineItems`.
+- Creates a **Checkout Session** with `lineItems` on behalf of the client's Express Account (direct charge).
 - Returns a `url` for browser redirect to Stripe-hosted checkout.
 - Success/cancel URLs resolve from: client config → group config → `FRONTEND_ORIGIN` default.
+- `Idempotency-Key` header is required for API key calls.
 
 ## 4. Fee Resolution
 `application_fee_amount` is collected on every transaction via a 6-level priority chain (first non-null wins):
@@ -55,5 +48,4 @@ Pass `waiveFee: true` in the payment request body to skip the platform fee for a
 |----------|-------------|
 | `STRIPE_SECRET_KEY` | Stripe secret key (platform account) |
 | `STRIPE_WEBHOOK_SECRET` | Webhook endpoint signing secret |
-| `USE_CHECKOUT` | `"true"` for Checkout Sessions, `"false"` for PaymentIntents |
 | `DEFAULT_PROCESS_FEE_CENTS` | (optional) Last-resort fallback fee (cents) when no client/group/DB default is configured |

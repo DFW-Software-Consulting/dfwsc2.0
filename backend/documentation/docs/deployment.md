@@ -37,8 +37,6 @@ SMTP_PORT=587
 SMTP_USER=your-smtp-user
 SMTP_PASS=your-smtp-password
 
-USE_CHECKOUT=true
-
 POSTGRES_USER=dfwsc
 POSTGRES_PASSWORD=devpass
 POSTGRES_DB=dfwsc
