@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import { usePaymentReport } from "../../hooks/usePaymentReports";
@@ -29,6 +29,7 @@ export default function PaymentReports({ workspace = "client_portal" }) {
   const [selectedId, setSelectedId] = useState("");
   const [limit, setLimit] = useState("10");
   const [reportEnabled, setReportEnabled] = useState(false);
+  const [prevIsDfwscMode, setPrevIsDfwscMode] = useState(isDfwscMode);
 
   const isAllClients = selectedId === "__all__";
   const params = selectedId
@@ -71,13 +72,17 @@ export default function PaymentReports({ workspace = "client_portal" }) {
         { value: "group", label: "By Group" },
       ];
 
-  useEffect(() => {
+  // Force back to the "client" report type when switching into DFWSC mode,
+  // where "By Group" isn't a valid option. Adjusted during render (rather
+  // than in an effect) since it only needs to react to isDfwscMode changing.
+  if (isDfwscMode !== prevIsDfwscMode) {
+    setPrevIsDfwscMode(isDfwscMode);
     if (isDfwscMode && reportType !== "client") {
       setReportType("client");
       setSelectedId("");
       setReportEnabled(false);
     }
-  }, [isDfwscMode, reportType]);
+  }
 
   const showClientColumn = reportType === "group" || isAllClients;
   const resultColumns = [

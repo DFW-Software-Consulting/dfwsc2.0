@@ -31,7 +31,7 @@ import { sendMail } from "../../lib/mailer";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
 
-const REGEN_LINK_REGEX = /\/regenerate-key\?token=([a-f0-9]+)/;
+const REGEN_LINK_REGEX = /\/regenerate-key#token=([a-f0-9]+)/;
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -86,9 +86,9 @@ describe("Onboard Initiate — API key via email link", () => {
     const mailCall = (sendMail as any).mock.calls.at(-1)?.[0];
     expect(mailCall).toBeTruthy();
     expect(mailCall.to).toBe(email);
-    expect(mailCall.html).toContain("/onboard?token=");
+    expect(mailCall.html).toContain("/onboard#token=");
     expect(mailCall.html).toMatch(REGEN_LINK_REGEX);
-    expect(mailCall.text).toContain("/onboard?token=");
+    expect(mailCall.text).toContain("/onboard#token=");
     expect(mailCall.text).toMatch(REGEN_LINK_REGEX);
     expect(mailCall.html).toMatch(/15 minutes/i);
 
@@ -123,6 +123,45 @@ describe("Onboard Initiate — API key via email link", () => {
     expect(JSON.stringify(body)).not.toMatch(/apiKey"\s*:\s*"[a-f0-9]+"/);
   });
 
+  it("returns 502 and removes the new client when the onboarding email cannot be sent", async () => {
+    const email = `onboard-mail-fail-${randomUUID()}@example.com`;
+    const token = makeAdminToken();
+    (sendMail as any).mockRejectedValueOnce(new Error("smtp down"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/onboard-client/initiate",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      payload: { name: "Mail Fail Client", email, workspace: "client_portal" },
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({
+      error: "Failed to send onboarding email. Please try again.",
+      code: "EMAIL_DELIVERY_FAILED",
+    });
+    expect(sendMail).toHaveBeenCalledTimes(1);
+
+    const [leftoverClient] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.email, email))
+      .limit(1);
+    expect(leftoverClient).toBeUndefined();
+
+    const retry = await app.inject({
+      method: "POST",
+      url: "/api/v1/onboard-client/initiate",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      payload: { name: "Mail Fail Client", email, workspace: "client_portal" },
+    });
+
+    expect(retry.statusCode).toBe(201);
+    expect(retry.json().clientId).toBeDefined();
+    createdClientIds.push(retry.json().clientId);
+    expect(sendMail).toHaveBeenCalledTimes(2);
+  });
+
   it("the retrieval link returns a new API key when consumed", async () => {
     const email = `onboard-retrieve-${randomUUID()}@example.com`;
     const token = makeAdminToken();
@@ -142,8 +181,10 @@ describe("Onboard Initiate — API key via email link", () => {
     const rawToken = mailCall.text.match(REGEN_LINK_REGEX)[1];
 
     const regenerate = await app.inject({
-      method: "GET",
-      url: `/api/v1/api-key/regenerate?token=${rawToken}`,
+      method: "POST",
+      url: "/api/v1/api-key/regenerate",
+      headers: { "content-type": "application/json" },
+      payload: { token: rawToken },
     });
 
     expect(regenerate.statusCode).toBe(200);

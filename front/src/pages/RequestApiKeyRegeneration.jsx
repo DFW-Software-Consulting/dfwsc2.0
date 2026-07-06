@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRequestApiKeyRegeneration } from "../hooks/useApiKey";
 import logger from "../utils/logger";
+import { validateEmail } from "../utils/validation";
 
 export default function RequestApiKeyRegeneration() {
   const [email, setEmail] = useState("");
@@ -15,8 +16,9 @@ export default function RequestApiKeyRegeneration() {
   const handleSubmit = useCallback(
     (e) => {
       e.preventDefault();
-      if (!email.trim()) {
-        setError("Please enter your email address.");
+      const emailError = validateEmail(email);
+      if (emailError) {
+        setError(emailError);
         return;
       }
       setError("");
@@ -47,7 +49,7 @@ export default function RequestApiKeyRegeneration() {
                 Enter your email address and we will send you a link to regenerate your API key.
               </p>
 
-              <form onSubmit={handleSubmit}>
+              <form onSubmit={handleSubmit} noValidate>
                 <div className="mb-6">
                   <label
                     htmlFor="email"
@@ -68,7 +70,10 @@ export default function RequestApiKeyRegeneration() {
                 </div>
 
                 {error && (
-                  <p className="mb-4 text-center text-sm font-medium text-red-500 dark:text-red-400 transition-colors">
+                  <p
+                    role="alert"
+                    className="mb-4 text-center text-sm font-medium text-red-500 dark:text-red-400 transition-colors"
+                  >
                     {error}
                   </p>
                 )}

@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useRegenerateApiKey } from "../hooks/useApiKey";
 import logger from "../utils/logger";
 
 export default function RegenerateApiKey() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [token] = useState(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.get("token") || "";
+    const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+    return hashParams.get("token") || "";
   });
   const [apiKey, setApiKey] = useState(null);
   const [error, setError] = useState("");
@@ -14,7 +17,10 @@ export default function RegenerateApiKey() {
 
   useEffect(() => {
     document.title = "Regenerate API Key";
-  }, []);
+    if (location.search || location.hash) {
+      navigate(location.pathname, { replace: true });
+    }
+  }, [location.hash, location.pathname, location.search, navigate]);
 
   const handleRegenerate = useCallback(() => {
     if (!token) {
@@ -121,7 +127,10 @@ export default function RegenerateApiKey() {
           )}
 
           {error && (
-            <p className="mt-4 text-center text-sm font-medium text-red-500 dark:text-red-400 transition-colors">
+            <p
+              role="alert"
+              className="mt-4 text-center text-sm font-medium text-red-500 dark:text-red-400 transition-colors"
+            >
               {error}
             </p>
           )}

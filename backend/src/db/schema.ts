@@ -183,7 +183,7 @@ export const admins = pgTable("admins", {
   // narrowing this now risks rejecting a future legitimate role value.
   role: text("role").notNull().default("admin"),
   active: boolean("active").notNull().default(true),
-  setupConfirmed: boolean("setup_confirmed").default(false),
+  setupConfirmed: boolean("setup_confirmed").default(false).notNull(),
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })

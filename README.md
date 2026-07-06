@@ -174,7 +174,7 @@ React Router handles these client-side routes:
 - `/` - Home page
 - `/pricing` - Pricing page
 - `/team` - Team page
-- `/onboard?token=<token>` - Client Stripe onboarding
+- `/onboard#token=<token>` - Client Stripe onboarding
 
 ## 🔐 Environment Variables
 
@@ -211,7 +211,6 @@ ADMIN_USERNAME=your-admin-username
 ADMIN_PASSWORD=a-strong-password-12-chars-min
 
 # Payment Config
-USE_CHECKOUT=true
 DEFAULT_PROCESS_FEE_CENTS=100
 
 ```
