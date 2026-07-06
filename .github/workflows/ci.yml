@@ -128,6 +128,39 @@ jobs:
 
   # --- Checks mirrored from the local git hooks ---
 
+  # Mirrors .husky/pre-push step 8 ("Prod build"), which is skippable locally
+  # (SKIP_DOCKER_BUILD=1) and never runs in CI otherwise. Validates that
+  # docker-compose.prod.yml itself (interpolation + build wiring) is correct,
+  # not just the raw Dockerfiles built by the `build` job above.
+  prod-compose-build:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values for interpolation only — docker-compose.prod.yml has no
+      # build `args:`, so none of these reach the built images; they only need
+      # to be present so `config`/`build` don't fall back to blank strings.
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/stripe_portal_ci
+      STRIPE_SECRET_KEY: sk_test_ci
+      STRIPE_WEBHOOK_SECRET: whsec_ci
+      JWT_SECRET: ci_jwt_secret_min_32_chars_xxxxxxxxx
+      JWT_EXPIRY: 1h
+      FRONTEND_ORIGIN: http://localhost:5173
+      API_BASE_URL: http://localhost:4242
+      ALLOW_ADMIN_SETUP: "false"
+      USE_CHECKOUT: "true"
+      DEFAULT_PROCESS_FEE_CENTS: "100"
+      SMTP_HOST: localhost
+      SMTP_PORT: "1025"
+      SMTP_USER: ci
+      SMTP_PASS: ci
+      SMTP_FROM: noreply@example.com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose.prod.yml (interpolation/syntax)
+        run: docker compose -f docker-compose.prod.yml config -q
+      - name: Build docker-compose.prod.yml images
+        run: docker compose -f docker-compose.prod.yml build
+
   secrets:
     runs-on: ubuntu-latest
     steps:
