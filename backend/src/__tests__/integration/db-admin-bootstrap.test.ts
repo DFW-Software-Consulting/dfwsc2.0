@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeAdminToken } from "../helpers/auth";
+import { TEST_JWT_SECRET } from "../helpers/constants";
+import { createAppDbMock } from "../helpers/mock-factories";
 
 /**
  * DB-backed admin authentication: bootstrap → login → confirm → login flow.
@@ -9,50 +12,39 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  *  3. setup/status reflects bootstrapPending=true
  *  4. confirm-bootstrap updates creds and sets setupConfirmed=true
  *  5. Login with new creds succeeds; old creds no longer work
+ *
+ * Also covers: confirm-bootstrap scopes its update to the JWT-authenticated
+ * caller's own admin row rather than an arbitrary row (#100). That requires
+ * a DB mock that actually filters by id — the previous inline mock here just
+ * returned "the first row" regardless of the WHERE clause, which happened to
+ * work only because every prior test seeded a single admin. createAppDbMock
+ * (already used by app.test.ts) does real id-based filtering, so it's reused
+ * here instead of hand-rolling another shortcut.
  */
 
-// Mutable in-memory admin store used by the DB mock
-const dbState: { admins: any[] } = { admins: [] };
+const dataStore = {
+  clients: new Map<string, any>(),
+  clientsByApiKey: new Map<string, string>(),
+  onboardingTokens: new Map<string, any>(),
+  webhookEvents: new Map<string, any>(),
+  clientGroups: new Map<string, any>(),
+  admins: new Map<string, any>(),
+};
 
 vi.mock("../../db/client", () => ({
-  db: {
-    select: vi.fn(() => ({
-      from: (_table: any) => {
-        const rows = [...dbState.admins];
-        const p = Promise.resolve(rows);
-        return {
-          where: (_expr: any) => {
-            // Simple single-admin filter: return first match (sufficient for these tests)
-            const first = rows.slice(0, 1);
-            const lp = Promise.resolve(first);
-            return {
-              limit: (n: number) => Promise.resolve(rows.slice(0, n)),
-              then: lp.then.bind(lp),
-              catch: lp.catch.bind(lp),
-              finally: lp.finally.bind(lp),
-            };
-          },
-          then: p.then.bind(p),
-          catch: p.catch.bind(p),
-          finally: p.finally.bind(p),
-        };
-      },
-    })),
-    insert: vi.fn((_table: any) => ({
-      values: vi.fn((payload: any) => {
-        dbState.admins.push({ ...payload });
-        return Promise.resolve();
-      }),
-    })),
-    update: vi.fn((_table: any) => ({
-      set: vi.fn((values: any) => ({
-        where: vi.fn((_expr: any) => {
-          for (const a of dbState.admins) Object.assign(a, values);
-          return Promise.resolve();
-        }),
-      })),
-    })),
-  },
+  db: createAppDbMock(dataStore),
+}));
+
+// createAppDbMock introspects the plain { field, value } / { all } shape
+// produced by this mock, not real drizzle-orm's chunk-based SQL builders —
+// mirrors app.test.ts's drizzle-orm mock exactly.
+vi.mock("drizzle-orm", () => ({
+  count: () => ({ fn: "count" }),
+  eq: (field: unknown, value: unknown) => ({ value, field }),
+  ne: (field: unknown, value: unknown) => ({ not: true, value, field }),
+  inArray: (field: unknown, values: unknown[]) => ({ inArray: true, field, values }),
+  and: (...conditions: any[]) => ({ all: conditions }),
+  isNull: (field: unknown) => ({ isNull: true, field }),
 }));
 
 vi.mock("../../lib/stripe", () => ({
@@ -76,13 +68,13 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
   const newPassword = "new-secure-pass-456";
 
   beforeEach(async () => {
-    dbState.admins = [];
+    dataStore.admins.clear();
     process.env.ALLOW_ADMIN_SETUP = "true";
     process.env.SETUP_FLAG_PATH = `/tmp/test-bootstrap-${Date.now()}-${Math.random()}`;
   });
 
   afterEach(() => {
-    dbState.admins = [];
+    dataStore.admins.clear();
     vi.resetModules();
   });
 
@@ -103,16 +95,16 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
     // Seed the mock DB directly using the known plaintext bootstrapPassword.
     const bcrypt = await import("bcryptjs");
     const hash = await bcrypt.hash(bootstrapPassword, 10);
-    dbState.admins = [
-      {
-        id: "admin-setup-1",
-        username: bootstrapUsername,
-        passwordHash: hash,
-        role: "admin",
-        active: true,
-        setupConfirmed: false,
-      },
-    ];
+    dataStore.admins.set("admin-setup-1", {
+      id: "admin-setup-1",
+      username: bootstrapUsername,
+      passwordHash: hash,
+      role: "admin",
+      active: true,
+      setupConfirmed: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
 
     // Step 2: Login with setup creds → 200 + valid JWT
     const loginRes1 = await server.inject({
@@ -162,8 +154,8 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
     expect(confirmRes.json().message).toBe("Admin credentials confirmed");
 
     // Verify DB state: setupConfirmed=true, username updated
-    expect(dbState.admins[0].setupConfirmed).toBe(true);
-    expect(dbState.admins[0].username).toBe(newUsername);
+    expect(dataStore.admins.get("admin-setup-1")?.setupConfirmed).toBe(true);
+    expect(dataStore.admins.get("admin-setup-1")?.username).toBe(newUsername);
 
     // Step 5: Login with new creds → 200 + valid JWT
     const loginRes2 = await server.inject({
@@ -180,7 +172,7 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
   });
 
   it("login returns a generic 401 when no admin is in the database", async () => {
-    dbState.admins = [];
+    dataStore.admins.clear();
     const server = await createServer();
 
     const res = await server.inject({
@@ -192,6 +184,63 @@ describe("DB-backed admin auth: setup → confirm → login flow", () => {
 
     expect(res.statusCode).toBe(401);
     expect(res.json()).toMatchObject({ error: "Invalid credentials" });
+
+    await server.close();
+  });
+
+  it("confirm-bootstrap updates only the authenticated admin's own row when multiple admins exist (#100)", async () => {
+    // Two admins present, both still mid-bootstrap. Admin A happens to be
+    // first in insertion order — the old bug always mutated allAdmins[0]
+    // (i.e. admin A) regardless of who actually authenticated.
+    dataStore.admins.set("admin-a", {
+      id: "admin-a",
+      username: "admin-a-original",
+      passwordHash: "$2b$10$placeholderA",
+      role: "admin",
+      active: true,
+      setupConfirmed: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    dataStore.admins.set("admin-b", {
+      id: "admin-b",
+      username: "admin-b-original",
+      passwordHash: "$2b$10$placeholderB",
+      role: "admin",
+      active: true,
+      setupConfirmed: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const server = await createServer();
+
+    // Admin B authenticates (JWT sub = admin-b) and confirms bootstrap.
+    const tokenForAdminB = makeAdminToken(TEST_JWT_SECRET, { sub: "admin-b" });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/auth/confirm-bootstrap",
+      payload: { username: "admin-b-confirmed", password: "brand-new-password-123" },
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${tokenForAdminB}`,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().message).toBe("Admin credentials confirmed");
+
+    // Admin B's own row is updated...
+    const adminB = dataStore.admins.get("admin-b");
+    expect(adminB?.setupConfirmed).toBe(true);
+    expect(adminB?.username).toBe("admin-b-confirmed");
+
+    // ...and admin A's row is completely untouched.
+    const adminA = dataStore.admins.get("admin-a");
+    expect(adminA?.setupConfirmed).toBe(false);
+    expect(adminA?.username).toBe("admin-a-original");
+    expect(adminA?.passwordHash).toBe("$2b$10$placeholderA");
 
     await server.close();
   });

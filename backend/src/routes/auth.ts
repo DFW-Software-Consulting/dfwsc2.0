@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { and, eq } from "drizzle-orm";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { db } from "../db/client";
 import { admins } from "../db/schema";
@@ -9,6 +9,14 @@ import { AUTH_RATE_LIMIT_MAX, BCRYPT_SALT_ROUNDS } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { rateLimit } from "../lib/rate-limit";
 import { parseBody } from "../lib/validation";
+
+// The shape requireAdminJwt attaches to the request: either the full admin row
+// (when the JWT carries `sub` and the DB re-validation succeeds) or, for
+// legacy tokens signed without `sub`, the raw decoded payload (no id/
+// setupConfirmed). Both are handled below via optional chaining.
+type AuthenticatedAdminRequest = FastifyRequest & {
+  admin?: { id?: string; setupConfirmed?: boolean | null };
+};
 
 const MIN_ADMIN_PASSWORD_LENGTH = 12;
 
@@ -103,14 +111,17 @@ export default async function authRoutes(fastify: FastifyInstance) {
         throw errors.badRequest(passwordError);
       }
 
-      const allAdmins = await db.select().from(admins);
-      const firstAdmin = allAdmins[0];
+      // Scope this to the JWT-authenticated caller's own row (attached by
+      // requireAdminJwt) instead of an arbitrary/unordered row from the
+      // admins table — otherwise any admin holding a valid JWT could finalize
+      // a DIFFERENT admin's bootstrap and overwrite their credentials (#100).
+      const authenticatedAdmin = (request as AuthenticatedAdminRequest).admin;
 
-      if (!firstAdmin) {
+      if (!authenticatedAdmin?.id) {
         throw errors.badRequest("No bootstrap admin found");
       }
 
-      if (firstAdmin.setupConfirmed) {
+      if (authenticatedAdmin.setupConfirmed) {
         throw errors.badRequest("Bootstrap already confirmed");
       }
 
@@ -124,7 +135,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
           setupConfirmed: true,
           updatedAt: new Date(),
         })
-        .where(and(eq(admins.id, firstAdmin.id), eq(admins.setupConfirmed, false)));
+        .where(and(eq(admins.id, authenticatedAdmin.id), eq(admins.setupConfirmed, false)));
 
       fastify.log.info({ username }, "Admin bootstrap confirmed");
 
