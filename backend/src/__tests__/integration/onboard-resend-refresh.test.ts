@@ -20,6 +20,7 @@ vi.mock("../../lib/mailer", () => ({
 vi.mock("../../lib/rate-limit", () => ({
   adminRateLimit: () => async () => {},
   rateLimit: () => async () => {},
+  warnIfInMemoryRateLimit: vi.fn(),
 }));
 
 import { randomBytes, randomUUID } from "node:crypto";
