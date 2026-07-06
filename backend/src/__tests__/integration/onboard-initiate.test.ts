@@ -22,12 +22,21 @@ vi.mock("../../lib/rate-limit", () => ({
   warnIfInMemoryRateLimit: vi.fn(),
 }));
 
+vi.mock("../../lib/api-key-regeneration", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/api-key-regeneration")>();
+  return {
+    ...actual,
+    createRegenerationToken: vi.fn(actual.createRegenerationToken),
+  };
+});
+
 import { createHash, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { apiKeyRegenerationTokens, clients } from "../../db/schema";
+import { createRegenerationToken } from "../../lib/api-key-regeneration";
 import { sendMail } from "../../lib/mailer";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
@@ -161,6 +170,41 @@ describe("Onboard Initiate — API key via email link", () => {
     expect(retry.json().clientId).toBeDefined();
     createdClientIds.push(retry.json().clientId);
     expect(sendMail).toHaveBeenCalledTimes(2);
+  });
+
+  it("rolls back the new client when the regeneration-token write fails, and retry succeeds", async () => {
+    const email = `onboard-regen-fail-${randomUUID()}@example.com`;
+    const token = makeAdminToken();
+    (createRegenerationToken as any).mockRejectedValueOnce(new Error("regen token insert failed"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/onboard-client/initiate",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      payload: { name: "Regen Fail Client", email, workspace: "client_portal" },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(sendMail).not.toHaveBeenCalled();
+
+    const [leftoverClient] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.email, email))
+      .limit(1);
+    expect(leftoverClient).toBeUndefined();
+
+    const retry = await app.inject({
+      method: "POST",
+      url: "/api/v1/onboard-client/initiate",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      payload: { name: "Regen Fail Client", email, workspace: "client_portal" },
+    });
+
+    expect(retry.statusCode).toBe(201);
+    expect(retry.json().clientId).toBeDefined();
+    createdClientIds.push(retry.json().clientId);
+    expect(sendMail).toHaveBeenCalledTimes(1);
   });
 
   it("the retrieval link returns a new API key when consumed", async () => {

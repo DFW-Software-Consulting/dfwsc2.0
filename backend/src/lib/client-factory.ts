@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import validator from "validator";
-import { db } from "../db/client";
+import { type DbOrTx, db } from "../db/client";
 import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { hashApiKey, sha256Lookup } from "./auth";
 import { dbErrorConstraint, errors, isUniqueViolation } from "./errors";
@@ -29,12 +29,10 @@ interface ClientWithToken {
   token: string;
 }
 
-export async function createClientWithOnboardingToken({
-  name,
-  email,
-  workspace,
-  groupId,
-}: CreateClientWithOnboardingTokenOptions): Promise<ClientWithToken> {
+export async function createClientWithOnboardingToken(
+  { name, email, workspace, groupId }: CreateClientWithOnboardingTokenOptions,
+  dbOrTx: DbOrTx = db
+): Promise<ClientWithToken> {
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     throw Object.assign(new Error("Name is required and must be a non-empty string"), {
       statusCode: 400,
@@ -46,7 +44,7 @@ export async function createClientWithOnboardingToken({
   }
 
   if (groupId) {
-    const [group] = await db
+    const [group] = await dbOrTx
       .select({ id: clientGroups.id, workspace: clientGroups.workspace })
       .from(clientGroups)
       .where(eq(clientGroups.id, groupId))
@@ -71,7 +69,7 @@ export async function createClientWithOnboardingToken({
   const onboardingTokenId = uuidv4();
 
   try {
-    await db.transaction(async (tx) => {
+    await dbOrTx.transaction(async (tx) => {
       await tx.insert(clients).values({
         id: clientId,
         workspace,

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { db } from "../db/client";
+import { type DbOrTx, db } from "../db/client";
 import { apiKeyRegenerationTokens, clients } from "../db/schema";
 import { hashApiKey, sha256Lookup } from "./auth";
 import { errors } from "./errors";
@@ -12,17 +12,20 @@ function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-export async function createRegenerationToken({
-  clientId,
-  email,
-}: {
-  clientId: string;
-  email: string;
-}): Promise<string> {
+export async function createRegenerationToken(
+  {
+    clientId,
+    email,
+  }: {
+    clientId: string;
+    email: string;
+  },
+  dbOrTx: DbOrTx = db
+): Promise<string> {
   const rawToken = crypto.randomBytes(32).toString("hex");
   const tokenHash = hashToken(rawToken);
 
-  await db.transaction(async (tx) => {
+  await dbOrTx.transaction(async (tx) => {
     await tx
       .update(apiKeyRegenerationTokens)
       .set({ status: "revoked", updatedAt: new Date() })

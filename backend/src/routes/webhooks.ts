@@ -4,9 +4,10 @@ import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clients, webhookEvents } from "../db/schema";
-import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
+import { withStripeCircuit } from "../lib/circuit-breakers";
 import { isUniqueViolation } from "../lib/errors";
 import { stripe } from "../lib/stripe";
+import { mapStripeError } from "../lib/stripe-errors";
 
 // A DB error is non-retryable when replaying the same Stripe event would fail
 // identically (e.g. a Postgres unique violation) — retrying would only wedge
@@ -14,6 +15,8 @@ import { stripe } from "../lib/stripe";
 function isNonRetryableDbError(err: unknown): boolean {
   return isUniqueViolation(err);
 }
+
+const CIRCUIT_OPEN_ERROR = { error: "Stripe service temporarily unavailable" };
 
 // How long a claim row can remain unprocessed before we consider the
 // claiming process to have crashed and allow another delivery to reclaim it.
@@ -331,9 +334,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
           { err, eventId: event.id, eventType: event.type },
           "Webhook event processing failed; released claim so Stripe can retry"
         );
-        if (isCircuitOpenError(err)) {
-          return reply.code(503).send({ error: "Stripe service temporarily unavailable" });
-        }
+        if (mapStripeError(err, reply, { circuitOpen: CIRCUIT_OPEN_ERROR })) return;
         return reply.code(500).send({ error: "Webhook processing failed" });
       }
     }
