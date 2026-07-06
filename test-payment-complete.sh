@@ -40,7 +40,7 @@ else
 fi
 echo ""
 
-# Step 2: Test Payment with Checkout Session (USE_CHECKOUT=true)
+# Step 2: Test Payment with Checkout Session
 echo "2️⃣  Creating payment with Checkout Session..."
 CHECKOUT_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE/payments/create" \
     -H "Content-Type: application/json" \
@@ -82,9 +82,8 @@ else
 fi
 echo ""
 
-# Step 3: Test Payment Intent (if USE_CHECKOUT=false)
-echo "3️⃣  Testing Payment Intent mode..."
-echo "   (This will fail if USE_CHECKOUT=true, which is expected)"
+# Step 3: Verify lineItems are required (no PaymentIntent mode)
+echo "3️⃣  Verifying a body without lineItems is rejected..."
 PI_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE/payments/create" \
     -H "Content-Type: application/json" \
     -H "X-API-Key: $API_KEY" \
@@ -92,20 +91,14 @@ PI_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_BASE/payments/create" \
     -d '{
         "amount": 1500,
         "currency": "usd",
-        "description": "Test payment intent"
+        "description": "Test payment without lineItems"
     }')
 
 PI_CODE=$(echo "$PI_RESPONSE" | tail -n1)
 PI_BODY=$(echo "$PI_RESPONSE" | head -n-1)
 
-if [ "$PI_CODE" = "201" ]; then
-    CLIENT_SECRET=$(echo "$PI_BODY" | grep -o '"clientSecret":"[^"]*"' | cut -d'"' -f4)
-    PAYMENT_INTENT_ID=$(echo "$PI_BODY" | grep -o '"paymentIntentId":"[^"]*"' | cut -d'"' -f4)
-    echo "   ✅ Payment Intent created successfully"
-    echo "   Payment Intent ID: $PAYMENT_INTENT_ID"
-    echo "   Client Secret: ${CLIENT_SECRET:0:30}..."
-elif [ "$PI_CODE" = "400" ]; then
-    echo "   ℹ️  Payment Intent mode not enabled (USE_CHECKOUT=true)"
+if [ "$PI_CODE" = "400" ]; then
+    echo "   ✅ Correctly rejected — lineItems are required (Checkout only)"
     echo "   Response: $PI_BODY"
 else
     echo "   ⚠️  Unexpected response (HTTP $PI_CODE)"
@@ -130,7 +123,7 @@ echo ""
 echo "Summary:"
 echo "  - Client Stripe account: $STRIPE_ACCOUNT"
 echo "  - Checkout session: Created"
-echo "  - Payment Intent: Tested"
+echo "  - lineItems requirement: Verified"
 echo ""
 echo "Next steps:"
 echo "  1. Complete payment at the Checkout URL above"

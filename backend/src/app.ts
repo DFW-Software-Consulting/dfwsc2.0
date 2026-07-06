@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fastifyCors from "@fastify/cors";
+import fastifyHelmet from "@fastify/helmet";
 import fastify from "fastify";
 import fastifyRawBody from "fastify-raw-body";
 import { logMaskedEnvSummary, validateEnv } from "./lib/env";
@@ -37,6 +38,16 @@ function resolveTrustProxy(): number | boolean {
   return 1;
 }
 
+// Reuse an inbound X-Request-Id for tracing so a request's logs correlate
+// end-to-end across the proxy and the app in Loki/Promtail-aggregated output,
+// instead of always minting a fresh id server-side. Bounded to a safe charset
+// and length so a client can't inject arbitrary values into log lines.
+const REQUEST_ID_HEADER_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;
+function resolveRequestId(header: string | string[] | undefined): string {
+  const value = Array.isArray(header) ? header[0] : header;
+  return value && REQUEST_ID_HEADER_PATTERN.test(value) ? value : crypto.randomUUID();
+}
+
 export async function buildServer() {
   const logger = process.env.NODE_ENV === "test" ? { level: "silent" } : true;
   const server = fastify({
@@ -44,8 +55,9 @@ export async function buildServer() {
     // Trust reverse-proxy hops so request.ip reflects the real client, not the
     // proxy. Configurable via TRUST_PROXY (defaults to 1 hop).
     trustProxy: resolveTrustProxy(),
-    // Generate unique request IDs for tracing
-    genReqId: () => crypto.randomUUID(),
+    // Generate unique request IDs for tracing, reusing an inbound X-Request-Id
+    // (e.g. set by the reverse proxy) when present so logs correlate end-to-end.
+    genReqId: (req) => resolveRequestId(req.headers["x-request-id"]),
     ajv: {
       customOptions: {
         allErrors: true,
@@ -84,6 +96,15 @@ export async function buildServer() {
   server.register(fastifyCors, {
     origin: allowedOrigins.length > 0 ? allowedOrigins : false,
     credentials: true,
+  });
+
+  // Security headers (HSTS, X-Content-Type-Options, frame protections, referrer
+  // policy, etc.) at the API layer. CSP is left to the frontend (front/nginx.conf)
+  // since this is a JSON API, not an HTML document — CSP mainly governs document
+  // capabilities (script/style sources, framing of *this* document), and a
+  // restrictive default CSP here risks breaking the Swagger UI served at /docs.
+  server.register(fastifyHelmet, {
+    contentSecurityPolicy: false,
   });
 
   server.register(fastifyRawBody, {
