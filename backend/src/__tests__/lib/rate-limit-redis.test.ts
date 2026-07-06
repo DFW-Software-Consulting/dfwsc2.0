@@ -132,3 +132,42 @@ describe("rateLimit - Redis path", () => {
     expect(reply.code).toHaveBeenCalledWith(429);
   });
 });
+
+describe("rateLimit - startup warning", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("warns via the provided logger when REDIS_URL is unset", async () => {
+    delete process.env.REDIS_URL;
+    const logger = { warn: vi.fn() };
+
+    const { warnIfInMemoryRateLimit } = await import("../../lib/rate-limit");
+    warnIfInMemoryRateLimit(logger);
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const [message] = logger.warn.mock.calls[0];
+    expect(message).toMatch(/REDIS_URL/);
+    expect(message).toMatch(/in-memory/i);
+    expect(message).toMatch(/replica/i);
+  });
+
+  it("does not warn when REDIS_URL is set", async () => {
+    process.env.REDIS_URL = "redis://localhost:6379";
+    vi.doMock("ioredis", () => ({
+      default: vi.fn().mockImplementation(() => ({
+        on: vi.fn(),
+        pipeline: vi.fn(),
+      })),
+    }));
+    const logger = { warn: vi.fn() };
+
+    try {
+      const { warnIfInMemoryRateLimit } = await import("../../lib/rate-limit");
+      warnIfInMemoryRateLimit(logger);
+      expect(logger.warn).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.REDIS_URL;
+    }
+  });
+});

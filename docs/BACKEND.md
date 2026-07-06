@@ -41,7 +41,7 @@ If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environm
 6. **Refresh**: `GET /api/v1/connect/refresh?client_id=...&state=...` regenerates an expired account link and redirects the client.
 
 ## 4. Rate Limiting
-- **Implementation**: In-memory sliding-window limiter (`lib/rate-limit.ts`).
+- **Implementation**: Sliding-window limiter (`lib/rate-limit.ts`) — Redis-backed (shared across replicas) when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets and logs a one-time startup warning, since limits are then effectively multiplied by replica count under horizontal scaling.
 - **Admin/Onboard Routes**: 10 req/min per IP.
 - **Resend Route**: 5 req/min per IP.
 - **Payment Routes**: 20 req/min per Stripe Account ID (fallback to IP).
