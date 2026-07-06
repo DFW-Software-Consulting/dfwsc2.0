@@ -101,8 +101,9 @@ describe("Connect Callback State Validation Integration", () => {
 
     // Call /onboard-client endpoint which should change status to 'in_progress'
     const onboardResponse = await app.inject({
-      method: "GET",
-      url: `/api/v1/onboard-client?token=${testToken}`,
+      method: "POST",
+      url: "/api/v1/onboard-client",
+      payload: { token: testToken },
     });
 
     expect(onboardResponse.statusCode).toBe(200);

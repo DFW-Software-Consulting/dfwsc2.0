@@ -104,6 +104,29 @@ describe("app.ts extra coverage", () => {
     }
   });
 
+  it("echoes an inbound X-Request-Id so logs correlate with the caller's id", async () => {
+    const server = await buildServer();
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/health",
+      headers: { "x-request-id": "caller-supplied-id-123" },
+    });
+    expect(response.headers["x-request-id"]).toBe("caller-supplied-id-123");
+    await server.close();
+  });
+
+  it("ignores an unsafe inbound X-Request-Id and generates its own", async () => {
+    const server = await buildServer();
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/health",
+      headers: { "x-request-id": "not safe! \n injected" },
+    });
+    expect(response.headers["x-request-id"]).toBeDefined();
+    expect(response.headers["x-request-id"]).not.toBe("not safe! \n injected");
+    await server.close();
+  });
+
   it("initializes Swagger when ENABLE_SWAGGER is true", async () => {
     const originalEnableSwagger = process.env.ENABLE_SWAGGER;
     try {

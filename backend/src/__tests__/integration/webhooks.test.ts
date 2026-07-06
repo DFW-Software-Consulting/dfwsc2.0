@@ -75,7 +75,6 @@ describe("POST /api/v1/webhooks/stripe", () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_1234567890";
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_test1234567890";
     process.env.FRONTEND_ORIGIN = "http://localhost:5173";
-    process.env.USE_CHECKOUT = process.env.USE_CHECKOUT ?? "false";
     process.env.SMTP_HOST = process.env.SMTP_HOST ?? "mailhog";
     process.env.SMTP_PORT = process.env.SMTP_PORT ?? "1025";
     process.env.SMTP_USER = process.env.SMTP_USER ?? "test";
