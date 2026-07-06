@@ -28,6 +28,12 @@ jobs:
       - run: npm ci --prefix backend
       - run: npm ci --prefix front
       - run: npm run lint
+      # Non-blocking dependency vulnerability scan (tighten later by dropping `|| true`
+      # once existing findings are triaged).
+      - name: Backend dependency audit
+        run: npm audit --prefix backend --audit-level=high || true
+      - name: Frontend dependency audit
+        run: npm audit --prefix front --audit-level=high || true
 
   typecheck:
     runs-on: ubuntu-latest
@@ -98,8 +104,8 @@ jobs:
       - name: Run migrations
         run: npm run db:migrate
         working-directory: backend
-      - name: Backend tests
-        run: npm test -- --run
+      - name: Backend tests (coverage-enforced)
+        run: npm run test:coverage
         working-directory: backend
 
       # --- Frontend ---
