@@ -219,6 +219,50 @@ describe("validateAndRegenerate", () => {
     expect(tokenRecord.status).toBe("completed");
   });
 
+  it("allows only one concurrent redemption of the same token", async () => {
+    const cId = crypto.randomUUID();
+    await db.insert(clients).values({
+      id: cId,
+      name: "Concurrent Test Client",
+      email: `concurrent-${cId}@example.com`,
+      status: "active",
+      apiKeyHash: "hashed:old-key",
+      apiKeyLookup: "old-lookup",
+    });
+    cleanupIds.push(cId);
+
+    const rawToken = await createRegenerationToken({
+      clientId: cId,
+      email: `concurrent-${cId}@example.com`,
+    });
+
+    const results = await Promise.allSettled([
+      validateAndRegenerate(rawToken),
+      validateAndRegenerate(rawToken),
+    ]);
+
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    const rejected = results.filter((result) => result.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]).toMatchObject({
+      reason: expect.objectContaining({
+        statusCode: 400,
+        message: expect.stringMatching(/already been used/i),
+      }),
+    });
+
+    const tokenHash = hashToken(rawToken);
+    const [tokenRecord] = await db
+      .select()
+      .from(apiKeyRegenerationTokens)
+      .where(eq(apiKeyRegenerationTokens.token, tokenHash))
+      .limit(1);
+
+    expect(tokenRecord.status).toBe("completed");
+  });
+
   it("throws 404 for non-existent token", async () => {
     const fakeToken = crypto.randomBytes(32).toString("hex");
 
