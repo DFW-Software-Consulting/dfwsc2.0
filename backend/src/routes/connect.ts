@@ -43,6 +43,8 @@ interface AccountLinkContext {
   accountLinkUrl: string;
 }
 
+type OnboardingTokenRecord = typeof onboardingTokens.$inferSelect;
+
 const accountBodySchema = z.object({
   name: z.string({ error: "name is required." }).trim().min(1, "name is required."),
   email: z.string({ error: "email is required." }).email("email must be a valid email address."),
@@ -75,20 +77,14 @@ const regenerateRequestAdminSchema = z.object({
   clientId: z.string({ error: "clientId is required." }).min(1, "clientId is required."),
 });
 
-async function createAccountLinkForToken(
+const tokenBodySchema = z.object({
+  token: z.string({ error: "token is required." }).trim().min(1, "token is required."),
+});
+
+async function createAccountLinkForRecord(
   request: FastifyRequest,
-  token: string
+  onboardingRecord: OnboardingTokenRecord
 ): Promise<AccountLinkContext> {
-  const [onboardingRecord] = await db
-    .select()
-    .from(onboardingTokens)
-    .where(eq(onboardingTokens.token, hashOnboardingToken(token)))
-    .limit(1);
-
-  if (!onboardingRecord) {
-    throw errors.notFound("Onboarding token");
-  }
-
   if (onboardingRecord.status === "revoked") {
     throw errors.notFound("Onboarding link");
   }
@@ -155,7 +151,7 @@ async function createAccountLinkForToken(
 
   const baseUrl = resolveServerBaseUrl(request);
   const callbackUrl = `${baseUrl}/api/v1/connect/callback?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
-  const refreshUrl = `${baseUrl}/api/v1/connect/refresh?token=${encodeURIComponent(token)}`;
+  const refreshUrl = `${baseUrl}/api/v1/connect/refresh?client_id=${encodeURIComponent(clientRecord.id)}&state=${encodeURIComponent(state)}`;
 
   const accountLink = await withStripeCircuit(() =>
     stripe.accountLinks.create(
@@ -189,6 +185,23 @@ async function createAccountLinkForToken(
     .where(eq(onboardingTokens.id, onboardingRecord.id));
 
   return { accountLinkUrl: accountLink.url };
+}
+
+async function createAccountLinkForToken(
+  request: FastifyRequest,
+  token: string
+): Promise<AccountLinkContext> {
+  const [onboardingRecord] = await db
+    .select()
+    .from(onboardingTokens)
+    .where(eq(onboardingTokens.token, hashOnboardingToken(token)))
+    .limit(1);
+
+  if (!onboardingRecord) {
+    throw errors.notFound("Onboarding token");
+  }
+
+  return createAccountLinkForRecord(request, onboardingRecord);
 }
 
 export default async function connectRoutes(fastify: FastifyInstance) {
@@ -244,7 +257,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const frontendOrigin = resolveFrontendOrigin();
 
-      const onboardingUrlHint = `${frontendOrigin}/onboard?token=${token}`;
+      const onboardingUrlHint = `${frontendOrigin}/onboard#token=${encodeURIComponent(token)}`;
 
       request.log.info({ clientId, workspace, groupId }, "Client created via /accounts handler");
 
@@ -316,8 +329,8 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const frontendOrigin = resolveFrontendOrigin();
 
-      const onboardingUrl = `${frontendOrigin}/onboard?token=${token}`;
-      const regenerateUrl = `${frontendOrigin}/regenerate-key?token=${rawRegenToken}`;
+      const onboardingUrl = `${frontendOrigin}/onboard#token=${encodeURIComponent(token)}`;
+      const regenerateUrl = `${frontendOrigin}/regenerate-key#token=${encodeURIComponent(rawRegenToken)}`;
 
       const safeName = he.encode(name);
       const mailHtml = `
@@ -466,7 +479,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const frontendOrigin = resolveFrontendOrigin();
 
-      const onboardingUrl = `${frontendOrigin}/onboard?token=${newToken}`;
+      const onboardingUrl = `${frontendOrigin}/onboard#token=${encodeURIComponent(newToken)}`;
 
       const safeName = he.encode(clientRecord.name);
       const mailHtml = `
@@ -516,16 +529,15 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     }
   );
 
-  fastify.get(
+  fastify.post(
     "/onboard-client",
     {
       preHandler: [rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS })],
     },
     async (request, reply) => {
-      const { token } = request.query as { token: string };
-      if (typeof token !== "string" || token.trim().length === 0) {
-        throw errors.badRequest("token is required.");
-      }
+      const body = parseBody(tokenBodySchema, request.body, reply);
+      if (!body) return;
+      const { token } = body;
       try {
         const { accountLinkUrl } = await createAccountLinkForToken(request, token);
         return reply.send({ url: accountLinkUrl });
@@ -561,20 +573,50 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       preHandler: [rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS })],
     },
     async (request, reply) => {
-      const { token } = request.query as { token: string };
-      if (typeof token !== "string" || token.trim().length === 0) {
-        throw errors.badRequest("token is required.");
+      const { client_id, state } = request.query as { client_id?: string; state?: string };
+      const normalizedClientId = typeof client_id === "string" ? client_id.trim() : "";
+      const normalizedState = typeof state === "string" ? state.trim() : "";
+
+      if (!normalizedClientId) {
+        throw errors.badRequest("client_id is required.");
+      }
+
+      if (!normalizedState) {
+        throw errors.badRequest("state is required.");
       }
 
       try {
-        const { accountLinkUrl } = await createAccountLinkForToken(request, token);
+        const [onboardingRecord] = await db
+          .select()
+          .from(onboardingTokens)
+          .where(
+            and(
+              eq(onboardingTokens.clientId, normalizedClientId),
+              eq(onboardingTokens.state, normalizedState)
+            )
+          )
+          .limit(1);
+
+        if (!onboardingRecord) {
+          throw errors.notFound("Onboarding link");
+        }
+
+        if (
+          onboardingRecord.stateExpiresAt &&
+          new Date() > new Date(onboardingRecord.stateExpiresAt)
+        ) {
+          throw errors.notFound("Onboarding link expired");
+        }
+
+        const { accountLinkUrl } = await createAccountLinkForRecord(request, onboardingRecord);
         return reply.redirect(accountLinkUrl);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         request.log.error(
           {
             error: errorMessage,
-            token_hash: hashToken(token),
+            client_id: normalizedClientId,
+            state_hash: hashToken(normalizedState),
           },
           "Stripe accountLinks.create failed during refresh"
         );
@@ -789,7 +831,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             status: tokenStatus,
             // Single-use nonce: invalidate on first successful callback
             // regardless of in_progress/completed, so this callback URL
-            // cannot be replayed. Legitimate re-entry (GET /onboard-client,
+            // cannot be replayed. Legitimate re-entry (POST /onboard-client,
             // GET /connect/refresh) mints a fresh state via
             // createAccountLinkForToken.
             state: null,
@@ -838,7 +880,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         const settings = await getSettings();
         const companyName = settings.company_name || "DFW Software Consulting";
         const frontendOrigin = resolveFrontendOrigin();
-        const regenerateUrl = `${frontendOrigin}/regenerate-key?token=${rawToken}`;
+        const regenerateUrl = `${frontendOrigin}/regenerate-key#token=${encodeURIComponent(rawToken)}`;
 
         const safeName = he.encode(clientRecord.name);
         const mailHtml = `
@@ -920,7 +962,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const settings = await getSettings();
       const companyName = settings.company_name || "DFW Software Consulting";
       const frontendOrigin = resolveFrontendOrigin();
-      const regenerateUrl = `${frontendOrigin}/regenerate-key?token=${rawToken}`;
+      const regenerateUrl = `${frontendOrigin}/regenerate-key#token=${encodeURIComponent(rawToken)}`;
 
       const safeName = he.encode(clientRecord.name);
       const mailHtml = `
@@ -987,16 +1029,15 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     }
   );
 
-  fastify.get(
+  fastify.post(
     "/api-key/regenerate",
     {
       preHandler: [rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS })],
     },
     async (request, reply) => {
-      const { token } = request.query as { token: string };
-      if (typeof token !== "string" || token.trim().length === 0) {
-        throw errors.badRequest("token is required.");
-      }
+      const body = parseBody(tokenBodySchema, request.body, reply);
+      if (!body) return;
+      const { token } = body;
 
       const newApiKey = await validateAndRegenerate(token);
 

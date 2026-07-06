@@ -174,7 +174,7 @@ React Router handles these client-side routes:
 - `/` - Home page
 - `/pricing` - Pricing page
 - `/team` - Team page
-- `/onboard?token=<token>` - Client Stripe onboarding
+- `/onboard#token=<token>` - Client Stripe onboarding
 
 ## 🔐 Environment Variables
 

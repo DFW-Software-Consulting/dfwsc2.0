@@ -535,7 +535,9 @@ describe("connect onboarding", () => {
       (token) => token.clientId === body.clientId
     );
     expect(savedToken).toBeDefined();
-    const rawToken = new URL(body.onboardingUrlHint).searchParams.get("token");
+    const rawToken = new URLSearchParams(new URL(body.onboardingUrlHint).hash.slice(1)).get(
+      "token"
+    );
     expect(rawToken).toBeTruthy();
     expect(savedToken?.token).not.toBe(rawToken);
     expect(savedToken?.token).toHaveLength(64);
@@ -608,8 +610,8 @@ describe("connect onboarding", () => {
       "DFW Software Consulting - Stripe Onboarding"
     );
     expect(mailhogMessages[0].Content.Headers.To[0]).toBe("client@example.com");
-    expect(mailhogMessages[0].Content.Body).toContain("/onboard?token=");
-    expect(mailhogMessages[0].Content.Body).toContain("/regenerate-key?token=");
+    expect(mailhogMessages[0].Content.Body).toContain("/onboard#token=");
+    expect(mailhogMessages[0].Content.Body).toContain("/regenerate-key#token=");
     await server.close();
   });
 
@@ -642,8 +644,9 @@ describe("connect onboarding", () => {
     const server = await createServer();
 
     const response = await server.inject({
-      method: "GET",
-      url: `/api/v1/onboard-client?token=${onboardingToken}`,
+      method: "POST",
+      url: "/api/v1/onboard-client",
+      payload: { token: onboardingToken },
     });
 
     expect(response.statusCode).toBe(200);
@@ -666,7 +669,7 @@ describe("connect onboarding", () => {
       expect.objectContaining({
         account: "acct_new",
         type: "account_onboarding",
-        refresh_url: `https://api.example.com/api/v1/connect/refresh?token=${onboardingToken}`,
+        refresh_url: `https://api.example.com/api/v1/connect/refresh?client_id=client_onboard&state=${updatedToken?.state}`,
         return_url: `https://api.example.com/api/v1/connect/callback?client_id=client_onboard&state=${updatedToken?.state}`,
       }),
       expect.objectContaining({ idempotencyKey: expect.any(String) })
@@ -1294,7 +1297,7 @@ describe("email", () => {
       "DFW Software Consulting - Stripe Onboarding"
     );
     expect(mailhogMessages[0].Content.Headers.To[0]).toBe("test@example.com");
-    expect(mailhogMessages[0].Content.Body).toContain("/regenerate-key?token=");
+    expect(mailhogMessages[0].Content.Body).toContain("/regenerate-key#token=");
     await server.close();
   });
 });

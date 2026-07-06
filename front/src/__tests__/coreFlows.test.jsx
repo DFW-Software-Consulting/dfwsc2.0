@@ -56,17 +56,20 @@ describe("OnboardClient", () => {
     };
   });
 
-  it("extracts token from URL parameters and displays it in the input field", () => {
+  it("extracts token from URL hash and displays it in the input field", () => {
     Object.defineProperty(window, "location", {
       value: {
-        search: "?token=test-token-123",
-        href: "http://localhost/?token=test-token-123",
+        search: "",
+        href: "http://localhost/#token=test-token-123",
         assign: vi.fn(),
       },
       writable: true,
     });
 
-    renderWithProviders(<OnboardClient />, { token: null });
+    renderWithProviders(<OnboardClient />, {
+      token: null,
+      initialEntries: ["/#token=test-token-123"],
+    });
 
     const tokenInput = screen.getByRole("textbox", { name: /onboarding token/i });
     expect(tokenInput).toBeInTheDocument();

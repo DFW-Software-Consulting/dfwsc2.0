@@ -52,8 +52,7 @@ Authorization: Bearer <jwt_token>
 ```json
 {
   "name": "Acme Corporation",
-  "onboardingToken": "abc123...",
-  "onboardingUrlHint": "http://localhost:8080/onboard?token=abc123...",
+  "onboardingUrlHint": "http://localhost:8080/onboard#token=abc123...",
   "apiKey": "sk_live_abc123...",
   "clientId": "client_abc123"
 }
@@ -109,22 +108,22 @@ Authorization: Bearer <jwt_token>
 
 **Email Template**:
 - HTML and text versions sent
-- Includes onboarding link: `{FRONTEND_ORIGIN}/onboard?token={token}`
+- Includes onboarding link: `{FRONTEND_ORIGIN}/onboard#token={token}`
 - Name and email are HTML-encoded to prevent XSS
 
 ---
 
-### GET `/api/v1/onboard-client`
+### POST `/api/v1/onboard-client`
 Exchanges a valid onboarding token for a Stripe account link URL.
 
 **Authentication**: None (public endpoint, token-based)
 
 **Rate Limiting**: 10 requests per minute per IP
 
-**Query Parameters**:
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `token` | string | Onboarding token from invitation |
+**Request Body**:
+```json
+{ "token": "abc123..." }
+```
 
 **Success Response** (200 OK):
 ```json
@@ -148,14 +147,15 @@ Exchanges a valid onboarding token for a Stripe account link URL.
 ### GET `/api/v1/connect/refresh`
 Regenerates an account link for incomplete onboarding sessions.
 
-**Authentication**: None (public endpoint, token-based)
+**Authentication**: None (public endpoint, state-based)
 
 **Rate Limiting**: 10 requests per minute per IP
 
 **Query Parameters**:
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `token` | string | Onboarding token |
+| `client_id` | string | Client id |
+| `state` | string | Account-link state nonce |
 
 **Success Response**: Redirect to Stripe account link URL
 
@@ -214,7 +214,9 @@ curl -X POST http://localhost:4242/api/v1/accounts \
 
 ### Get Onboarding Link
 ```bash
-curl "http://localhost:4242/api/v1/onboard-client?token=abc123..."
+curl -X POST "http://localhost:4242/api/v1/onboard-client" \
+  -H "Content-Type: application/json" \
+  -d '{"token":"abc123..."}'
 ```
 
 ### Simulate Stripe Callback (Testing Only)
