@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useClient, usePatchClient } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import { validateFeeValue, validateUrl } from "../../utils/validation";
@@ -20,11 +20,22 @@ export default function EditClientModal({
   const { data: fullClient, isLoading: clientLoading } = useClient(client.id, workspace);
   const patchClientMutation = usePatchClient();
 
-  const [feeType, setFeeType] = useState("none");
-  const [feeValue, setFeeValue] = useState("");
-  const [groupId, setGroupId] = useState("");
-  const [successUrl, setSuccessUrl] = useState("");
-  const [cancelUrl, setCancelUrl] = useState("");
+  // Operational fields — seeded from the client prop, which is stable for the
+  // lifetime of this modal (the parent unmounts it on close rather than
+  // swapping to a different client in place).
+  const [feeType, setFeeType] = useState(() => {
+    if (client.processingFeePercent != null) return "percent";
+    if (client.processingFeeCents != null) return "cents";
+    return "none";
+  });
+  const [feeValue, setFeeValue] = useState(() => {
+    if (client.processingFeePercent != null) return String(client.processingFeePercent);
+    if (client.processingFeeCents != null) return String(client.processingFeeCents);
+    return "";
+  });
+  const [groupId, setGroupId] = useState(() => client.groupId ?? "");
+  const [successUrl, setSuccessUrl] = useState(() => client.paymentSuccessUrl ?? "");
+  const [cancelUrl, setCancelUrl] = useState(() => client.paymentCancelUrl ?? "");
   const [error, setError] = useState("");
 
   // Profile fields (DFWSC mode only)
@@ -41,26 +52,12 @@ export default function EditClientModal({
   const [notes, setNotes] = useState("");
   const [defaultPaymentTermsDays, setDefaultPaymentTermsDays] = useState("");
 
-  // Populate operational fields from client prop (available immediately)
-  useEffect(() => {
-    if (client.processingFeePercent != null) {
-      setFeeType("percent");
-      setFeeValue(String(client.processingFeePercent));
-    } else if (client.processingFeeCents != null) {
-      setFeeType("cents");
-      setFeeValue(String(client.processingFeeCents));
-    } else {
-      setFeeType("none");
-      setFeeValue("");
-    }
-    setGroupId(client.groupId ?? "");
-    setSuccessUrl(client.paymentSuccessUrl ?? "");
-    setCancelUrl(client.paymentCancelUrl ?? "");
-  }, [client]);
-
-  // Populate profile fields from full client data once loaded
-  useEffect(() => {
-    if (!fullClient) return;
+  // Populate profile fields from full client data once it arrives from the
+  // network. Adjusted during render (rather than in an effect) since it needs
+  // to react to `fullClient` transitioning from unloaded to loaded.
+  const [syncedFullClient, setSyncedFullClient] = useState(null);
+  if (fullClient && fullClient !== syncedFullClient) {
+    setSyncedFullClient(fullClient);
     setName(fullClient.name ?? "");
     setEmail(fullClient.email ?? "");
     setPhone(fullClient.phone ?? "");
@@ -75,7 +72,7 @@ export default function EditClientModal({
     setDefaultPaymentTermsDays(
       fullClient.defaultPaymentTermsDays != null ? String(fullClient.defaultPaymentTermsDays) : ""
     );
-  }, [fullClient]);
+  }
 
   const inheritedFee = (() => {
     if (feeType !== "none" || !groupId) return null;

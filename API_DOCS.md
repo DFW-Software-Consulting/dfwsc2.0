@@ -269,8 +269,7 @@ Creates a new client record and returns their credentials. Does **not** send an 
   "name": "Acme Corp",
   "clientId": "abc123",
   "apiKey": "64-hex-char-string",
-  "onboardingToken": "64-hex-char-string",
-  "onboardingUrlHint": "http://localhost:1919/onboard?token=..."
+  "onboardingUrlHint": "http://localhost:1919/onboard#token=..."
 }
 ```
 
@@ -303,8 +302,8 @@ Creates a new client and sends them an onboarding email with a link to connect t
 ```
 
 The email contains two links:
-- `<FRONTEND_ORIGIN>/onboard?token=<token>` — Stripe onboarding (24h).
-- `<FRONTEND_ORIGIN>/regenerate-key?token=<token>` — reveals the API key once. Expires in **15 minutes**. Visiting it calls `GET /api/v1/api-key/regenerate?token=<token>`, which rotates and returns the plaintext key.
+- `<FRONTEND_ORIGIN>/onboard#token=<token>` — Stripe onboarding (24h).
+- `<FRONTEND_ORIGIN>/regenerate-key#token=<token>` — reveals the API key once. Expires in **15 minutes**. The frontend redeems it with `POST /api/v1/api-key/regenerate` and body `{ "token": "<token>" }`, which rotates and returns the plaintext key.
 
 > If the 15-minute retrieval link expires before the client opens it, an admin can re-issue one via `POST /api/v1/api-key/regenerate-request/admin`.
 
@@ -339,9 +338,9 @@ or:
 
 ---
 
-#### `GET /api/v1/onboard-client?token=<token>`
+#### `POST /api/v1/onboard-client`
 
-No auth. Called by the frontend when a client visits their onboarding link.
+No auth. Called by the frontend when a client visits their onboarding link. Send `{ "token": "<token>" }` in the JSON body.
 
 Validates the token, creates a Stripe Express account (if not already created), and returns the Stripe account link URL.
 
@@ -371,7 +370,7 @@ After successful validation, the client's `stripeAccountId` is saved and the use
 
 ---
 
-#### `GET /api/v1/connect/refresh?token=<token>`
+#### `GET /api/v1/connect/refresh?client_id=<client_id>&state=<state>`
 
 No auth. Regenerates a Stripe account link for an incomplete onboarding. Stripe calls this when an account link expires. Redirects (302) directly to the new Stripe account link.
 
@@ -392,52 +391,11 @@ Idempotency-Key: <unique-string>
 
 Use a unique key per payment attempt (e.g., a UUID). This prevents duplicate charges if the request is retried.
 
-The behavior depends on the `USE_CHECKOUT` environment variable:
-
----
-
-**PaymentIntent mode (`USE_CHECKOUT=false` — default)**
-
-Use this when you want to embed a payment form in your own frontend using Stripe Elements.
+All payments use a hosted Stripe Checkout page — the user is redirected to Stripe to complete payment.
 
 **Request:**
 ```json
 {
-  "amount": 5000,
-  "currency": "usd",
-  "description": "Invoice #1234",
-  "metadata": {
-    "invoiceId": "1234"
-  }
-}
-```
-
-- `amount` — in cents (e.g., `5000` = $50.00)
-- `currency` — ISO 4217 currency code (e.g., `"usd"`)
-- `description` — optional
-- `metadata` — optional key/value pairs passed to Stripe
-
-**Response `201`:**
-```json
-{
-  "clientSecret": "pi_xxx_secret_yyy",
-  "paymentIntentId": "pi_xxx"
-}
-```
-
-Pass `clientSecret` to `stripe.confirmPayment()` in your frontend.
-
----
-
-**Checkout mode (`USE_CHECKOUT=true`)**
-
-Use this for a hosted Stripe Checkout page — the user is redirected to Stripe to complete payment.
-
-**Request:**
-```json
-{
-  "amount": 5000,
-  "currency": "usd",
   "description": "Invoice #1234",
   "metadata": { "invoiceId": "1234" },
   "lineItems": [
@@ -453,7 +411,10 @@ Use this for a hosted Stripe Checkout page — the user is redirected to Stripe 
 }
 ```
 
-- `lineItems` — required in Checkout mode, must be non-empty
+- `lineItems` — required, must be non-empty. `unit_amount` is in cents (e.g., `5000` = $50.00)
+- `description` — optional
+- `metadata` — optional key/value pairs passed to Stripe
+- `amount` — optional explicit total in cents; required only when line items reference Stripe price IDs instead of `price_data`
 
 **Response `201`:**
 ```json
@@ -466,8 +427,7 @@ Redirect the user to this URL to complete payment. After payment, Stripe redirec
 
 **Common payment errors:**
 - `400` — Missing or empty `Idempotency-Key`
-- `400` — Missing `amount` or `currency` (PaymentIntent mode)
-- `400` — Missing `lineItems` (Checkout mode)
+- `400` — Missing or empty `lineItems`
 - `401` — Missing or invalid API key
 
 ---
@@ -860,8 +820,6 @@ No auth required. Registered without the `/api/v1` prefix. Returns a small JavaS
 window.API_URL = "https://api.example.com";
 ```
 
-> The `USE_CHECKOUT` flag is read only server-side inside the payments handler; it is **not** exposed by any endpoint.
-
 ---
 
 ### Products
@@ -995,7 +953,7 @@ Save the `apiKey` from the response. You will not see it again. The client recei
 
 **Step 2 — Client connects Stripe (client action)**
 
-The client clicks the link in their email, which opens the frontend at `/onboard?token=...`. The frontend calls `GET /api/v1/onboard-client?token=...` to get a Stripe Connect URL, then redirects the client to Stripe.
+The client clicks the link in their email, which opens the frontend at `/onboard#token=...`. The frontend calls `POST /api/v1/onboard-client` with the token in the JSON body to get a Stripe Connect URL, then redirects the client to Stripe.
 
 **Step 3 — Stripe redirects back**
 
@@ -1067,7 +1025,6 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | `STRIPE_SECRET_KEY` | Stripe secret key (`sk_test_...` or `sk_live_...`) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
 | `FRONTEND_ORIGIN` | Comma-separated allowed CORS origins (e.g., `http://localhost:1919`) |
-| `USE_CHECKOUT` | `"true"` or `"false"` — switches payment mode |
 | `SMTP_HOST` | SMTP server hostname |
 | `SMTP_PORT` | SMTP server port number |
 | `SMTP_USER` | SMTP username |
@@ -1093,4 +1050,3 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | Variable | Description |
 |----------|-------------|
 | `ALLOW_ADMIN_SETUP` | Set to `true` to enable the `/auth/setup` endpoint |
-| `ADMIN_SETUP_TOKEN` | Optional token required to call `/auth/setup` |

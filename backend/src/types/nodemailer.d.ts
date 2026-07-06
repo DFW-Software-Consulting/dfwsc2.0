@@ -15,6 +15,9 @@ declare module "nodemailer" {
       user: string;
       pass: string;
     };
+    connectionTimeout?: number;
+    greetingTimeout?: number;
+    socketTimeout?: number;
   }
 
   export interface Transporter {
