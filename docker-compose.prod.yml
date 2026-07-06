@@ -19,6 +19,7 @@ services:
       - backend
 
   api:
+    container_name: dfwsc-api
     build:
       context: ./backend
       dockerfile: Dockerfile

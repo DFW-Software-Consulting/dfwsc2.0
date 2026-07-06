@@ -6,7 +6,7 @@ import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
-import { clientGroups, clients, onboardingTokens } from "../db/schema";
+import { apiKeyRegenerationTokens, clientGroups, clients, onboardingTokens } from "../db/schema";
 import { createRegenerationToken, validateAndRegenerate } from "../lib/api-key-regeneration";
 import { requireAdminJwt } from "../lib/auth";
 import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
@@ -33,6 +33,10 @@ const ONBOARDING_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex").slice(0, 12);
+}
+
+function hashRegenerationToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 interface AccountLinkContext {
@@ -358,6 +362,32 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         });
       } catch (err) {
         request.log.error({ err, clientId }, "Failed to send onboarding email");
+        try {
+          await db.transaction(async (tx) => {
+            const result = await tx
+              .delete(clients)
+              .where(
+                and(
+                  eq(clients.id, clientId),
+                  eq(clients.email, email),
+                  eq(clients.workspace, workspaceParam)
+                )
+              );
+
+            if (result.rowCount !== 1) {
+              throw new Error(`Expected to delete 1 client row, deleted ${result.rowCount ?? 0}`);
+            }
+          });
+        } catch (cleanupErr) {
+          request.log.error(
+            { err: cleanupErr, clientId },
+            "Failed to clean up client after email failure"
+          );
+          throw errors.emailFailed(
+            "Failed to send onboarding email and clean up client. Please contact support."
+          );
+        }
+        throw errors.emailFailed("Failed to send onboarding email. Please try again.");
       }
 
       return reply.code(201).send({
@@ -962,6 +992,34 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         });
       } catch (err) {
         request.log.error({ err, clientId: clientRecord.id }, "Failed to send regeneration email");
+        try {
+          const tokenHash = hashRegenerationToken(rawToken);
+          const result = await db
+            .update(apiKeyRegenerationTokens)
+            .set({ status: "revoked", updatedAt: new Date() })
+            .where(
+              and(
+                eq(apiKeyRegenerationTokens.clientId, clientRecord.id),
+                eq(apiKeyRegenerationTokens.token, tokenHash),
+                eq(apiKeyRegenerationTokens.status, "pending")
+              )
+            );
+
+          if (result.rowCount !== 1) {
+            throw new Error(
+              `Expected to revoke 1 regeneration token, revoked ${result.rowCount ?? 0}`
+            );
+          }
+        } catch (cleanupErr) {
+          request.log.error(
+            { err: cleanupErr, clientId: clientRecord.id },
+            "Failed to revoke unsent regeneration token"
+          );
+          throw errors.emailFailed(
+            "Failed to send regeneration email and revoke unsent token. Please contact support."
+          );
+        }
+        throw errors.emailFailed("Failed to send regeneration email. Please try again.");
       }
 
       return reply.code(200).send({
