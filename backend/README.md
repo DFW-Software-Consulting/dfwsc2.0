@@ -17,7 +17,6 @@ Create a `.env` file based on `.env.example`.
 | `STRIPE_SECRET_KEY` | ✅ | Stripe API key used for all server-side requests. |
 | `STRIPE_WEBHOOK_SECRET` | ✅ | Signing secret for `/webhooks/stripe`. |
 | `FRONTEND_ORIGIN` | ✅ | Origin allowed by CORS and used for Checkout redirects. |
-| `USE_CHECKOUT` | ✅ | `true` to use Checkout Sessions, `false` to create PaymentIntents directly. |
 | `DEFAULT_PROCESS_FEE_CENTS` | ❌ | Platform fee applied when the request omits `applicationFeeAmount`. Must be a non-negative integer. |
 | `DATABASE_URL` | ✅ | PostgreSQL connection string used by Drizzle. |
 | `PORT` | ❌ | Server port (defaults to `4242`). |
@@ -67,8 +66,7 @@ Non-listed endpoints from earlier versions have been removed (invoices, refunds,
 ## Payments and Fees
 
 - The caller supplies the desired `application_fee_amount` for each payment request.
-- When `USE_CHECKOUT=false`, the API creates a PaymentIntent with automatic payment methods and returns the `client_secret`.
-- When `USE_CHECKOUT=true`, the API creates a Checkout Session with platform fees applied via `payment_intent_data.application_fee_amount` and returns the hosted session URL.
+- The API always creates a Checkout Session from the required `lineItems`, applies platform fees via `payment_intent_data.application_fee_amount`, and returns the hosted session URL.
 - Idempotency is enforced via the standard `Idempotency-Key` request header on write routes.
 
 Refunds are **not** exposed through this API. Handle all refunds directly in the Stripe Dashboard so Stripe remains the source of truth.

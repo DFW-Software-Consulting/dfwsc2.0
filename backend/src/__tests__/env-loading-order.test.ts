@@ -8,7 +8,6 @@ describe("Environment Loading Order Integration", () => {
     process.env.STRIPE_SECRET_KEY = "sk_test_12345";
     process.env.STRIPE_WEBHOOK_SECRET = "whsec_test12345";
     process.env.FRONTEND_ORIGIN = "http://localhost:5173";
-    process.env.USE_CHECKOUT = "true";
     process.env.DATABASE_URL = "postgresql://user:password@localhost:5432/test_db";
     process.env.SMTP_HOST = "localhost";
     process.env.SMTP_PORT = "587";
@@ -61,7 +60,7 @@ describe("Environment Loading Order Integration", () => {
     const validatedEnv = validateEnv();
 
     // Check that required env vars are present in the validated environment
-    expect(validatedEnv.USE_CHECKOUT).toBe("true");
+    expect(validatedEnv.FRONTEND_ORIGIN).toBe("http://localhost:5173");
     expect(validatedEnv.STRIPE_WEBHOOK_SECRET).toBe("whsec_test12345");
 
     // Now build the server, which should also call validateEnv internally
