@@ -46,6 +46,10 @@ Gemini.md
 
 # Local AI tool settings
 .qwen/
+.opencode/
+
+# Claude Code worktrees (created per-branch, not part of the repo)
+.claude/worktrees/
 
 # Database - Note: drizzle migrations SHOULD be committed
 # Only ignore if you want to regenerate migrations

@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 COMPOSE := docker compose -f docker-compose.base.yml -f docker-compose.dev.yml
 
-.PHONY: help up up-build down down-v logs ps sh dev-frontend dev-backend test test-front test-back test-up coverage prod prod-build
+.PHONY: help up up-build down down-v logs ps sh dev-frontend dev-backend test test-front test-back test-up coverage prod prod-build down-prod logs-prod sh-prod ps-prod
 
 help:
 	@echo "Common targets:"
@@ -21,6 +21,10 @@ help:
 	@echo "  make coverage     # Run backend tests with coverage report"
 	@echo "  make prod         # Start prod stack (api, migrator)"
 	@echo "  make prod-build   # Build + start prod stack"
+	@echo "  make down-prod    # Stop prod stack"
+	@echo "  make logs-prod    # Tail prod api logs"
+	@echo "  make sh-prod      # Shell into prod api container"
+	@echo "  make ps-prod      # Show prod containers"
 
 up:
 	$(COMPOSE) up -d
@@ -72,3 +76,15 @@ prod:
 
 prod-build:
 	docker compose -f docker-compose.prod.yml up -d --build
+
+down-prod:
+	docker compose -f docker-compose.prod.yml down
+
+logs-prod:
+	docker compose -f docker-compose.prod.yml logs -f api
+
+sh-prod:
+	docker compose -f docker-compose.prod.yml exec api sh
+
+ps-prod:
+	docker compose -f docker-compose.prod.yml ps

@@ -20,10 +20,8 @@ const OPTIONAL_ENV_VARS = [
   "API_BASE_URL",
   "DEFAULT_PROCESS_FEE_CENTS",
   "SMTP_FROM",
-  "ADMIN_API_KEY",
   "ALLOW_ADMIN_SETUP",
   "ADMIN_PASSWORD",
-  "NEXTCLOUD_APP_PASSWORD",
   "REDIS_URL",
 ];
 
@@ -35,7 +33,6 @@ const FULLY_SECRET_ENV_VARS = new Set([
   "SMTP_PASS",
   "DATABASE_URL",
   "ADMIN_PASSWORD",
-  "NEXTCLOUD_APP_PASSWORD",
 ]);
 
 function isFullySecretKey(key: string): boolean {
