@@ -1,52 +1,15 @@
-# Documentation Overview
+# Documentation moved
 
-This directory mirrors the runtime layout of the Stripe Payment Portal so that developers can jump from code to supporting guides without guesswork. Each Markdown file begins with the path of the module it explains, lists the dependencies (including environment variables), and captures common debugging and testing tips.
+This directory previously held a parallel set of module-by-module docs
+(`src/`, `db/`, `docs/` subtrees). It was retired: it documented contracts
+that no longer exist (a `PaymentIntent`-based `clientSecret` response shape,
+a `src/server.ts` entry point that isn't part of this codebase) and drifted
+out of sync with the current routes.
 
-## Structure
+For accurate, maintained documentation, see:
 
-```
-documentation/
-├── README.md
-├── CHANGELOG.md
-├── src/
-│   ├── server.md
-│   ├── lib/
-│   │   ├── stripe.md
-│   │   └── mailer.md
-│   └── routes/
-│       ├── accounts.md
-│       ├── auth.md           # Admin authentication (JWT login, setup)
-│       ├── clients.md        # Client management (list, update)
-│       ├── config.md         # Runtime config endpoint
-│       ├── connect.md        # Stripe Connect onboarding flow
-│       ├── groups.md         # Client group management
-│       ├── health.md         # Health check endpoint
-│       ├── payments.md
-│       ├── reports.md
-│       └── webhooks.md
-├── db/
-│   ├── schema.md
-│   └── migrations.md
-└── docs/
-    ├── api.md
-    ├── deployment.md
-    ├── email_setup.md
-    ├── env_setup.md
-    ├── security.md
-    ├── stripe_setup.md
-    └── testing.md
-```
-
-## How to Use This Directory
-
-- **Start with `docs/`** for project-wide guidance on environment preparation, running tests, or deploying to production.
-- **Drill into `src/`** to understand a specific Fastify module, including example cURL requests that exercise each endpoint.
-- **Visit `db/`** when you need to inspect database shape or run migrations.
-- **Keep `CHANGELOG.md`** up to date as you add, update, or retire documentation so contributors can track the history of these guides.
-
-Every file is meant to be short enough to read in a few minutes and detailed enough to operate the service in isolation.
-
-## Ownership & Cadence
-- **Owner**: backend lead maintains docs in this directory.
-- **Update cadence**: refresh after any API, schema, or operational change; review at least monthly.
-- **Changelog**: record doc edits in `CHANGELOG.md` with date and summary.
+- [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) — system overview and entry point
+- [docs/BACKEND.md](../../docs/BACKEND.md) — API, logic, and auth
+- [docs/DATABASE.md](../../docs/DATABASE.md) — schema and migrations
+- [docs/STRIPE.md](../../docs/STRIPE.md) — Connect, webhooks, and payments
+- [API_DOCS.md](../../API_DOCS.md) — API reference

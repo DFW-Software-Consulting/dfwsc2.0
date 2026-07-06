@@ -20,7 +20,6 @@ export function ensureBaseEnv(): void {
   setIfMissing("JWT_SECRET", TEST_JWT_SECRET);
   setIfMissing("NEXTCLOUD_BASE_URL", "https://cloud.example.com");
   setIfMissing("NEXTCLOUD_USERNAME", "test");
-  setIfMissing("NEXTCLOUD_APP_PASSWORD", "test-password");
   setIfMissing("NEXTCLOUD_REGISTER_ID", "1");
   setIfMissing("NEXTCLOUD_CONTACT_SCHEMA_ID", "1");
   setIfMissing("NEXTCLOUD_LEDGER_SCHEMA_ID", "1");

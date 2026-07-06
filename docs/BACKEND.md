@@ -51,7 +51,14 @@ If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environm
 ## 5. Workspace
 All clients and groups belong to the `client_portal` workspace. The `workspace` query parameter is required on all admin list endpoints and validated server-side.
 
-## 6. API Route Map
+## 6. Resilience: Circuit Breakers
+Outbound calls to Stripe and SMTP are wrapped by in-process circuit breakers (`lib/circuit-breakers.ts`, built on `opossum`). Each breaker opens after 5 consecutive failures and stays open for a 30-second reset timeout; while open, calls fail fast instead of hitting the upstream service.
+
+- **Stripe** (`withStripeCircuit`): wraps Stripe API calls in the `payments`, `connect`, `products`, and `webhooks` routes. When the breaker is open, these routes catch `isCircuitOpenError` and respond `503` with `{ "error": "Payment service is temporarily unavailable.", "code": "STRIPE_CIRCUIT_OPEN" }`.
+- **SMTP** (`withSmtpCircuit`): wraps outbound mail in `lib/mailer.ts` (onboarding and API-key-regeneration emails).
+- Breaker state (open/half-open/closed, plus fire/failure/success counts) is exposed via `GET /metrics` (bearer-token protected; the endpoint is disabled and returns 404 if `METRICS_TOKEN` is unset).
+
+## 7. API Route Map
 All routes are prefixed with `/api/v1`.
 
 ### Public Routes
@@ -106,5 +113,5 @@ All routes are prefixed with `/api/v1`.
 | GET | `/settings` | Get system settings | Admin JWT |
 | POST | `/webhooks/stripe` | Stripe webhook handler | Stripe Signature |
 
-## 7. Swagger
+## 8. Swagger
 Swagger UI is available at `/docs` when the backend is started with `ENABLE_SWAGGER=true`. It is disabled by default in production to keep the build lean.
