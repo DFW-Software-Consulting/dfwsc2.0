@@ -4,7 +4,7 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
-import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
+import { MAX_FEE_PERCENT, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { errors, isUniqueViolation } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
 import { isValidHttpsUrl, parseBody } from "../lib/validation";
@@ -91,11 +91,11 @@ const clientPatchBodySchema = z
     }
     if (
       body.processingFeePercent != null &&
-      (body.processingFeePercent <= 0 || body.processingFeePercent > 100)
+      (body.processingFeePercent <= 0 || body.processingFeePercent > MAX_FEE_PERCENT)
     ) {
       ctx.addIssue({
         code: "custom",
-        message: "processingFeePercent must be greater than 0 and at most 100.",
+        message: `processingFeePercent must be greater than 0 and at most ${MAX_FEE_PERCENT}.`,
         path: ["processingFeePercent"],
       });
     }

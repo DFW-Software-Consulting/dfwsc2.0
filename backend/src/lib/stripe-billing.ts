@@ -1,6 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { db } from "../db/client";
 import { type clientGroups, type clients, settings } from "../db/schema";
+import { MAX_FEE_PERCENT } from "./constants";
 import { stripe } from "./stripe";
 
 export { stripe };
@@ -158,8 +159,8 @@ function validateFeePercent(value: string, source: string): number {
   if (Number.isNaN(parsed)) {
     throw new Error(`Invalid ${source} processingFeePercent: must be a valid number.`);
   }
-  if (parsed < 0 || parsed > 100) {
-    throw new Error(`${source} processingFeePercent must be between 0 and 100.`);
+  if (parsed < 0 || parsed > MAX_FEE_PERCENT) {
+    throw new Error(`${source} processingFeePercent must be between 0 and ${MAX_FEE_PERCENT}.`);
   }
   return parsed;
 }

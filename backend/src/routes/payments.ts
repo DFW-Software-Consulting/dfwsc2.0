@@ -107,8 +107,6 @@ const paymentCreateBodySchema = z.object({
 });
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
-  const useCheckout = (process.env.USE_CHECKOUT ?? "false").toLowerCase() === "true";
-
   fastify.post(
     "/payments/create",
     {
@@ -177,77 +175,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           )[0] ?? null)
         : null;
 
-      if (!useCheckout) {
-        if (typeof amount !== "number" || !currency) {
-          throw errors.badRequest("amount and currency are required for PaymentIntents.");
-        }
-
-        if (!Number.isInteger(amount) || amount <= 0) {
-          throw errors.badRequest(
-            "amount must be a positive integer (in the smallest currency unit)."
-          );
-        }
-
-        let feeAmount: number;
-        try {
-          feeAmount = await resolveClientFee(client, group, amount);
-        } catch (e: unknown) {
-          throw errors.badRequest((e as Error).message);
-        }
-
-        const totalAmount = effectiveWaiveFee ? amount : amount + feeAmount;
-
-        const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
-          amount: totalAmount,
-          currency,
-          automatic_payment_methods: { enabled: true },
-          description,
-          metadata: {
-            ...(metadata ?? {}),
-            clientId,
-            baseAmount: amount.toString(),
-            feeAmount: effectiveWaiveFee ? "0" : feeAmount.toString(),
-            waivedFeeAmount: effectiveWaiveFee ? feeAmount.toString() : "0",
-          },
-        };
-
-        try {
-          if (!effectiveWaiveFee) {
-            paymentIntentParams.application_fee_amount = feeAmount;
-          }
-          const paymentIntent = await withStripeCircuit(() =>
-            stripe.paymentIntents.create(paymentIntentParams, {
-              stripeAccount: stripeAccountId,
-              idempotencyKey,
-            })
-          );
-          return reply.code(201).send({
-            clientSecret: paymentIntent.client_secret,
-            paymentIntentId: paymentIntent.id,
-            stripeAccountId,
-          });
-        } catch (err) {
-          request.log.error({ err }, "Stripe PaymentIntent creation failed");
-          if (isCircuitOpenError(err)) {
-            return reply.code(503).send({
-              error: "Payment service is temporarily unavailable.",
-              code: "STRIPE_CIRCUIT_OPEN",
-            });
-          }
-          if (err instanceof Error && err.name === "StripeCardError") {
-            return reply.code(402).send({ error: err.message, code: "CARD_DECLINED" });
-          }
-          if (err instanceof Error && err.name === "StripeRateLimitError") {
-            return reply
-              .code(429)
-              .send({ error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" });
-          }
-          throw errors.stripeFailed("Payment processing failed. Please try again.");
-        }
-      }
-
       if (!Array.isArray(lineItems) || lineItems.length === 0) {
-        throw errors.badRequest("lineItems are required when USE_CHECKOUT=true.");
+        throw errors.badRequest("lineItems are required.");
       }
 
       const hasExplicitAmount = typeof amount === "number";
