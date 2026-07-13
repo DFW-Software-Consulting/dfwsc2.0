@@ -6,6 +6,7 @@ import { db } from "../db/client";
 import { clients, webhookEvents } from "../db/schema";
 import { withStripeCircuit } from "../lib/circuit-breakers";
 import { isUniqueViolation } from "../lib/errors";
+import { syncInvoiceLifecycle, syncInvoicePaid } from "../lib/ledger-sync";
 import { stripe } from "../lib/stripe";
 import { mapStripeError } from "../lib/stripe-errors";
 
@@ -90,6 +91,18 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
         { invoiceId: inv.id, clientId: inv.metadata?.clientId },
         "Invoice payment failed."
       );
+      await syncInvoiceLifecycle(inv, logger, event.account);
+      break;
+    }
+    case "invoice.finalized":
+    case "invoice.voided":
+    case "invoice.marked_uncollectible": {
+      const inv = event.data.object as Stripe.Invoice;
+      logger.info(
+        { invoiceId: inv.id, status: inv.status, eventType: event.type },
+        "Invoice lifecycle event received."
+      );
+      await syncInvoiceLifecycle(inv, logger, event.account);
       break;
     }
     case "customer.subscription.updated": {
@@ -196,6 +209,11 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
           }
         }
       }
+
+      // Book the payment into the Nextcloud ledgers (NextLedger income + fee
+      // expense, Pipelinq register upsert). Idempotent; throws on failure so
+      // the claim is released and Stripe redelivers.
+      await syncInvoicePaid(stripe, inv, logger, event.account);
       break;
     }
     case "subscription_schedule.completed": {

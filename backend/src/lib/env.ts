@@ -23,6 +23,13 @@ const OPTIONAL_ENV_VARS = [
   "ALLOW_ADMIN_SETUP",
   "ADMIN_PASSWORD",
   "REDIS_URL",
+  // Nextcloud ledger sync — all three of URL/USER/APP_PASSWORD must be set to
+  // enable it (see lib/ledger-sync.ts); register/schema ids have defaults.
+  "NEXTCLOUD_URL",
+  "NEXTCLOUD_LEDGER_USER",
+  "NEXTCLOUD_APP_PASSWORD",
+  "OPENREGISTER_REGISTER_ID",
+  "OPENREGISTER_INVOICE_SCHEMA_ID",
 ];
 
 // Vars whose values must never appear in logs, even partially — presence only.

@@ -43,9 +43,30 @@ Pass `waiveFee: true` in the payment request body to skip the platform fee for a
 - Deduplicates events using the `webhook_events` table (`stripeEventId` unique constraint).
 - Handles subscription lifecycle and invoice status updates.
 
+### Nextcloud ledger sync (optional)
+When `NEXTCLOUD_URL`, `NEXTCLOUD_LEDGER_USER`, and `NEXTCLOUD_APP_PASSWORD` are all set,
+invoice events on the **platform account** are mirrored into the Nextcloud bookkeeping
+systems (`backend/src/lib/ledger-sync.ts`); connected-account events are skipped.
+
+- `invoice.paid` → income entry (gross) + expense entry (exact Stripe fee from the
+  charge's balance transaction) in the NextLedger fiscal year matching the payment
+  date (auto-created on rollover), plus an upsert of the Pipelinq OpenRegister
+  "Ledger Invoice" object keyed by `stripe_invoice_id`.
+- `invoice.finalized` / `invoice.payment_failed` / `invoice.voided` /
+  `invoice.marked_uncollectible` → register upsert only (no money moved).
+
+Handlers are idempotent (safe under Stripe redelivery); a Nextcloud outage returns a
+non-2xx so Stripe retries. Remember to subscribe the webhook endpoint to the invoice
+events in the Stripe Dashboard.
+
 ## 6. Environment Variables
 | Variable | Description |
 |----------|-------------|
 | `STRIPE_SECRET_KEY` | Stripe secret key (platform account) |
 | `STRIPE_WEBHOOK_SECRET` | Webhook endpoint signing secret |
 | `DEFAULT_PROCESS_FEE_CENTS` | (optional) Last-resort fallback fee (cents) when no client/group/DB default is configured |
+| `NEXTCLOUD_URL` | (optional) Nextcloud base URL for ledger sync |
+| `NEXTCLOUD_LEDGER_USER` | (optional) Nextcloud username for ledger sync |
+| `NEXTCLOUD_APP_PASSWORD` | (optional) Nextcloud app password for ledger sync |
+| `OPENREGISTER_REGISTER_ID` | (optional) OpenRegister register id (default `1`) |
+| `OPENREGISTER_INVOICE_SCHEMA_ID` | (optional) OpenRegister Ledger Invoice schema id (default `9`) |
