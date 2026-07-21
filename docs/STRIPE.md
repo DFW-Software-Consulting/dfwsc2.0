@@ -21,8 +21,21 @@ All payments go through **Stripe Checkout** — the former Stripe Elements / Pay
 
 - Creates a **Checkout Session** with `lineItems` on behalf of the client's Express Account (direct charge).
 - Returns a `url` for browser redirect to Stripe-hosted checkout.
-- Success/cancel URLs resolve from: client config → group config → `FRONTEND_ORIGIN` default.
-- `Idempotency-Key` header is required for API key calls.
+- Line items must use inline `price_data` (no platform price IDs — those are incompatible with connected-account Checkout).
+- The base amount is derived server-side from line items; a caller-supplied `amount` is ignored.
+- All line items must use the same 3-letter ISO currency.
+- `Idempotency-Key` header is required for all payment creation calls (both API-key and admin).
+- Success/cancel URLs resolve from: client config → group config → `DEFAULT_PAYMENT_SUCCESS_URL`/`DEFAULT_PAYMENT_CANCEL_URL` if valid HTTP(S) URLs → `FRONTEND_ORIGIN` default.
+- The built-in success fallback always includes `session_id={CHECKOUT_SESSION_ID}`. A default success URL also gets that placeholder appended unless it already has a `session_id` query parameter.
+
+### Payment Ledger
+Every payment creation inserts a row into the `payment_ledger` table synchronously after Stripe Checkout Session creation. The ledger tracks:
+- Connected account, Stripe session ID, client, source
+- Status (created → paid/expired/failed/canceled/refunded/disputed)
+- Base/total/fee amounts, currency, metadata
+- `last_stripe_event_created_at` for ordering protection (stale events are ignored)
+
+`GET /api/v1/payments/session/:sessionId` returns payer-safe fields from the ledger (no internal IDs or metadata leaked).
 
 ## 4. Fee Resolution
 `application_fee_amount` is collected on every transaction via a 6-level priority chain (first non-null wins):
@@ -40,12 +53,19 @@ Pass `waiveFee: true` in the payment request body to skip the platform fee for a
 ## 5. Webhook Handling
 `POST /api/v1/webhooks/stripe`
 - Validates Stripe signature via `STRIPE_WEBHOOK_SECRET`.
-- Deduplicates events using the `webhook_events` table (`stripeEventId` unique constraint).
-- Handles subscription lifecycle and invoice status updates.
+- Deduplicates events using the `webhook_events` table (`stripeEventId` unique constraint) with a reclaimable lease mechanism.
+- Updates the `payment_ledger` table for: `checkout.session.completed`, `checkout.session.expired`, `checkout.session.async_payment_succeeded/failed`, `payment_intent.succeeded/failed/canceled`, `charge.refunded`, `charge.dispute.created`.
+- **account.updated ordering protection**: Retrieves current account state from Stripe rather than trusting the event payload, handling out-of-order delivery.
+- Ledger updates use `last_stripe_event_created_at` to ignore stale events.
 
-## 6. Environment Variables
+## 6. Products
+Products and prices are created on the **connected account** (not the platform account) by passing `stripeAccount` to Stripe API calls. Both `GET /products` and `POST /products` require a `clientId` parameter to resolve the connected account.
+
+## 7. Environment Variables
 | Variable | Description |
 |----------|-------------|
 | `STRIPE_SECRET_KEY` | Stripe secret key (platform account) |
 | `STRIPE_WEBHOOK_SECRET` | Webhook endpoint signing secret |
 | `DEFAULT_PROCESS_FEE_CENTS` | (optional) Last-resort fallback fee (cents) when no client/group/DB default is configured |
+| `DEFAULT_PAYMENT_SUCCESS_URL` | (optional) Default Checkout success redirect URL used after client/group config |
+| `DEFAULT_PAYMENT_CANCEL_URL` | (optional) Default Checkout cancel redirect URL used after client/group config |

@@ -80,6 +80,19 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "client_id" },
             { column_name: "token" },
             { column_name: "status" },
+            // payment_ledger columns
+            { column_name: "idempotency_key" },
+            { column_name: "connected_account_id" },
+            { column_name: "stripe_session_id" },
+            { column_name: "stripe_payment_intent_id" },
+            { column_name: "source" },
+            { column_name: "base_amount_cents" },
+            { column_name: "total_amount_cents" },
+            { column_name: "fee_amount_cents" },
+            { column_name: "refunded_amount_cents" },
+            { column_name: "currency" },
+            { column_name: "metadata" },
+            { column_name: "last_stripe_event_created_at" },
           ],
         };
       }
@@ -88,7 +101,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(7);
+    expect(mockDb.execute).toHaveBeenCalledTimes(8);
   });
 
   it("throws when a table is missing required columns", async () => {

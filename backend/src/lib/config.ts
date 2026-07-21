@@ -9,6 +9,47 @@ export function resolveFrontendOrigin(): string {
   return origin;
 }
 
+function resolveOptionalHttpUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return undefined;
+    }
+    return trimmed;
+  } catch {
+    return undefined;
+  }
+}
+
+function appendCheckoutSessionId(url: string): string {
+  if (new URL(url).searchParams.has("session_id")) {
+    return url;
+  }
+
+  const hashIndex = url.indexOf("#");
+  const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
+  const separator = base.includes("?")
+    ? base.endsWith("?") || base.endsWith("&")
+      ? ""
+      : "&"
+    : "?";
+
+  return `${base}${separator}session_id={CHECKOUT_SESSION_ID}${hash}`;
+}
+
+export function resolveDefaultPaymentSuccessUrl(): string | undefined {
+  const url = resolveOptionalHttpUrl(process.env.DEFAULT_PAYMENT_SUCCESS_URL);
+  return url ? appendCheckoutSessionId(url) : undefined;
+}
+
+export function resolveDefaultPaymentCancelUrl(): string | undefined {
+  return resolveOptionalHttpUrl(process.env.DEFAULT_PAYMENT_CANCEL_URL);
+}
+
 /**
  * Resolves the server's own base URL for building callback/refresh links.
  *

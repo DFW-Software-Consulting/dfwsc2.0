@@ -61,6 +61,28 @@ const REQUIRED_TABLES: TableColumns[] = [
     table: "api_key_regeneration_tokens",
     columns: ["id", "client_id", "token", "status", "email", "created_at", "updated_at"],
   },
+  {
+    table: "payment_ledger",
+    columns: [
+      "id",
+      "idempotency_key",
+      "connected_account_id",
+      "stripe_session_id",
+      "stripe_payment_intent_id",
+      "client_id",
+      "source",
+      "status",
+      "base_amount_cents",
+      "total_amount_cents",
+      "fee_amount_cents",
+      "refunded_amount_cents",
+      "currency",
+      "metadata",
+      "last_stripe_event_created_at",
+      "created_at",
+      "updated_at",
+    ],
+  },
 ];
 
 export async function verifyDatabaseSchema(): Promise<void> {
