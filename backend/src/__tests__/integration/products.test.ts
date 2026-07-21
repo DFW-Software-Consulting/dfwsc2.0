@@ -13,8 +13,12 @@ vi.mock("../../lib/stripe", () => ({
   },
 }));
 
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
+import { db } from "../../db/client";
+import { clients } from "../../db/schema";
 import {
   openStripeCircuitForTests,
   resetCircuitBreakersForTests,
@@ -25,6 +29,13 @@ import { ensureBaseEnv } from "../helpers/env";
 
 describe("Products API", () => {
   let app: any;
+  // A client with a connected + charges-enabled Stripe account — the "happy path" client
+  // that `resolveConnectedAccount` should resolve for all Stripe-calling routes.
+  let clientId: string;
+  let stripeAccountId: string;
+  // A client that exists but has no connected/charges-enabled Stripe account — used to
+  // cover the `resolveConnectedAccount` rejection path.
+  let disconnectedClientId: string;
 
   beforeAll(async () => {
     ensureBaseEnv();
@@ -35,14 +46,38 @@ describe("Products API", () => {
     if (app) await app.close();
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     resetCircuitBreakersForTests();
+
+    clientId = randomUUID();
+    stripeAccountId = `acct_products${clientId.replace(/-/g, "").slice(0, 14)}`;
+    disconnectedClientId = randomUUID();
+
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Products Test Client",
+      email: `products-${clientId}@example.com`,
+      status: "active",
+      stripeAccountId,
+      chargesEnabled: true,
+    });
+
+    await db.insert(clients).values({
+      id: disconnectedClientId,
+      name: "Disconnected Client",
+      email: `disconnected-${disconnectedClientId}@example.com`,
+      status: "active",
+      stripeAccountId: null,
+      chargesEnabled: false,
+    });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
     resetCircuitBreakersForTests();
+    await db.delete(clients).where(eq(clients.id, clientId));
+    await db.delete(clients).where(eq(clients.id, disconnectedClientId));
   });
 
   // ── GET /products ─────────────────────────────────────────────────────────
@@ -65,7 +100,7 @@ describe("Products API", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/products",
+        url: `/api/v1/products?clientId=${clientId}`,
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -89,7 +124,7 @@ describe("Products API", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/products",
+        url: `/api/v1/products?clientId=${clientId}`,
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -104,15 +139,18 @@ describe("Products API", () => {
 
       await app.inject({
         method: "GET",
-        url: "/api/v1/products",
+        url: `/api/v1/products?clientId=${clientId}`,
         headers: { authorization: `Bearer ${token}` },
       });
 
-      expect(stripe.products.list).toHaveBeenCalledWith({
-        active: true,
-        limit: 100,
-        expand: ["data.default_price"],
-      });
+      expect(stripe.products.list).toHaveBeenCalledWith(
+        {
+          active: true,
+          limit: 100,
+          expand: ["data.default_price"],
+        },
+        { stripeAccount: stripeAccountId }
+      );
     });
 
     it("returns defaultPrice as null when default_price is a string ID (not expanded)", async () => {
@@ -125,7 +163,7 @@ describe("Products API", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/products",
+        url: `/api/v1/products?clientId=${clientId}`,
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -133,10 +171,38 @@ describe("Products API", () => {
       expect(response.json()[0].defaultPrice).toBeNull();
     });
 
-    it("returns 401 when no JWT provided", async () => {
+    it("returns 400 when clientId query parameter is missing", async () => {
+      const token = makeAdminToken();
+
       const response = await app.inject({
         method: "GET",
         url: "/api/v1/products",
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/clientId/i);
+      expect(stripe.products.list).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 when the client has no connected/charges-enabled Stripe account", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/products?clientId=${disconnectedClientId}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/connected stripe account/i);
+      expect(stripe.products.list).not.toHaveBeenCalled();
+    });
+
+    it("returns 401 when no JWT provided", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/products?clientId=${clientId}`,
       });
 
       expect(response.statusCode).toBe(401);
@@ -148,7 +214,7 @@ describe("Products API", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/products",
+        url: `/api/v1/products?clientId=${clientId}`,
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -173,7 +239,7 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "New Plan", amountCents: 4900 },
+        payload: { name: "New Plan", amountCents: 4900, clientId },
       });
 
       expect(response.statusCode).toBe(201);
@@ -200,7 +266,12 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "Described Plan", amountCents: 999, description: "A description" },
+        payload: {
+          name: "Described Plan",
+          amountCents: 999,
+          description: "A description",
+          clientId,
+        },
       });
 
       expect(response.statusCode).toBe(201);
@@ -220,11 +291,18 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "No Desc", amountCents: 500 },
+        payload: { name: "No Desc", amountCents: 500, clientId },
       });
 
       const callArgs = (stripe.products.create as any).mock.calls[0][0];
       expect(callArgs).not.toHaveProperty("description");
+      const callOpts = (stripe.products.create as any).mock.calls[0][1];
+      expect(callOpts).toEqual(
+        expect.objectContaining({
+          stripeAccount: stripeAccountId,
+          idempotencyKey: expect.any(String),
+        })
+      );
     });
 
     it("calls prices.create with correct product, unit_amount, and currency", async () => {
@@ -240,14 +318,20 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "Price Check", amountCents: 1500, currency: "eur" },
+        payload: { name: "Price Check", amountCents: 1500, currency: "eur", clientId },
       });
 
-      expect(stripe.prices.create).toHaveBeenCalledWith({
-        product: "prod_price_check",
-        unit_amount: 1500,
-        currency: "eur",
-      });
+      expect(stripe.prices.create).toHaveBeenCalledWith(
+        {
+          product: "prod_price_check",
+          unit_amount: 1500,
+          currency: "eur",
+        },
+        expect.objectContaining({
+          stripeAccount: stripeAccountId,
+          idempotencyKey: expect.any(String),
+        })
+      );
     });
 
     it("defaults currency to usd", async () => {
@@ -263,11 +347,35 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "USD Plan", amountCents: 2000 },
+        payload: { name: "USD Plan", amountCents: 2000, clientId },
       });
 
       expect(stripe.prices.create).toHaveBeenCalledWith(
-        expect.objectContaining({ currency: "usd" })
+        expect.objectContaining({ currency: "usd" }),
+        expect.objectContaining({ stripeAccount: stripeAccountId })
+      );
+    });
+
+    it("archives the orphaned product when price creation fails", async () => {
+      const token = makeAdminToken();
+      const mockProduct = { id: "prod_orphan", name: "Orphan Plan", description: null };
+
+      (stripe.products.create as any).mockResolvedValueOnce(mockProduct);
+      (stripe.prices.create as any).mockRejectedValueOnce(new Error("price creation failed"));
+      (stripe.products.update as any).mockResolvedValueOnce({});
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/products",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { name: "Orphan Plan", amountCents: 750, clientId },
+      });
+
+      expect(response.statusCode).toBe(500);
+      expect(stripe.products.update).toHaveBeenCalledWith(
+        "prod_orphan",
+        { active: false },
+        expect.objectContaining({ stripeAccount: stripeAccountId })
       );
     });
 
@@ -278,7 +386,7 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { amountCents: 1000 },
+        payload: { amountCents: 1000, clientId },
       });
 
       expect(response.statusCode).toBe(400);
@@ -292,7 +400,7 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "   ", amountCents: 1000 },
+        payload: { name: "   ", amountCents: 1000, clientId },
       });
 
       expect(response.statusCode).toBe(400);
@@ -306,7 +414,7 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "Plan", amountCents: 0 },
+        payload: { name: "Plan", amountCents: 0, clientId },
       });
 
       expect(response.statusCode).toBe(400);
@@ -320,7 +428,7 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "Plan", amountCents: 9.99 },
+        payload: { name: "Plan", amountCents: 9.99, clientId },
       });
 
       expect(response.statusCode).toBe(400);
@@ -334,11 +442,55 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        payload: { name: "Plan", amountCents: -100 },
+        payload: { name: "Plan", amountCents: -100, clientId },
       });
 
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toMatch(/amountCents/i);
+    });
+
+    it("returns 400 when clientId is missing", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/products",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { name: "Plan", amountCents: 1000 },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/clientId/i);
+      expect(stripe.products.create).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 when the client has no connected/charges-enabled Stripe account", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/products",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { name: "Plan", amountCents: 1000, clientId: disconnectedClientId },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/connected stripe account/i);
+      expect(stripe.products.create).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when the client does not exist", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/v1/products",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        payload: { name: "Plan", amountCents: 1000, clientId: randomUUID() },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(stripe.products.create).not.toHaveBeenCalled();
     });
 
     it("returns 401 when no JWT provided", async () => {
@@ -346,7 +498,7 @@ describe("Products API", () => {
         method: "POST",
         url: "/api/v1/products",
         headers: { "content-type": "application/json" },
-        payload: { name: "Plan", amountCents: 1000 },
+        payload: { name: "Plan", amountCents: 1000, clientId },
       });
 
       expect(response.statusCode).toBe(401);
@@ -381,7 +533,7 @@ describe("Products API", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/tax-rates",
+        url: `/api/v1/tax-rates?clientId=${clientId}`,
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -408,7 +560,7 @@ describe("Products API", () => {
 
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/tax-rates",
+        url: `/api/v1/tax-rates?clientId=${clientId}`,
         headers: { authorization: `Bearer ${token}` },
       });
 
@@ -423,20 +575,51 @@ describe("Products API", () => {
 
       await app.inject({
         method: "GET",
+        url: `/api/v1/tax-rates?clientId=${clientId}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+
+      expect(stripe.taxRates.list).toHaveBeenCalledWith(
+        {
+          active: true,
+          limit: 100,
+        },
+        { stripeAccount: stripeAccountId }
+      );
+    });
+
+    it("returns 400 when clientId query parameter is missing", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "GET",
         url: "/api/v1/tax-rates",
         headers: { authorization: `Bearer ${token}` },
       });
 
-      expect(stripe.taxRates.list).toHaveBeenCalledWith({
-        active: true,
-        limit: 100,
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/clientId/i);
+      expect(stripe.taxRates.list).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 when the client has no connected/charges-enabled Stripe account", async () => {
+      const token = makeAdminToken();
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/tax-rates?clientId=${disconnectedClientId}`,
+        headers: { authorization: `Bearer ${token}` },
       });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/connected stripe account/i);
+      expect(stripe.taxRates.list).not.toHaveBeenCalled();
     });
 
     it("returns 401 when no JWT provided", async () => {
       const response = await app.inject({
         method: "GET",
-        url: "/api/v1/tax-rates",
+        url: `/api/v1/tax-rates?clientId=${clientId}`,
       });
 
       expect(response.statusCode).toBe(401);

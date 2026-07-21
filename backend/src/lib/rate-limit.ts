@@ -11,6 +11,8 @@ type RateLimitOptions = {
 type AdminScopedRequest = FastifyRequest & { admin?: { id?: string } };
 
 let redis: Redis | null = null;
+const isProduction = process.env.NODE_ENV === "production";
+
 try {
   if (process.env.REDIS_URL) {
     redis = new Redis(process.env.REDIS_URL, {
@@ -92,7 +94,25 @@ export function rateLimit(options: RateLimitOptions) {
           return reply.code(429).send({ error: "Too Many Requests" });
         }
         return;
-      } catch {}
+      } catch (err) {
+        // In production, fail closed: reject the request rather than silently
+        // degrading to in-memory rate limiting. This prevents abuse when Redis
+        // is unavailable.
+        if (isProduction) {
+          request.log.error({ err }, "Rate limiter Redis error; rejecting request (fail-closed)");
+          return reply.code(503).send({
+            error: "Rate limiting service is temporarily unavailable.",
+            code: "RATE_LIMIT_UNAVAILABLE",
+          });
+        }
+        // In dev/test, fall through to in-memory fallback.
+      }
+    } else if (isProduction && process.env.REDIS_URL) {
+      // Redis was configured but not available — fail closed in production.
+      return reply.code(503).send({
+        error: "Rate limiting service is temporarily unavailable.",
+        code: "RATE_LIMIT_UNAVAILABLE",
+      });
     }
 
     const now = Date.now();

@@ -1,13 +1,17 @@
-import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
+import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
-import { clientGroups, clients } from "../db/schema";
+import { clientGroups, clients, paymentLedger } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { withStripeCircuit } from "../lib/circuit-breakers";
-import { resolveFrontendOrigin } from "../lib/config";
+import {
+  resolveDefaultPaymentCancelUrl,
+  resolveDefaultPaymentSuccessUrl,
+  resolveFrontendOrigin,
+} from "../lib/config";
 import { REPORT_MAX_CONCURRENCY } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { adminRateLimit, rateLimit } from "../lib/rate-limit";
@@ -15,6 +19,29 @@ import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
 import { mapStripeError } from "../lib/stripe-errors";
 import { parseBody, validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
+
+// ── Sanitize Stripe PaymentIntent for reports ──────────────────────────────────
+// Returns only the fields needed by the frontend/admin reports.
+// Never return raw Stripe objects — they contain sensitive data like full
+// card details, internal IDs, and API metadata.
+function sanitizePaymentIntent(
+  pi: Stripe.PaymentIntent,
+  extra?: { clientId?: string; clientName?: string }
+): Record<string, unknown> {
+  return {
+    id: pi.id,
+    amount: pi.amount,
+    amountReceived: pi.amount_received,
+    currency: pi.currency,
+    status: pi.status,
+    created: pi.created,
+    description: pi.description ?? null,
+    metadata: pi.metadata ?? {},
+    paymentMethod: pi.payment_method ?? null,
+    ...(extra?.clientId ? { clientId: extra.clientId } : {}),
+    ...(extra?.clientName ? { clientName: extra.clientName } : {}),
+  };
+}
 
 interface RequestWithClient extends FastifyRequest {
   client?: typeof clients.$inferSelect;
@@ -101,16 +128,109 @@ const STRIPE_CIRCUIT_OPEN_ERROR = {
   code: "STRIPE_CIRCUIT_OPEN",
 };
 
+// ── Strict line-item schema ────────────────────────────────────────────────────
+// Only inline price_data is accepted. Stripe price IDs (platform-scoped) are
+// incompatible with connected-account Checkout sessions and are rejected.
+const CURRENCY_REGEX = /^[a-z]{3}$/;
+const MAX_SAFE_AMOUNT = 99_999_999; // Stripe max for most currencies is 99999999
+
+const lineItemSchema = z.object({
+  price_data: z.object({
+    currency: z
+      .string()
+      .transform((v) => v.toLowerCase())
+      .refine((v) => CURRENCY_REGEX.test(v), {
+        message: "currency must be a 3-letter ISO code (e.g. 'usd').",
+      }),
+    product_data: z.object({
+      name: z.string().min(1, "product name is required.").max(200),
+      description: z.string().max(1000).optional(),
+    }),
+    unit_amount: z
+      .number()
+      .int("unit_amount must be an integer.")
+      .positive("unit_amount must be positive.")
+      .max(MAX_SAFE_AMOUNT, `unit_amount must not exceed ${MAX_SAFE_AMOUNT}.`),
+  }),
+  quantity: z
+    .number()
+    .int("quantity must be an integer.")
+    .positive("quantity must be positive.")
+    .max(999_999)
+    .default(1),
+});
+
+// ── Metadata validation ────────────────────────────────────────────────────────
+// Stripe allows max 50 metadata keys, each key max 40 chars, each value max 500 chars.
+const STRIPE_METADATA_MAX_KEYS = 50;
+const STRIPE_METADATA_MAX_KEY_LENGTH = 40;
+const STRIPE_METADATA_MAX_VALUE_LENGTH = 500;
+
+function validateStripeMetadata(
+  metadata: Record<string, string> | undefined
+): Record<string, string> {
+  if (!metadata) return {};
+  const keys = Object.keys(metadata);
+  if (keys.length > STRIPE_METADATA_MAX_KEYS) {
+    throw errors.badRequest(`metadata must not exceed ${STRIPE_METADATA_MAX_KEYS} keys.`);
+  }
+  for (const key of keys) {
+    if (key.length > STRIPE_METADATA_MAX_KEY_LENGTH) {
+      throw errors.badRequest(
+        `metadata key '${key.slice(0, 20)}...' exceeds ${STRIPE_METADATA_MAX_KEY_LENGTH} characters.`
+      );
+    }
+    if (metadata[key].length > STRIPE_METADATA_MAX_VALUE_LENGTH) {
+      throw errors.badRequest(
+        `metadata value for '${key}' exceeds ${STRIPE_METADATA_MAX_VALUE_LENGTH} characters.`
+      );
+    }
+  }
+  return metadata;
+}
+
 const paymentCreateBodySchema = z.object({
   amount: z.number().optional(),
-  currency: z.string().optional(),
-  description: z.string().optional(),
+  currency: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.toLowerCase() : v)),
+  description: z.string().max(2000).optional(),
   metadata: z.record(z.string(), z.string()).optional(),
-  lineItems: z.array(z.any()).optional(),
+  lineItems: z.array(lineItemSchema).optional(),
   waiveFee: z.boolean().optional(),
   workspace: z.string().optional(),
   clientId: z.string().optional(),
 });
+
+// ── Ledger insert helper ───────────────────────────────────────────────────────
+// Inserts a payment ledger row after Stripe creation.
+// CRITICAL: This MUST succeed before returning the payment URL/secret to the caller.
+// If Stripe succeeds but DB insert fails, we return a 503 and the caller can retry
+// with the same idempotency key — Stripe will return the existing object and we
+// can then insert the ledger row.
+// Uses ON CONFLICT DO NOTHING on idempotency_key to handle retries idempotently.
+async function insertPaymentLedger(row: {
+  id: string;
+  idempotencyKey: string;
+  connectedAccountId: string;
+  stripeSessionId: string | null;
+  stripePaymentIntentId: string | null;
+  clientId: string;
+  source: "checkout" | "payment_intent";
+  status: "created" | "paid" | "expired" | "failed" | "refunded" | "disputed" | "canceled";
+  baseAmountCents: number;
+  totalAmountCents: number;
+  feeAmountCents: number;
+  refundedAmountCents: number;
+  currency: string;
+  metadata: string | null;
+}): Promise<void> {
+  await db
+    .insert(paymentLedger)
+    .values(row)
+    .onConflictDoNothing({ target: paymentLedger.idempotencyKey });
+}
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
   fastify.post(
@@ -123,32 +243,38 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const idempotencyKeyHeader = extractIdempotencyKey(request);
-      const isApiCall = !!request.headers["x-api-key"];
-      if (isApiCall && (!idempotencyKeyHeader || idempotencyKeyHeader.trim().length === 0)) {
-        throw errors.badRequest("Idempotency-Key header is required for API calls.");
+      // Require nonblank Idempotency-Key for ALL payment creation (API-key and admin).
+      if (!idempotencyKeyHeader || idempotencyKeyHeader.trim().length === 0) {
+        throw errors.badRequest("Idempotency-Key header is required.");
       }
-      const idempotencyKey = idempotencyKeyHeader ?? randomUUID();
+      const idempotencyKey = idempotencyKeyHeader.trim();
+      // Stripe limits idempotency keys to 255 characters.
+      if (idempotencyKey.length > 255) {
+        throw errors.badRequest("Idempotency-Key must not exceed 255 characters.");
+      }
+      const isApiCall = !!request.headers["x-api-key"];
 
       const body = parseBody(paymentCreateBodySchema, request.body, reply);
       if (!body) return;
       const {
-        amount,
         currency,
         description,
-        metadata,
+        metadata: rawMetadata,
         lineItems,
         waiveFee = false,
         workspace,
       } = body as Omit<typeof body, "lineItems"> & {
-        lineItems?: Stripe.Checkout.SessionCreateParams.LineItem[];
+        lineItems?: z.infer<typeof lineItemSchema>[];
       };
+
+      const userMetadata = validateStripeMetadata(rawMetadata);
 
       let client = (request as RequestWithClient).client;
 
       if (!client) {
         const validWorkspace = validateWorkspace(workspace, reply);
         if (!validWorkspace) return;
-        const bodyClientId = body.clientId || metadata?.clientId;
+        const bodyClientId = body.clientId || userMetadata?.clientId;
         if (!bodyClientId) {
           throw errors.badRequest("clientId is required when using Admin authentication.");
         }
@@ -181,38 +307,47 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           )[0] ?? null)
         : null;
 
+      // ── Checkout flow ──────────────────────────────────────────────────────
       if (!Array.isArray(lineItems) || lineItems.length === 0) {
         throw errors.badRequest("lineItems are required.");
       }
 
-      const hasExplicitAmount = typeof amount === "number";
-      if (hasExplicitAmount && (!Number.isInteger(amount) || (amount as number) <= 0)) {
-        throw errors.badRequest(
-          "amount must be a positive integer (in the smallest currency unit)."
-        );
+      if (lineItems.length > 100) {
+        throw errors.badRequest("lineItems must not exceed 100 items.");
       }
 
-      let baseAmount = hasExplicitAmount ? (amount as number) : 0;
-      if (!hasExplicitAmount) {
-        for (const item of lineItems) {
-          const unitAmount = item.price_data?.unit_amount;
-          if (typeof unitAmount !== "number" || unitAmount <= 0) {
-            request.log.warn(
-              { item: { price_data: item.price_data, price: item.price } },
-              "Line item missing unit_amount - using price ID requires explicit amount"
-            );
-            throw errors.badRequest(
-              "An explicit integer amount is required when any line item references a Stripe price ID."
-            );
-          }
-          baseAmount += unitAmount * (item.quantity || 1);
+      // Derive baseAmount strictly from line items server-side.
+      // The caller-supplied `amount` is ignored for Checkout to prevent fee
+      // integrity attacks where a caller sends a lower amount than the line
+      // items imply.
+      let baseAmount = 0;
+      let lineItemCurrency: string | undefined;
+      for (const item of lineItems) {
+        const unitAmount = item.price_data.unit_amount;
+        const qty = item.quantity;
+        const lineTotal = unitAmount * qty;
+        if (!Number.isSafeInteger(lineTotal) || lineTotal > MAX_SAFE_AMOUNT * 999_999) {
+          throw errors.badRequest("Line item total exceeds safe integer bounds.");
+        }
+        baseAmount += lineTotal;
+        if (!lineItemCurrency) {
+          lineItemCurrency = item.price_data.currency;
+        } else if (lineItemCurrency !== item.price_data.currency) {
+          throw errors.badRequest("All line items must use the same currency.");
         }
       }
 
       if (baseAmount <= 0) {
-        throw errors.badRequest(
-          "amount must be provided when line items use price IDs, or line items must have unit_amount."
-        );
+        throw errors.badRequest("Computed base amount must be positive.");
+      }
+
+      if (!Number.isSafeInteger(baseAmount)) {
+        throw errors.badRequest("Computed base amount exceeds safe integer bounds.");
+      }
+
+      const resolvedCurrency = lineItemCurrency ?? currency;
+      if (!resolvedCurrency || !CURRENCY_REGEX.test(resolvedCurrency)) {
+        throw errors.badRequest("currency must be a 3-letter ISO code (e.g. 'usd').");
       }
 
       let feeAmount: number;
@@ -222,27 +357,30 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         throw errors.badRequest((e as Error).message);
       }
 
-      const frontendOrigin = resolveFrontendOrigin();
+      if (!Number.isSafeInteger(feeAmount) || feeAmount < 0) {
+        throw errors.badRequest("Computed fee is invalid.");
+      }
 
-      const checkoutLineItems = [...lineItems];
+      const checkoutLineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = lineItems.map(
+        (item) => ({
+          price_data: {
+            currency: item.price_data.currency,
+            product_data: {
+              name: item.price_data.product_data.name,
+              ...(item.price_data.product_data.description
+                ? { description: item.price_data.product_data.description }
+                : {}),
+            },
+            unit_amount: item.price_data.unit_amount,
+          },
+          quantity: item.quantity,
+        })
+      );
+
       if (feeAmount > 0 && !effectiveWaiveFee) {
-        const priceDataCurrencies = new Set(
-          lineItems.map((item) => item.price_data?.currency).filter((c): c is string => !!c)
-        );
-        let feeCurrency: string | undefined;
-        if (priceDataCurrencies.size === 1) {
-          feeCurrency = [...priceDataCurrencies][0];
-        } else if (priceDataCurrencies.size === 0 && currency) {
-          feeCurrency = currency;
-        }
-        if (!feeCurrency) {
-          throw errors.badRequest(
-            "Unable to determine a consistent currency for the processing fee line item."
-          );
-        }
         checkoutLineItems.push({
           price_data: {
-            currency: feeCurrency,
+            currency: resolvedCurrency,
             product_data: {
               name: "Processing Fee",
             },
@@ -252,19 +390,24 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         });
       }
 
+      const totalAmount = effectiveWaiveFee ? baseAmount : baseAmount + feeAmount;
+
+      const defaultSuccessUrl = resolveDefaultPaymentSuccessUrl();
+      const defaultCancelUrl = resolveDefaultPaymentCancelUrl();
+      const successUrl = client.paymentSuccessUrl ?? group?.paymentSuccessUrl ?? defaultSuccessUrl;
+      const cancelUrl = client.paymentCancelUrl ?? group?.paymentCancelUrl ?? defaultCancelUrl;
+      const frontendOrigin = successUrl && cancelUrl ? undefined : resolveFrontendOrigin();
+
       const sessionParams: Stripe.Checkout.SessionCreateParams = {
         mode: "payment",
         line_items: checkoutLineItems,
         success_url:
-          client.paymentSuccessUrl ??
-          group?.paymentSuccessUrl ??
-          `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url:
-          client.paymentCancelUrl ?? group?.paymentCancelUrl ?? `${frontendOrigin}/payment-cancel`,
+          successUrl ?? `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: cancelUrl ?? `${frontendOrigin}/payment-cancel`,
         payment_intent_data: {
           description,
           metadata: {
-            ...(metadata ?? {}),
+            ...userMetadata,
             clientId,
             baseAmount: baseAmount.toString(),
             feeAmount: effectiveWaiveFee ? "0" : feeAmount.toString(),
@@ -276,17 +419,17 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         },
       };
 
+      let session: Stripe.Checkout.Session;
       try {
         if (sessionParams.payment_intent_data && !effectiveWaiveFee) {
           sessionParams.payment_intent_data.application_fee_amount = feeAmount;
         }
-        const session = await withStripeCircuit(() =>
+        session = await withStripeCircuit(() =>
           stripe.checkout.sessions.create(sessionParams, {
             stripeAccount: stripeAccountId,
             idempotencyKey,
           })
         );
-        return reply.code(201).send({ url: session.url });
       } catch (err) {
         request.log.error({ err }, "Stripe Checkout session creation failed");
         if (
@@ -299,6 +442,80 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           return;
         throw errors.stripeFailed("Payment processing failed. Please try again.");
       }
+
+      // CRITICAL: Persist ledger synchronously BEFORE returning the checkout URL.
+      // If this fails, we return 503 — the caller can retry with the same
+      // idempotency key and Stripe will return the existing session.
+      try {
+        await insertPaymentLedger({
+          id: uuidv4(),
+          idempotencyKey,
+          connectedAccountId: stripeAccountId,
+          stripeSessionId: session.id,
+          stripePaymentIntentId: null,
+          clientId,
+          source: "checkout",
+          status: "created",
+          baseAmountCents: baseAmount,
+          totalAmountCents: totalAmount,
+          feeAmountCents: effectiveWaiveFee ? 0 : feeAmount,
+          refundedAmountCents: 0,
+          currency: resolvedCurrency,
+          metadata: Object.keys(userMetadata).length > 0 ? JSON.stringify(userMetadata) : null,
+        });
+      } catch (err) {
+        request.log.error(
+          { err, stripeSessionId: session.id },
+          "Ledger insert failed after Stripe Checkout session creation — returning 503"
+        );
+        return reply.code(503).send({
+          error:
+            "Payment recorded but confirmation failed. Please retry with the same Idempotency-Key.",
+          code: "LEDGER_PERSISTENCE_FAILED",
+        });
+      }
+
+      return reply.code(201).send({ url: session.url });
+    }
+  );
+
+  // ── GET /payments/session/:sessionId ─────────────────────────────────────────
+  // Rate-limited public endpoint for retrieving checkout session result.
+  // Uses the payment ledger as primary source. Returns only payer-safe fields.
+  fastify.get(
+    "/payments/session/:sessionId",
+    {
+      preHandler: [rateLimit({ max: 30, windowMs: 60_000 })],
+    },
+    async (request, reply) => {
+      const { sessionId } = request.params as { sessionId: string };
+      if (!sessionId || !/^cs_(test_|live_)[A-Za-z0-9_]+$/.test(sessionId)) {
+        throw errors.badRequest("Invalid session ID format.");
+      }
+
+      // Primary: look up in ledger.
+      const [ledgerRow] = await db
+        .select()
+        .from(paymentLedger)
+        .where(eq(paymentLedger.stripeSessionId, sessionId))
+        .limit(1);
+
+      if (ledgerRow) {
+        return reply.send({
+          status: ledgerRow.status,
+          baseAmountCents: ledgerRow.baseAmountCents,
+          totalAmountCents: ledgerRow.totalAmountCents,
+          feeAmountCents: ledgerRow.feeAmountCents,
+          currency: ledgerRow.currency,
+          createdAt: ledgerRow.createdAt,
+        });
+      }
+
+      // Fallback: retrieve from Stripe using stored connected account context.
+      // We need to find which connected account this session belongs to.
+      // Without a ledger row, we cannot determine the connected account,
+      // so we return 404 rather than guessing.
+      throw errors.notFound("Payment session");
     }
   );
 
@@ -370,7 +587,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         if (parsedLimit !== undefined) perAccountParams.limit = parsedLimit;
 
         const maxConcurrency = REPORT_MAX_CONCURRENCY;
-        const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
+        const results: Array<Record<string, unknown>[]> = [];
         const failedAccounts: string[] = [];
         let hasMore = false;
         for (let i = 0; i < connected.length; i += maxConcurrency) {
@@ -390,7 +607,9 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
             if (outcome.status === "fulfilled") {
               const { pi, client: c } = outcome.value;
               if (pi.has_more) hasMore = true;
-              results.push(pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name })));
+              results.push(
+                pi.data.map((p) => sanitizePaymentIntent(p, { clientId: c.id, clientName: c.name }))
+              );
             } else {
               const c = batch[j];
               if (mapStripeError(outcome.reason, reply, { circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR }))
@@ -442,7 +661,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       return reply.send({
         clientId,
-        data: paymentIntents.data,
+        data: paymentIntents.data.map((p) => sanitizePaymentIntent(p)),
         hasMore: paymentIntents.has_more,
       });
     }
