@@ -6,7 +6,7 @@ vi.mock("../../lib/stripe", () => ({
     webhooks: {
       constructEvent: vi.fn(),
     },
-    accounts: { create: vi.fn() },
+    accounts: { create: vi.fn(), retrieve: vi.fn() },
     accountLinks: { create: vi.fn() },
     subscriptions: {
       retrieve: vi.fn().mockResolvedValue({
@@ -251,6 +251,16 @@ describe("POST /api/v1/webhooks/stripe", () => {
     });
     mockConstructEvent.mockReturnValueOnce(event);
 
+    // account.updated now retrieves current state live from Stripe rather
+    // than trusting the webhook payload, to handle out-of-order delivery.
+    const accountsRetrieveMock = stripe.accounts.retrieve as ReturnType<typeof vi.fn>;
+    accountsRetrieveMock.mockResolvedValueOnce({
+      id: stripeAccountId,
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
+
     const response = await sendWebhook(app, event);
 
     expect(response.statusCode).toBe(200);
@@ -292,6 +302,16 @@ describe("POST /api/v1/webhooks/stripe", () => {
     });
     mockConstructEvent.mockReturnValueOnce(event);
 
+    // account.updated now retrieves current state live from Stripe rather
+    // than trusting the webhook payload, to handle out-of-order delivery.
+    const accountsRetrieveMock = stripe.accounts.retrieve as ReturnType<typeof vi.fn>;
+    accountsRetrieveMock.mockResolvedValueOnce({
+      id: stripeAccountId,
+      details_submitted: false,
+      charges_enabled: false,
+      payouts_enabled: false,
+    });
+
     const response = await sendWebhook(app, event);
 
     expect(response.statusCode).toBe(200);
@@ -318,6 +338,16 @@ describe("POST /api/v1/webhooks/stripe", () => {
       payouts_enabled: true,
     });
     mockConstructEvent.mockReturnValueOnce(event);
+
+    // account.updated now retrieves current state live from Stripe rather
+    // than trusting the webhook payload, to handle out-of-order delivery.
+    const accountsRetrieveMock = stripe.accounts.retrieve as ReturnType<typeof vi.fn>;
+    accountsRetrieveMock.mockResolvedValueOnce({
+      id: stripeAccountId,
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
 
     const response = await sendWebhook(app, event);
 
