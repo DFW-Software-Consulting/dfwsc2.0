@@ -192,6 +192,72 @@ export const admins = pgTable("admins", {
     .$onUpdate(() => new Date()),
 });
 
+export const paymentLedger = pgTable(
+  "payment_ledger",
+  {
+    id: text("id").primaryKey(),
+    // The idempotency key used when creating the Stripe session/PI.
+    // Unique per creation attempt; prevents duplicate ledger rows.
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    connectedAccountId: text("connected_account_id").notNull(),
+    stripeSessionId: text("stripe_session_id"),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    source: text("source", { enum: ["checkout", "payment_intent"] }).notNull(),
+    // Status semantics:
+    // - created: initial state after Stripe creation
+    // - paid: terminal success state (checkout completed or PI succeeded)
+    // - expired: checkout session expired without payment
+    // - failed: payment attempt failed
+    // - canceled: payment intent canceled before completion
+    // - refunded: fully or partially refunded (see refunded_amount_cents)
+    // - disputed: charge disputed (may or may not be refunded yet)
+    // Precedence: disputed > refunded > paid > failed/expired/canceled > created
+    // Once in disputed/refunded, cannot transition to paid.
+    status: text("status", {
+      enum: ["created", "paid", "expired", "failed", "refunded", "disputed", "canceled"],
+    })
+      .notNull()
+      .default("created"),
+    baseAmountCents: integer("base_amount_cents").notNull(),
+    totalAmountCents: integer("total_amount_cents").notNull(),
+    feeAmountCents: integer("fee_amount_cents").notNull(),
+    // Track refunded amount for partial vs full refund distinction.
+    // 0 = no refund, >0 and <total = partial, =total = full refund.
+    refundedAmountCents: integer("refunded_amount_cents").notNull().default(0),
+    currency: text("currency").notNull(),
+    metadata: text("metadata"),
+    // Stripe event ordering can be out-of-order; store the Stripe event
+    // created timestamp so we can ignore stale updates.
+    lastStripeEventCreatedAt: integer("last_stripe_event_created_at"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    clientIdIdx: index("payment_ledger_client_id_idx").on(table.clientId),
+    sessionIdIdx: index("payment_ledger_session_id_idx")
+      .on(table.stripeSessionId)
+      .where(sql`${table.stripeSessionId} IS NOT NULL`),
+    paymentIntentIdIdx: index("payment_ledger_pi_id_idx")
+      .on(table.stripePaymentIntentId)
+      .where(sql`${table.stripePaymentIntentId} IS NOT NULL`),
+    connectedAccountIdx: index("payment_ledger_connected_account_idx").on(table.connectedAccountId),
+    sourceCheck: check(
+      "payment_ledger_source_check",
+      sql`${table.source} IN ('checkout', 'payment_intent')`
+    ),
+    statusCheck: check(
+      "payment_ledger_status_check",
+      sql`${table.status} IN ('created', 'paid', 'expired', 'failed', 'refunded', 'disputed', 'canceled')`
+    ),
+  })
+);
+
 export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),

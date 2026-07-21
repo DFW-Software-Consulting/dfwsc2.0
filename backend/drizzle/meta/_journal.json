@@ -169,6 +169,13 @@
       "when": 1783291169797,
       "tag": "0023_setup_confirmed_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784607584162,
+      "tag": "0024_payment_ledger",
+      "breakpoints": true
     }
   ]
 }

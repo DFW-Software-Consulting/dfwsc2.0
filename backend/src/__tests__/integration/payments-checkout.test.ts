@@ -97,15 +97,11 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
     expect(response.json().error).toMatch(/lineItems/i);
   });
 
-  it("returns 502 when Stripe call fails due to missing price", async () => {
-    // processingFeeCents=1000 (fee), amount=100 (payment) → fee > amount.
-    // Line items use a Stripe price ID (no price_data), so `currency` must be
-    // supplied explicitly for the server to resolve the processing-fee line
-    // item's currency (L2-adjacent validation) before it ever calls Stripe.
-    vi.mocked(stripe.checkout.sessions.create).mockRejectedValueOnce(
-      Object.assign(new Error("No such price: 'price_test'"), { name: "StripeInvalidRequestError" })
-    );
-
+  it("returns 400 when a lineItem uses a Stripe price ID instead of inline price_data", async () => {
+    // Only inline price_data is accepted (see comment atop payments.ts) — Stripe
+    // price IDs are platform-scoped and incompatible with connected-account
+    // Checkout sessions, so this must be rejected by validation before Stripe
+    // is ever called.
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/payments/create",
@@ -118,6 +114,39 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
         amount: 100,
         currency: "usd",
         lineItems: [{ price: "price_test", quantity: 1 }],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 502 when the Stripe Checkout session creation call fails", async () => {
+    vi.mocked(stripe.checkout.sessions.create).mockRejectedValueOnce(
+      Object.assign(new Error("An error occurred with our connection to Stripe."), {
+        name: "StripeConnectionError",
+      })
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 5000,
+            },
+            quantity: 1,
+          },
+        ],
       },
     });
 
@@ -297,5 +326,99 @@ describe("GET /api/v1/reports/payments — group with no connected clients", () 
     expect(body.groupId).toBe(groupId);
     expect(body.data).toEqual([]);
     expect(body.hasMore).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reports — response must be sanitized, never raw Stripe objects.
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/reports/payments — sanitizes Stripe payment intents", () => {
+  let app: any;
+  let clientId: string;
+
+  beforeAll(async () => {
+    ensureBaseEnv();
+    app = await buildServer();
+
+    clientId = randomUUID();
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Sanitize Report Client",
+      email: `sanitize-report-${clientId}@example.com`,
+      status: "active",
+      workspace: "client_portal",
+      stripeAccountId: `acct_sanitize${clientId.replace(/-/g, "").slice(0, 12)}`,
+      chargesEnabled: true,
+    });
+  });
+
+  afterAll(async () => {
+    await db.delete(clients).where(eq(clients.id, clientId));
+    if (app) await app.close();
+  });
+
+  it("does not leak raw Stripe fields (client_secret, customer, payment_method_types, etc.)", async () => {
+    const token = makeAdminToken();
+
+    vi.mocked(stripe.paymentIntents.list).mockResolvedValueOnce({
+      data: [
+        {
+          id: "pi_test_sanitize_1",
+          object: "payment_intent",
+          amount: 5000,
+          amount_received: 5000,
+          currency: "usd",
+          status: "succeeded",
+          created: 1700000000,
+          description: "Test payment",
+          metadata: { foo: "bar" },
+          payment_method: "pm_test_123",
+          client_secret: "pi_test_sanitize_1_secret_abc123",
+          customer: "cus_test_123",
+          latest_charge: "ch_test_123",
+          payment_method_types: ["card"],
+          application: "ca_test_app",
+          application_fee_amount: 500,
+          transfer_data: { destination: "acct_dest_123" },
+          receipt_email: "customer@example.com",
+        },
+      ],
+      has_more: false,
+    } as never);
+
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/reports/payments?clientId=${clientId}&workspace=client_portal`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.data).toHaveLength(1);
+    const pi = body.data[0];
+
+    // Sanitized, payer-safe fields only.
+    expect(pi).toEqual({
+      id: "pi_test_sanitize_1",
+      amount: 5000,
+      amountReceived: 5000,
+      currency: "usd",
+      status: "succeeded",
+      created: 1700000000,
+      description: "Test payment",
+      metadata: { foo: "bar" },
+      paymentMethod: "pm_test_123",
+    });
+
+    // Explicitly assert none of the raw/sensitive Stripe fields leak through.
+    expect(pi).not.toHaveProperty("client_secret");
+    expect(pi).not.toHaveProperty("customer");
+    expect(pi).not.toHaveProperty("latest_charge");
+    expect(pi).not.toHaveProperty("payment_method_types");
+    expect(pi).not.toHaveProperty("application");
+    expect(pi).not.toHaveProperty("transfer_data");
+    expect(pi).not.toHaveProperty("receipt_email");
+    expect(pi).not.toHaveProperty("amount_received");
   });
 });
