@@ -1,7 +1,8 @@
 SHELL := /bin/bash
 COMPOSE := docker compose -f docker-compose.base.yml -f docker-compose.dev.yml
+PROD_COMPOSE := docker compose -f docker-compose.prod.yml
 
-.PHONY: help up up-build down down-v logs ps sh dev-frontend dev-backend test test-front test-back test-up coverage prod prod-build down-prod logs-prod sh-prod ps-prod
+.PHONY: help up up-build down down-v logs ps sh dev-frontend dev-backend test test-front test-back test-up coverage prod prod-build down-prod logs-prod sh-prod ps-prod backup-build backup-shell backup-now backup-list backup-restore
 
 help:
 	@echo "Common targets:"
@@ -25,6 +26,11 @@ help:
 	@echo "  make logs-prod    # Tail prod api logs"
 	@echo "  make sh-prod      # Shell into prod api container"
 	@echo "  make ps-prod      # Show prod containers"
+	@echo "  make backup-build # Build the production backup image"
+	@echo "  make backup-shell # Open a shell in the backup container"
+	@echo "  make backup-now   # Run one backup immediately"
+	@echo "  make backup-list  # List local backup files"
+	@echo "  make backup-restore FILE=... [RESTORE_CONFIRM=yes] # Restore a backup"
 
 up:
 	$(COMPOSE) up -d
@@ -72,10 +78,10 @@ test-up:
 	npm run test --prefix front
 
 prod:
-	docker compose -f docker-compose.prod.yml up -d
+	$(PROD_COMPOSE) up -d
 
 prod-build:
-	docker compose -f docker-compose.prod.yml up -d --build
+	$(PROD_COMPOSE) up -d --build
 
 down-prod:
 	docker compose -f docker-compose.prod.yml down
@@ -88,3 +94,24 @@ sh-prod:
 
 ps-prod:
 	docker compose -f docker-compose.prod.yml ps
+
+# Backup image helpers
+backup-build:
+	$(PROD_COMPOSE) build backup
+
+backup-shell:
+	$(PROD_COMPOSE) run --rm --entrypoint /bin/sh backup
+
+backup-now:
+	$(PROD_COMPOSE) run --rm --entrypoint /usr/local/bin/backup.sh backup
+
+backup-list:
+	$(PROD_COMPOSE) run --rm --entrypoint /bin/sh backup -c 'ls -lht /backups/postgres/*.sql.gz 2>/dev/null || echo "No local backups"'
+
+backup-restore:
+	@if [ -z "$(FILE)" ]; then \
+		echo "Usage: make backup-restore FILE=/backups/postgres/YYYYmmdd_HHMMSS_<db>.sql.gz [RESTORE_CONFIRM=yes] [RESTORE_NONINTERACTIVE=1]"; \
+		exit 1; \
+	fi
+	RESTORE_CONFIRM=$(RESTORE_CONFIRM) RESTORE_NONINTERACTIVE=$(RESTORE_NONINTERACTIVE) \
+		$(PROD_COMPOSE) run --rm --entrypoint /usr/local/bin/restore.sh backup "$(FILE)"

@@ -1,0 +1,9 @@
+# Backup image build context — exclude files that are not needed inside the image.
+.git
+.env
+.env.*
+*.md
+*.yml
+*.yaml
+Dockerfile*
+scripts/*.txt
