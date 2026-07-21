@@ -929,19 +929,37 @@ export default async function connectRoutes(fastify: FastifyInstance) {
     }
   );
 
-  fastify.get(
+  // POST /api-key/regenerate — consume a regeneration token and return a new API key.
+  // Changed from GET to POST so the one-time token is in the request body, not
+  // the URL query string (avoids leaking the secret in server logs, browser
+  // history, and referrer headers). The emailed frontend link still carries the
+  // token to the SPA; the SPA then POSTs it to this endpoint.
+  fastify.post(
     "/api-key/regenerate",
     {
       preHandler: [rateLimit({ max: STRICT_RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS })],
+      schema: {
+        body: {
+          type: "object",
+          required: ["token"],
+          properties: {
+            token: { type: "string", minLength: 1 },
+          },
+        },
+      },
     },
     async (request, reply) => {
-      const { token } = request.query as { token: string };
+      const body = request.body as { token?: string } | undefined;
+      const token = body?.token;
       if (typeof token !== "string" || token.trim().length === 0) {
         throw errors.badRequest("token is required.");
       }
 
       const newApiKey = await validateAndRegenerate(token);
 
+      // no-store: the response contains a secret API key that must not be
+      // cached by any intermediary or the browser.
+      reply.header("Cache-Control", "no-store");
       return reply.code(200).send({ apiKey: newApiKey });
     }
   );

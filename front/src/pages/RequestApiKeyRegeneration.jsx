@@ -26,7 +26,7 @@ export default function RequestApiKeyRegeneration() {
         },
         onError: (err) => {
           logger.error("Regeneration request error:", err);
-          setSubmitted(true);
+          setError("Unable to send the regeneration link. Please try again later.");
         },
       });
     },

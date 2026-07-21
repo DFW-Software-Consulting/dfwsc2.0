@@ -142,8 +142,10 @@ describe("Onboard Initiate — API key via email link", () => {
     const rawToken = mailCall.text.match(REGEN_LINK_REGEX)[1];
 
     const regenerate = await app.inject({
-      method: "GET",
-      url: `/api/v1/api-key/regenerate?token=${rawToken}`,
+      method: "POST",
+      url: "/api/v1/api-key/regenerate",
+      headers: { "content-type": "application/json" },
+      payload: { token: rawToken },
     });
 
     expect(regenerate.statusCode).toBe(200);

@@ -7,4 +7,4 @@ export const requestApiKeyRegenerationAdmin = (token, clientId) =>
   apiFetch("/api-key/regenerate-request/admin", { token, method: "POST", body: { clientId } });
 
 export const regenerateApiKey = (regenerationToken) =>
-  apiFetch(`/api-key/regenerate?token=${encodeURIComponent(regenerationToken)}`);
+  apiFetch("/api-key/regenerate", { method: "POST", body: { token: regenerationToken } });
