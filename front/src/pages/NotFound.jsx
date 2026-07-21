@@ -3,33 +3,42 @@ import { Link } from "react-router-dom";
 
 export default function NotFound() {
   useEffect(() => {
-    document.title = "Page Not Found";
+    document.title = "Page Not Found - DFW Software Consulting";
   }, []);
 
   return (
-    <section className="min-h-[90vh] flex items-center justify-center p-4 transition-colors duration-300">
-      <div className="w-full max-w-xl mx-auto">
-        <div className="bg-[var(--bg-main)] dark:bg-white/[0.02] backdrop-blur-md p-8 rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 text-center transition-colors">
-          <p className="text-sm font-bold uppercase tracking-widest text-brand-600 dark:text-brand-400 transition-colors">
-            404
-          </p>
-          <h1 className="mt-4 text-3xl font-bold text-center mb-4 text-slate-900 dark:text-white transition-colors">
-            Page not found
-          </h1>
-          <p className="text-center text-slate-600 dark:text-gray-300 mb-8 transition-colors">
-            The page you&apos;re looking for doesn&apos;t exist or may have been moved.
-          </p>
-
-          <Link
-            to="/"
-            className="inline-flex items-center justify-center rounded-full bg-brand-500 hover:bg-brand-600
-                       text-white font-semibold py-2.5 px-6 shadow-glow
-                       transition-all duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+    <div className="min-h-[90vh] flex items-center justify-center transition-colors duration-300">
+      <div className="text-center max-w-2xl mx-auto px-6" role="status" aria-live="polite">
+        <div className="w-16 h-16 mx-auto mb-6 flex items-center justify-center rounded-full bg-slate-500/10 border border-slate-500/20">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-10 w-10 text-slate-500"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
           >
-            Back to Home
-          </Link>
+            <path
+              fillRule="evenodd"
+              d="M18 10A8 8 0 11.001 10 8 8 0 0118 10zM9 6a1 1 0 012 0v4a1 1 0 11-2 0V6zm1 9a1.25 1.25 0 100-2.5A1.25 1.25 0 0010 15z"
+              clipRule="evenodd"
+            />
+          </svg>
         </div>
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">
+          Page Not Found
+        </h1>
+        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+          The page you are looking for does not exist or has been moved.
+        </p>
+        <Link
+          to="/"
+          className="inline-flex items-center justify-center rounded-full bg-brand-500 hover:bg-brand-600
+                     text-white font-semibold py-2.5 px-6 shadow-glow
+                     transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-400"
+        >
+          Go Home
+        </Link>
       </div>
-    </section>
+    </div>
   );
 }

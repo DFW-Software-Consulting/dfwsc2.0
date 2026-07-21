@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import OnboardClient from "../pages/OnboardClient";
 import { renderWithProviders } from "../test/renderWithProviders";
@@ -160,5 +161,31 @@ describe("OnboardClient", () => {
     });
 
     expect(window.location.href).toBe("http://localhost/");
+  });
+
+  it("submits the token when the user presses Enter in the input", async () => {
+    global.fetch.mockImplementationOnce(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                ok: true,
+                headers: { get: () => "application/json" },
+                json: async () => ({ url: "https://stripe.com/connect" }),
+              }),
+            100
+          )
+        )
+    );
+
+    renderWithProviders(<OnboardClient />, { token: null });
+
+    const tokenInput = screen.getByRole("textbox", { name: /onboarding token/i });
+    await userEvent.type(tokenInput, "test-token{enter}");
+
+    await waitFor(() => {
+      expect(screen.getByText(/verifying token and redirecting/i)).toBeInTheDocument();
+    });
   });
 });
