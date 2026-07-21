@@ -128,6 +128,8 @@ jobs:
         run: docker build -t dfwsc-api:ci -f backend/Dockerfile backend
       - name: Build frontend Docker image
         run: docker build -t dfwsc-web:ci -f front/Dockerfile front
+      - name: Build backup Docker image
+        run: docker build -t dfwsc-backup:ci -f backup/Dockerfile backup
 
   # --- Checks mirrored from the local git hooks ---
 
