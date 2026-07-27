@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import DiegoImage from "../assets/diego.jpg";
 import HectorImage from "../assets/hector.webp";
 import JcImage from "../assets/jc.jpg";
-import SpencerImage from "../assets/spencer.jpg";
 import Banner from "../components/Banner.jsx";
 
 const teamMembers = [
@@ -18,12 +17,6 @@ const teamMembers = [
     role: "Full Stack & DevOps Engineer",
     bio: "Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.",
     image: DiegoImage,
-  },
-  {
-    name: "Spencer Lillian",
-    role: "Full Stack Engineer",
-    bio: "Collaborates with clients to translate business needs into robust solutions. Supports backend systems, cloud deployments, and continuous delivery workflows.",
-    image: SpencerImage,
   },
   {
     name: "Hector Oropesa",
