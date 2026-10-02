@@ -728,7 +728,12 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           { client_id: normalizedClientId, account: normalizedAccount, state: normalizedState },
           "Expired state parameter"
         );
-        throw errors.badRequest("Expired state parameter.");
+        // The client's browser lands here from Stripe, so show a friendly page
+        // instead of raw JSON. Nothing is consumed; the account.updated webhook
+        // reconciles readiness. The state is minted after the token-age check, so
+        // once it expires the onboarding token is past its TTL too and an
+        // unfinished client needs a new link (resend).
+        return reply.redirect(`${resolveFrontendOrigin()}/onboarding-success?status=expired`);
       }
 
       const [clientRecord] = await db

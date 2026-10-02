@@ -31,7 +31,7 @@ Runs on `http://localhost:5173` with API calls to `http://localhost:4242/api/v1`
 # From project root
 docker compose -f docker-compose.dev.yml up
 ```
-Runs on `http://localhost:1919` with API calls to the containerized backend
+Runs on `http://localhost:5173` with API calls to the containerized backend
 
 ## Testing
 

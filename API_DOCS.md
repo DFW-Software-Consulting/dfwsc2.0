@@ -269,7 +269,7 @@ Creates a new client record and returns their credentials. Does **not** send an 
   "name": "Acme Corp",
   "clientId": "abc123",
   "apiKey": "64-hex-char-string",
-  "onboardingUrlHint": "http://localhost:1919/onboard#token=..."
+  "onboardingUrlHint": "http://localhost:5173/onboard#token=..."
 }
 ```
 
@@ -363,10 +363,10 @@ Validates the token, creates a Stripe Express account (if not already created), 
 
 No auth. This is the redirect URL Stripe calls after a client completes onboarding. You don't call this manually — Stripe does. Stripe only redirects to the platform-registered `return_url` (`client_id` + `state`); it does not append `account`. An `account` query param is accepted only as an optional legacy/manual cross-check — the client's `stripeAccountId` is looked up from the database.
 
-After successful validation, the client's `stripeAccountId` is saved and the user is redirected to `<FRONTEND_ORIGIN>/onboarding-success`.
+After successful validation, the client's `stripeAccountId` is saved and the user is redirected to `<FRONTEND_ORIGIN>/onboarding-success`. If the state has expired (24-hour window), the user is instead redirected to `<FRONTEND_ORIGIN>/onboarding-success?status=expired` and nothing is changed.
 
 **Errors:**
-- `400` — Missing or invalid parameters, expired state (30-min window)
+- `400` — Missing or invalid parameters, or invalid/replayed state
 
 ---
 
@@ -1024,7 +1024,7 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | `DATABASE_URL` | PostgreSQL connection string |
 | `STRIPE_SECRET_KEY` | Stripe secret key (`sk_test_...` or `sk_live_...`) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
-| `FRONTEND_ORIGIN` | Comma-separated allowed CORS origins (e.g., `http://localhost:1919`) |
+| `FRONTEND_ORIGIN` | Comma-separated allowed CORS origins (e.g., `http://localhost:5173`) |
 | `SMTP_HOST` | SMTP server hostname |
 | `SMTP_PORT` | SMTP server port number |
 | `SMTP_USER` | SMTP username |
