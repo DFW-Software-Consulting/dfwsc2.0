@@ -24,6 +24,7 @@ import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, onboardingTokens } from "../../db/schema";
 import { hashOnboardingToken } from "../../lib/client-factory";
+import { OAUTH_STATE_EXPIRY_MS } from "../../lib/constants";
 import { hitBuckets } from "../../lib/rate-limit";
 
 // Constants for test values
@@ -100,6 +101,7 @@ describe("Connect Callback State Validation Integration", () => {
     expect(tokenRecord.status).toBe("pending");
 
     // Call /onboard-client endpoint which should change status to 'in_progress'
+    const before = Date.now();
     const onboardResponse = await app.inject({
       method: "POST",
       url: "/api/v1/onboard-client",
@@ -122,7 +124,10 @@ describe("Connect Callback State Validation Integration", () => {
       .from(onboardingTokens)
       .where(eq(onboardingTokens.id, onboardingTokenId));
     const state = tokenRecord.state;
-    const _stateExpiresAt = tokenRecord.stateExpiresAt;
+    // The stored state lifetime should be OAUTH_STATE_EXPIRY_MS (24h) from now.
+    const stateExpiresAtMs = new Date(tokenRecord.stateExpiresAt as Date).getTime();
+    expect(stateExpiresAtMs).toBeGreaterThanOrEqual(before + OAUTH_STATE_EXPIRY_MS - 5_000);
+    expect(stateExpiresAtMs).toBeLessThanOrEqual(Date.now() + OAUTH_STATE_EXPIRY_MS + 5_000);
     const [linkedClient] = await db.select().from(clients).where(eq(clients.id, clientId));
     const testStripeAccount = linkedClient.stripeAccountId;
 
@@ -172,8 +177,8 @@ describe("Connect Callback State Validation Integration", () => {
     const state = `test_state_${randomUUID().replace(/-/g, "")}`;
     const testStripeAccount = `acct_${randomUUID().replace(/-/g, "")}`;
 
-    // Set state to expire in 30 minutes from now
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    // Set state to expire in 24 hours (OAUTH_STATE_EXPIRY_MS) from now
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -285,8 +290,8 @@ describe("Connect Callback State Validation Integration", () => {
     const validState = `valid_state_${randomUUID().replace(/-/g, "")}`;
     const invalidState = `invalid_state_${randomUUID().replace(/-/g, "")}`;
 
-    // Set state to expire in 30 minutes from now
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    // Set state to expire in 24 hours (OAUTH_STATE_EXPIRY_MS) from now
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -383,8 +388,8 @@ describe("Connect Callback State Validation Integration", () => {
     const onboardingTokenId = randomUUID();
     const state = `test_state_${randomUUID().replace(/-/g, "")}`;
 
-    // Set state to expire in 30 minutes from now
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    // Set state to expire in 24 hours (OAUTH_STATE_EXPIRY_MS) from now
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -443,8 +448,8 @@ describe("Connect Callback State Validation Integration", () => {
     const stateA = `state_a_${randomUUID().replace(/-/g, "")}`;
     const stateB = `state_b_${randomUUID().replace(/-/g, "")}`;
 
-    // Set states to expire in 30 minutes from now
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    // Set states to expire in 24 hours (OAUTH_STATE_EXPIRY_MS) from now
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenAId,
@@ -510,7 +515,7 @@ describe("Connect Callback State Validation Integration", () => {
 
     const onboardingTokenId = randomUUID();
     const state = `test_state_${randomUUID().replace(/-/g, "")}`;
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -579,7 +584,7 @@ describe("Connect Callback State Validation Integration", () => {
 
     const onboardingTokenId = randomUUID();
     const state = `test_state_${randomUUID().replace(/-/g, "")}`;
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
