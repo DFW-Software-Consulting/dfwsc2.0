@@ -26,8 +26,8 @@ describe("Frontend Dockerfile", () => {
       expect(dockerfileContent).toMatch(/FROM.*AS production/);
     });
 
-    it("should use node:20-alpine base image", () => {
-      expect(dockerfileContent).toMatch(/FROM node:20-alpine/);
+    it("should use node:22-alpine base image", () => {
+      expect(dockerfileContent).toMatch(/FROM node:22-alpine/);
     });
 
     it("should build with Vite", () => {

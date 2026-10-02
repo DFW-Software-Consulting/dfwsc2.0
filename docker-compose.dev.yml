@@ -1,6 +1,6 @@
 services:
   api:
-    image: node:20-alpine
+    image: node:22-alpine
     user: "0:0"
     working_dir: /app
     command: sh -c "chown -R node:node /app /app/node_modules && exec su node -c 'npm install --include=dev && until nc -z db 5432; do sleep 2; done && (npx drizzle-kit migrate || echo \"Migration failed, continuing...\") && npm run dev'"
@@ -55,7 +55,7 @@ services:
       - api
 
   web:
-    image: node:20-alpine
+    image: node:22-alpine
     user: "0:0"
     working_dir: /app
     command: sh -c "npm install --include=dev && npm run dev"
