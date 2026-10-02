@@ -16,9 +16,10 @@ export default defineConfig({
       exclude: ['src/**/*.test.ts', 'src/**/__tests__/**', 'src/index.ts', 'src/server.ts'],
       reportOnFailure: true,
       // Baseline thresholds reflecting current coverage; ratchet these up as coverage improves.
+      // Branches was 80 before vitest 4, whose v8 coverage remapping reports branches ~4 points lower.
       thresholds: {
         statements: 87,
-        branches: 80,
+        branches: 79,
         functions: 82,
         lines: 87,
       },
