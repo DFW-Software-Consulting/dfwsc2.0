@@ -269,7 +269,7 @@ Creates a new client record and returns their credentials. Does **not** send an 
   "name": "Acme Corp",
   "clientId": "abc123",
   "apiKey": "64-hex-char-string",
-  "onboardingUrlHint": "http://localhost:1919/onboard#token=..."
+  "onboardingUrlHint": "http://localhost:5173/onboard#token=..."
 }
 ```
 
@@ -1024,7 +1024,7 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | `DATABASE_URL` | PostgreSQL connection string |
 | `STRIPE_SECRET_KEY` | Stripe secret key (`sk_test_...` or `sk_live_...`) |
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
-| `FRONTEND_ORIGIN` | Comma-separated allowed CORS origins (e.g., `http://localhost:1919`) |
+| `FRONTEND_ORIGIN` | Comma-separated allowed CORS origins (e.g., `http://localhost:5173`) |
 | `SMTP_HOST` | SMTP server hostname |
 | `SMTP_PORT` | SMTP server port number |
 | `SMTP_USER` | SMTP username |
