@@ -191,7 +191,7 @@ async function createServer({ skipEnvValidation = false }: { skipEnvValidation?:
       logMaskedEnvSummary: () => {},
     }));
   } else {
-    vi.unmock("../lib/env");
+    vi.doUnmock("../lib/env");
   }
 
   vi.resetModules();

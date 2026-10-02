@@ -66,12 +66,12 @@
   "devDependencies": {
     "@types/node": "^24.9.1",
     "@types/opossum": "^8.1.9",
-    "@vitest/coverage-v8": "^4.1.11",
-    "@vitest/ui": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.3",
+    "@vitest/ui": "^5.0.3",
     "nodemon": "^3.1.4",
     "ts-node": "^10.9.2",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.3"
   }
 }
