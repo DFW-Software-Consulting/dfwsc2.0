@@ -71,7 +71,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
 ### Backend Dockerfile (already exists)
 The backend/Dockerfile is already optimized for production:
 ```dockerfile
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 WORKDIR /app
 
 FROM base AS builder
@@ -106,7 +106,7 @@ CMD ["node", "dist/index.js"]
 ### Frontend Dockerfile (already exists)
 `front/Dockerfile` already exists in the repo; it builds the Vite app and serves it via nginx running as a non-root user (required so the container doesn't crash-loop on `/var/cache/nginx` / `/run/nginx.pid` permissions):
 ```dockerfile
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./

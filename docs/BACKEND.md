@@ -3,7 +3,7 @@
 This document details the backend implementation, API design, and core logic for the DFWSC Payment Portal.
 
 ## 1. Overview
-The backend is a **Fastify 5** application written in **TypeScript**, using **Node.js 20**. Routes handle HTTP concerns; `src/lib/` handles core business logic (Stripe, mailer, auth, etc.).
+The backend is a **Fastify 5** application written in **TypeScript**, using **Node.js 22**. Routes handle HTTP concerns; `src/lib/` handles core business logic (Stripe, mailer, auth, etc.).
 
 ## 2. Request Authentication
 Two distinct schemes are implemented:

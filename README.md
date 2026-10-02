@@ -38,7 +38,7 @@ dfwsc2.0/
 - **TailwindCSS v4** - Utility-first CSS
 
 ### Backend
-- **Node.js 20** - Runtime
+- **Node.js 22** - Runtime
 - **Fastify 5** - Web framework
 - **TypeScript** - Type safety
 - **PostgreSQL 17** - Database
@@ -49,7 +49,7 @@ dfwsc2.0/
 ## 🛠️ Development
 
 ### Prerequisites
-- Node.js 20+
+- Node.js 22+
 - PostgreSQL 17
 - npm or yarn
 
