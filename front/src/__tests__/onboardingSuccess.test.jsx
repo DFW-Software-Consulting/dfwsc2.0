@@ -31,7 +31,8 @@ describe("OnboardingSuccess", () => {
       screen.getByRole("heading", { name: /your setup session timed out/i })
     ).toBeInTheDocument();
     expect(screen.getByText(/your details were saved/i)).toBeInTheDocument();
-    expect(screen.getByText(/reopen the onboarding link from your email/i)).toBeInTheDocument();
+    expect(screen.getByText(/we'll send you a new one/i)).toBeInTheDocument();
+    expect(screen.queryByText(/reopen the onboarding link/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /onboarding complete/i })).not.toBeInTheDocument();
   });
 });

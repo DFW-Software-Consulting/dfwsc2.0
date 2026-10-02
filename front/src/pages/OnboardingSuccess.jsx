@@ -36,7 +36,8 @@ export default function OnboardingSuccess() {
           <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
             If you finished Stripe's form, your details were saved and your account will be
             activated automatically. You don't need to do anything else. If you hadn't finished,
-            reopen the onboarding link from your email to pick up where you left off.
+            your onboarding link has expired too, so reply to the onboarding email and we'll send
+            you a new one.
           </p>
           <p className="text-slate-500 dark:text-gray-400 transition-colors">
             If you have questions, reply to the onboarding email or contact our team.
