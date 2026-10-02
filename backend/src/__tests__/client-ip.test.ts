@@ -62,7 +62,7 @@ describe("getClientIp", () => {
       "x-forwarded-for": "2606:4700::1111",
       "cf-connecting-ip": "2001:db8::1",
     });
-    expect(ip).toBe("2001:db8::1");
+    expect(ip).toBe("2001:db8::/64");
   });
 
   it("treats an IPv4-mapped IPv6 Cloudflare peer as IPv4", async () => {
@@ -75,7 +75,63 @@ describe("getClientIp", () => {
 
   it("ignores CF-Connecting-IP from a non-Cloudflare IPv6 peer", async () => {
     const ip = await resolve(getClientIp, "2001:db8::5", { "cf-connecting-ip": "203.0.113.7" });
-    expect(ip).toBe("2001:db8::5");
+    expect(ip).toBe("2001:db8::/64");
+  });
+});
+
+describe("getClientIp rate-limit keys (IPv6 collapses to /64)", () => {
+  const viaCloudflare = (visitor: string) =>
+    resolve(getClientIp, "10.0.1.12", {
+      "x-forwarded-for": "104.22.191.13",
+      "cf-connecting-ip": visitor,
+    });
+
+  it("gives two CF-Connecting-IP values in the same /64 the same key", async () => {
+    expect(await viaCloudflare("2001:db8:1:2::a")).toBe("2001:db8:1:2::/64");
+    expect(await viaCloudflare("2001:db8:1:2:ffff::b")).toBe("2001:db8:1:2::/64");
+  });
+
+  it("gives values in different /64s different keys", async () => {
+    const a = await viaCloudflare("2001:db8:1:2::a");
+    const b = await viaCloudflare("2001:db8:1:3::a");
+    expect(a).toBe("2001:db8:1:2::/64");
+    expect(b).toBe("2001:db8:1:3::/64");
+    expect(a).not.toBe(b);
+  });
+
+  it("collapses uppercase and leading-zero IPv6 to the same key as the lowercase form", async () => {
+    expect(await viaCloudflare("2001:0DB8:0001:0002::1")).toBe("2001:db8:1:2::/64");
+    expect(await viaCloudflare("2001:db8:1:2::1")).toBe("2001:db8:1:2::/64");
+  });
+
+  it("formats full, short and zero-run addresses canonically", async () => {
+    expect(await viaCloudflare("2001:db8:abcd:1234:aaaa:bbbb:cccc:dddd")).toBe(
+      "2001:db8:abcd:1234::/64"
+    );
+    expect(await viaCloudflare("2001:DB8::1")).toBe("2001:db8::/64");
+    expect(await viaCloudflare("fe80::1")).toBe("fe80::/64");
+    expect(await viaCloudflare("::1")).toBe("::/64");
+    expect(await viaCloudflare("2001:db8:0:0:5::1")).toBe("2001:db8::/64");
+    expect(await viaCloudflare("2001:db8:0:5::1")).toBe("2001:db8:0:5::/64");
+  });
+
+  it("returns the dotted IPv4 for an IPv4-mapped CF-Connecting-IP", async () => {
+    expect(await viaCloudflare("::ffff:203.0.113.7")).toBe("203.0.113.7");
+    expect(await viaCloudflare("::ffff:cb00:7107")).toBe("203.0.113.7");
+  });
+
+  it("collapses a direct (non-Cloudflare) IPv6 peer to its /64", async () => {
+    expect(await resolve(getClientIp, "2001:db8:9:9::5", {})).toBe("2001:db8:9:9::/64");
+  });
+
+  it("collapses IPv6 when the Cloudflare path is disabled", async () => {
+    const resolver = createClientIpResolver("none");
+    expect(await resolve(resolver, "2001:db8:9:9::5", {})).toBe("2001:db8:9:9::/64");
+  });
+
+  it("leaves IPv4 keys unchanged", async () => {
+    expect(await viaCloudflare("203.0.113.7")).toBe("203.0.113.7");
+    expect(await resolve(getClientIp, "198.51.100.9", {})).toBe("198.51.100.9");
   });
 });
 

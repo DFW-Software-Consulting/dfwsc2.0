@@ -68,6 +68,27 @@ describe("rateLimit", () => {
     expect(b.reply.code).not.toHaveBeenCalled();
   });
 
+  it("shares one bucket across IPv6 addresses in the same /64", async () => {
+    const rateLimit = await getRateLimit();
+    const guard = rateLimit({ max: 1, windowMs: 60_000 });
+    const edge = "104.22.191.13";
+    const a = makeMocks(edge);
+    const b = makeMocks(edge);
+    const c = makeMocks(edge);
+    (a.request.headers as Record<string, string>)["cf-connecting-ip"] = "2001:db8:1:2::a";
+    (b.request.headers as Record<string, string>)["cf-connecting-ip"] = "2001:db8:1:2:ffff::b";
+    (c.request.headers as Record<string, string>)["cf-connecting-ip"] = "2001:db8:1:3::a";
+
+    await guard(a.request as any, a.reply as any);
+    expect(a.reply.code).not.toHaveBeenCalled();
+
+    // Different address, same /64: limited. A different /64 is unaffected.
+    await guard(b.request as any, b.reply as any);
+    expect(b.reply.code).toHaveBeenCalledWith(429);
+    await guard(c.request as any, c.reply as any);
+    expect(c.reply.code).not.toHaveBeenCalled();
+  });
+
   it("returns 429 when max is exceeded", async () => {
     const rateLimit = await getRateLimit();
     const guard = rateLimit({ max: 2, windowMs: 60_000 });
