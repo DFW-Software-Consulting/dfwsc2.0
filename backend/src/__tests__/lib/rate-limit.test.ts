@@ -48,6 +48,26 @@ describe("rateLimit", () => {
     expect(reply.send).not.toHaveBeenCalled();
   });
 
+  it("buckets by CF-Connecting-IP when requests arrive via the same Cloudflare edge", async () => {
+    const rateLimit = await getRateLimit();
+    const guard = rateLimit({ max: 1, windowMs: 60_000 });
+    const edge = "104.22.191.13";
+    const a = makeMocks(edge);
+    const b = makeMocks(edge);
+    (a.request.headers as Record<string, string>)["cf-connecting-ip"] = "203.0.113.7";
+    (b.request.headers as Record<string, string>)["cf-connecting-ip"] = "203.0.113.8";
+
+    await guard(a.request as any, a.reply as any);
+    await guard(b.request as any, b.reply as any);
+    expect(a.reply.code).not.toHaveBeenCalled();
+    expect(b.reply.code).not.toHaveBeenCalled();
+
+    // Same visitor again is limited; the other visitor's bucket is independent.
+    await guard(a.request as any, a.reply as any);
+    expect(a.reply.code).toHaveBeenCalledWith(429);
+    expect(b.reply.code).not.toHaveBeenCalled();
+  });
+
   it("returns 429 when max is exceeded", async () => {
     const rateLimit = await getRateLimit();
     const guard = rateLimit({ max: 2, windowMs: 60_000 });

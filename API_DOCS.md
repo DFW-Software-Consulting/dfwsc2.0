@@ -1045,6 +1045,7 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | `ENABLE_SWAGGER` | `true` (non-prod) | Set to `false` to disable `/docs` |
 | `NODE_ENV` | — | `production`, `development`, or `test` |
 | `TRUST_PROXY` | `loopback,linklocal,uniquelocal` | Reverse proxies trusted for `X-Forwarded-For` (so `request.ip`, and per-IP rate limits, use the real client). Accepts `true`, `false`, or a comma-separated IP/CIDR list. Default trusts private-network proxies only. Numeric hop counts are no longer supported (Fastify 5.12+); a numeric value logs a warning and uses the default |
+| `CLOUDFLARE_IP_RANGES` | built-in Cloudflare ranges | Comma-separated CIDRs that replace the built-in Cloudflare edge list; when the proxied peer is inside this list, per-IP rate limits key on the `CF-Connecting-IP` header instead of the edge address. Set to `none` to ignore `CF-Connecting-IP`; invalid entries abort startup |
 
 ### First-run setup only
 

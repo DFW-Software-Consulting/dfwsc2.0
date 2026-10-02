@@ -7,6 +7,7 @@ import { db } from "../db/client";
 import { clientGroups, clients, paymentLedger } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { withStripeCircuit } from "../lib/circuit-breakers";
+import { getClientIp } from "../lib/client-ip";
 import {
   resolveDefaultPaymentCancelUrl,
   resolveDefaultPaymentSuccessUrl,
@@ -120,7 +121,7 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
   if (req.client?.stripeAccountId) {
     return `stripe:${req.client.stripeAccountId}`;
   }
-  return request.ip || "unknown";
+  return getClientIp(request);
 }
 
 const STRIPE_CIRCUIT_OPEN_ERROR = {

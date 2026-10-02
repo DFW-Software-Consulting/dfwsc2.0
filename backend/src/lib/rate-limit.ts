@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import Redis from "ioredis";
+import { getClientIp } from "./client-ip";
 
 type RateLimitOptions = {
   max: number;
@@ -84,7 +85,7 @@ export function rateLimit(options: RateLimitOptions) {
   maxRegisteredWindowMs = Math.max(maxRegisteredWindowMs, windowMs);
 
   return async function rateLimitGuard(request: FastifyRequest, reply: FastifyReply) {
-    const key = `ratelimit:${options.keyGenerator ? options.keyGenerator(request) : request.ip || "unknown"}`;
+    const key = `ratelimit:${options.keyGenerator ? options.keyGenerator(request) : getClientIp(request)}`;
     const maxForRequest = options.maxGenerator ? options.maxGenerator(request) : max;
 
     if (redis) {
@@ -133,7 +134,7 @@ export function adminRateLimit(options: Omit<RateLimitOptions, "keyGenerator">) 
     ...options,
     keyGenerator: (request) => {
       const admin = (request as AdminScopedRequest).admin;
-      return `admin:${admin?.id ?? request.ip}`;
+      return `admin:${admin?.id ?? getClientIp(request)}`;
     },
   });
 }
