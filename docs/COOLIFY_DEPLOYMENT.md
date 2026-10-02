@@ -28,7 +28,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
 - **Source**: `./backend` directory, deployed as a Coolify **Docker Compose** resource pointing at `docker-compose.prod.yml`
 - **Containers**: that compose file defines four services:
   - `migrator` - runs `npm run db:migrate` once against `DATABASE_URL`, then exits; `api` will not start until this completes successfully
-  - `api` (container name `dfwsc-api`) - the Fastify server, `node dist/index.js`, port 4242
+  - `api` (reachable as `dfwsc-api` via a network alias on Coolify's `coolify` network; Coolify ignores `container_name`) - the Fastify server, `node dist/index.js`, port 4242
   - `redis` - backs rate limiting and circuit-breaker state; `api`'s `REDIS_URL` defaults to `redis://redis:6379`, the in-stack service, so it rarely needs to be set explicitly
   - `backup` - runs `scripts/backup-db.sh` on a nightly cron schedule (`0 2 * * *`) into the `postgres_backups` volume, optionally pushing to S3 if `AWS_S3_BACKUP_BUCKET` is set
 - **Build**: Use existing Dockerfile (multi-stage production build)
@@ -62,7 +62,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
   - VITE_API_URL=/api/v1 (optional, used during build if needed)
 - **Configuration**: Uses existing `front/nginx.conf` which:
   - Serves React static files from root path (`/`)
-  - Proxies `/api/*` requests to the API container by its internal Docker name (`dfwsc-api:4242`) — this requires the frontend container to be attached to the same Docker network as the backend stack
+  - Proxies `/api/*` requests to the API container by its network alias (`dfwsc-api:4242`) — the `api` service joins the external `coolify` network with that alias in `docker-compose.prod.yml`, and the frontend container is on that network by default
 - **Dependencies**: Backend service must be reachable (both for the internal nginx proxy above and for any direct/cross-origin API calls the SPA makes)
 - **Healthcheck**: `curl -f http://localhost || exit 1`
 
@@ -136,7 +136,7 @@ CMD ["nginx", "-g", "daemon off;"]
 ## Nginx Configuration
 The existing `front/nginx.conf` is already configured correctly:
 - Serves React app from root
-- Proxies `/api/*` to the API container by its internal Docker name (`dfwsc-api:4242`) — requires the frontend container to share a Docker network with the backend stack
+- Proxies `/api/*` to the API container by its network alias (`dfwsc-api:4242`) — the `api` service joins the external `coolify` network with that alias, which the frontend container is on by default
 - Includes security headers and compression
 
 ## Deployment Sequence
@@ -161,7 +161,7 @@ The existing `front/nginx.conf` is already configured correctly:
    - Set build context to `./front`
    - Use the existing `front/Dockerfile`
    - Add minimal environment variables (VITE_API_URL=/api/v1 if needed)
-   - Attach it to the same Docker network as the backend stack so its nginx proxy can reach `dfwsc-api:4242`
+   - Leave it on Coolify's default `coolify` network; the backend's `api` service joins that network as `dfwsc-api`, so the nginx proxy can reach `dfwsc-api:4242`
    - Add healthcheck: `curl -f http://localhost || exit 1`
    - Save and deploy
 

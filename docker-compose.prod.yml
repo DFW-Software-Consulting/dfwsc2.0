@@ -19,7 +19,6 @@ services:
       - backend
 
   api:
-    container_name: dfwsc-api
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -71,8 +70,14 @@ services:
       retries: 5
       start_period: 10s
     networks:
-      - frontend
-      - backend
+      frontend:
+      backend:
+      # Join Coolify's shared proxy network under a stable, unique name so the
+      # separately deployed frontend (nginx) can proxy /api/ to dfwsc-api:4242.
+      # Coolify ignores container_name, so the alias is what makes this resolvable.
+      coolify:
+        aliases:
+          - dfwsc-api
 
   redis:
     image: redis:7-alpine
@@ -121,3 +126,7 @@ networks:
     driver: bridge
   backend:
     driver: bridge
+  # Pre-existing network managed by Coolify (its reverse proxy and the frontend
+  # app live on it). For a local run without Coolify: docker network create coolify
+  coolify:
+    external: true
