@@ -314,7 +314,7 @@ describe("Connect Callback State Validation Integration", () => {
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenId));
   });
 
-  it("should reject request with expired state parameter", async () => {
+  it("should redirect to the expired onboarding page for an expired state parameter", async () => {
     const clientId = randomUUID();
     const testStripeAccount = "acct_test123456789";
 
@@ -349,10 +349,16 @@ describe("Connect Callback State Validation Integration", () => {
       url: `/api/v1/connect/callback?client_id=${clientId}&account=${testStripeAccount}&state=${expiredState}`,
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({
-      error: "Expired state parameter.",
-    });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toMatch(/\/onboarding-success\?status=expired$/);
+
+    // The token must not be marked completed (nor have its state consumed)
+    const [tokenAfter] = await db
+      .select()
+      .from(onboardingTokens)
+      .where(eq(onboardingTokens.id, onboardingTokenId));
+    expect(tokenAfter.status).toBe("in_progress");
+    expect(tokenAfter.state).toBe(expiredState);
 
     // Clean up
     await db.delete(clients).where(eq(clients.id, clientId));

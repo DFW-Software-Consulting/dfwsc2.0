@@ -897,7 +897,7 @@ describe("connect callback", () => {
     await server.close();
   });
 
-  it("rejects callback with expired state", async () => {
+  it("redirects callback with expired state to the expired onboarding page", async () => {
     const clientId = "client_expired_state";
     const onboardingTokenId = "token_expired";
     seedOnboardingToken(dataStore, {
@@ -914,8 +914,11 @@ describe("connect callback", () => {
       method: "GET",
       url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_123&state=expired_state_val`,
     });
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ error: "Expired state parameter." });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toMatch(/\/onboarding-success\?status=expired$/);
+    const expiredToken = dataStore.onboardingTokens.get(onboardingTokenId);
+    expect(expiredToken?.status).toBe("in_progress");
+    expect(expiredToken?.state).toBe("expired_state_val");
     await server.close();
   });
 
