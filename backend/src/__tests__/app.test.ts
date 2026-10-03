@@ -2023,7 +2023,7 @@ describe("payment session endpoint", () => {
       stripePaymentIntentId: null,
       clientId: "client_session",
       source: "checkout",
-      status: "completed",
+      status: "paid",
       baseAmountCents: 5000,
       totalAmountCents: 5100,
       feeAmountCents: 100,
@@ -2041,7 +2041,7 @@ describe("payment session endpoint", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.status).toBe("completed");
+    expect(body.status).toBe("paid");
     expect(body.baseAmountCents).toBe(5000);
     expect(body.totalAmountCents).toBe(5100);
     expect(body.feeAmountCents).toBe(100);
@@ -2209,7 +2209,7 @@ describe("webhook ledger updates", () => {
       stripePaymentIntentId: null,
       clientId: "client_ooo",
       source: "checkout",
-      status: "completed",
+      status: "paid",
       baseAmountCents: 1000,
       totalAmountCents: 1100,
       feeAmountCents: 100,
@@ -2247,9 +2247,9 @@ describe("webhook ledger updates", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    // Status should remain 'completed' — the older event was ignored.
+    // Status should remain 'paid' — the older event was ignored.
     const ledgerRow = dataStore.paymentLedger.get("ooo-ledger-key");
-    expect(ledgerRow.status).toBe("completed");
+    expect(ledgerRow.status).toBe("paid");
     await server.close();
   });
 });

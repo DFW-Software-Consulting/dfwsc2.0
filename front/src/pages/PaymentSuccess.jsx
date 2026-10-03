@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { getPaymentSession } from "../api/payments";
 
-const PAID_STATUSES = new Set(["completed", "succeeded"]);
+// Mirrors the payment_ledger status enum in backend/src/db/schema.ts.
+const PAID_STATUSES = new Set(["paid"]);
 const FAILED_STATUSES = new Set(["failed", "expired", "canceled"]);
-const REFUND_STATUSES = new Set(["refunded", "partially_refunded", "disputed"]);
+const REFUND_STATUSES = new Set(["refunded", "disputed"]);
+// Only a freshly created ledger row can still change to paid; keep polling for it alone.
+const POLLING_STATUSES = new Set(["created"]);
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_ATTEMPTS = 10;
@@ -154,9 +157,6 @@ export default function PaymentSuccess() {
       total: formatMoney(data.totalAmountCents, data.currency),
       base: formatMoney(data.baseAmountCents, data.currency),
       fee: formatMoney(data.feeAmountCents, data.currency),
-      refunded: data.refundedAmountCents
-        ? formatMoney(data.refundedAmountCents, data.currency)
-        : "",
       date: formatDate(data.createdAt),
     };
   }, [state]);
@@ -193,7 +193,7 @@ export default function PaymentSuccess() {
         }
 
         attempts += 1;
-        if (attempts >= MAX_POLL_ATTEMPTS) {
+        if (!POLLING_STATUSES.has(data.status) || attempts >= MAX_POLL_ATTEMPTS) {
           setState({ type: "pending", data });
           return;
         }
@@ -303,11 +303,6 @@ export default function PaymentSuccess() {
           {summary?.total && (
             <p>
               Total amount: <span className="font-semibold">{summary.total}</span>
-            </p>
-          )}
-          {summary?.refunded && (
-            <p>
-              Refunded: <span className="font-semibold">{summary.refunded}</span>
             </p>
           )}
         </div>
