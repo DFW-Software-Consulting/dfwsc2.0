@@ -17,7 +17,7 @@ export default function Hero() {
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-[500px] bg-brand-500/10 blur-[120px] rounded-full pointer-events-none" />
 
       <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 relative">
-        <div className="mx-auto grid max-w-6xl items-center gap-16 lg:grid-cols-[1.2fr,1fr]">
+        <div className="mx-auto grid max-w-6xl items-center gap-16 lg:grid-cols-[1.2fr_1fr]">
           <div className="text-center lg:text-left">
             <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-brand-500/20 bg-brand-500/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-brand-800 dark:text-brand-200 backdrop-blur-sm">
               <span className="relative flex h-2 w-2">
@@ -77,7 +77,8 @@ export default function Hero() {
                 src="https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1600&auto=format&fit=crop"
                 alt="Developer configuring cloud infrastructure"
                 className="w-full rounded-[2rem] border border-slate-200 dark:border-white/10 shadow-2xl brightness-100 dark:brightness-90 grayscale-[0.1] hover:grayscale-0 hover:brightness-100 transition-all duration-700"
-                loading="lazy"
+                width="1600"
+                height="1067"
               />
               <div className="absolute inset-0 rounded-[2rem] bg-gradient-to-t from-slate-200/20 dark:from-[#020617]/40 via-transparent to-transparent opacity-60 pointer-events-none" />
             </div>
