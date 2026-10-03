@@ -176,6 +176,13 @@
       "when": 1784607584162,
       "tag": "0024_payment_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791032751993,
+      "tag": "0025_payment_ledger_per_client_idempotency",
+      "breakpoints": true
     }
   ]
 }

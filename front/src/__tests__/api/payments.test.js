@@ -10,7 +10,7 @@ import { getPaymentSession } from "../../api/payments";
 describe("getPaymentSession", () => {
   it("GETs the public session endpoint with the encoded session id", async () => {
     apiFetch.mockResolvedValue({
-      status: "completed",
+      status: "paid",
       baseAmountCents: 10000,
       totalAmountCents: 10200,
       feeAmountCents: 200,
@@ -25,7 +25,7 @@ describe("getPaymentSession", () => {
   });
 
   it("encodes special characters in the session id", async () => {
-    apiFetch.mockResolvedValue({ status: "completed", currency: "usd" });
+    apiFetch.mockResolvedValue({ status: "paid", currency: "usd" });
 
     await getPaymentSession("cs_test_session+with spaces");
 

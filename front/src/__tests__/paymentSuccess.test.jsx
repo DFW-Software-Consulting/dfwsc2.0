@@ -17,7 +17,7 @@ function setWindowSearch(search) {
 
 function buildSession(overrides = {}) {
   return {
-    status: "completed",
+    status: "paid",
     baseAmountCents: 10000,
     totalAmountCents: 10200,
     feeAmountCents: 200,
@@ -45,8 +45,8 @@ describe("PaymentSuccess", () => {
     expect(screen.queryByText(/payment successful/i)).not.toBeInTheDocument();
   });
 
-  it("shows verified paid state for completed status with currency formatting", async () => {
-    getPaymentSession.mockResolvedValue(buildSession({ status: "completed" }));
+  it("shows verified paid state for paid status with currency formatting", async () => {
+    getPaymentSession.mockResolvedValue(buildSession({ status: "paid" }));
     render(<PaymentSuccess />);
 
     expect(screen.getByRole("heading", { name: /verifying payment/i })).toBeInTheDocument();
@@ -61,13 +61,15 @@ describe("PaymentSuccess", () => {
     expect(screen.getByText(/jul 20, 2026/i)).toBeInTheDocument();
   });
 
-  it("treats succeeded as a paid status", async () => {
-    getPaymentSession.mockResolvedValue(buildSession({ status: "succeeded" }));
+  it.each(["completed", "succeeded"])("does not treat legacy %s as paid", async (status) => {
+    getPaymentSession.mockResolvedValue(buildSession({ status }));
     render(<PaymentSuccess />);
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: /payment successful/i })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: /payment pending/i })).toBeInTheDocument();
     });
+    expect(screen.queryByText(/payment successful/i)).not.toBeInTheDocument();
+    expect(getPaymentSession).toHaveBeenCalledTimes(1);
   });
 
   it("shows pending state after polling attempts are exhausted", async () => {
@@ -80,6 +82,22 @@ describe("PaymentSuccess", () => {
     });
 
     expect(screen.getByRole("heading", { name: /payment pending/i })).toBeInTheDocument();
+    expect(getPaymentSession).toHaveBeenCalledTimes(10);
+  });
+
+  it("keeps polling a created session until it becomes paid", async () => {
+    vi.useFakeTimers();
+    getPaymentSession
+      .mockResolvedValueOnce(buildSession({ status: "created" }))
+      .mockResolvedValue(buildSession({ status: "paid" }));
+    render(<PaymentSuccess />);
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(screen.getByRole("heading", { name: /payment successful/i })).toBeInTheDocument();
+    expect(getPaymentSession).toHaveBeenCalledTimes(2);
   });
 
   it("shows failed state for canceled status", async () => {
@@ -91,13 +109,8 @@ describe("PaymentSuccess", () => {
     });
   });
 
-  it("shows refunded state with refunded amount", async () => {
-    getPaymentSession.mockResolvedValue(
-      buildSession({
-        status: "partially_refunded",
-        refundedAmountCents: 5000,
-      })
-    );
+  it("shows refunded state with the total amount", async () => {
+    getPaymentSession.mockResolvedValue(buildSession({ status: "refunded" }));
     render(<PaymentSuccess />);
 
     await waitFor(() => {
@@ -105,7 +118,6 @@ describe("PaymentSuccess", () => {
     });
 
     expect(screen.getByText(/\$102\.00/)).toBeInTheDocument();
-    expect(screen.getByText(/\$50\.00/)).toBeInTheDocument();
   });
 
   it("shows unavailable state when the backend request fails", async () => {
