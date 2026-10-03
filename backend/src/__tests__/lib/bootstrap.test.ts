@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../db/client";
 import { bootstrapAdminIfNeeded } from "../../lib/bootstrap";
@@ -51,6 +52,57 @@ describe("Bootstrap Lib", () => {
     mockAdmins([{ id: "1", username: "renamed-admin", setupConfirmed: true }]);
 
     process.env.ADMIN_USERNAME = "testadmin";
+    process.env.ADMIN_PASSWORD = "testpassword";
+
+    await bootstrapAdminIfNeeded(mockServer);
+
+    expect(mockServer.log.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/remove ADMIN_USERNAME and ADMIN_PASSWORD/)
+    );
+  });
+
+  it("should name existing admins that still accept ADMIN_PASSWORD", async () => {
+    mockAdmins([
+      {
+        id: "1",
+        username: "renamed-admin",
+        setupConfirmed: true,
+        active: true,
+        passwordHash: await bcrypt.hash("a-different-password", 4),
+      },
+      {
+        id: "2",
+        username: "testadmin",
+        setupConfirmed: true,
+        active: true,
+        passwordHash: await bcrypt.hash("testpassword", 4),
+      },
+    ]);
+
+    process.env.ADMIN_USERNAME = "testadmin";
+    process.env.ADMIN_PASSWORD = "testpassword";
+
+    await bootstrapAdminIfNeeded(mockServer);
+
+    expect(db.insert).not.toHaveBeenCalled();
+    expect(mockServer.log.warn).toHaveBeenCalledTimes(1);
+    expect(mockServer.log.warn).toHaveBeenCalledWith(
+      { usernames: ["testadmin"] },
+      expect.stringMatching(/Change their passwords or remove the accounts/)
+    );
+  });
+
+  it("should not name an inactive admin that matches ADMIN_PASSWORD", async () => {
+    mockAdmins([
+      {
+        id: "1",
+        username: "disabled",
+        setupConfirmed: true,
+        active: false,
+        passwordHash: await bcrypt.hash("testpassword", 4),
+      },
+    ]);
+
     process.env.ADMIN_PASSWORD = "testpassword";
 
     await bootstrapAdminIfNeeded(mockServer);

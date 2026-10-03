@@ -127,6 +127,20 @@ describe("POST /api-key/regenerate-request abuse resistance", () => {
     expect(sendMail).toHaveBeenCalledTimes(1);
   });
 
+  it("issues exactly one token and one mail for a burst of simultaneous requests", async () => {
+    const responses = await Promise.all(Array.from({ length: 5 }, () => post({ email })));
+    for (const response of responses) expect(response.statusCode).toBe(200);
+
+    await vi.waitFor(() => expect(sendMail).toHaveBeenCalledTimes(1));
+    // Give the other detached requests a chance to (wrongly) finish too.
+    await settle();
+
+    const tokens = await tokensFor();
+    expect(tokens).toHaveLength(1);
+    expect(tokens[0].status).toBe("pending");
+    expect(sendMail).toHaveBeenCalledTimes(1);
+  });
+
   it("does not revoke a fresh pending token created elsewhere (e.g. the welcome email link)", async () => {
     await db
       .insert(apiKeyRegenerationTokens)

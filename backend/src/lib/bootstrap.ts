@@ -16,9 +16,26 @@ export async function bootstrapAdminIfNeeded(server: FastifyInstance): Promise<v
     // re-create a second admin with the bootstrap password once the first admin renames
     // themselves during setup confirmation.
     if (password && existingAdmins.some((admin) => admin.setupConfirmed)) {
-      server.log.warn(
-        "ADMIN_PASSWORD is still set although a confirmed admin exists. It is ignored from now on: remove ADMIN_USERNAME and ADMIN_PASSWORD from the environment."
-      );
+      // Rows seeded by the earlier behaviour are left in place, so name any active account
+      // that still accepts the bootstrap password instead of implying it is unused.
+      const stillAccepting: string[] = [];
+      for (const admin of existingAdmins) {
+        if (admin.active === false || !admin.passwordHash) continue;
+        if (await bcrypt.compare(password, admin.passwordHash)) {
+          stillAccepting.push(admin.username);
+        }
+      }
+
+      if (stillAccepting.length > 0) {
+        server.log.warn(
+          { usernames: stillAccepting },
+          "ADMIN_PASSWORD still signs in to the listed admin accounts. Change their passwords or remove the accounts, then remove ADMIN_USERNAME and ADMIN_PASSWORD from the environment."
+        );
+      } else {
+        server.log.warn(
+          "ADMIN_PASSWORD is still set although a confirmed admin exists. It is ignored from now on: remove ADMIN_USERNAME and ADMIN_PASSWORD from the environment."
+        );
+      }
     }
     return;
   }
