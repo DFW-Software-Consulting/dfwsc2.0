@@ -14,6 +14,7 @@ import AdminTable from "./shared/AdminTable";
 import Button from "./shared/Button";
 import { getOnboardingState } from "./shared/onboardingState";
 import StatusBadge from "./shared/StatusBadge";
+import TruncationNotice from "./shared/TruncationNotice";
 
 function formatFee(client, groups) {
   if (client.processingFeePercent != null) return `${client.processingFeePercent}%`;
@@ -275,6 +276,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
         emptyMessage="No clients yet"
         loadingMessage="Loading clients..."
       />
+      <TruncationNotice shown={clients.length} total={clients.pagination?.total} noun="clients" />
 
       <ConfirmModal
         isOpen={confirmModal.isOpen}

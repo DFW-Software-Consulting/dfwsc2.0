@@ -1,4 +1,4 @@
-import { count, eq } from "drizzle-orm";
+import { asc, count, desc, eq } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -174,6 +174,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
       .select()
       .from(clientGroups)
       .where(eq(clientGroups.workspace, workspace))
+      .orderBy(desc(clientGroups.createdAt), asc(clientGroups.id))
       .limit(pagination.limit)
       .offset(pagination.offset);
     return res.status(200).send({ data: groups.map(formatGroupResponse), total, ...pagination });

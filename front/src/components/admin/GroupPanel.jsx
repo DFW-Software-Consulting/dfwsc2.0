@@ -12,6 +12,7 @@ import FormInput from "./shared/FormInput";
 import LoadingSpinner from "./shared/LoadingSpinner";
 import { getOnboardingState } from "./shared/onboardingState";
 import StatusBadge from "./shared/StatusBadge";
+import TruncationNotice from "./shared/TruncationNotice";
 
 function formatFee(group) {
   if (group.processingFeePercent != null) return `${group.processingFeePercent}%`;
@@ -273,6 +274,13 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
       {isError && <p className="text-red-400 text-sm py-4 text-center">{error?.message}</p>}
       {!isLoading && !isError && groups.length === 0 && (
         <p className="text-gray-400 text-sm py-4 text-center">No groups yet</p>
+      )}
+
+      <TruncationNotice shown={groups.length} total={groups.pagination?.total} noun="companies" />
+      {clients.pagination && clients.length < clients.pagination.total && (
+        <p className="text-xs text-yellow-400 pb-2 text-center">
+          Member counts only include the {clients.length} clients loaded.
+        </p>
       )}
 
       {groups.length > 0 && (
