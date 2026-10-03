@@ -194,7 +194,8 @@ describe("Mailer failure handling across connect.ts routes", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().message).toMatch(/regeneration link/i);
-      expect(sendMail).toHaveBeenCalledTimes(1);
+      // The send runs after the response; its rejection is caught and logged.
+      await vi.waitFor(() => expect(sendMail).toHaveBeenCalledTimes(1));
 
       // Same generic message as a non-existent email — the caller cannot
       // distinguish "mail delivery failed" from "no such account" here,

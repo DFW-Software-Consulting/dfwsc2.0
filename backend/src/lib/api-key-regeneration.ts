@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { type DbOrTx, db } from "../db/client";
 import { apiKeyRegenerationTokens, clients } from "../db/schema";
@@ -7,6 +7,10 @@ import { hashApiKey, sha256Lookup } from "./auth";
 import { errors } from "./errors";
 
 const REGENERATION_TOKEN_TTL_MS = 15 * 60 * 1000;
+// A client with a pending token younger than this is not issued another one by the
+// public self-service request, so an outsider cannot flood the inbox or revoke a
+// fresh link (including the one in the welcome email).
+const REGENERATION_REQUEST_COOLDOWN_MS = 5 * 60 * 1000;
 
 function hashToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -46,6 +50,39 @@ export async function createRegenerationToken(
   });
 
   return rawToken;
+}
+
+/**
+ * Self-service variant of createRegenerationToken: returns null, and leaves the
+ * existing pending token untouched, when the client already has one younger than the
+ * cooldown. The client row is locked so concurrent requests cannot both pass the check.
+ */
+export async function createRegenerationTokenUnlessRecent(
+  { clientId, email }: { clientId: string; email: string },
+  dbOrTx: DbOrTx = db
+): Promise<string | null> {
+  return dbOrTx.transaction(async (tx) => {
+    await tx.select({ id: clients.id }).from(clients).where(eq(clients.id, clientId)).for("update");
+
+    const [recent] = await tx
+      .select({ id: apiKeyRegenerationTokens.id })
+      .from(apiKeyRegenerationTokens)
+      .where(
+        and(
+          eq(apiKeyRegenerationTokens.clientId, clientId),
+          eq(apiKeyRegenerationTokens.status, "pending"),
+          gt(
+            apiKeyRegenerationTokens.createdAt,
+            new Date(Date.now() - REGENERATION_REQUEST_COOLDOWN_MS)
+          )
+        )
+      )
+      .limit(1);
+
+    if (recent) return null;
+
+    return createRegenerationToken({ clientId, email }, tx);
+  });
 }
 
 export async function validateAndRegenerate(rawToken: string): Promise<string> {
