@@ -65,6 +65,40 @@ describe("mapStripeError permanent errors", () => {
     expect(send).toHaveBeenCalledWith({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
   });
 
+  it("maps an in-flight idempotency conflict to a retryable 409 IDEMPOTENCY_KEY_IN_USE", () => {
+    const { reply, code, send } = fakeReply();
+    const err = sdkError(
+      "idempotency_error",
+      409,
+      "There is currently another in-progress request",
+      {
+        code: "idempotency_key_in_use",
+      }
+    );
+
+    expect(mapStripeError(err, reply, { circuitOpen, permanentErrors: true })).toBe(true);
+
+    expect(code).toHaveBeenCalledWith(409);
+    expect(send).toHaveBeenCalledWith({
+      error: expect.stringContaining("Retry shortly with the same key"),
+      code: "IDEMPOTENCY_KEY_IN_USE",
+    });
+  });
+
+  it("keeps a real SDK parameter-mismatch idempotency error as IDEMPOTENCY_KEY_REUSED", () => {
+    const { reply, code, send } = fakeReply();
+    const err = sdkError(
+      "idempotency_error",
+      400,
+      "Keys for idempotent requests can only be used with the same parameters"
+    );
+
+    expect(mapStripeError(err, reply, { circuitOpen, permanentErrors: true })).toBe(true);
+
+    expect(code).toHaveBeenCalledWith(409);
+    expect(send).toHaveBeenCalledWith({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
+  });
+
   it("maps StripePermissionError to 409 ACCOUNT_NOT_CONNECTED", () => {
     const { reply, code, send } = fakeReply();
 

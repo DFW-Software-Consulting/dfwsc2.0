@@ -212,6 +212,21 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
     expect(response.json().code).toBe("IDEMPOTENCY_KEY_REUSED");
   });
 
+  it("returns 409 IDEMPOTENCY_KEY_IN_USE for a real SDK in-flight idempotency error", async () => {
+    const response = await createWithStripeError(
+      Stripe.errors.StripeError.generate({
+        type: "idempotency_error",
+        statusCode: 409,
+        code: "idempotency_key_in_use",
+        message:
+          "There is currently another in-progress request using this Stripe idempotency key.",
+      } as never)
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("IDEMPOTENCY_KEY_IN_USE");
+  });
+
   it("returns 409 ACCOUNT_NOT_CONNECTED for a real SDK permission error", async () => {
     const response = await createWithStripeError(
       new Stripe.errors.StripePermissionError({
