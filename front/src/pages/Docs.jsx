@@ -7,6 +7,7 @@ const sidebarSections = [
   { id: "quick-start", label: "Quick Start" },
   { id: "step-1", label: "Step 1 — Create a Payment" },
   { id: "step-2", label: "Step 2 — Redirect to Checkout" },
+  { id: "step-3", label: "Step 3 — Confirm the Payment" },
   { id: "code-examples", label: "Code Examples" },
   { id: "error-handling", label: "Error Handling" },
   { id: "rules", label: "Rules" },
@@ -81,7 +82,26 @@ async function createPayment(amountCents, description) {
     throw new Error(\`Payment error: \${err.error}\`);
   }
 
-  return response.json(); // { url }
+  return response.json(); // { url, sessionId } — store sessionId with your order
+}
+
+// Call this from your backend when the customer lands on your success URL
+// (and for any order still pending later).
+async function verifyPayment(sessionId, expectedAmountCents, expectedCurrency) {
+  const response = await fetch(
+    \`https://<your-api-base-url>/api/v1/payments/session/\${encodeURIComponent(sessionId)}\`
+  );
+
+  if (!response.ok) {
+    throw new Error(\`Could not check payment: \${response.status}\`); // 429 is retryable
+  }
+
+  const payment = await response.json();
+  return (
+    payment.status === 'paid' &&
+    payment.baseAmountCents === expectedAmountCents &&
+    payment.currency === expectedCurrency
+  );
 }`;
 
 const PYTHON_CODE = `import requests
@@ -112,7 +132,22 @@ def create_payment(amount_cents: int, description: str) -> dict:
         }
     )
     response.raise_for_status()
-    return response.json()  # { 'url': ... }`;
+    return response.json()  # { 'url': ..., 'sessionId': ... } — store sessionId with your order
+
+
+# Call this from your backend when the customer lands on your success URL
+# (and for any order still pending later).
+def verify_payment(session_id: str, expected_amount_cents: int, expected_currency: str) -> bool:
+    response = requests.get(
+        f'https://<your-api-base-url>/api/v1/payments/session/{session_id}'
+    )
+    response.raise_for_status()  # a 429 is retryable
+    payment = response.json()
+    return (
+        payment['status'] == 'paid'
+        and payment['baseAmountCents'] == expected_amount_cents
+        and payment['currency'] == expected_currency
+    )`;
 
 const PHP_CODE = `function createPayment(int $amountCents, string $description): array {
     $ch = curl_init(
@@ -140,7 +175,28 @@ const PHP_CODE = `function createPayment(int $amountCents, string $description):
     ]);
     $result = curl_exec($ch);
     curl_close($ch);
-    return json_decode($result, true); // ['url' => ...]
+    return json_decode($result, true); // ['url' => ..., 'sessionId' => ...] — store sessionId with your order
+}
+
+// Call this from your backend when the customer lands on your success URL
+// (and for any order still pending later).
+function verifyPayment(string $sessionId, int $expectedAmountCents, string $expectedCurrency): bool {
+    $ch = curl_init(
+        'https://<your-api-base-url>/api/v1/payments/session/' . rawurlencode($sessionId)
+    );
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    $result = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($httpCode !== 200) {
+        return false; // a 429 is retryable — try again in a few seconds
+    }
+
+    $payment = json_decode($result, true);
+    return $payment['status'] === 'paid'
+        && $payment['baseAmountCents'] === $expectedAmountCents
+        && $payment['currency'] === $expectedCurrency;
 }`;
 
 const LANG_TABS = [
@@ -159,6 +215,19 @@ const ERROR_ROWS = [
   { status: "429", cause: "Too many requests", fix: "Slow down and retry" },
   { status: "500", cause: "Server error", fix: "Contact DFWSC support" },
   { status: "502", cause: "Stripe unreachable", fix: "Retry — usually temporary" },
+];
+
+const STATUS_ROWS = [
+  { status: "paid", meaning: "The customer paid. This is the only status to fulfil an order on." },
+  {
+    status: "created",
+    meaning: "Not finished yet. Wait a couple of seconds and check again.",
+  },
+  { status: "expired", meaning: "Not paid. The checkout session ran out of time." },
+  { status: "failed", meaning: "Not paid. The payment did not go through." },
+  { status: "canceled", meaning: "Not paid. The payment was canceled." },
+  { status: "refunded", meaning: "The customer paid, but the payment was later refunded." },
+  { status: "disputed", meaning: "The customer paid, but the payment was later disputed." },
 ];
 
 export default function Docs() {
@@ -290,8 +359,16 @@ export default function Docs() {
                       array — it returns a Stripe-hosted Checkout{" "}
                       <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
                         url
+                      </code>{" "}
+                      and a{" "}
+                      <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
+                        sessionId
                       </code>
-                      .
+                      . Store the{" "}
+                      <code className="rounded-lg bg-slate-100 dark:bg-white/5 px-2 py-1 text-brand-600 dark:text-brand-300 font-mono transition-colors">
+                        sessionId
+                      </code>{" "}
+                      with your order.
                     </>
                   ),
                 },
@@ -315,7 +392,12 @@ export default function Docs() {
                 {
                   id: "webhook-redirect",
                   content:
-                    "Stripe sends the customer back to your success or cancel URL when they finish.",
+                    "Stripe sends the customer back to your success or cancel URL when they finish. The success URL always has ?session_id=... added to it.",
+                },
+                {
+                  id: "confirm-payment",
+                  content:
+                    "Your backend checks the session ID with the DFWSC API and only fulfils the order once the status is paid.",
                 },
               ].map((step, i) => (
                 <div key={step.id} className="flex items-start gap-6 group">
@@ -490,6 +572,22 @@ export default function Docs() {
                 </tbody>
               </table>
             </div>
+
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
+              Response
+            </h3>
+            <CodeBlock language="json">{`{
+  "url": "https://checkout.stripe.com/c/pay/cs_test_...",
+  "sessionId": "cs_test_..."
+}`}</CodeBlock>
+            <p className="mt-4 text-base text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
+              Save the{" "}
+              <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
+                sessionId
+              </code>{" "}
+              against your own order right now, when you create the payment. You need it in Step 3
+              to confirm the payment.
+            </p>
           </section>
 
           {/* Step 2 */}
@@ -508,18 +606,28 @@ export default function Docs() {
               Response from Step 1
             </h3>
             <CodeBlock language="json">{`{
-  "url": "https://checkout.stripe.com/c/pay/cs_test_..."
+  "url": "https://checkout.stripe.com/c/pay/cs_test_...",
+  "sessionId": "cs_test_..."
 }`}</CodeBlock>
 
             <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
               Redirect the customer
             </h3>
-            <CodeBlock language="javascript">{`// After your backend gets { url } from Step 1:
+            <CodeBlock language="javascript">{`// After your backend gets { url, sessionId } from Step 1:
 window.location.href = url;`}</CodeBlock>
 
             <p className="mt-8 text-base text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
               The customer completes payment on Stripe&apos;s hosted page and is then sent back to
-              your configured success or cancel URL.
+              your configured success or cancel URL. On return to the success URL,{" "}
+              <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
+                ?session_id=...
+              </code>{" "}
+              is appended (or{" "}
+              <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
+                &amp;session_id=...
+              </code>{" "}
+              if your URL already has a query string), so you know which payment the customer is
+              coming back from.
             </p>
 
             <div className="mt-8 p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] text-sm text-slate-700 dark:text-slate-300 transition-colors shadow-sm">
@@ -529,6 +637,103 @@ window.location.href = url;`}</CodeBlock>
               Ask your DFWSC administrator to configure your{" "}
               <strong>post-payment redirect URLs</strong> (success and cancel) so customers land
               back on the right pages of your site after checkout.
+            </div>
+          </section>
+
+          {/* Step 3 */}
+          <section>
+            <SectionAnchor id="step-3" />
+            <SectionBadge>Backend</SectionBadge>
+            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              Step 3 — Confirm the Payment
+            </h2>
+            <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
+              Arriving on your success page does not prove the customer paid. Before you fulfil an
+              order, check the payment from your{" "}
+              <strong className="text-slate-900 dark:text-white underline decoration-brand-500/50 transition-colors">
+                server
+              </strong>{" "}
+              using the{" "}
+              <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
+                sessionId
+              </code>{" "}
+              you saved in Step 1. No API key is needed for this call.
+            </p>
+
+            <div className="mt-8 p-4 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] font-mono text-brand-600 dark:text-brand-400 font-bold transition-colors">
+              GET /api/v1/payments/session/{"{sessionId}"}
+            </div>
+
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
+              Response
+            </h3>
+            <CodeBlock language="json">{`{
+  "status": "paid",
+  "baseAmountCents": 5000,
+  "totalAmountCents": 5500,
+  "feeAmountCents": 500,
+  "currency": "usd",
+  "createdAt": "2026-01-15T14:32:10.000Z"
+}`}</CodeBlock>
+
+            <h3 className="mt-12 text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-6 transition-colors">
+              Status values
+            </h3>
+            <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.01] transition-colors shadow-sm">
+              <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Status
+                    </th>
+                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                      Meaning
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {STATUS_ROWS.map((row) => (
+                    <tr
+                      key={row.status}
+                      className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-6 py-4 font-mono text-brand-600 dark:text-brand-300">
+                        {row.status}
+                      </td>
+                      <td className="px-6 py-4 text-xs transition-colors">{row.meaning}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-8 grid gap-4">
+              {[
+                {
+                  title: "Fulfil only on paid.",
+                  desc: "Compare baseAmountCents and currency to your order first. If they do not match, do not fulfil it.",
+                },
+                {
+                  title: "Customers do not always come back.",
+                  desc: "If someone pays and closes the tab, your success page never loads. Re-check any order that is still pending using its stored sessionId.",
+                },
+                {
+                  title: "Do not poll faster than every couple of seconds.",
+                  desc: "This endpoint is rate limited. If you get a 429, wait and try again.",
+                },
+              ].map((item) => (
+                <div
+                  key={item.title}
+                  className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm"
+                >
+                  <h3 className="font-bold text-slate-900 dark:text-white text-base transition-colors">
+                    {item.title}
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
+                    {item.desc}
+                  </p>
+                </div>
+              ))}
             </div>
           </section>
 

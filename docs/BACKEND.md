@@ -20,7 +20,7 @@ The payment route also accepts Admin JWT as a fallback (for admin-initiated paym
 ## 3. Core Flows
 
 ### Payment Flow
-`POST /api/v1/payments/create` always creates a **Stripe Checkout Session** from the required `lineItems` array and returns a `url` for browser redirect to the Stripe-hosted checkout page. (The former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.) Line items must use inline `price_data` (no platform price IDs). The base amount is derived server-side from line items; a caller-supplied `amount` is ignored for Checkout. All line items must use the same 3-letter ISO currency.
+`POST /api/v1/payments/create` always creates a **Stripe Checkout Session** from the required `lineItems` array and returns `{ url, sessionId }` (201): `url` is for browser redirect to the Stripe-hosted checkout page, and `sessionId` is the Checkout Session ID the integrator stores against its order and later passes to `GET /payments/session/:sessionId` to confirm the payment. (The former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.) Line items must use inline `price_data` (no platform price IDs). The base amount is derived server-side from line items; a caller-supplied `amount` is ignored for Checkout. All line items must use the same 3-letter ISO currency.
 
 **Idempotency**: A nonblank `Idempotency-Key` header is required for all payment creation calls (both API-key and admin).
 
@@ -28,7 +28,7 @@ The payment route also accepts Admin JWT as a fallback (for admin-initiated paym
 
 **Payment Ledger**: Every payment creation inserts a row into the `payment_ledger` table synchronously after Stripe Checkout Session creation. The ledger tracks connected account, Stripe IDs, amounts, currency, and status. Webhook events update the ledger idempotently with ordering protection (stale events are ignored).
 
-Checkout success/cancel redirects resolve in priority order: client URL, group URL, valid `DEFAULT_PAYMENT_SUCCESS_URL`/`DEFAULT_PAYMENT_CANCEL_URL`, then the built-in `FRONTEND_ORIGIN` fallback. Default success URLs receive `session_id={CHECKOUT_SESSION_ID}` unless they already include a `session_id` query parameter.
+Checkout success/cancel redirects resolve in priority order: client URL, group URL, valid `DEFAULT_PAYMENT_SUCCESS_URL`/`DEFAULT_PAYMENT_CANCEL_URL`, then the built-in `FRONTEND_ORIGIN` fallback. Every success URL (client, group, default or fallback) carries `session_id={CHECKOUT_SESSION_ID}`: it is appended (`?` or `&`, before any `#fragment`) unless the URL already contains the literal `{CHECKOUT_SESSION_ID}` placeholder. This uses plain string handling because URL serialization would percent-encode the braces and Stripe would stop substituting them. The cancel URL is unchanged.
 
 All payments resolve `application_fee_amount` via a 6-level priority chain:
 1. Client `processingFeePercent`
@@ -111,7 +111,7 @@ All routes are prefixed with `/api/v1`.
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | POST | `/payments/create` | Create Checkout Session | API Key or Admin JWT + Idempotency-Key |
-| GET | `/payments/session/:sessionId` | Get checkout session result from ledger | Public (rate-limited) |
+| GET | `/payments/session/:sessionId` | Get checkout session result from ledger (how integrators confirm payment; 30 req/min per IP) | Public (rate-limited) |
 | GET | `/reports/payments` | List Stripe PaymentIntents by client or group | Admin JWT |
 
 ### Products & Settings
