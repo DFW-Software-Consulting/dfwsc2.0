@@ -26,11 +26,11 @@ Create a `.env` file based on `.env.example`.
 | `SMTP_USER` | ✅ | Username/login for the SMTP server. |
 | `SMTP_PASS` | ✅ | Password/API key for the SMTP server. |
 | `SMTP_FROM` | ❌ | Friendly from address used in onboarding emails. Defaults to `SMTP_USER` when omitted. |
-| `ADMIN_USERNAME` | ✅ | Username for admin login to access client management endpoints. |
-| `ADMIN_PASSWORD` | ✅ | Password for admin authentication. Supports plain text (dev) or bcrypt hash (production). |
+| `ADMIN_USERNAME` | ❌ | Username for the first admin, created at startup when no admin with this username exists. Remove it from the environment once the admin is confirmed. |
+| `ADMIN_PASSWORD` | ❌ | Plaintext password for the first admin (at least 12 characters in production). The server hashes it with bcrypt when it creates the admin, so do not supply a pre-computed hash: the hash string itself would become the password. Remove it from the environment once the admin is confirmed. |
 | `JWT_SECRET` | ✅ | Secret key for signing JWT tokens. Must be minimum 32 characters. Generate with: `openssl rand -base64 32` |
 | `JWT_EXPIRY` | ❌ | JWT token expiration time. Defaults to `1h`. Supported formats: `1h`, `30m`, `7d`, `24h`. |
-| `ALLOW_ADMIN_SETUP` | ❌ | Set to `true` to enable browser-based admin credential setup. Only works when `ADMIN_PASSWORD` is not set. |
+| `ALLOW_ADMIN_SETUP` | ❌ | When `true`, an admin created from `ADMIN_USERNAME`/`ADMIN_PASSWORD` at startup is left unconfirmed: log in, then choose permanent credentials with `POST /api/v1/auth/confirm-bootstrap`. When not `true`, that admin is created already confirmed. It does not enable `POST /api/v1/auth/setup`, which always returns `410 Gone`. |
 
 ## Database Schema
 
@@ -48,15 +48,17 @@ The database only stores the connected account mapping and raw webhook payloads.
 | --- | --- | --- |
 | `GET /api/v1/health` | Health check. | Public |
 | `POST /api/v1/auth/login` | Admin login endpoint. Returns JWT token for authentication. Rate limited to 5 requests per 15 minutes. | Public |
-| `GET /api/v1/auth/setup/status` | Check if admin setup is allowed. Returns `{ setupAllowed, adminConfigured }`. | Public |
-| `POST /api/v1/auth/setup` | One-time admin credential setup. Only works when `ALLOW_ADMIN_SETUP=true` and no admin is configured. | Public |
+| `GET /api/v1/auth/setup/status` | Bootstrap status. Returns `{ adminConfigured, requiresSetup }`. | Public |
+| `POST /api/v1/auth/setup` | Deprecated. Always returns `410 Gone`. | Public |
+| `POST /api/v1/auth/confirm-bootstrap` | Replace the bootstrap admin's username and password with permanent credentials. | Admin (JWT) |
 | `GET /api/v1/clients` | List all clients with their status and Stripe account information. | Admin (JWT) |
 | `PATCH /api/v1/clients/:id` | Update client status (`active` or `inactive`). Soft-deletes clients without removing from database. | Admin (JWT) |
 | `POST /api/v1/accounts` | Create a client record and onboarding token. | Admin |
 | `POST /api/v1/onboard-client/initiate` | Email onboarding link to a client. | Admin |
 | `GET /api/v1/onboard-client` | Exchange onboarding token for a Stripe onboarding link. | Public |
 | `GET /api/v1/connect/callback` | Stripe onboarding return URL. Persists the `account` query parameter to the client record and redirects to the frontend success page. | Public |
-| `POST /api/v1/payments/create` | Create a PaymentIntent or Checkout Session for a client's connected account. Requires an `Idempotency-Key` header. | Admin or Client |
+| `POST /api/v1/payments/create` | Create a Checkout Session for a client's connected account. Requires an `Idempotency-Key` header and a `lineItems` array; returns `{ url, sessionId }`. | Admin or Client |
+| `GET /api/v1/payments/session/:sessionId` | Confirm a payment by Checkout session ID (status and amounts). Rate limited. | Public |
 | `POST /api/v1/webhooks/stripe` | Verify the Stripe signature, store the raw event payload, mark the event as processed, and log basic status updates. | Stripe |
 | `GET /api/v1/reports/payments` | List PaymentIntents for a client's connected account with Stripe pagination parameters. | Admin |
 
@@ -65,7 +67,7 @@ Non-listed endpoints from earlier versions have been removed (invoices, refunds,
 ## Payments and Fees
 
 - The caller supplies the desired `application_fee_amount` for each payment request.
-- The API always creates a Checkout Session from the required `lineItems`, applies platform fees via `payment_intent_data.application_fee_amount`, and returns the hosted session URL.
+- The API always creates a Checkout Session from the required `lineItems`, applies platform fees via `payment_intent_data.application_fee_amount`, and returns the hosted session URL and session ID.
 - Idempotency is enforced via the standard `Idempotency-Key` request header on write routes.
 
 Refunds are **not** exposed through this API. Handle all refunds directly in the Stripe Dashboard so Stripe remains the source of truth.
@@ -136,36 +138,20 @@ To replay Stripe events, use the Stripe CLI directly:
 stripe trigger payment_intent.succeeded
 ```
 
-## Admin Credential Recovery
+## Admin Bootstrap
 
-If you lose access to your admin credentials or need to set up admin access on a new deployment without CLI access, use the browser-based setup flow.
+The first admin is created from environment variables at startup. There is no browser-based credential setup or recovery flow: `POST /api/v1/auth/setup` always returns `410 Gone`.
 
-### Recovery Steps
+### First-run steps
 
-1. **Enable setup mode** by setting the environment variable:
-   ```
-   ALLOW_ADMIN_SETUP=true
-   ```
+1. Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` (plaintext, at least 12 characters in production), and `ALLOW_ADMIN_SETUP=true`.
+2. Start the application. If no admin with that username exists, one is created with the password hashed by bcrypt and left unconfirmed.
+3. Open `/admin` and log in with those credentials. The login response reports `bootstrapPending: true` until the admin is confirmed.
+4. Choose permanent credentials (the new password must also meet the password rules) with `POST /api/v1/auth/confirm-bootstrap`.
+5. **Remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment, set `ALLOW_ADMIN_SETUP=false`, and restart.**
 
-2. **Remove or unset the existing `ADMIN_PASSWORD`** variable (the setup endpoint only works when no admin password is configured).
+### Security considerations
 
-3. **Restart your application** to pick up the environment changes.
-
-4. **Navigate to the admin page** (`/admin`) in your browser. You'll see a setup form instead of the login form.
-
-5. **Create your admin credentials** by entering a username and password (minimum 8 characters).
-
-6. **Copy the generated credentials**. The setup form will display:
-   - `ADMIN_USERNAME=<your-username>`
-   - `ADMIN_PASSWORD=<bcrypt-hash>`
-
-7. **Update your environment** with the new credentials.
-
-8. **Remove or set `ALLOW_ADMIN_SETUP=false`** and restart your application.
-
-### Security Considerations
-
-- The setup endpoint is **rate limited** to 3 requests per 15 minutes.
-- Setup can only be used **once per server session**. After a successful setup, the endpoint returns 403 until the server restarts.
-- **Never leave `ALLOW_ADMIN_SETUP=true` in production** after completing setup.
-- The generated password hash is bcrypt, which is secure for production use.
+- `ADMIN_PASSWORD` is hashed as given. Never put a bcrypt hash in it; the hash string would become the password.
+- Remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` once the admin is confirmed. If you renamed the admin when you confirmed, a startup with the original `ADMIN_USERNAME` still set finds no admin by that name and creates another one with the original bootstrap password.
+- `POST /api/v1/auth/confirm-bootstrap` requires an admin JWT and is rate limited to 3 requests per 15 minutes.

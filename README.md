@@ -154,7 +154,7 @@ Most API routes are prefixed with `/api/v1` (the runtime config script `/app-con
 | GET | `/api/v1/onboard-client` | Get Stripe onboarding link (JSON) by token | Public |
 | GET | `/api/v1/connect/refresh` | Refresh Stripe account link (redirect) | Public |
 | GET | `/api/v1/connect/callback` | Stripe Connect return callback | Public |
-| POST | `/api/v1/payments/create` | Create payment (PaymentIntent or Checkout); returns `{ url, sessionId }` | Client (API key) or Admin (JWT) |
+| POST | `/api/v1/payments/create` | Create a Stripe Checkout payment; returns `{ url, sessionId }` | Client (API key) or Admin (JWT) |
 | GET | `/api/v1/payments/session/:sessionId` | Confirm a payment by Checkout session ID (status + amounts) | Public (rate-limited) |
 | GET | `/api/v1/reports/payments` | List payments | Admin (JWT) |
 | GET | `/api/v1/groups` | List client groups | Admin (JWT) |
@@ -206,17 +206,17 @@ SMTP_PASS=your-app-password
 JWT_SECRET=your_jwt_secret_minimum_32_characters_long
 JWT_EXPIRY=1h
 
-# First-run Admin Bootstrap (remove after setup)
+# First-run Admin Bootstrap (remove ADMIN_USERNAME and ADMIN_PASSWORD once the admin is confirmed)
 ALLOW_ADMIN_SETUP=true
 ADMIN_USERNAME=your-admin-username
-ADMIN_PASSWORD=a-strong-password-12-chars-min
+ADMIN_PASSWORD=a-strong-password-12-chars-min  # plaintext, hashed by the server; never a bcrypt hash
 
 # Payment Config
 DEFAULT_PROCESS_FEE_CENTS=100
 
 ```
 
-**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, set `ADMIN_USERNAME`/`ADMIN_PASSWORD` (with `ALLOW_ADMIN_SETUP=true`) to bootstrap the first admin from env vars, log in, then confirm the credentials via `/auth/confirm-bootstrap`. After confirming, set `ALLOW_ADMIN_SETUP=false`. The `/auth/setup` endpoint is deprecated and always returns 410 Gone. See `.env.example` for detailed documentation.
+**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, set `ADMIN_USERNAME`/`ADMIN_PASSWORD` (with `ALLOW_ADMIN_SETUP=true`) to bootstrap the first admin from env vars, log in, then confirm the credentials via `/auth/confirm-bootstrap`. After confirming, remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment and set `ALLOW_ADMIN_SETUP=false`. `ADMIN_PASSWORD` is plaintext (at least 12 characters in production) and is hashed by the server when it creates the admin; a pre-computed bcrypt hash would itself become the password. The `/auth/setup` endpoint is deprecated and always returns 410 Gone. See `.env.example` for detailed documentation.
 
 ### Frontend (.env)
 

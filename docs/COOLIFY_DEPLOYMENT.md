@@ -19,7 +19,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
 - **Port**: 5432 (internal only)
 - **Environment Variables**:
   - POSTGRES_USER=postgres
-  - POSTGRES_PASSWORD=postgres
+  - POSTGRES_PASSWORD=<generate a strong random value, e.g. `openssl rand -base64 32`; never use a default such as `postgres`>
   - POSTGRES_DB=stripe_portal
 - **Storage**: Enable persistent volume for data directory
 - **Healthcheck**: `pg_isready -U postgres -d stripe_portal`
@@ -49,6 +49,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
   API_BASE_URL=https://your-backend-domain.com
   ALLOW_ADMIN_SETUP=false  # Set to true only during initial admin setup
   ```
+- **First admin (first deploy only)**: the first admin is created at startup from `ADMIN_USERNAME` and `ADMIN_PASSWORD`. `ADMIN_PASSWORD` is plaintext (at least 12 characters in production) and is hashed by the server — never supply a bcrypt hash, because the hash string itself would become the password. With `ALLOW_ADMIN_SETUP=true` the admin is created unconfirmed: log in at `/admin`, confirm permanent credentials, then **remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment** and set `ALLOW_ADMIN_SETUP=false`. `docker-compose.prod.yml` does not currently pass `ADMIN_USERNAME` or `ADMIN_PASSWORD` to the `api` container, so they only reach it if you add them to that service's `environment` for the first deploy (and remove them again afterwards).
 - **Startup Command**: `node dist/index.js` (handled by Dockerfile). DB migrations run automatically on each deploy via the `migrator` service above — no separate manual migration step is needed.
 - **Dependencies**: Database must be reachable via `DATABASE_URL` before deploying; within the compose stack, `api` also depends on `migrator` (completed) and `redis` (started) automatically
 - **Healthcheck**: `curl -f http://localhost:4242/api/v1/health || exit 1` (the compose file itself uses an equivalent `wget` healthcheck)
@@ -171,7 +172,7 @@ The existing `front/nginx.conf` is already configured correctly:
 
 2. **Test API Endpoints**
    - Access backend health: `https://[backend-service].coolify.app/api/v1/health`
-   - Access Swagger docs: `https://[backend-service].coolify.app/docs/`
+   - Swagger UI (`/docs`) is off unless `ENABLE_SWAGGER=true` is set on the API, and `docker-compose.prod.yml` does not pass that variable. There is no production guard in the code: if you set it, the UI is served in production, so leave it unset
 
 3. **Test Frontend**
    - Access frontend: `https://[frontend-service].coolify.app`
