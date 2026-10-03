@@ -19,9 +19,13 @@ export function useClient(id, workspace) {
   });
 }
 
+// The API's maximum page size. There is no pager yet, so request as much as
+// the server will return in one go.
+const LIST_LIMIT = 100;
+
 export function useClients(params = {}) {
   const { token } = useAuth();
-  const effectiveParams = { workspace: "client_portal", ...params };
+  const effectiveParams = { workspace: "client_portal", limit: LIST_LIMIT, ...params };
   return useQuery({
     queryKey: ["clients", effectiveParams],
     queryFn: () => getClients(token, effectiveParams),
@@ -74,8 +78,9 @@ export function usePatchClientStatus() {
       const isClientsQuery = (query) => query.queryKey[0] === "clients";
       await queryClient.cancelQueries({ predicate: isClientsQuery });
       const prev = queryClient.getQueriesData({ predicate: isClientsQuery });
-      queryClient.setQueriesData({ predicate: isClientsQuery }, (old) =>
-        old?.map((c) => (c.id === id ? { ...c, status } : c))
+      queryClient.setQueriesData(
+        { predicate: isClientsQuery },
+        (old) => old && { ...old, data: old.data.map((c) => (c.id === id ? { ...c, status } : c)) }
       );
       return { prev };
     },
@@ -104,7 +109,11 @@ export function useDeleteClient() {
 
 export function useResendOnboarding() {
   const { token } = useAuth();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body) => resendOnboardingLink(token, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "clients" });
+    },
   });
 }
