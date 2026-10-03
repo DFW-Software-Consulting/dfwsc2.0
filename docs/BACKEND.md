@@ -22,7 +22,7 @@ The payment route also accepts Admin JWT as a fallback (for admin-initiated paym
 ### Payment Flow
 `POST /api/v1/payments/create` always creates a **Stripe Checkout Session** from the required `lineItems` array and returns `{ url, sessionId }` (201): `url` is for browser redirect to the Stripe-hosted checkout page, and `sessionId` is the Checkout Session ID the integrator stores against its order and later passes to `GET /payments/session/:sessionId` to confirm the payment. (The former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.) Line items must use inline `price_data` (no platform price IDs). The base amount is derived server-side from line items; a caller-supplied `amount` is ignored for Checkout. All line items must use the same 3-letter ISO currency.
 
-**Idempotency**: A nonblank `Idempotency-Key` header is required for all payment creation calls (both API-key and admin).
+**Idempotency**: A nonblank `Idempotency-Key` header is required for all payment creation calls (both API-key and admin). Conflicts return 409: `IDEMPOTENCY_KEY_REUSED` (same key, different parameters; permanent, use a new key) or `IDEMPOTENCY_KEY_IN_USE` (same key still in progress; transient, retry shortly with the same key).
 
 **Metadata**: Caller-supplied metadata is validated against Stripe limits (max 50 keys, 40-char keys, 500-char values) before being passed to Stripe.
 

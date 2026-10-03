@@ -85,6 +85,27 @@ describe("mapStripeError permanent errors", () => {
     });
   });
 
+  it("maps an in-flight conflict sent as invalid_request_error to IDEMPOTENCY_KEY_IN_USE", () => {
+    const { reply, code, send } = fakeReply();
+    const err = sdkError(
+      "invalid_request_error",
+      409,
+      "There is currently another in-progress request",
+      {
+        code: "idempotency_key_in_use",
+      }
+    );
+    expect(err).toBeInstanceOf(Stripe.errors.StripeInvalidRequestError);
+
+    expect(mapStripeError(err, reply, { circuitOpen, permanentErrors: true })).toBe(true);
+
+    expect(code).toHaveBeenCalledWith(409);
+    expect(send).toHaveBeenCalledWith({
+      error: expect.stringContaining("Retry shortly with the same key"),
+      code: "IDEMPOTENCY_KEY_IN_USE",
+    });
+  });
+
   it("keeps a real SDK parameter-mismatch idempotency error as IDEMPOTENCY_KEY_REUSED", () => {
     const { reply, code, send } = fakeReply();
     const err = sdkError(

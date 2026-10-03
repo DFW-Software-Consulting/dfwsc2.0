@@ -66,6 +66,17 @@ export function mapStripeError(
   }
 
   if (mapping.permanentErrors && err instanceof Error) {
+    // Stripe answers 409 `idempotency_key_in_use` while the first request is still running.
+    // Match on `code` regardless of class: the SDK picks the class from the wire `type`, which
+    // may be `idempotency_error` or `invalid_request_error` for this case.
+    if ((err as { code?: unknown }).code === "idempotency_key_in_use") {
+      reply.code(409).send({
+        error:
+          "A request with this Idempotency-Key is still in progress. Retry shortly with the same key.",
+        code: "IDEMPOTENCY_KEY_IN_USE",
+      });
+      return true;
+    }
     if (kind === "StripeInvalidRequestError") {
       const param = (err as { param?: unknown }).param;
       reply.code(400).send({
@@ -76,15 +87,6 @@ export function mapStripeError(
       return true;
     }
     if (kind === "StripeIdempotencyError") {
-      // Stripe answers 409 `idempotency_key_in_use` while the first request is still running.
-      if ((err as { code?: unknown }).code === "idempotency_key_in_use") {
-        reply.code(409).send({
-          error:
-            "A request with this Idempotency-Key is still in progress. Retry shortly with the same key.",
-          code: "IDEMPOTENCY_KEY_IN_USE",
-        });
-        return true;
-      }
       reply.code(409).send({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
       return true;
     }

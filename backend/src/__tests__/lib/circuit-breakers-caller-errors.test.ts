@@ -31,6 +31,7 @@ describe("circuit-breakers caller-error handling", () => {
     ["StripeInvalidRequestError", 400],
     ["StripeIdempotencyError", 400],
     ["StripeIdempotencyError", 409],
+    ["StripeInvalidRequestError", 409],
     ["StripePermissionError", 403],
     ["StripeCardError", 402],
   ])("does not open the Stripe circuit on repeated %s (%i)", async (name, status) => {
