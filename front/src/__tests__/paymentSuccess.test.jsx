@@ -61,8 +61,8 @@ describe("PaymentSuccess", () => {
     expect(screen.getByText(/jul 20, 2026/i)).toBeInTheDocument();
   });
 
-  it("does not treat legacy completed or succeeded as paid", async () => {
-    getPaymentSession.mockResolvedValue(buildSession({ status: "succeeded" }));
+  it.each(["completed", "succeeded"])("does not treat legacy %s as paid", async (status) => {
+    getPaymentSession.mockResolvedValue(buildSession({ status }));
     render(<PaymentSuccess />);
 
     await waitFor(() => {
@@ -82,6 +82,22 @@ describe("PaymentSuccess", () => {
     });
 
     expect(screen.getByRole("heading", { name: /payment pending/i })).toBeInTheDocument();
+    expect(getPaymentSession).toHaveBeenCalledTimes(10);
+  });
+
+  it("keeps polling a created session until it becomes paid", async () => {
+    vi.useFakeTimers();
+    getPaymentSession
+      .mockResolvedValueOnce(buildSession({ status: "created" }))
+      .mockResolvedValue(buildSession({ status: "paid" }));
+    render(<PaymentSuccess />);
+
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    expect(screen.getByRole("heading", { name: /payment successful/i })).toBeInTheDocument();
+    expect(getPaymentSession).toHaveBeenCalledTimes(2);
   });
 
   it("shows failed state for canceled status", async () => {
