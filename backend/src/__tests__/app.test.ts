@@ -2023,7 +2023,7 @@ describe("payment session endpoint", () => {
       stripePaymentIntentId: null,
       clientId: "client_session",
       source: "checkout",
-      status: "completed",
+      status: "paid",
       baseAmountCents: 5000,
       totalAmountCents: 5100,
       feeAmountCents: 100,
@@ -2041,7 +2041,7 @@ describe("payment session endpoint", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.status).toBe("completed");
+    expect(body.status).toBe("paid");
     expect(body.baseAmountCents).toBe(5000);
     expect(body.totalAmountCents).toBe(5100);
     expect(body.feeAmountCents).toBe(100);
@@ -2200,7 +2200,8 @@ describe("webhook ledger updates", () => {
   });
 
   it("ignores out-of-order events for ledger updates", async () => {
-    // Seed a ledger row with a newer event timestamp.
+    // Seed a failed row with a newer event timestamp. Precedence allows failed -> paid,
+    // so only the timestamp guard can keep a late-delivered completion from flipping it.
     dataStore.paymentLedger.set("ooo-ledger-key", {
       id: "ledger_ooo",
       idempotencyKey: "ooo-ledger-key",
@@ -2209,7 +2210,7 @@ describe("webhook ledger updates", () => {
       stripePaymentIntentId: null,
       clientId: "client_ooo",
       source: "checkout",
-      status: "completed",
+      status: "failed",
       baseAmountCents: 1000,
       totalAmountCents: 1100,
       feeAmountCents: 100,
@@ -2221,12 +2222,13 @@ describe("webhook ledger updates", () => {
     });
 
     const payload = JSON.stringify({
-      id: "evt_ooo_expired",
-      type: "checkout.session.expired",
+      id: "evt_ooo_completed",
+      type: "checkout.session.completed",
       created: 1699999000, // Older event
       data: {
         object: {
           id: "cs_test_ooo",
+          payment_status: "paid",
         },
       },
     });
@@ -2247,9 +2249,9 @@ describe("webhook ledger updates", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    // Status should remain 'completed' — the older event was ignored.
+    // Status should remain 'failed' — the older event was ignored.
     const ledgerRow = dataStore.paymentLedger.get("ooo-ledger-key");
-    expect(ledgerRow.status).toBe("completed");
+    expect(ledgerRow.status).toBe("failed");
     await server.close();
   });
 });
