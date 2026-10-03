@@ -24,8 +24,15 @@ function resolveOptionalHttpUrl(value: string | undefined): string | undefined {
   }
 }
 
-function appendCheckoutSessionId(url: string): string {
-  if (new URL(url).searchParams.has("session_id")) {
+/**
+ * Makes sure a Checkout success URL carries `session_id={CHECKOUT_SESSION_ID}`
+ * so the customer's return trip (and the integrator) can identify the session.
+ * Plain string handling on purpose: URL/URLSearchParams would percent-encode the
+ * braces and Stripe would stop substituting the placeholder. A URL that already
+ * contains the placeholder is returned unchanged.
+ */
+export function appendCheckoutSessionId(url: string): string {
+  if (url.includes("{CHECKOUT_SESSION_ID}")) {
     return url;
   }
 

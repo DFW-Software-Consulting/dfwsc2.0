@@ -26,7 +26,8 @@ All payments go through **Stripe Checkout** — the former Stripe Elements / Pay
 - All line items must use the same 3-letter ISO currency.
 - `Idempotency-Key` header is required for all payment creation calls (both API-key and admin).
 - Success/cancel URLs resolve from: client config → group config → `DEFAULT_PAYMENT_SUCCESS_URL`/`DEFAULT_PAYMENT_CANCEL_URL` if valid HTTP(S) URLs → `FRONTEND_ORIGIN` default.
-- The built-in success fallback always includes `session_id={CHECKOUT_SESSION_ID}`. A default success URL also gets that placeholder appended unless it already has a `session_id` query parameter.
+- Every success URL (client, group, default or built-in fallback) carries `session_id={CHECKOUT_SESSION_ID}`: it is appended (`?` or `&`, before any `#fragment`) unless the URL already contains the literal `{CHECKOUT_SESSION_ID}` placeholder. Stripe substitutes the placeholder when it redirects the customer back. The cancel URL is unchanged.
+- The 201 response is `{ url, sessionId }`. Integrators store `sessionId` against their order and confirm the result via `GET /api/v1/payments/session/:sessionId` (see below).
 
 ### Payment Ledger
 Every payment creation inserts a row into the `payment_ledger` table synchronously after Stripe Checkout Session creation. The ledger tracks:
@@ -35,7 +36,7 @@ Every payment creation inserts a row into the `payment_ledger` table synchronous
 - Base/total/fee amounts, currency, metadata
 - `last_stripe_event_created_at` for ordering protection (stale events are ignored)
 
-`GET /api/v1/payments/session/:sessionId` returns payer-safe fields from the ledger (no internal IDs or metadata leaked).
+`GET /api/v1/payments/session/:sessionId` returns payer-safe fields from the ledger (`status`, `baseAmountCents`, `totalAmountCents`, `feeAmountCents`, `currency`, `createdAt`; no internal IDs or metadata leaked). It is public (no API key) and rate-limited to 30 requests/minute per IP. Integrators should fulfil only on `paid` and compare `baseAmountCents`/`currency` to their order; the public guide is the `/docs` page (Step 3).
 
 ## 4. Fee Resolution
 `application_fee_amount` is collected on every transaction via a 6-level priority chain (first non-null wins):

@@ -154,7 +154,8 @@ Most API routes are prefixed with `/api/v1` (the runtime config script `/app-con
 | GET | `/api/v1/onboard-client` | Get Stripe onboarding link (JSON) by token | Public |
 | GET | `/api/v1/connect/refresh` | Refresh Stripe account link (redirect) | Public |
 | GET | `/api/v1/connect/callback` | Stripe Connect return callback | Public |
-| POST | `/api/v1/payments/create` | Create payment (PaymentIntent or Checkout) | Client (API key) or Admin (JWT) |
+| POST | `/api/v1/payments/create` | Create payment (PaymentIntent or Checkout); returns `{ url, sessionId }` | Client (API key) or Admin (JWT) |
+| GET | `/api/v1/payments/session/:sessionId` | Confirm a payment by Checkout session ID (status + amounts) | Public (rate-limited) |
 | GET | `/api/v1/reports/payments` | List payments | Admin (JWT) |
 | GET | `/api/v1/groups` | List client groups | Admin (JWT) |
 | POST | `/api/v1/groups` | Create client group | Admin (JWT) |
