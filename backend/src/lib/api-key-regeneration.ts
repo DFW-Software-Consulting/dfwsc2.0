@@ -85,6 +85,22 @@ export async function createRegenerationTokenUnlessRecent(
   });
 }
 
+/**
+ * Revokes the still-pending token for a raw token value, e.g. when its email could not
+ * be delivered, so the cooldown does not block the client's next request.
+ */
+export async function revokeRegenerationToken(rawToken: string): Promise<void> {
+  await db
+    .update(apiKeyRegenerationTokens)
+    .set({ status: "revoked", updatedAt: new Date() })
+    .where(
+      and(
+        eq(apiKeyRegenerationTokens.token, hashToken(rawToken)),
+        eq(apiKeyRegenerationTokens.status, "pending")
+      )
+    );
+}
+
 export async function validateAndRegenerate(rawToken: string): Promise<string> {
   const tokenHash = hashToken(rawToken);
 

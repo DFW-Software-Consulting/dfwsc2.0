@@ -172,7 +172,7 @@ describe("Mailer failure handling across connect.ts routes", () => {
   });
 
   describe("POST /api/v1/api-key/regenerate-request", () => {
-    it("still returns the generic 200 success message and leaves the token pending when sendMail rejects (fire-and-forget, avoids email enumeration)", async () => {
+    it("still returns the generic 200 success message and revokes the unsent token when sendMail rejects (fire-and-forget, avoids email enumeration)", async () => {
       const clientId = randomUUID();
       const email = `mailer-fail-selfserve-${clientId}@example.com`;
       await db.insert(clients).values({
@@ -209,12 +209,15 @@ describe("Mailer failure handling across connect.ts routes", () => {
       expect(unknownResponse.statusCode).toBe(200);
       expect(unknownResponse.json().message).toBe(response.json().message);
 
-      const tokens = await db
-        .select()
-        .from(apiKeyRegenerationTokens)
-        .where(eq(apiKeyRegenerationTokens.clientId, clientId));
-      const pending = tokens.find((t: any) => t.status === "pending");
-      expect(pending).toBeDefined();
+      // The link never reached the client, so it must not keep them in the cooldown.
+      await vi.waitFor(async () => {
+        const rows = await db
+          .select()
+          .from(apiKeyRegenerationTokens)
+          .where(eq(apiKeyRegenerationTokens.clientId, clientId));
+        expect(rows.find((t: any) => t.status === "pending")).toBeUndefined();
+        expect(rows.find((t: any) => t.status === "revoked")).toBeDefined();
+      });
     });
   });
 });

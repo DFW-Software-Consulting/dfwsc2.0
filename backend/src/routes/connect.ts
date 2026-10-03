@@ -10,6 +10,7 @@ import { apiKeyRegenerationTokens, clientGroups, clients, onboardingTokens } fro
 import {
   createRegenerationToken,
   createRegenerationTokenUnlessRecent,
+  revokeRegenerationToken,
   validateAndRegenerate,
 } from "../lib/api-key-regeneration";
 import { requireAdminJwt } from "../lib/auth";
@@ -889,9 +890,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       if (clientRecord) {
         // Detached so both branches respond in the same time: token creation and the
         // SMTP round trip must not be observable by the caller. The catch keeps a
-        // failure from becoming an unhandled rejection.
+        // failure from becoming an unhandled rejection, and a token whose email was not
+        // sent is revoked so the cooldown does not lock the client out.
+        let rawToken: string | null = null;
         void (async () => {
-          const rawToken = await createRegenerationTokenUnlessRecent({
+          rawToken = await createRegenerationTokenUnlessRecent({
             clientId: clientRecord.id,
             email: clientRecord.email,
           });
@@ -927,11 +930,19 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             html: mailHtml,
             text: mailText,
           });
-        })().catch((err) => {
+        })().catch(async (err) => {
           request.log.error(
             { err, clientId: clientRecord.id },
             "Failed to send regeneration email"
           );
+          if (rawToken) {
+            await revokeRegenerationToken(rawToken).catch((revokeErr) => {
+              request.log.error(
+                { err: revokeErr, clientId: clientRecord.id },
+                "Failed to revoke regeneration token after email failure"
+              );
+            });
+          }
         });
       }
 

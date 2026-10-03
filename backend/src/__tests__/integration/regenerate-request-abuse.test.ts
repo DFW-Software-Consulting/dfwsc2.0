@@ -174,13 +174,53 @@ describe("POST /api-key/regenerate-request abuse resistance", () => {
   });
 
   it("logs a detached failure and does not raise an unhandled rejection", async () => {
-    (sendMail as any).mockRejectedValueOnce(new Error("smtp down"));
+    const error = new Error("smtp down");
+    (sendMail as any).mockRejectedValueOnce(error);
+    // request.log is a per-request child of app.log, so capture what the children log.
+    const logged: unknown[][] = [];
+    const originalChild = app.log.child.bind(app.log);
+    const childSpy = vi.spyOn(app.log, "child").mockImplementation((...args: any[]) => {
+      const child = originalChild(...args);
+      vi.spyOn(child, "error").mockImplementation((...a: any[]) => {
+        logged.push(a);
+      });
+      return child;
+    });
 
     const response = await post({ email });
     expect(response.statusCode).toBe(200);
     await vi.waitFor(() => expect(sendMail).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(
+        logged.some(
+          ([obj, msg]) => msg === "Failed to send regeneration email" && (obj as any).err === error
+        )
+      ).toBe(true)
+    );
     await settle(50);
 
     expect(unhandled).toEqual([]);
+    childSpy.mockRestore();
+  });
+
+  it("revokes the token when the email fails, so an immediate retry issues a fresh token and email", async () => {
+    (sendMail as any).mockRejectedValueOnce(new Error("smtp down"));
+
+    await post({ email });
+    await vi.waitFor(async () => {
+      const tokens = await tokensFor();
+      expect(tokens).toHaveLength(1);
+      expect(tokens[0].status).toBe("revoked");
+    });
+    const [failed] = await tokensFor();
+
+    const retry = await post({ email });
+    expect(retry.statusCode).toBe(200);
+    await vi.waitFor(() => expect(sendMail).toHaveBeenCalledTimes(2));
+
+    const tokens = await tokensFor();
+    const pending = tokens.filter((t: any) => t.status === "pending");
+    expect(pending).toHaveLength(1);
+    expect(pending[0].id).not.toBe(failed.id);
   });
 });
