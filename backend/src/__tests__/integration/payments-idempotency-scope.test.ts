@@ -194,6 +194,58 @@ describe("POST /api/v1/payments/create — idempotency keys are scoped per clien
     expect(rows[0]?.stripeSessionId).toBe(original);
   });
 
+  it("returns 503 and no url when the session already belongs to another client's row", async () => {
+    const a = await newClient("conflict-A");
+    const b = await newClient("conflict-B");
+    const shared = newSessionId();
+    vi.mocked(stripe.checkout.sessions.create).mockResolvedValue(sessionFor(shared) as any);
+
+    const first = await createPayment(a, "k1");
+    const second = await createPayment(b, "k2");
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(503);
+    expect(second.json().code).toBe("LEDGER_PERSISTENCE_FAILED");
+    expect(second.json().url).toBeUndefined();
+    expect(second.json().sessionId).toBeUndefined();
+
+    const rows = await db
+      .select()
+      .from(paymentLedger)
+      .where(eq(paymentLedger.stripeSessionId, shared));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.clientId).toBe(a.id);
+    expect(rows[0]?.idempotencyKey).toBe("k1");
+  });
+
+  it("accepts the longest key that fits Stripe's 255-character limit once namespaced", async () => {
+    const a = await newClient("boundary-ok");
+    const session = newSessionId();
+    vi.mocked(stripe.checkout.sessions.create).mockResolvedValue(sessionFor(session) as any);
+    const key = "k".repeat(255 - a.id.length - 1);
+
+    const res = await createPayment(a, key);
+
+    expect(res.statusCode).toBe(201);
+    const stripeKey = (
+      vi.mocked(stripe.checkout.sessions.create).mock.calls[0]?.[1] as {
+        idempotencyKey: string;
+      }
+    ).idempotencyKey;
+    expect(stripeKey).toHaveLength(255);
+  });
+
+  it("rejects a key one character over the namespaced limit without calling Stripe", async () => {
+    const a = await newClient("boundary-over");
+    const key = "k".repeat(255 - a.id.length);
+
+    const res = await createPayment(a, key);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain(`${255 - a.id.length - 1} characters`);
+    expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
   it("rejects keys too long to namespace under 255 characters", async () => {
     const a = await newClient("long");
     const res = await createPayment(a, "k".repeat(255));

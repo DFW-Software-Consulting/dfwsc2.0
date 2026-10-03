@@ -274,10 +274,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         throw errors.badRequest("Idempotency-Key header is required.");
       }
       const idempotencyKey = idempotencyKeyHeader.trim();
-      // Stripe limits idempotency keys to 255 characters.
-      if (idempotencyKey.length > 255) {
-        throw errors.badRequest("Idempotency-Key must not exceed 255 characters.");
-      }
       const isApiCall = !!request.headers["x-api-key"];
 
       const body = parseBody(paymentCreateBodySchema, request.body, reply);
@@ -328,7 +324,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       const stripeAccountId = client.stripeAccountId;
 
       // Keys are scoped per client: namespace the key sent to Stripe so two
-      // clients using the same key never collide on the platform.
+      // clients using the same key never collide on the platform. Stripe limits
+      // idempotency keys to 255 characters, so the namespaced key must fit.
       const stripeIdempotencyKey = `${clientId}:${idempotencyKey}`;
       if (stripeIdempotencyKey.length > 255) {
         throw errors.badRequest(
