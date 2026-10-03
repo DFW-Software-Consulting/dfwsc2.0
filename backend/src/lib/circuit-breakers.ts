@@ -17,9 +17,39 @@ const breakerOptions = {
   volumeThreshold: 5,
 };
 
+/**
+ * opossum treats an error the filter returns true for as a success, not a failure.
+ * Stripe 4xx responses other than 429 (invalid request, idempotency mismatch, permission,
+ * card errors) mean Stripe answered and the caller's input was wrong, so they must not
+ * count toward opening the process-wide breaker. Connection errors (no status), 5xx, 429
+ * and opossum timeouts still count.
+ */
+function isStripeCallerError(error: unknown): boolean {
+  const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
+  return (
+    typeof statusCode === "number" && statusCode >= 400 && statusCode < 500 && statusCode !== 429
+  );
+}
+
+/**
+ * Permanent SMTP rejection of a recipient address (nodemailer sets `command: "RCPT TO"` and
+ * a 5xx `responseCode`, or `code: "EENVELOPE"`). That is bad input, not an outage; auth and
+ * connection failures still count.
+ */
+function isSmtpRecipientRejection(error: unknown): boolean {
+  const err = error as { code?: unknown; command?: unknown; responseCode?: unknown } | null;
+  if (err?.code === "EENVELOPE") return true;
+  return (
+    err?.command === "RCPT TO" &&
+    typeof err.responseCode === "number" &&
+    err.responseCode >= 500 &&
+    err.responseCode < 600
+  );
+}
+
 const stripeCircuitBreaker = new CircuitBreaker<[AsyncAction<unknown>], unknown>(
   (action) => action(),
-  { ...breakerOptions, name: "stripe" }
+  { ...breakerOptions, name: "stripe", errorFilter: isStripeCallerError }
 );
 
 const smtpCircuitBreaker = new CircuitBreaker<[AsyncAction<unknown>], unknown>(
@@ -27,6 +57,7 @@ const smtpCircuitBreaker = new CircuitBreaker<[AsyncAction<unknown>], unknown>(
   {
     ...breakerOptions,
     name: "smtp",
+    errorFilter: isSmtpRecipientRejection,
   }
 );
 
