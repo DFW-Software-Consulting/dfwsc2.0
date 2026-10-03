@@ -38,6 +38,19 @@ describe("Docs page", () => {
     expect(container.textContent).not.toMatch(/unique\s+Idempotency-Key/i);
   });
 
+  it("tells integrators to keep and check every session of an order", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).toMatch(/does not cancel the earlier one: it stays payable until it expires/i);
+    expect(text).toMatch(/keep the earlier ones; do not replace them/i);
+    expect(text).toMatch(/check every session of an order, not just the newest/i);
+    expect(text).toMatch(/earlier session comes back paid, the order is paid/i);
+    expect(text).toMatch(/both come back paid, the customer paid twice/i);
+    expect(text).toMatch(/no refund endpoint/i);
+    expect(text).not.toMatch(/store the new sessionId against the order/i);
+  });
+
   it("states the confirmation endpoint limit and a polling backoff", () => {
     const { container } = render(<Docs />, { wrapper: MemoryRouter });
 

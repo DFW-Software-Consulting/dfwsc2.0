@@ -67,7 +67,7 @@ A key identifies one payment attempt, not one order:
 
 - **Generate a UUID per attempt** and store it with the `sessionId` you get back. Keys are scoped to your account, so another integrator's keys never clash with yours. A key can be at most 218 characters; a longer one returns `400` and the message states the exact limit.
 - **Reuse a key only to repeat a request** that failed or timed out, with the same body, and never more than 24 hours after you first sent it.
-- **Retire the key and generate a new one** when the customer abandons checkout and starts again later, when the order changed, or after a `400` that says Stripe rejected a field. Store the new `sessionId` against the order.
+- **Retire the key and generate a new one** when the customer abandons checkout and starts again later, when the order changed, or after a `400` that says Stripe rejected a field. Each new key creates a new Checkout session, and starting again does not cancel the earlier one: it stays payable until it expires (24 hours by default), so the customer can still pay in the earlier tab. Add the new `sessionId` to the order's list and keep the earlier ones; do not replace them. Step 3 explains how to check all of them.
 - Sending a key again for a different payment returns `409 IDEMPOTENCY_KEY_REUSED`. Retrying it will not help: use a new key.
 
 ### Request Body
@@ -127,7 +127,7 @@ After payment, Stripe redirects the customer to your configured success URL (or 
 
 ## Step 3 — Confirm the Payment (Backend)
 
-Arriving on your success page does not prove the customer paid. Before you fulfil an order, check the payment from your **server** using the `sessionId` you saved in Step 1. No API key is needed for this call.
+Arriving on your success page does not prove the customer paid. Before you fulfil an order, check the payment from your **server** using the `sessionId` you saved in Step 1 (every `sessionId` you saved, if the customer started checkout more than once for the order). No API key is needed for this call.
 
 ```
 GET /api/v1/payments/session/{sessionId}
@@ -156,6 +156,7 @@ GET /api/v1/payments/session/{sessionId}
 
 - **Fulfil only on `paid`.** Compare `baseAmountCents` and `currency` to your order first. If they do not match, do not fulfil it.
 - **Customers do not always come back.** If someone pays and closes the tab, your success page never loads. Re-check any order that is still pending using its stored `sessionId`.
+- **Check every session of an order, not just the newest.** Starting checkout again does not cancel the earlier session, so it stays payable until it expires and the customer can still pay in an earlier tab. Check all of the order's stored `sessionId`s until each one is `paid` or `expired`. If an earlier session comes back `paid`, the order is paid: fulfil it once (if the amount matches, as above) and do not send the customer to pay again. If two sessions for the same order both come back `paid`, the customer paid twice: fulfil the order once and refund the extra payment from your Stripe dashboard, because this portal has no refund endpoint. If the order changed after an earlier session was created, that session still carries the old amount; a `paid` result whose amount no longer matches the order must not be fulfilled, and the payment needs to be reconciled or refunded in your Stripe dashboard.
 - **Back off when you poll.** This endpoint allows 30 requests per minute for each calling IP address, shared by every session you check from that address, so one order polled every two seconds uses the whole budget. Check once when the customer lands on the success URL, then again after about 2, 5 and 10 seconds. If the status is still `created`, leave the order to a background job. Treat that job's polling as one budget shared by all your pending orders, not a rate per order: check a pending order once a minute for its first ten minutes, then every 15 minutes, and stop once the status is `expired` or 24 hours have passed since you created it (an abandoned checkout stays `created` until Stripe expires it). Keep the job's total to about 20 requests a minute across every order, so the check you make when a customer returns to the success URL always has headroom; if more orders are due than fit, check the oldest first and let the rest wait for the next minute. On a `429`, wait before the next attempt instead of retrying straight away.
 
 ---
@@ -367,7 +368,7 @@ A `502` or `503` returned while the API restarts during a deploy comes from the 
 ## Rules to Follow
 
 - **Your API key goes on your backend only.** Never put it in frontend JavaScript or a mobile app binary.
-- **Always use a new `Idempotency-Key` (a UUID) per payment attempt.** A key covers one attempt, not one order. Store it with the `sessionId`, reuse it only to retry a failed or timed-out request within 24 hours, and generate a new one when the customer starts checkout again.
+- **Always use a new `Idempotency-Key` (a UUID) per payment attempt.** A key covers one attempt, not one order. Store it with the `sessionId`, reuse it only to retry a failed or timed-out request within 24 hours, and generate a new one when the customer starts checkout again. Keep every `sessionId` you create for an order: an earlier session stays payable until it expires.
 - **Confirm before you fulfil.** Check `GET /api/v1/payments/session/{sessionId}` from your backend and fulfil only on `paid`. The API does not send webhooks.
 - **Amounts are in cents.** $1.00 = `100`, $25.50 = `2550`, $100.00 = `10000`.
 - **Use HTTPS.** Never send your API key over plain HTTP.

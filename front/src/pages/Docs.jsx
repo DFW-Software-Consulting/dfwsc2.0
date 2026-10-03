@@ -570,9 +570,12 @@ export default function Docs() {
                 characters. Reuse a key only to repeat a request that failed or timed out, with the
                 same body, and never more than 24 hours after you first sent it. Generate a new key
                 when the customer abandons checkout and starts again later, when the order changed,
-                or after a 400 that says Stripe rejected a field, and store the new sessionId
-                against the order. Sending a key again for a different payment returns 409
-                IDEMPOTENCY_KEY_REUSED: use a new key.
+                or after a 400 that says Stripe rejected a field. Each new key creates a new
+                Checkout session, and starting again does not cancel the earlier one: it stays
+                payable until it expires (24 hours by default), so the customer can still pay in the
+                earlier tab. Add the new sessionId to the order's list and keep the earlier ones; do
+                not replace them. Step 3 explains how to check all of them. Sending a key again for
+                a different payment returns 409 IDEMPOTENCY_KEY_REUSED: use a new key.
               </p>
             </div>
 
@@ -727,7 +730,8 @@ window.location.href = url;`}</CodeBlock>
               <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
                 sessionId
               </code>{" "}
-              you saved in Step 1. No API key is needed for this call.
+              you saved in Step 1 (every sessionId you saved, if the customer started checkout more
+              than once for the order). No API key is needed for this call.
             </p>
 
             <div className="mt-8 p-4 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] font-mono text-brand-600 dark:text-brand-400 font-bold transition-colors">
@@ -786,6 +790,10 @@ window.location.href = url;`}</CodeBlock>
                 {
                   title: "Customers do not always come back.",
                   desc: "If someone pays and closes the tab, your success page never loads. Re-check any order that is still pending using its stored sessionId.",
+                },
+                {
+                  title: "Check every session of an order, not just the newest.",
+                  desc: "Starting checkout again does not cancel the earlier session, so it stays payable until it expires and the customer can still pay in an earlier tab. Check all of the order's stored sessionIds until each one is paid or expired. If an earlier session comes back paid, the order is paid: fulfil it once (if the amount matches, as above) and do not send the customer to pay again. If two sessions for the same order both come back paid, the customer paid twice: fulfil the order once and refund the extra payment from your Stripe dashboard, because this portal has no refund endpoint. If the order changed after an earlier session was created, that session still carries the old amount; a paid result whose amount no longer matches the order must not be fulfilled, and the payment needs to be reconciled or refunded in your Stripe dashboard.",
                 },
                 {
                   title: "Back off when you poll.",
@@ -920,7 +928,7 @@ window.location.href = url;`}</CodeBlock>
                 },
                 {
                   title: "Always use a new Idempotency-Key (a UUID) per payment attempt.",
-                  desc: "A key covers one attempt, not one order. Store it with the sessionId, reuse it only to retry a failed or timed-out request within 24 hours, and generate a new one when the customer starts checkout again.",
+                  desc: "A key covers one attempt, not one order. Store it with the sessionId, reuse it only to retry a failed or timed-out request within 24 hours, and generate a new one when the customer starts checkout again. Keep every sessionId you create for an order: an earlier session stays payable until it expires.",
                 },
                 {
                   title: "Amounts are in cents.",
