@@ -18,6 +18,7 @@ vi.mock("../../lib/stripe", () => ({
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import jwt from "jsonwebtoken";
+import Stripe from "stripe";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
@@ -151,6 +152,112 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
     });
 
     expect(response.statusCode).toBe(502);
+  });
+
+  const lineItemsPayload = {
+    lineItems: [
+      {
+        price_data: {
+          currency: "usd",
+          product_data: { name: "Service" },
+          unit_amount: 5000,
+        },
+        quantity: 1,
+      },
+    ],
+  };
+
+  async function createWithStripeError(err: Error) {
+    vi.mocked(stripe.checkout.sessions.create).mockRejectedValueOnce(err);
+    return app.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+      payload: lineItemsPayload,
+    });
+  }
+
+  it("returns 400 INVALID_REQUEST with Stripe's message for a real SDK invalid-request error", async () => {
+    const response = await createWithStripeError(
+      Stripe.errors.StripeError.generate({
+        type: "invalid_request_error",
+        statusCode: 400,
+        message: "Invalid currency: xyz",
+        param: "currency",
+      } as never)
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Invalid currency: xyz",
+      code: "INVALID_REQUEST",
+      param: "currency",
+    });
+  });
+
+  it("returns 409 IDEMPOTENCY_KEY_REUSED for a real SDK idempotency error", async () => {
+    const response = await createWithStripeError(
+      Stripe.errors.StripeError.generate({
+        type: "idempotency_error",
+        statusCode: 400,
+        message:
+          "Keys for idempotent requests can only be used with the same parameters. Try using a key other than 'acct:secret-key' if you meant to execute a different request.",
+      } as never)
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error:
+        "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.",
+      code: "IDEMPOTENCY_KEY_REUSED",
+    });
+  });
+
+  it("returns 409 IDEMPOTENCY_KEY_IN_USE for a real SDK in-flight idempotency error", async () => {
+    const response = await createWithStripeError(
+      Stripe.errors.StripeError.generate({
+        type: "idempotency_error",
+        statusCode: 409,
+        code: "idempotency_key_in_use",
+        message:
+          "There is currently another in-progress request using this Stripe idempotency key.",
+      } as never)
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("IDEMPOTENCY_KEY_IN_USE");
+  });
+
+  it("returns 409 IDEMPOTENCY_KEY_IN_USE when the in-flight conflict arrives as invalid_request_error", async () => {
+    const response = await createWithStripeError(
+      Stripe.errors.StripeError.generate({
+        type: "invalid_request_error",
+        statusCode: 409,
+        code: "idempotency_key_in_use",
+        message:
+          "There is currently another in-progress request using this Stripe idempotency key.",
+      } as never)
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("IDEMPOTENCY_KEY_IN_USE");
+  });
+
+  it("returns 409 ACCOUNT_NOT_CONNECTED for a real SDK permission error", async () => {
+    const response = await createWithStripeError(
+      new Stripe.errors.StripePermissionError({
+        type: "invalid_request_error",
+        statusCode: 403,
+        message: "The provided key does not have access to this account.",
+      } as never)
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("ACCOUNT_NOT_CONNECTED");
   });
 });
 

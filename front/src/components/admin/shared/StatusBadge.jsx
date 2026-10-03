@@ -19,6 +19,9 @@ const COLOR_MAP = {
   none: "bg-gray-700 text-gray-200",
   trialing: "bg-blue-800 text-blue-200",
   lead: "bg-purple-800 text-purple-200",
+  not_started: "bg-gray-700 text-gray-200",
+  in_progress: "bg-yellow-800 text-yellow-200",
+  ready: "bg-green-800 text-green-200",
 };
 
 const LABEL_MAP = {
@@ -28,6 +31,9 @@ const LABEL_MAP = {
   unpaid: "Overdue",
   canceled: "Canceled",
   none: "No Subscription",
+  not_started: "Not started",
+  in_progress: "In progress",
+  ready: "Ready to charge",
 };
 
 export default function StatusBadge({ status }) {

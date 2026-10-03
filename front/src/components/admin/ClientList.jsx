@@ -12,7 +12,9 @@ import ConfirmModal from "./ConfirmModal";
 import EditClientModal from "./EditClientModal";
 import AdminTable from "./shared/AdminTable";
 import Button from "./shared/Button";
+import { getOnboardingState } from "./shared/onboardingState";
 import StatusBadge from "./shared/StatusBadge";
+import TruncationNotice from "./shared/TruncationNotice";
 
 function formatFee(client, groups) {
   if (client.processingFeePercent != null) return `${client.processingFeePercent}%`;
@@ -110,7 +112,12 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
       resendMutation.mutate(
         { clientId: client.id },
         {
-          onSuccess: () => {
+          onSuccess: (data) => {
+            if (data?.alreadyOnboarded) {
+              showToast?.("Onboarding is already complete for this client.", "success");
+              logger.info(`Client already onboarded, no link sent: ${client.email}`);
+              return;
+            }
             showToast?.("New onboarding link sent successfully!", "success");
             logger.info(`Resent onboarding link for client: ${client.email}`);
           },
@@ -151,9 +158,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
           },
           {
             header: "Onboarding",
-            render: (client) => (
-              <StatusBadge status={client.stripeAccountId ? "completed" : "pending"} />
-            ),
+            render: (client) => <StatusBadge status={getOnboardingState(client)} />,
           },
         ]
       : []),
@@ -203,6 +208,9 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
         const isTogglingStatus =
           patchClientStatusMutation.isPending &&
           patchClientStatusMutation.variables?.id === client.id;
+        const isOnboarded = getOnboardingState(client) === "ready";
+        const isResending =
+          resendMutation.isPending && resendMutation.variables?.clientId === client.id;
         const isDeleting =
           deleteClientMutation.isPending && deleteClientMutation.variables === client.id;
         return (
@@ -212,8 +220,8 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
                 size="sm"
                 variant="ghost"
                 className="bg-purple-600 hover:bg-purple-700 text-white"
-                disabled={!!client.stripeAccountId}
-                title={client.stripeAccountId ? "Already onboarded" : "Resend onboarding link"}
+                disabled={isOnboarded || isResending}
+                title={isOnboarded ? "Already onboarded" : "Resend onboarding link"}
                 onClick={() => handleResendLink(client)}
               >
                 Resend Link
@@ -273,6 +281,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
         emptyMessage="No clients yet"
         loadingMessage="Loading clients..."
       />
+      <TruncationNotice shown={clients.length} total={clients.pagination?.total} noun="clients" />
 
       <ConfirmModal
         isOpen={confirmModal.isOpen}

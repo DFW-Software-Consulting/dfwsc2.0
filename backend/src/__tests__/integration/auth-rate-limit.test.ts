@@ -275,4 +275,40 @@ describe("Auth Rate Limit Integration", () => {
 
     await server2.close();
   });
+
+  it("keeps separate buckets for /auth/login and /auth/setup on the real server", async () => {
+    const server = await createServer();
+    const { hitBuckets } = await import("../../lib/rate-limit");
+
+    try {
+      for (let i = 0; i < 5; i++) {
+        const response = await server.inject({
+          method: "POST",
+          url: "/api/v1/auth/login",
+          payload: { username: "test", password: "test" },
+          headers: { "content-type": "application/json" },
+        });
+        expect([400, 401, 503]).toContain(response.statusCode);
+      }
+
+      const blocked = await server.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        payload: { username: "test", password: "test" },
+        headers: { "content-type": "application/json" },
+      });
+      expect(blocked.statusCode).toBe(429);
+
+      // The setup limiter allows 3 hits per window; if it shared the login bucket
+      // it would already be exhausted by the six login hits above.
+      const setup = await server.inject({ method: "POST", url: "/api/v1/auth/setup" });
+      expect(setup.statusCode).toBe(410);
+
+      const keys = [...hitBuckets.keys()];
+      expect(keys.some((k) => k.startsWith("ratelimit:POST:/api/v1/auth/login:"))).toBe(true);
+      expect(keys.some((k) => k.startsWith("ratelimit:POST:/api/v1/auth/setup:"))).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
 });

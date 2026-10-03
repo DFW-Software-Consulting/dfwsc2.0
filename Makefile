@@ -113,5 +113,5 @@ backup-restore:
 		echo "Usage: make backup-restore FILE=/backups/postgres/YYYYmmdd_HHMMSS_<db>.sql.gz [RESTORE_CONFIRM=yes] [RESTORE_NONINTERACTIVE=1]"; \
 		exit 1; \
 	fi
-	RESTORE_CONFIRM=$(RESTORE_CONFIRM) RESTORE_NONINTERACTIVE=$(RESTORE_NONINTERACTIVE) \
-		$(PROD_COMPOSE) run --rm --entrypoint /usr/local/bin/restore.sh backup "$(FILE)"
+	$(PROD_COMPOSE) run --rm -e RESTORE_CONFIRM="$(RESTORE_CONFIRM)" -e RESTORE_NONINTERACTIVE="$(RESTORE_NONINTERACTIVE)" \
+		--entrypoint /usr/local/bin/restore.sh backup "$(FILE)"

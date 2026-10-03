@@ -10,7 +10,9 @@ import ErrorMessage from "./shared/ErrorMessage";
 import FeeConfigSection from "./shared/FeeConfigSection";
 import FormInput from "./shared/FormInput";
 import LoadingSpinner from "./shared/LoadingSpinner";
+import { getOnboardingState } from "./shared/onboardingState";
 import StatusBadge from "./shared/StatusBadge";
+import TruncationNotice from "./shared/TruncationNotice";
 
 function formatFee(group) {
   if (group.processingFeePercent != null) return `${group.processingFeePercent}%`;
@@ -274,6 +276,13 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
         <p className="text-gray-400 text-sm py-4 text-center">No groups yet</p>
       )}
 
+      <TruncationNotice shown={groups.length} total={groups.pagination?.total} noun="companies" />
+      {clients.pagination && clients.length < clients.pagination.total && (
+        <p className="text-xs text-yellow-400 pb-2 text-center">
+          Member counts only include the {clients.length} clients loaded.
+        </p>
+      )}
+
       {groups.length > 0 && (
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-700">
@@ -389,12 +398,19 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                                     </div>
                                     <div className="flex items-center gap-3">
                                       <StatusBadge status={m.status} />
-                                      {m.stripeAccountId ? (
+                                      {getOnboardingState(m) === "ready" ? (
                                         <span
                                           className="text-xs text-blue-400"
                                           title="Stripe connected"
                                         >
                                           ✓ Connected
+                                        </span>
+                                      ) : getOnboardingState(m) === "in_progress" ? (
+                                        <span
+                                          className="text-xs text-yellow-400"
+                                          title="Stripe onboarding started but not finished"
+                                        >
+                                          ⚠ In progress
                                         </span>
                                       ) : (
                                         <span
