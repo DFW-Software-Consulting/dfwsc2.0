@@ -32,21 +32,25 @@ describe("migration 0025 upgrade path on a populated 0024 database", () => {
     await adminPool.query(`CREATE DATABASE "${scratchDb}"`);
     pool = new Pool({ connectionString: scratchUrl(), max: 2 });
 
-    // Folder with the journal cut off before 0025, so the migrator stops at 0024.
+    // Two folders cut by position in the journal, so the test always runs exactly 0000-0024
+    // and then 0025, however many migrations are added after it.
     tmpRoot = mkdtempSync(path.join(tmpdir(), "ledger-0025-"));
-    const before = path.join(tmpRoot, "before");
-    mkdirSync(path.join(before, "meta"), { recursive: true });
     const journal = JSON.parse(
       readFileSync(path.join(migrationsFolder, "meta", "_journal.json"), "utf8")
     );
-    const kept = journal.entries.filter((e: { tag: string }) => e.tag !== TARGET_TAG);
-    expect(kept.length).toBe(journal.entries.length - 1);
-    writeFileSync(
-      path.join(before, "meta", "_journal.json"),
-      JSON.stringify({ ...journal, entries: kept })
-    );
-    for (const e of kept)
-      cpSync(path.join(migrationsFolder, `${e.tag}.sql`), path.join(before, `${e.tag}.sql`));
+    const cut = journal.entries.findIndex((e: { tag: string }) => e.tag === TARGET_TAG);
+    expect(cut).toBeGreaterThan(0);
+    const writeFolder = (dir: string, entries: Array<{ tag: string }>) => {
+      mkdirSync(path.join(dir, "meta"), { recursive: true });
+      writeFileSync(
+        path.join(dir, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries })
+      );
+      for (const e of entries)
+        cpSync(path.join(migrationsFolder, `${e.tag}.sql`), path.join(dir, `${e.tag}.sql`));
+    };
+    writeFolder(path.join(tmpRoot, "before"), journal.entries.slice(0, cut));
+    writeFolder(path.join(tmpRoot, "through"), journal.entries.slice(0, cut + 1));
   });
 
   afterAll(async () => {
@@ -105,7 +109,7 @@ describe("migration 0025 upgrade path on a populated 0024 database", () => {
     expect(dataBefore).toHaveLength(12);
 
     // Apply 0025 on top of the populated database.
-    await migrate(scratch, { migrationsFolder });
+    await migrate(scratch, { migrationsFolder: path.join(tmpRoot, "through") });
 
     expect(await snapshot()).toEqual(dataBefore);
 
