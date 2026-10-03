@@ -789,7 +789,7 @@ window.location.href = url;`}</CodeBlock>
                 },
                 {
                   title: "Back off when you poll.",
-                  desc: "This endpoint allows 30 requests per minute for each calling IP address, shared by every session you check from that address, so one order polled every two seconds uses the whole budget. Check once when the customer lands on the success URL, then again after about 2, 5 and 10 seconds. If the status is still created, leave the order to a background job that checks it about once a minute. On a 429, wait before the next attempt instead of retrying straight away.",
+                  desc: "This endpoint allows 30 requests per minute for each calling IP address, shared by every session you check from that address, so one order polled every two seconds uses the whole budget. Check once when the customer lands on the success URL, then again after about 2, 5 and 10 seconds. If the status is still created, leave the order to a background job. Treat that job's polling as one budget shared by all your pending orders, not a rate per order: check a pending order once a minute for its first ten minutes, then every 15 minutes, and stop once the status is expired or 24 hours have passed since you created it (an abandoned checkout stays created until Stripe expires it). Keep the job's total to about 20 requests a minute across every order, so the check you make when a customer returns to the success URL always has headroom; if more orders are due than fit, check the oldest first and let the rest wait for the next minute. On a 429, wait before the next attempt instead of retrying straight away.",
                 },
               ].map((item) => (
                 <div

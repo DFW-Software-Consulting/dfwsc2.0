@@ -43,6 +43,9 @@ describe("Docs page", () => {
 
     expect(container.textContent).toMatch(/30 requests per minute for each calling IP address/i);
     expect(container.textContent).toMatch(/2, 5 and 10 seconds/);
+    expect(container.textContent).toMatch(/one budget shared by all your pending orders/i);
+    expect(container.textContent).toMatch(/every 15 minutes/i);
+    expect(container.textContent).toMatch(/about 20 requests a minute across every order/i);
     expect(container.textContent).not.toMatch(/couple of seconds/i);
   });
 
