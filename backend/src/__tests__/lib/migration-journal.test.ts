@@ -35,6 +35,13 @@ const GRANDFATHERED_DUPLICATE_PREFIX_TAGS: readonly string[] = [
   "0019_hash_onboarding_tokens",
 ];
 
+/**
+ * Journal entries whose `when` equals the previous entry's `when` (idx 2 and idx 3 were both
+ * hand-stamped 1775961000000). Both applied together in one migrator run, so nothing was
+ * skipped; grandfathered by idx. Every other entry must have a strictly greater `when`.
+ */
+const GRANDFATHERED_EQUAL_WHEN_IDX: readonly number[] = [3];
+
 interface JournalEntry {
   idx: number;
   version: string;
@@ -114,6 +121,26 @@ describe("migration journal consistency (backend/drizzle)", () => {
       ).toBeGreaterThan(idxValues[i - 1]);
     }
     expect(new Set(idxValues).size, "journal contains duplicate idx values").toBe(idxValues.length);
+  });
+
+  it("has strictly increasing `when` timestamps in entry order, except the grandfathered idx 3", () => {
+    // Drizzle applies a migration only when its `when` exceeds the newest created_at already
+    // recorded in the database. A migration merged with an older `when` than one already
+    // deployed is silently skipped in production while a fresh CI database still applies it.
+    for (let i = 1; i < journal.entries.length; i++) {
+      const previous = journal.entries[i - 1];
+      const current = journal.entries[i];
+      if (GRANDFATHERED_EQUAL_WHEN_IDX.includes(current.idx) && current.when === previous.when) {
+        continue;
+      }
+      expect(
+        current.when,
+        `journal entry idx ${current.idx} ("${current.tag}") has when ${current.when}, which ` +
+          `does not exceed idx ${previous.idx}'s when ${previous.when}. Drizzle would skip it in ` +
+          "any database that already applied a newer migration. Regenerate it with " +
+          "`npx drizzle-kit generate` instead of hand-editing `when`."
+      ).toBeGreaterThan(previous.when);
+    }
   });
 
   it("has unique numeric filename prefixes, except the grandfathered 0019 pair", () => {

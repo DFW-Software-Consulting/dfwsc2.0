@@ -12,8 +12,11 @@ set -euo pipefail
 #   restore.sh s3://my-bucket/backups/20260102_030405_stripe_portal.sql.gz
 #   restore.sh 20260102_030405_stripe_portal.sql.gz
 #
-# One-off with Docker Compose:
-#   make backup-restore FILE=/backups/postgres/20260102_030405_stripe_portal.sql.gz RESTORE_CONFIRM=1
+# One-off with Docker Compose (the Makefile passes both variables into the container):
+#   make backup-restore FILE=/backups/postgres/20260102_030405_stripe_portal.sql.gz RESTORE_CONFIRM=yes
+#
+# Inside a running backup container (e.g. on Coolify, where there is no Makefile):
+#   docker exec -it -e RESTORE_CONFIRM=yes <backup-container> restore.sh /backups/postgres/<file>.sql.gz
 
 : "${DATABASE_URL:?DATABASE_URL must be set}"
 
@@ -79,6 +82,31 @@ if [ ! -f "$LOCAL_FILE" ] || [ ! -s "$LOCAL_FILE" ]; then
   exit 1
 fi
 
+# Refuse a corrupt or truncated archive before anything is written: psql would
+# otherwise see an early EOF and commit whatever statements arrived.
+if ! gzip -t "$LOCAL_FILE"; then
+  echo "[restore] ERROR: gzip integrity check failed: ${LOCAL_FILE}" >&2
+  exit 1
+fi
+
+# gzip -t only proves the compressed stream is intact. A dump cut short inside a
+# COPY block, or the near-empty output of a pg_dump that could not connect, is
+# still valid gzip, and psql would commit whatever arrived. A finished plain-format
+# pg_dump ends with this trailer, so refuse any file that lacks it. The tail is
+# matched with case rather than grep -q so pipefail cannot turn an early grep exit
+# into a false refusal.
+if ! DUMP_TAIL=$(gunzip -c "$LOCAL_FILE" | tail -n 20); then
+  echo "[restore] ERROR: could not read the end of the dump: ${LOCAL_FILE}" >&2
+  exit 1
+fi
+case "$DUMP_TAIL" in
+  *"-- PostgreSQL database dump complete"*) ;;
+  *)
+    echo "[restore] ERROR: dump is incomplete (no 'PostgreSQL database dump complete' trailer): ${LOCAL_FILE}" >&2
+    exit 1
+    ;;
+esac
+
 # Identify the actual target database name.
 TARGET_DB=$(psql "$DATABASE_URL" -At -c "SELECT current_database();" 2>/dev/null || true)
 if [ -z "$TARGET_DB" ]; then
@@ -128,6 +156,8 @@ if [ -t 0 ] && [ -z "$RESTORE_NONINTERACTIVE" ]; then
 fi
 
 echo "[restore] Restoring to ${TARGET_DB} ..."
-gunzip -c "$LOCAL_FILE" | psql "$DATABASE_URL"
+# Stop at the first SQL error and roll everything back, so a failed restore
+# leaves the target as it was instead of half-applied.
+gunzip -c "$LOCAL_FILE" | psql -v ON_ERROR_STOP=1 --single-transaction "$DATABASE_URL"
 
 echo "[restore] Restore complete: ${TARGET_DB}"
