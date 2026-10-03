@@ -204,12 +204,17 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
       Stripe.errors.StripeError.generate({
         type: "idempotency_error",
         statusCode: 400,
-        message: "Keys for idempotent requests can only be used with the same parameters",
+        message:
+          "Keys for idempotent requests can only be used with the same parameters. Try using a key other than 'acct:secret-key' if you meant to execute a different request.",
       } as never)
     );
 
     expect(response.statusCode).toBe(409);
-    expect(response.json().code).toBe("IDEMPOTENCY_KEY_REUSED");
+    expect(response.json()).toEqual({
+      error:
+        "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.",
+      code: "IDEMPOTENCY_KEY_REUSED",
+    });
   });
 
   it("returns 409 IDEMPOTENCY_KEY_IN_USE for a real SDK in-flight idempotency error", async () => {

@@ -18,7 +18,7 @@ export interface StripeErrorMapping {
   /**
    * Map permanent caller errors instead of letting them fall through as retryable:
    * `StripeInvalidRequestError` -> 400 (Stripe's message), `StripeIdempotencyError` -> 409
-   * `IDEMPOTENCY_KEY_REUSED` (parameter mismatch, permanent) or 409 `IDEMPOTENCY_KEY_IN_USE`
+   * `IDEMPOTENCY_KEY_REUSED` (parameter mismatch, permanent, fixed message) or 409 `IDEMPOTENCY_KEY_IN_USE`
    * (same key still in flight, retryable), `StripePermissionError` -> 409 `ACCOUNT_NOT_CONNECTED`.
    * Opt-in because other call sites rely on their own fallback for these errors.
    */
@@ -87,7 +87,13 @@ export function mapStripeError(
       return true;
     }
     if (kind === "StripeIdempotencyError") {
-      reply.code(409).send({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
+      // Fixed text: Stripe's message quotes the key it received, which is not necessarily
+      // the key the caller sent.
+      reply.code(409).send({
+        error:
+          "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.",
+        code: "IDEMPOTENCY_KEY_REUSED",
+      });
       return true;
     }
     if (kind === "StripePermissionError") {

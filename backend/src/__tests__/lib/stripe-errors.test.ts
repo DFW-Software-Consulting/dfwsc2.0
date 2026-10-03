@@ -26,6 +26,9 @@ function sdkError(
 
 const circuitOpen = { error: "open", code: "STRIPE_CIRCUIT_OPEN" };
 
+const REUSED_MESSAGE =
+  "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.";
+
 describe("mapStripeError permanent errors", () => {
   it("maps StripeInvalidRequestError to 400 with Stripe's message and param", () => {
     const { reply, code, send } = fakeReply();
@@ -62,7 +65,21 @@ describe("mapStripeError permanent errors", () => {
     expect(mapStripeError(err, reply, { circuitOpen, permanentErrors: true })).toBe(true);
 
     expect(code).toHaveBeenCalledWith(409);
-    expect(send).toHaveBeenCalledWith({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
+    expect(send).toHaveBeenCalledWith({ error: REUSED_MESSAGE, code: "IDEMPOTENCY_KEY_REUSED" });
+  });
+
+  it("does not echo the idempotency key quoted in Stripe's message", () => {
+    const { reply, send } = fakeReply();
+    const err = sdkError(
+      "idempotency_error",
+      400,
+      "Keys for idempotent requests can only be used with the same parameters. Try using a key other than 'client-1:order-9' if you meant to execute a different request."
+    );
+
+    expect(mapStripeError(err, reply, { circuitOpen, permanentErrors: true })).toBe(true);
+
+    expect(send).toHaveBeenCalledWith({ error: REUSED_MESSAGE, code: "IDEMPOTENCY_KEY_REUSED" });
+    expect(JSON.stringify(send.mock.calls)).not.toContain("client-1:order-9");
   });
 
   it("maps an in-flight idempotency conflict to a retryable 409 IDEMPOTENCY_KEY_IN_USE", () => {
@@ -117,7 +134,7 @@ describe("mapStripeError permanent errors", () => {
     expect(mapStripeError(err, reply, { circuitOpen, permanentErrors: true })).toBe(true);
 
     expect(code).toHaveBeenCalledWith(409);
-    expect(send).toHaveBeenCalledWith({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
+    expect(send).toHaveBeenCalledWith({ error: REUSED_MESSAGE, code: "IDEMPOTENCY_KEY_REUSED" });
   });
 
   it("maps StripePermissionError to 409 ACCOUNT_NOT_CONNECTED", () => {
@@ -190,7 +207,7 @@ describe("mapStripeError permanent errors", () => {
       expect(mapStripeError(err, reply, opts)).toBe(true);
 
       expect(code).toHaveBeenCalledWith(409);
-      expect(send).toHaveBeenCalledWith({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
+      expect(send).toHaveBeenCalledWith({ error: REUSED_MESSAGE, code: "IDEMPOTENCY_KEY_REUSED" });
     });
 
     it("maps StripePermissionError to 409 ACCOUNT_NOT_CONNECTED", () => {

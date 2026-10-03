@@ -62,6 +62,10 @@ All clients and groups belong to the `client_portal` workspace. The `workspace` 
 ## 6. Resilience: Circuit Breakers
 Outbound calls to Stripe and SMTP are wrapped by in-process circuit breakers (`lib/circuit-breakers.ts`, built on `opossum`). Each breaker opens after 5 consecutive failures and stays open for a 30-second reset timeout; while open, calls fail fast instead of hitting the upstream service.
 
+A "failure" is defined per breaker. Errors that mean the caller's input was wrong are not counted (opossum records them as successes, so they also reset the consecutive count):
+- **Stripe** counts calls with no HTTP status (connection errors), 5xx, 429, 401 (platform key revoked or wrong) and opossum timeouts. Any other 4xx (invalid request, idempotency mismatch, permission, card errors) does not count.
+- **SMTP** counts every error except a permanent 5xx rejection of a recipient (`RCPT TO`). Auth, connection, `MAIL FROM`, `DATA` and temporary 4xx failures still count.
+
 - **Stripe** (`withStripeCircuit`): wraps Stripe API calls in the `payments`, `connect`, `products`, and `webhooks` routes. When the breaker is open, these routes catch `isCircuitOpenError` and respond `503` with `{ "error": "Payment service is temporarily unavailable.", "code": "STRIPE_CIRCUIT_OPEN" }`.
 - **SMTP** (`withSmtpCircuit`): wraps outbound mail in `lib/mailer.ts` (onboarding and API-key-regeneration emails).
 - Breaker state (open/half-open/closed, plus fire/failure/success counts) is exposed via `GET /metrics` (bearer-token protected; the endpoint is disabled and returns 404 if `METRICS_TOKEN` is unset).
