@@ -34,8 +34,10 @@ export default function EditClientModal({
     return "";
   });
   const [groupId, setGroupId] = useState(() => client.groupId ?? "");
-  const [successUrl, setSuccessUrl] = useState(() => client.paymentSuccessUrl ?? "");
-  const [cancelUrl, setCancelUrl] = useState(() => client.paymentCancelUrl ?? "");
+  // The list row never carries the payment URLs, so they are seeded from the
+  // full client record once it loads.
+  const [successUrl, setSuccessUrl] = useState("");
+  const [cancelUrl, setCancelUrl] = useState("");
   const [error, setError] = useState("");
 
   // Profile fields (DFWSC mode only)
@@ -69,6 +71,8 @@ export default function EditClientModal({
     setPostalCode(fullClient.postalCode ?? "");
     setCountry(fullClient.country ?? "");
     setNotes(fullClient.notes ?? "");
+    setSuccessUrl(fullClient.paymentSuccessUrl ?? "");
+    setCancelUrl(fullClient.paymentCancelUrl ?? "");
     setDefaultPaymentTermsDays(
       fullClient.defaultPaymentTermsDays != null ? String(fullClient.defaultPaymentTermsDays) : ""
     );
@@ -135,11 +139,18 @@ export default function EditClientModal({
       return;
     }
 
-    const body = {
-      groupId: groupId || null,
-      paymentSuccessUrl: successUrl.trim() || null,
-      paymentCancelUrl: cancelUrl.trim() || null,
-    };
+    const body = { groupId: groupId || null };
+
+    // Send a URL only when it differs from the stored value, so saving a fee or
+    // group change never overwrites a URL the form did not touch.
+    const nextSuccessUrl = successUrl.trim();
+    if (nextSuccessUrl !== (fullClient?.paymentSuccessUrl ?? "")) {
+      body.paymentSuccessUrl = nextSuccessUrl || null;
+    }
+    const nextCancelUrl = cancelUrl.trim();
+    if (nextCancelUrl !== (fullClient?.paymentCancelUrl ?? "")) {
+      body.paymentCancelUrl = nextCancelUrl || null;
+    }
 
     if (feeType !== "none") {
       const feeErr = validateFeeValue(feeValue, feeType);
@@ -187,6 +198,7 @@ export default function EditClientModal({
     isDfwscMode,
     successUrl,
     cancelUrl,
+    fullClient,
     name,
     email,
     phone,
@@ -412,7 +424,7 @@ export default function EditClientModal({
         <Button
           variant="primary"
           isLoading={patchClientMutation.isPending}
-          disabled={isDfwscMode && clientLoading}
+          disabled={clientLoading}
           onClick={handleSave}
         >
           {patchClientMutation.isPending ? "Saving..." : "Save Changes"}

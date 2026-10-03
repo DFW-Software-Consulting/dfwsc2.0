@@ -758,6 +758,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
       const failedRow = await seedLedgerRow();
       await deliver("checkout.session.completed", {
         id: failedRow.sessionId,
+        payment_status: "paid",
         payment_intent: failedRow.paymentIntentId,
       });
       // A PaymentIntent-keyed failure finds the row (it is already paid, so
@@ -803,6 +804,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
       await deliver("checkout.session.completed", {
         id: row.sessionId,
+        payment_status: "paid",
         payment_intent: "pi_different",
       });
 
@@ -823,7 +825,11 @@ describe("POST /api/v1/webhooks/stripe", () => {
       const row = await seedLedgerRow({ stripePaymentIntentId: "pi_same" });
       const warnSpy = vi.spyOn(app.log, "warn");
 
-      await deliver("checkout.session.completed", { id: row.sessionId, payment_intent: "pi_same" });
+      await deliver("checkout.session.completed", {
+        id: row.sessionId,
+        payment_status: "paid",
+        payment_intent: "pi_same",
+      });
 
       expect(warnSpy).not.toHaveBeenCalled();
       const updated = await getRow(row.id);
@@ -911,7 +917,11 @@ describe("POST /api/v1/webhooks/stripe", () => {
     it("leaves the PaymentIntent id null when the session has none", async () => {
       const row = await seedLedgerRow();
 
-      await deliver("checkout.session.completed", { id: row.sessionId, payment_intent: null });
+      await deliver("checkout.session.completed", {
+        id: row.sessionId,
+        payment_status: "paid",
+        payment_intent: null,
+      });
 
       const updated = await getRow(row.id);
       expect(updated.status).toBe("paid");

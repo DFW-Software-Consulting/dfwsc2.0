@@ -196,9 +196,10 @@ export const paymentLedger = pgTable(
   "payment_ledger",
   {
     id: text("id").primaryKey(),
-    // The idempotency key used when creating the Stripe session/PI.
-    // Unique per creation attempt; prevents duplicate ledger rows.
-    idempotencyKey: text("idempotency_key").notNull().unique(),
+    // The caller's idempotency key used when creating the Stripe session/PI.
+    // Scoped per client (see payment_ledger_client_idempotency_key_uniq); the
+    // key sent to Stripe is namespaced as `${clientId}:${key}`.
+    idempotencyKey: text("idempotency_key").notNull(),
     connectedAccountId: text("connected_account_id").notNull(),
     stripeSessionId: text("stripe_session_id"),
     stripePaymentIntentId: text("stripe_payment_intent_id"),
@@ -240,9 +241,14 @@ export const paymentLedger = pgTable(
   },
   (table) => ({
     clientIdIdx: index("payment_ledger_client_id_idx").on(table.clientId),
-    sessionIdIdx: index("payment_ledger_session_id_idx")
+    // A Stripe session maps to exactly one ledger row.
+    sessionIdUniq: uniqueIndex("payment_ledger_session_id_uniq")
       .on(table.stripeSessionId)
       .where(sql`${table.stripeSessionId} IS NOT NULL`),
+    clientIdempotencyKeyUniq: uniqueIndex("payment_ledger_client_idempotency_key_uniq").on(
+      table.clientId,
+      table.idempotencyKey
+    ),
     paymentIntentIdIdx: index("payment_ledger_pi_id_idx")
       .on(table.stripePaymentIntentId)
       .where(sql`${table.stripePaymentIntentId} IS NOT NULL`),

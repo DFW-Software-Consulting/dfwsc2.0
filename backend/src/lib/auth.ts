@@ -10,6 +10,34 @@ export function sha256Lookup(apiKey: string): string {
   return crypto.createHash("sha256").update(apiKey).digest("hex");
 }
 
+// API keys are 256-bit random values and the lookup is the SHA-256 of the full
+// key, so bcrypt is only a second check and costs ~40 ms of event-loop time per
+// call. A successful verification is remembered briefly, keyed by the lookup and
+// tied to the exact stored hash: the row (status and hash) is still loaded on
+// every request, so a deactivated client, or a key that was regenerated (new
+// lookup and new hash), is never accepted from the cache.
+const VERIFIED_KEY_TTL_MS = 60_000;
+const VERIFIED_KEY_MAX_ENTRIES = 1000;
+const verifiedApiKeys = new Map<string, { hash: string; expiresAt: number }>();
+
+function isVerifiedApiKey(lookup: string, hash: string): boolean {
+  const entry = verifiedApiKeys.get(lookup);
+  if (!entry) return false;
+  if (entry.expiresAt <= Date.now() || entry.hash !== hash) {
+    verifiedApiKeys.delete(lookup);
+    return false;
+  }
+  return true;
+}
+
+function rememberVerifiedApiKey(lookup: string, hash: string): void {
+  if (verifiedApiKeys.size >= VERIFIED_KEY_MAX_ENTRIES) {
+    const oldest = verifiedApiKeys.keys().next().value;
+    if (oldest !== undefined) verifiedApiKeys.delete(oldest);
+  }
+  verifiedApiKeys.set(lookup, { hash, expiresAt: Date.now() + VERIFIED_KEY_TTL_MS });
+}
+
 export async function requireApiKey(request: FastifyRequest, reply: FastifyReply) {
   const apiKeyHeader = request.headers["x-api-key"];
   const apiKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
@@ -27,9 +55,16 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
       .limit(1);
 
     if (clientByLookup) {
-      const isValid = clientByLookup.apiKeyHash
-        ? await verifyPassword(apiKey, clientByLookup.apiKeyHash)
-        : false;
+      const storedHash = clientByLookup.apiKeyHash;
+      let isValid = false;
+      if (storedHash) {
+        if (isVerifiedApiKey(lookup, storedHash)) {
+          isValid = true;
+        } else if (await verifyPassword(apiKey, storedHash)) {
+          isValid = true;
+          rememberVerifiedApiKey(lookup, storedHash);
+        }
+      }
       if (isValid) {
         (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client =
           clientByLookup;
