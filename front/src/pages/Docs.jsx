@@ -49,16 +49,17 @@ function SectionAnchor({ id }) {
   return <span id={id} className="-mt-32 block pt-32" aria-hidden="true" />;
 }
 
-const NODE_CODE = `const { randomUUID } = require('crypto');
-
-async function createPayment(amountCents, description) {
+const NODE_CODE = `// idempotencyKey: a UUID you generate once per payment attempt (for example with
+// require('crypto').randomUUID()) and store with your order. If a request fails or
+// times out, retry with the same key so you never create a second payment.
+async function createPayment(amountCents, description, idempotencyKey) {
   const response = await fetch(
     'https://<your-api-base-url>/api/v1/payments/create',
     {
       method: 'POST',
       headers: {
         'X-Api-Key': process.env.DFWSC_API_KEY,
-        'Idempotency-Key': randomUUID(),
+        'Idempotency-Key': idempotencyKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -79,7 +80,7 @@ async function createPayment(amountCents, description) {
 
   if (!response.ok) {
     const err = await response.json();
-    throw new Error(\`Payment error: \${err.error}\`);
+    throw new Error(\`Payment error \${response.status} (\${err.code ?? 'no code'}): \${err.error}\`);
   }
 
   return response.json(); // { url, sessionId } — store sessionId with your order
@@ -105,16 +106,18 @@ async function verifyPayment(sessionId, expectedAmountCents, expectedCurrency) {
 }`;
 
 const PYTHON_CODE = `import requests
-import uuid
 
 DFWSC_API_KEY = 'your-api-key'
 
-def create_payment(amount_cents: int, description: str) -> dict:
+# idempotency_key: a UUID you generate once per payment attempt (str(uuid.uuid4()))
+# and store with your order. If a request fails or times out, retry with the same
+# key so you never create a second payment.
+def create_payment(amount_cents: int, description: str, idempotency_key: str) -> dict:
     response = requests.post(
         'https://<your-api-base-url>/api/v1/payments/create',
         headers={
             'X-Api-Key': DFWSC_API_KEY,
-            'Idempotency-Key': str(uuid.uuid4()),
+            'Idempotency-Key': idempotency_key,
             'Content-Type': 'application/json',
         },
         json={
@@ -149,7 +152,10 @@ def verify_payment(session_id: str, expected_amount_cents: int, expected_currenc
         and payment['currency'] == expected_currency
     )`;
 
-const PHP_CODE = `function createPayment(int $amountCents, string $description): array {
+const PHP_CODE = `// $idempotencyKey: a UUID you generate once per payment attempt and store with your
+// order. If a request fails or times out, retry with the same key so you never
+// create a second payment.
+function createPayment(int $amountCents, string $description, string $idempotencyKey): array {
     $ch = curl_init(
         'https://<your-api-base-url>/api/v1/payments/create'
     );
@@ -158,7 +164,7 @@ const PHP_CODE = `function createPayment(int $amountCents, string $description):
         CURLOPT_POST           => true,
         CURLOPT_HTTPHEADER     => [
             'X-Api-Key: ' . DFWSC_API_KEY,
-            'Idempotency-Key: ' . bin2hex(random_bytes(16)),
+            'Idempotency-Key: ' . $idempotencyKey,
             'Content-Type: application/json',
         ],
         CURLOPT_POSTFIELDS => json_encode([
@@ -211,10 +217,33 @@ const ERROR_ROWS = [
     cause: "Missing or invalid field",
     fix: "Check request body — the error message says what's wrong",
   },
-  { status: "401", cause: "Bad or missing API key", fix: "Verify your X-Api-Key header" },
+  {
+    status: "401",
+    cause: "Bad, missing or deactivated API key",
+    fix: "Verify your X-Api-Key header. A deactivated client gets the same response — ask your DFWSC administrator",
+  },
+  {
+    status: "409",
+    cause: 'Stripe onboarding is not finished (code "ACCOUNT_NOT_CONNECTED")',
+    fix: "Retrying will not help. Finish the Stripe onboarding for this account, or ask your DFWSC administrator to confirm it can accept charges",
+  },
   { status: "429", cause: "Too many requests", fix: "Slow down and retry" },
-  { status: "500", cause: "Server error", fix: "Contact DFWSC support" },
-  { status: "502", cause: "Stripe unreachable", fix: "Retry — usually temporary" },
+  {
+    status: "500",
+    cause: "Server error",
+    fix: "Contact DFWSC support and quote the X-Request-Id response header",
+  },
+  {
+    status: "502",
+    cause: "Stripe unreachable",
+    fix: "Retry with the same Idempotency-Key — usually temporary",
+  },
+  {
+    status: "503",
+    cause:
+      'Payment was created but could not be recorded (code "LEDGER_PERSISTENCE_FAILED"), or the payment service is temporarily unavailable',
+    fix: "Retry the same request with the same Idempotency-Key. Do not generate a new key, and do not fulfil the order until Step 3 reports paid",
+  },
 ];
 
 const STATUS_ROWS = [
@@ -424,11 +453,11 @@ export default function Docs() {
             </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 transition-colors">
               Run this curl command to confirm your key works. A successful response includes a
-              Stripe Checkout url.
+              Stripe Checkout url and a sessionId.
             </p>
             <CodeBlock language="bash">{`curl -X POST https://<your-api-base-url>/api/v1/payments/create \\
   -H "X-Api-Key: <your-api-key>" \\
-  -H "Idempotency-Key: test-001" \\
+  -H "Idempotency-Key: $(uuidgen)" \\
   -H "Content-Type: application/json" \\
   -d '{ "lineItems": [{ "price_data": { "currency": "usd", "product_data": { "name": "Test" }, "unit_amount": 100 }, "quantity": 1 }] }'`}</CodeBlock>
           </section>
@@ -470,7 +499,7 @@ export default function Docs() {
                 <tbody>
                   {[
                     ["X-Api-Key", "Your API key"],
-                    ["Idempotency-Key", "A unique string for this payment attempt"],
+                    ["Idempotency-Key", "A new unique value (UUID) for each payment attempt"],
                     ["Content-Type", "application/json"],
                   ].map(([header, value]) => (
                     <tr
@@ -496,8 +525,10 @@ export default function Docs() {
                 <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-200/50 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
                   Idempotency-Key
                 </code>
-                . It prevents double-charges if a network error causes a retry. If you send the same
-                key twice, the second request returns the same result — no duplicate charge.
+                . Use a new unique value (a UUID) for each payment attempt and store it with your
+                order. It prevents double-charges if a network error causes a retry: if a request
+                fails or times out, retry the same request with the same key and you get the same
+                result — no duplicate charge.
               </p>
             </div>
 
@@ -546,11 +577,6 @@ export default function Docs() {
                     ],
                     ["description", "No", "Shows up in your Stripe dashboard"],
                     ["metadata", "No", "Any key/value pairs you want attached to the payment"],
-                    [
-                      "amount",
-                      "No",
-                      "Explicit total in cents — required only when line items reference Stripe price IDs",
-                    ],
                   ].map(([field, req, desc]) => (
                     <tr
                       key={field}
@@ -779,9 +805,21 @@ window.location.href = url;`}</CodeBlock>
               <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
                 error
               </code>{" "}
-              field.
+              message. Most errors also include a{" "}
+              <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
+                code
+              </code>{" "}
+              you can branch on. Every response carries an{" "}
+              <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
+                X-Request-Id
+              </code>{" "}
+              header — log it and quote it when you contact support.
             </p>
-            <CodeBlock language="json">{`{ "error": "Description of what went wrong" }`}</CodeBlock>
+            <CodeBlock language="json">{`{
+  "error": "Description of what went wrong",
+  "code": "ERROR_CODE",
+  "requestId": "..."
+}`}</CodeBlock>
 
             <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.01] transition-colors shadow-sm">
               <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
@@ -832,8 +870,8 @@ window.location.href = url;`}</CodeBlock>
                   desc: "Never put it in frontend JavaScript or a mobile app binary.",
                 },
                 {
-                  title: "Always use a unique Idempotency-Key per payment attempt.",
-                  desc: "Your invoice or order ID works great.",
+                  title: "Always use a new Idempotency-Key (a UUID) per payment attempt.",
+                  desc: "Store it with your order and reuse it only to retry the same request.",
                 },
                 {
                   title: "Amounts are in cents.",
