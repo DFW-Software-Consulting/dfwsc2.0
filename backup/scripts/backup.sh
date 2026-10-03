@@ -64,6 +64,20 @@ fi
 mv "$PARTIAL_FILE" "$BACKUP_FILE"
 
 # ---------------------------------------------------------------------------
+# Local retention cleanup
+# Runs before the remote upload so a run that fails there still prunes old dumps.
+# ---------------------------------------------------------------------------
+# Sweep partial dumps left behind by a killed run (the EXIT trap cannot run on SIGKILL).
+find "$BACKUP_DIR" -maxdepth 1 -type f -name "*.sql.gz.partial" -mmin +1440 -delete
+
+if [ "$BACKUP_RETENTION_DAYS" -gt 0 ]; then
+  echo "[backup] Pruning local backups older than ${BACKUP_RETENTION_DAYS} days"
+  find "$BACKUP_DIR" -maxdepth 1 -type f -name "*.sql.gz" -mtime +"${BACKUP_RETENTION_DAYS}" -delete
+else
+  echo "[backup] Local retention disabled (BACKUP_RETENTION_DAYS=0)"
+fi
+
+# ---------------------------------------------------------------------------
 # Optional remote upload
 # ---------------------------------------------------------------------------
 if [ -z "$BACKUP_S3_BUCKET" ]; then
@@ -96,18 +110,5 @@ fi
 # ---------------------------------------------------------------------------
 date -Iseconds > "$BACKUP_HEARTBEAT_PATH"
 echo "[backup] Heartbeat written to ${BACKUP_HEARTBEAT_PATH}"
-
-# ---------------------------------------------------------------------------
-# Local retention cleanup
-# ---------------------------------------------------------------------------
-# Sweep partial dumps left behind by a killed run (the EXIT trap cannot run on SIGKILL).
-find "$BACKUP_DIR" -maxdepth 1 -type f -name "*.sql.gz.partial" -mmin +1440 -delete
-
-if [ "$BACKUP_RETENTION_DAYS" -gt 0 ]; then
-  echo "[backup] Pruning local backups older than ${BACKUP_RETENTION_DAYS} days"
-  find "$BACKUP_DIR" -maxdepth 1 -type f -name "*.sql.gz" -mtime +"${BACKUP_RETENTION_DAYS}" -delete
-else
-  echo "[backup] Local retention disabled (BACKUP_RETENTION_DAYS=0)"
-fi
 
 echo "[backup] Success: ${BACKUP_FILE}"

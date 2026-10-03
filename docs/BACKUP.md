@@ -25,7 +25,7 @@ All variables are optional unless marked **required**.
 | `AWS_SECRET_ACCESS_KEY` | — | S3 secret key. |
 | `AWS_DEFAULT_REGION` | `us-east-1` | S3 region. |
 | `AWS_ENDPOINT_URL_S3` | — | S3-compatible endpoint (e.g. MinIO, R2, DigitalOcean Spaces). Also accepts `AWS_S3_ENDPOINT`. |
-| `BACKUP_REQUIRE_REMOTE` | — | Opt-in strictness. Set to `yes` (or `1`/`true`) to make a run fail, with no heartbeat, when no S3 bucket is configured. The local dump is still kept. Unset keeps the default: local-only backups with a warning. |
+| `BACKUP_REQUIRE_REMOTE` | — | Opt-in strictness. Set to `yes` (or `1`/`true`) to make a run fail, with no heartbeat, when no S3 bucket is configured. The local dump is still kept and local retention still runs, so dumps do not pile up. Unset keeps the default: local-only backups with a warning. |
 | `BACKUP_HEARTBEAT_MAX_AGE` | `90000` | Fail healthcheck if the last successful backup is older than this many seconds (default 25 h). |
 
 ## Makefile helpers
