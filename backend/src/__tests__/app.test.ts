@@ -482,7 +482,7 @@ describe("payments", () => {
     ).toBe(201);
     expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        success_url: "https://myclient.com/thank-you",
+        success_url: "https://myclient.com/thank-you?session_id={CHECKOUT_SESSION_ID}",
       }),
       expect.anything()
     );
@@ -640,7 +640,7 @@ describe("payments", () => {
     expect(response.statusCode).toBe(201);
     expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        success_url: "https://group.example.test/thanks",
+        success_url: "https://group.example.test/thanks?session_id={CHECKOUT_SESSION_ID}",
         cancel_url: "https://group.example.test/cancel",
       }),
       expect.anything()

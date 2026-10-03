@@ -9,6 +9,7 @@ import { requireAdminJwt, requireApiKey } from "../lib/auth";
 import { withStripeCircuit } from "../lib/circuit-breakers";
 import { getClientIp } from "../lib/client-ip";
 import {
+  appendCheckoutSessionId,
   resolveDefaultPaymentCancelUrl,
   resolveDefaultPaymentSuccessUrl,
   resolveFrontendOrigin,
@@ -402,8 +403,9 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       const sessionParams: Stripe.Checkout.SessionCreateParams = {
         mode: "payment",
         line_items: checkoutLineItems,
-        success_url:
-          successUrl ?? `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        success_url: appendCheckoutSessionId(
+          successUrl ?? `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`
+        ),
         cancel_url: cancelUrl ?? `${frontendOrigin}/payment-cancel`,
         payment_intent_data: {
           description,
@@ -476,7 +478,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         });
       }
 
-      return reply.code(201).send({ url: session.url });
+      return reply.code(201).send({ url: session.url, sessionId: session.id });
     }
   );
 

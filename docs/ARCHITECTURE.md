@@ -30,10 +30,11 @@ sequenceDiagram
 
     C->>A: POST /api/v1/payments/create (API Key or Admin JWT)
     A->>A: Resolve Platform Fee (6-level chain + env fallback)
-    A->>S: Create PaymentIntent or Checkout Session
-    S-->>A: clientSecret or session URL
-    A-->>C: clientSecret + stripeAccountId / url
+    A->>S: Create Checkout Session
+    S-->>A: Session URL + ID
+    A-->>C: url + sessionId
     C->>S: Complete Payment
+    C->>A: GET /api/v1/payments/session/:sessionId (confirm status)
 ```
 
 ### Onboarding Flow

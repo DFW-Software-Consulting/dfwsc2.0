@@ -271,6 +271,125 @@ describe("POST /api/v1/payments/create — fee waiver and connected-account guar
 });
 
 // ---------------------------------------------------------------------------
+// Session ID round trip — create response and success redirect
+// ---------------------------------------------------------------------------
+
+describe("POST /api/v1/payments/create — session ID for integrators", () => {
+  let app: any;
+  let apiKey: string;
+  let clientId: string;
+
+  beforeAll(async () => {
+    ensureBaseEnv();
+    app = await buildServer();
+  });
+
+  afterAll(async () => {
+    if (app) await app.close();
+  });
+
+  afterEach(async () => {
+    await db.delete(clients).where(eq(clients.id, clientId));
+  });
+
+  async function createPaymentFor(paymentSuccessUrl: string | null) {
+    clientId = randomUUID();
+    apiKey = randomUUID().replace(/-/g, "");
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Session ID Client",
+      email: `sessionid-${clientId}@example.com`,
+      apiKeyHash: await hashApiKey(apiKey),
+      apiKeyLookup: sha256Lookup(apiKey),
+      status: "active",
+      stripeAccountId: `acct_sessionid${clientId.replace(/-/g, "").slice(0, 12)}`,
+      chargesEnabled: true,
+      processingFeeCents: 1000,
+      paymentSuccessUrl,
+    });
+
+    vi.mocked(stripe.checkout.sessions.create).mockReset();
+    vi.mocked(stripe.checkout.sessions.create).mockResolvedValue({
+      id: `cs_test_${randomUUID().replace(/-/g, "")}`,
+      url: "https://checkout.stripe.com/c/pay/test",
+    } as never);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 5000,
+            },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+    const createCall = vi.mocked(stripe.checkout.sessions.create).mock.calls[0]?.[0] as unknown as
+      | { success_url?: string }
+      | undefined;
+    return { response, successUrl: createCall?.success_url };
+  }
+
+  it("returns the Checkout session ID alongside the url in the 201 body", async () => {
+    const { response } = await createPaymentFor(null);
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json();
+    expect(body.url).toBe("https://checkout.stripe.com/c/pay/test");
+    expect(body.sessionId).toMatch(/^cs_test_[a-f0-9]+$/);
+    expect(vi.mocked(stripe.checkout.sessions.create)).toHaveBeenCalledTimes(1);
+  });
+
+  it("appends ?session_id to a custom success URL with no query string", async () => {
+    const { response, successUrl } = await createPaymentFor("https://myclient.com/thank-you");
+
+    expect(response.statusCode).toBe(201);
+    expect(successUrl).toBe("https://myclient.com/thank-you?session_id={CHECKOUT_SESSION_ID}");
+  });
+
+  it("appends &session_id to a custom success URL that already has a query string", async () => {
+    const { response, successUrl } = await createPaymentFor(
+      "https://myclient.com/thank-you?order=42"
+    );
+
+    expect(response.statusCode).toBe(201);
+    expect(successUrl).toBe(
+      "https://myclient.com/thank-you?order=42&session_id={CHECKOUT_SESSION_ID}"
+    );
+  });
+
+  it("inserts session_id before a #fragment in a custom success URL", async () => {
+    const { response, successUrl } = await createPaymentFor(
+      "https://myclient.com/thank-you?order=42#receipt"
+    );
+
+    expect(response.statusCode).toBe(201);
+    expect(successUrl).toBe(
+      "https://myclient.com/thank-you?order=42&session_id={CHECKOUT_SESSION_ID}#receipt"
+    );
+  });
+
+  it("leaves a custom success URL unchanged when it already has the placeholder", async () => {
+    const custom = "https://myclient.com/thank-you?sid={CHECKOUT_SESSION_ID}&order=42";
+    const { response, successUrl } = await createPaymentFor(custom);
+
+    expect(response.statusCode).toBe(201);
+    expect(successUrl).toBe(custom);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Reports — group with no connected clients (lines 244-245)
 // ---------------------------------------------------------------------------
 
