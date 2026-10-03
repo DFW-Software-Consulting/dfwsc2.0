@@ -523,6 +523,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
             circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
             cardDeclinedCode: "CARD_DECLINED",
             rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
+            permanentErrors: true,
           })
         )
           return;
