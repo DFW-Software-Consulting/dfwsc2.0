@@ -225,7 +225,7 @@ describe("checkout ledger status accuracy", () => {
       expect(mockRetrieve).toHaveBeenCalledWith(
         row.sessionId,
         {},
-        { stripeAccount: "acct_status_test" }
+        { stripeAccount: "acct_status_test", timeout: 3000, maxNetworkRetries: 0 }
       );
       const updated = await getRow(row.id);
       expect(updated.status).toBe("paid");
@@ -318,6 +318,23 @@ describe("checkout ledger status accuracy", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().status).toBe("created");
+      expect((await getRow(row.id)).status).toBe("created");
+    });
+
+    it("degrades to the stored row when the Stripe lookup times out", async () => {
+      const row = await seedRow({ createdAt: new Date(Date.now() - STALE_MS) });
+      const timeoutError = Object.assign(new Error("Request timed out"), {
+        type: "StripeConnectionError",
+      });
+      mockRetrieve.mockRejectedValueOnce(timeoutError);
+
+      const response = await getStatus(row.sessionId);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().status).toBe("created");
+      expect(mockRetrieve).toHaveBeenCalledTimes(1);
+      // A short per-request budget with no network retries bounds the worst case.
+      expect(mockRetrieve.mock.calls[0][2]).toMatchObject({ timeout: 3000, maxNetworkRetries: 0 });
       expect((await getRow(row.id)).status).toBe("created");
     });
 

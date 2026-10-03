@@ -57,6 +57,9 @@ const RECONCILE_MIN_AGE_MS = 30_000;
 // instance per interval.
 const RECONCILE_INTERVAL_MS = 30_000;
 const RECONCILE_MAX_TRACKED = 1000;
+// This endpoint is public and polled, so the fallback lookup gets a much
+// shorter per-request budget than the shared Stripe client (10s, 1 retry).
+const RECONCILE_STRIPE_TIMEOUT_MS = 3000;
 const lastReconcileAttempt = new Map<string, number>();
 
 function shouldAttemptReconcile(sessionId: string, now: number): boolean {
@@ -89,7 +92,15 @@ async function reconcileStaleCheckout(
 
   try {
     const session = await withStripeCircuit(() =>
-      stripe.checkout.sessions.retrieve(sessionId, {}, { stripeAccount: row.connectedAccountId })
+      stripe.checkout.sessions.retrieve(
+        sessionId,
+        {},
+        {
+          stripeAccount: row.connectedAccountId,
+          timeout: RECONCILE_STRIPE_TIMEOUT_MS,
+          maxNetworkRetries: 0,
+        }
+      )
     );
     // An open session has nothing to apply yet.
     const outcome =
