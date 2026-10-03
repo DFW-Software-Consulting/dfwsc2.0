@@ -15,6 +15,7 @@ import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, paymentLedger, webhookEvents } from "../../db/schema";
 import {
+  getCircuitBreakerStates,
   openStripeCircuitForTests,
   resetCircuitBreakersForTests,
 } from "../../lib/circuit-breakers";
@@ -347,6 +348,48 @@ describe("checkout ledger status accuracy", () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().status).toBe("created");
       expect(mockRetrieve).not.toHaveBeenCalled();
+    });
+
+    it("does not count failed lookups towards the shared Stripe breaker", async () => {
+      mockRetrieve.mockRejectedValue(new Error("stripe unavailable"));
+      const rows = await Promise.all(
+        Array.from({ length: 6 }, () => seedRow({ createdAt: new Date(Date.now() - STALE_MS) }))
+      );
+
+      for (const row of rows) {
+        const response = await getStatus(row.sessionId);
+        expect(response.statusCode).toBe(200);
+      }
+
+      expect(mockRetrieve).toHaveBeenCalledTimes(6);
+      expect(getCircuitBreakerStates().stripe.open).toBe(false);
+      expect(getCircuitBreakerStates().stripe.failures).toBe(0);
+    });
+
+    it("reconciles a row that already carries an event timestamp from an unsettled completion", async () => {
+      const row = await seedRow({ createdAt: new Date(Date.now() - STALE_MS) });
+      const webhookTime = nowSeconds() - 10;
+      await deliver(
+        "checkout.session.completed",
+        { id: row.sessionId, payment_status: "unpaid", payment_intent: row.paymentIntentId },
+        webhookTime
+      );
+      expect((await getRow(row.id)).lastStripeEventCreatedAt).toBe(webhookTime);
+      mockRetrieve.mockResolvedValueOnce({
+        id: row.sessionId,
+        status: "complete",
+        payment_status: "paid",
+        payment_intent: row.paymentIntentId,
+        // Older than the webhook: only max(session.created, lastStripeEventCreatedAt) applies.
+        created: webhookTime - 100,
+      });
+
+      const response = await getStatus(row.sessionId);
+
+      expect(response.json().status).toBe("paid");
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("paid");
+      expect(updated.lastStripeEventCreatedAt).toBe(webhookTime);
     });
 
     it("does not stop a later webhook from applying after reconciliation", async () => {

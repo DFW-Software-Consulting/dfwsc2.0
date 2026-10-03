@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients, paymentLedger } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
-import { withStripeCircuit } from "../lib/circuit-breakers";
+import { getCircuitBreakerStates, withStripeCircuit } from "../lib/circuit-breakers";
 import { getClientIp } from "../lib/client-ip";
 import {
   appendCheckoutSessionId,
@@ -88,19 +88,22 @@ async function reconcileStaleCheckout(
   const sessionId = row.stripeSessionId;
   const now = Date.now();
   if (!sessionId || now - row.createdAt.getTime() < RECONCILE_MIN_AGE_MS) return row;
+  // Best-effort read on a public, polled endpoint: honour an open Stripe breaker
+  // but run the lookup outside it. Routing it through withStripeCircuit would
+  // count its failures (timeouts, 4xx for an inaccessible account) towards the
+  // breaker that guards payment creation and could open it for every merchant.
+  if (getCircuitBreakerStates().stripe.open) return row;
   if (!shouldAttemptReconcile(sessionId, now)) return row;
 
   try {
-    const session = await withStripeCircuit(() =>
-      stripe.checkout.sessions.retrieve(
-        sessionId,
-        {},
-        {
-          stripeAccount: row.connectedAccountId,
-          timeout: RECONCILE_STRIPE_TIMEOUT_MS,
-          maxNetworkRetries: 0,
-        }
-      )
+    const session = await stripe.checkout.sessions.retrieve(
+      sessionId,
+      {},
+      {
+        stripeAccount: row.connectedAccountId,
+        timeout: RECONCILE_STRIPE_TIMEOUT_MS,
+        maxNetworkRetries: 0,
+      }
     );
     // An open session has nothing to apply yet.
     const outcome =
