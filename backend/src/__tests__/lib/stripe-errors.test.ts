@@ -1,4 +1,5 @@
 import type { FastifyReply } from "fastify";
+import Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 import { mapStripeError } from "../../lib/stripe-errors";
 
@@ -8,8 +9,19 @@ function fakeReply() {
   return { reply: { code } as unknown as FastifyReply, code, send };
 }
 
+// Legacy shape: some errors identify themselves via `name` only.
 function stripeError(name: string, message: string, extra: Record<string, unknown> = {}) {
   return Object.assign(new Error(message), { name }, extra);
+}
+
+// Real SDK errors: stripe-node sets `type` to the class name and leaves `name` as "Error".
+function sdkError(
+  type: string,
+  statusCode: number,
+  message: string,
+  extra: Record<string, unknown> = {}
+) {
+  return Stripe.errors.StripeError.generate({ type, statusCode, message, ...extra } as never);
 }
 
 const circuitOpen = { error: "open", code: "STRIPE_CIRCUIT_OPEN" };
@@ -89,5 +101,97 @@ describe("mapStripeError permanent errors", () => {
       })
     ).toBe(false);
     expect(code).not.toHaveBeenCalled();
+  });
+
+  describe("with real Stripe SDK errors", () => {
+    const opts = { circuitOpen, permanentErrors: true };
+
+    it("generates SDK errors whose name is not the class name", () => {
+      const err = sdkError("invalid_request_error", 400, "x");
+      expect(err.name).toBe("Error");
+      expect(err.type).toBe("StripeInvalidRequestError");
+    });
+
+    it("maps an invalid_request_error to 400 with Stripe's message and param", () => {
+      const { reply, code, send } = fakeReply();
+      const err = sdkError("invalid_request_error", 400, "Invalid currency: xyz", {
+        param: "currency",
+      });
+
+      expect(mapStripeError(err, reply, opts)).toBe(true);
+
+      expect(code).toHaveBeenCalledWith(400);
+      expect(send).toHaveBeenCalledWith({
+        error: "Invalid currency: xyz",
+        code: "INVALID_REQUEST",
+        param: "currency",
+      });
+    });
+
+    it("maps an idempotency_error to 409 IDEMPOTENCY_KEY_REUSED", () => {
+      const { reply, code, send } = fakeReply();
+      const err = sdkError("idempotency_error", 400, "Keys for idempotent requests mismatch");
+
+      expect(mapStripeError(err, reply, opts)).toBe(true);
+
+      expect(code).toHaveBeenCalledWith(409);
+      expect(send).toHaveBeenCalledWith({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
+    });
+
+    it("maps StripePermissionError to 409 ACCOUNT_NOT_CONNECTED", () => {
+      const { reply, code, send } = fakeReply();
+      const err = new Stripe.errors.StripePermissionError({
+        type: "invalid_request_error",
+        statusCode: 403,
+        message: "The provided key does not have access to this account.",
+      } as never);
+
+      expect(mapStripeError(err, reply, opts)).toBe(true);
+
+      expect(code).toHaveBeenCalledWith(409);
+      expect(send).toHaveBeenCalledWith({
+        error: "Client Stripe account is not connected or cannot accept charges.",
+        code: "ACCOUNT_NOT_CONNECTED",
+      });
+    });
+
+    it("maps card and rate-limit SDK errors for call sites that opt in", () => {
+      const card = fakeReply();
+      expect(
+        mapStripeError(sdkError("card_error", 402, "Your card was declined."), card.reply, {
+          circuitOpen,
+          cardDeclinedCode: "CARD_DECLINED",
+        })
+      ).toBe(true);
+      expect(card.code).toHaveBeenCalledWith(402);
+      expect(card.send).toHaveBeenCalledWith({
+        error: "Your card was declined.",
+        code: "CARD_DECLINED",
+      });
+
+      const limited = fakeReply();
+      const rateLimited = { error: "busy", code: "RATE_LIMITED" };
+      expect(
+        mapStripeError(sdkError("rate_limit_error", 429, "slow down"), limited.reply, {
+          circuitOpen,
+          rateLimited,
+        })
+      ).toBe(true);
+      expect(limited.code).toHaveBeenCalledWith(429);
+      expect(limited.send).toHaveBeenCalledWith(rateLimited);
+    });
+
+    it("does not map SDK connection or API errors", () => {
+      const { reply, code } = fakeReply();
+      expect(mapStripeError(sdkError("api_error", 500, "boom"), reply, opts)).toBe(false);
+      expect(
+        mapStripeError(
+          new Stripe.errors.StripeConnectionError({ message: "down" } as never),
+          reply,
+          opts
+        )
+      ).toBe(false);
+      expect(code).not.toHaveBeenCalled();
+    });
   });
 });

@@ -25,6 +25,16 @@ export interface StripeErrorMapping {
 }
 
 /**
+ * Class name of a Stripe SDK error. The SDK (stripe-node 19) sets `type` to the class name
+ * (e.g. "StripeInvalidRequestError") and leaves `name` as "Error", so `type` is the real
+ * discriminator; `name` is the fallback for errors that set it instead.
+ */
+function stripeErrorKind(err: Error): string {
+  const type = (err as { type?: unknown }).type;
+  return typeof type === "string" && type.startsWith("Stripe") ? type : err.name;
+}
+
+/**
  * Shared Stripe-error -> HTTP mapping used across the payments/connect/products/webhooks
  * routes: circuit-open -> 503, StripeCardError -> 402, StripeRateLimitError -> 429.
  *
@@ -42,18 +52,20 @@ export function mapStripeError(
     return true;
   }
 
-  if (mapping.cardDeclinedCode && err instanceof Error && err.name === "StripeCardError") {
+  const kind = err instanceof Error ? stripeErrorKind(err) : undefined;
+
+  if (mapping.cardDeclinedCode && err instanceof Error && kind === "StripeCardError") {
     reply.code(402).send({ error: err.message, code: mapping.cardDeclinedCode });
     return true;
   }
 
-  if (mapping.rateLimited && err instanceof Error && err.name === "StripeRateLimitError") {
+  if (mapping.rateLimited && err instanceof Error && kind === "StripeRateLimitError") {
     reply.code(429).send(mapping.rateLimited);
     return true;
   }
 
   if (mapping.permanentErrors && err instanceof Error) {
-    if (err.name === "StripeInvalidRequestError") {
+    if (kind === "StripeInvalidRequestError") {
       const param = (err as { param?: unknown }).param;
       reply.code(400).send({
         error: err.message,
@@ -62,11 +74,11 @@ export function mapStripeError(
       });
       return true;
     }
-    if (err.name === "StripeIdempotencyError") {
+    if (kind === "StripeIdempotencyError") {
       reply.code(409).send({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
       return true;
     }
-    if (err.name === "StripePermissionError") {
+    if (kind === "StripePermissionError") {
       reply.code(409).send({
         error: "Client Stripe account is not connected or cannot accept charges.",
         code: "ACCOUNT_NOT_CONNECTED",

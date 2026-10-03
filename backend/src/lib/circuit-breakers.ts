@@ -19,26 +19,31 @@ const breakerOptions = {
 
 /**
  * opossum treats an error the filter returns true for as a success, not a failure.
- * Stripe 4xx responses other than 429 (invalid request, idempotency mismatch, permission,
- * card errors) mean Stripe answered and the caller's input was wrong, so they must not
- * count toward opening the process-wide breaker. Connection errors (no status), 5xx, 429
- * and opossum timeouts still count.
+ * Stripe 4xx responses other than 429 and 401 (invalid request, idempotency mismatch,
+ * permission, card errors) mean Stripe answered and the caller's input was wrong, so they
+ * must not count toward opening the process-wide breaker. A 401 means the platform key is
+ * revoked or wrong, which is a platform-wide failure, so it still counts. Connection errors
+ * (no status), 5xx, 429 and opossum timeouts also count.
  */
 function isStripeCallerError(error: unknown): boolean {
   const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
   return (
-    typeof statusCode === "number" && statusCode >= 400 && statusCode < 500 && statusCode !== 429
+    typeof statusCode === "number" &&
+    statusCode >= 400 &&
+    statusCode < 500 &&
+    statusCode !== 429 &&
+    statusCode !== 401
   );
 }
 
 /**
  * Permanent SMTP rejection of a recipient address (nodemailer sets `command: "RCPT TO"` and
- * a 5xx `responseCode`, or `code: "EENVELOPE"`). That is bad input, not an outage; auth and
- * connection failures still count.
+ * a 5xx `responseCode`). That is bad input, not an outage; auth, connection, MAIL FROM, DATA
+ * and temporary 4xx failures still count. `code: "EENVELOPE"` alone is not enough because
+ * nodemailer also uses it for MAIL FROM and DATA failures.
  */
 function isSmtpRecipientRejection(error: unknown): boolean {
-  const err = error as { code?: unknown; command?: unknown; responseCode?: unknown } | null;
-  if (err?.code === "EENVELOPE") return true;
+  const err = error as { command?: unknown; responseCode?: unknown } | null;
   return (
     err?.command === "RCPT TO" &&
     typeof err.responseCode === "number" &&

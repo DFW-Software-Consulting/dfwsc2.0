@@ -50,6 +50,7 @@ describe("circuit-breakers caller-error handling", () => {
     ["StripeAPIError", 500],
     ["StripeAPIError", 503],
     ["StripeRateLimitError", 429],
+    ["StripeAuthenticationError", 401],
   ])("still opens the Stripe circuit on five consecutive %s (%s)", async (name, status) => {
     const { getCircuitBreakerStates, withStripeCircuit } = await getCircuitBreakers();
 
@@ -95,6 +96,47 @@ describe("circuit-breakers caller-error handling", () => {
     }
 
     expect(getCircuitBreakerStates().smtp.closed).toBe(true);
+  });
+
+  it("counts real SDK errors by status: caller errors do not open, outages do", async () => {
+    const Stripe = (await import("stripe")).default;
+    const { getCircuitBreakerStates, withStripeCircuit } = await getCircuitBreakers();
+    const invalid = Stripe.errors.StripeError.generate({
+      type: "invalid_request_error",
+      statusCode: 400,
+      message: "bad",
+    } as never);
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      await expect(withStripeCircuit(() => Promise.reject(invalid))).rejects.toBe(invalid);
+    }
+    expect(getCircuitBreakerStates().stripe.closed).toBe(true);
+
+    const apiError = Stripe.errors.StripeError.generate({
+      type: "api_error",
+      statusCode: 500,
+      message: "boom",
+    } as never);
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await expect(withStripeCircuit(() => Promise.reject(apiError))).rejects.toBe(apiError);
+    }
+    expect(getCircuitBreakerStates().stripe.open).toBe(true);
+  });
+
+  it.each([
+    ["MAIL FROM rejection", { code: "EENVELOPE", command: "MAIL FROM", responseCode: 550 }],
+    ["DATA failure", { code: "EENVELOPE", command: "DATA", responseCode: 554 }],
+    ["temporary RCPT TO rejection", { code: "EENVELOPE", command: "RCPT TO", responseCode: 451 }],
+  ])("still opens the SMTP circuit on an EENVELOPE %s", async (_label, props) => {
+    const { getCircuitBreakerStates, withSmtpCircuit } = await getCircuitBreakers();
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await expect(withSmtpCircuit(() => Promise.reject(smtpError(props)))).rejects.toThrow(
+        "smtp failure"
+      );
+    }
+
+    expect(getCircuitBreakerStates().smtp.open).toBe(true);
   });
 
   it("still opens the SMTP circuit on connection and auth failures", async () => {
