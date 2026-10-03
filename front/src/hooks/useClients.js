@@ -109,7 +109,11 @@ export function useDeleteClient() {
 
 export function useResendOnboarding() {
   const { token } = useAuth();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body) => resendOnboardingLink(token, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "clients" });
+    },
   });
 }

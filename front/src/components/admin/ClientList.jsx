@@ -112,7 +112,12 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
       resendMutation.mutate(
         { clientId: client.id },
         {
-          onSuccess: () => {
+          onSuccess: (data) => {
+            if (data?.alreadyOnboarded) {
+              showToast?.("Onboarding is already complete for this client.", "success");
+              logger.info(`Client already onboarded, no link sent: ${client.email}`);
+              return;
+            }
             showToast?.("New onboarding link sent successfully!", "success");
             logger.info(`Resent onboarding link for client: ${client.email}`);
           },

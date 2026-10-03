@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ClientList from "../components/admin/ClientList";
 import { getOnboardingState } from "../components/admin/shared/onboardingState";
@@ -27,12 +27,14 @@ const clientRows = [
 ];
 
 const idleMutation = { mutate: vi.fn(), isPending: false, variables: undefined };
+const resendMutate = vi.fn();
+const resendMutation = { mutate: resendMutate, isPending: false, variables: undefined };
 
 vi.mock("../hooks/useClients", () => ({
   useClients: () => ({ data: clientRows, isLoading: false, isError: false }),
   useDeleteClient: () => idleMutation,
   usePatchClientStatus: () => idleMutation,
-  useResendOnboarding: () => idleMutation,
+  useResendOnboarding: () => resendMutation,
 }));
 
 vi.mock("../hooks/useGroups", () => ({
@@ -73,5 +75,33 @@ describe("ClientList onboarding column", () => {
     expect(resend("Not Started Co")).toBeEnabled();
     expect(resend("In Progress Co")).toBeEnabled();
     expect(resend("Ready Co")).toBeDisabled();
+  });
+
+  it("reports a client that finished onboarding instead of claiming a link was sent", () => {
+    const showToast = vi.fn();
+    resendMutate.mockImplementation((_vars, options) =>
+      options.onSuccess({ alreadyOnboarded: true })
+    );
+    renderWithProviders(<ClientList showToast={showToast} />);
+
+    fireEvent.click(within(rowFor("In Progress Co")).getByRole("button", { name: /resend link/i }));
+
+    expect(showToast).toHaveBeenCalledWith(
+      "Onboarding is already complete for this client.",
+      "success"
+    );
+    expect(showToast).not.toHaveBeenCalledWith("New onboarding link sent successfully!", "success");
+  });
+
+  it("confirms the link was sent when the server issued a new one", () => {
+    const showToast = vi.fn();
+    resendMutate.mockImplementation((_vars, options) =>
+      options.onSuccess({ message: "Onboarding link sent" })
+    );
+    renderWithProviders(<ClientList showToast={showToast} />);
+
+    fireEvent.click(within(rowFor("Not Started Co")).getByRole("button", { name: /resend link/i }));
+
+    expect(showToast).toHaveBeenCalledWith("New onboarding link sent successfully!", "success");
   });
 });
