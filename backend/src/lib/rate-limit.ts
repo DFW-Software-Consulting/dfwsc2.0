@@ -5,6 +5,9 @@ import { getClientIp } from "./client-ip";
 type RateLimitOptions = {
   max: number;
   windowMs: number;
+  // Bucket namespace. Defaults to the request's method and route pattern so
+  // limiters on different routes never share (or prune) each other's hits.
+  name?: string;
   keyGenerator?: (request: FastifyRequest) => string;
   maxGenerator?: (request: FastifyRequest) => number;
 };
@@ -12,7 +15,6 @@ type RateLimitOptions = {
 type AdminScopedRequest = FastifyRequest & { admin?: { id?: string } };
 
 let redis: Redis | null = null;
-const isProduction = process.env.NODE_ENV === "production";
 
 try {
   if (process.env.REDIS_URL) {
@@ -43,6 +45,27 @@ export function warnIfInMemoryRateLimit(logger: { warn: (msg: string) => void })
   );
 }
 
+// Redis failures are logged at most once per interval so an outage does not
+// produce one error line per request.
+const REDIS_ERROR_LOG_INTERVAL_MS = 30_000;
+let lastRedisErrorLogAt = 0;
+
+function logRedisFailure(request: FastifyRequest, err: unknown): void {
+  const now = Date.now();
+  if (now - lastRedisErrorLogAt < REDIS_ERROR_LOG_INTERVAL_MS) return;
+  lastRedisErrorLogAt = now;
+  request.log.error(
+    { err },
+    "Rate limiter Redis error; falling back to in-memory limits until Redis recovers"
+  );
+}
+
+function limiterNamespace(request: FastifyRequest, name?: string): string {
+  if (name) return name;
+  const route = request.routeOptions?.url;
+  return route ? `${request.method}:${route}` : "default";
+}
+
 export const hitBuckets = new Map<string, number[]>();
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 let maxRegisteredWindowMs = 0;
@@ -71,7 +94,11 @@ async function redisSlidingWindow(
   pipeline.zadd(key, now.toString(), `${now}:${Math.random()}`);
   pipeline.pexpire(key, windowMs);
   const results = await pipeline.exec();
-  if (!results) return false;
+  if (!results) throw new Error("Redis pipeline returned no results");
+  // ioredis resolves with per-command errors rather than rejecting when the
+  // connection is down, so surface them here.
+  const failed = results.find(([err]) => err);
+  if (failed) throw failed[0];
   const count = results[1]?.[1] as number;
   if (count >= maxHits) {
     await client.zremrangebyscore(key, now, now);
@@ -85,7 +112,8 @@ export function rateLimit(options: RateLimitOptions) {
   maxRegisteredWindowMs = Math.max(maxRegisteredWindowMs, windowMs);
 
   return async function rateLimitGuard(request: FastifyRequest, reply: FastifyReply) {
-    const key = `ratelimit:${options.keyGenerator ? options.keyGenerator(request) : getClientIp(request)}`;
+    const id = options.keyGenerator ? options.keyGenerator(request) : getClientIp(request);
+    const key = `ratelimit:${limiterNamespace(request, options.name)}:${id}`;
     const maxForRequest = options.maxGenerator ? options.maxGenerator(request) : max;
 
     if (redis) {
@@ -96,24 +124,10 @@ export function rateLimit(options: RateLimitOptions) {
         }
         return;
       } catch (err) {
-        // In production, fail closed: reject the request rather than silently
-        // degrading to in-memory rate limiting. This prevents abuse when Redis
-        // is unavailable.
-        if (isProduction) {
-          request.log.error({ err }, "Rate limiter Redis error; rejecting request (fail-closed)");
-          return reply.code(503).send({
-            error: "Rate limiting service is temporarily unavailable.",
-            code: "RATE_LIMIT_UNAVAILABLE",
-          });
-        }
-        // In dev/test, fall through to in-memory fallback.
+        // Single API instance: the in-memory limiter is as accurate as Redis,
+        // and failing closed would reject payments whenever Redis restarts.
+        logRedisFailure(request, err);
       }
-    } else if (isProduction && process.env.REDIS_URL) {
-      // Redis was configured but not available — fail closed in production.
-      return reply.code(503).send({
-        error: "Rate limiting service is temporarily unavailable.",
-        code: "RATE_LIMIT_UNAVAILABLE",
-      });
     }
 
     const now = Date.now();
