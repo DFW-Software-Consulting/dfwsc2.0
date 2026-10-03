@@ -50,8 +50,9 @@ function SectionAnchor({ id }) {
 }
 
 const NODE_CODE = `// idempotencyKey: a UUID you generate once per payment attempt (for example with
-// require('crypto').randomUUID()) and store with your order. If a request fails or
-// times out, retry with the same key so you never create a second payment.
+// require('crypto').randomUUID()) and store with the sessionId. If a request fails or
+// times out, retry with the same key (within 24 hours) so you never create a second
+// payment. If the customer starts checkout again, generate a new key.
 async function createPayment(amountCents, description, idempotencyKey) {
   const response = await fetch(
     'https://<your-api-base-url>/api/v1/payments/create',
@@ -79,8 +80,9 @@ async function createPayment(amountCents, description, idempotencyKey) {
   );
 
   if (!response.ok) {
-    const err = await response.json();
-    throw new Error(\`Payment error \${response.status} (\${err.code ?? 'no code'}): \${err.error}\`);
+    // A proxy error during a deploy has no JSON body, so do not assume one.
+    const err = await response.json().catch(() => ({}));
+    throw new Error(\`Payment error \${response.status} (\${err.code ?? 'no code'}): \${err.error ?? 'no message'}\`);
   }
 
   return response.json(); // { url, sessionId } — store sessionId with your order
@@ -110,8 +112,9 @@ const PYTHON_CODE = `import requests
 DFWSC_API_KEY = 'your-api-key'
 
 # idempotency_key: a UUID you generate once per payment attempt (str(uuid.uuid4()))
-# and store with your order. If a request fails or times out, retry with the same
-# key so you never create a second payment.
+# and store with the sessionId. If a request fails or times out, retry with the same
+# key (within 24 hours) so you never create a second payment. If the customer starts
+# checkout again, generate a new key.
 def create_payment(amount_cents: int, description: str, idempotency_key: str) -> dict:
     response = requests.post(
         'https://<your-api-base-url>/api/v1/payments/create',
@@ -152,9 +155,10 @@ def verify_payment(session_id: str, expected_amount_cents: int, expected_currenc
         and payment['currency'] == expected_currency
     )`;
 
-const PHP_CODE = `// $idempotencyKey: a UUID you generate once per payment attempt and store with your
-// order. If a request fails or times out, retry with the same key so you never
-// create a second payment.
+const PHP_CODE = `// $idempotencyKey: a UUID you generate once per payment attempt and store with the
+// sessionId. If a request fails or times out, retry with the same key (within 24
+// hours) so you never create a second payment. If the customer starts checkout
+// again, generate a new key.
 function createPayment(int $amountCents, string $description, string $idempotencyKey): array {
     $ch = curl_init(
         'https://<your-api-base-url>/api/v1/payments/create'
@@ -196,7 +200,7 @@ function verifyPayment(string $sessionId, int $expectedAmountCents, string $expe
     curl_close($ch);
 
     if ($httpCode !== 200) {
-        return false; // a 429 is retryable — try again in a few seconds
+        return false; // a 429 is retryable — back off before checking again
     }
 
     $payment = json_decode($result, true);
@@ -214,35 +218,62 @@ const LANG_TABS = [
 const ERROR_ROWS = [
   {
     status: "400",
-    cause: "Missing or invalid field",
-    fix: "Check request body — the error message says what's wrong",
+    cause:
+      'Missing or invalid field, an Idempotency-Key that is too long, or Stripe rejected a field of the request (code "INVALID_REQUEST", with param naming the field when Stripe says which)',
+    retry:
+      "No. Fix the request; the error message says what is wrong. After INVALID_REQUEST, send the corrected request with a new Idempotency-Key, because Stripe keeps its first answer for a key, errors included, for 24 hours",
   },
   {
     status: "401",
     cause: "Bad, missing or deactivated API key",
-    fix: "Verify your X-Api-Key header. A deactivated client gets the same response — ask your DFWSC administrator",
+    retry:
+      "No. Verify your X-Api-Key header. A deactivated client gets the same response — ask your DFWSC administrator",
+  },
+  {
+    status: "402",
+    cause: 'The card was declined (code "CARD_DECLINED")',
+    retry: "No, not with the same key. Start a new attempt with a new Idempotency-Key",
   },
   {
     status: "409",
-    cause: 'Stripe onboarding is not finished (code "ACCOUNT_NOT_CONNECTED")',
-    fix: "Retrying will not help. Finish the Stripe onboarding for this account, or ask your DFWSC administrator to confirm it can accept charges",
+    cause:
+      'Stripe onboarding is not finished, or the account cannot take payments (code "ACCOUNT_NOT_CONNECTED")',
+    retry:
+      "No. Finish the Stripe onboarding for this account, or ask your DFWSC administrator to confirm it can accept charges",
   },
-  { status: "429", cause: "Too many requests", fix: "Slow down and retry" },
+  {
+    status: "409",
+    cause: 'The key was already used for a different payment (code "IDEMPOTENCY_KEY_REUSED")',
+    retry: "No, not with this key. Generate a new Idempotency-Key for the new payment",
+  },
+  {
+    status: "409",
+    cause: 'A request with this key is still in progress (code "IDEMPOTENCY_KEY_IN_USE")',
+    retry: "Yes. Wait a moment and retry the same request with the same key",
+  },
+  {
+    status: "429",
+    cause: 'Too many requests, or Stripe is busy (code "RATE_LIMITED")',
+    retry: "Yes. Back off, then retry with the same key",
+  },
   {
     status: "500",
     cause: "Server error",
-    fix: "Contact DFWSC support and quote the X-Request-Id response header",
+    retry: "Contact DFWSC support and quote the X-Request-Id response header",
   },
   {
     status: "502",
-    cause: "Stripe unreachable",
-    fix: "Retry with the same Idempotency-Key — usually temporary",
+    cause:
+      'Stripe could not be reached, or failed in a way that is not covered above (code "STRIPE_FAILED")',
+    retry:
+      "Yes, with the same key. If it still fails after a few attempts, stop and contact DFWSC support with the X-Request-Id",
   },
   {
     status: "503",
     cause:
-      'Payment was created but could not be recorded (code "LEDGER_PERSISTENCE_FAILED"), or the payment service is temporarily unavailable',
-    fix: "Retry the same request with the same Idempotency-Key. Do not generate a new key, and do not fulfil the order until Step 3 reports paid",
+      'The payment service is temporarily unavailable (code "STRIPE_CIRCUIT_OPEN"), or the payment was created but could not be recorded (code "LEDGER_PERSISTENCE_FAILED")',
+    retry:
+      "Yes. Retry the same request with the same key; the first usually clears within about 30 seconds. Do not generate a new key, and do not fulfil the order until Step 3 reports paid",
   },
 ];
 
@@ -250,7 +281,7 @@ const STATUS_ROWS = [
   { status: "paid", meaning: "The customer paid. This is the only status to fulfil an order on." },
   {
     status: "created",
-    meaning: "Not finished yet. Wait a couple of seconds and check again.",
+    meaning: "Not finished yet. Check again later, using the schedule below.",
   },
   { status: "expired", meaning: "Not paid. The checkout session ran out of time." },
   { status: "failed", meaning: "Not paid. The payment did not go through." },
@@ -499,7 +530,10 @@ export default function Docs() {
                 <tbody>
                   {[
                     ["X-Api-Key", "Your API key"],
-                    ["Idempotency-Key", "A new unique value (UUID) for each payment attempt"],
+                    [
+                      "Idempotency-Key",
+                      "A new UUID for each payment attempt (at most 218 characters)",
+                    ],
                     ["Content-Type", "application/json"],
                   ].map(([header, value]) => (
                     <tr
@@ -521,14 +555,24 @@ export default function Docs() {
                 What is an Idempotency Key?
               </h3>
               <p className="mt-4 text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
-                Every request needs a unique{" "}
+                Every request needs an{" "}
                 <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-200/50 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
                   Idempotency-Key
                 </code>
-                . Use a new unique value (a UUID) for each payment attempt and store it with your
-                order. It prevents double-charges if a network error causes a retry: if a request
-                fails or times out, retry the same request with the same key and you get the same
+                . It prevents double-charges if a network error causes a retry: if a request fails
+                or times out, send the same request again with the same key and you get the same
                 result — no duplicate charge.
+              </p>
+              <p className="mt-4 text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
+                A key identifies one payment attempt, not one order. Generate a UUID per attempt and
+                store it with the sessionId you get back. Keys are scoped to your account, so keys
+                from other integrators never clash with yours, and a key can be at most 218
+                characters. Reuse a key only to repeat a request that failed or timed out, with the
+                same body, and never more than 24 hours after you first sent it. Generate a new key
+                when the customer abandons checkout and starts again later, when the order changed,
+                or after a 400 that says Stripe rejected a field, and store the new sessionId
+                against the order. Sending a key again for a different payment returns 409
+                IDEMPOTENCY_KEY_REUSED: use a new key.
               </p>
             </div>
 
@@ -744,8 +788,8 @@ window.location.href = url;`}</CodeBlock>
                   desc: "If someone pays and closes the tab, your success page never loads. Re-check any order that is still pending using its stored sessionId.",
                 },
                 {
-                  title: "Do not poll faster than every couple of seconds.",
-                  desc: "This endpoint is rate limited. If you get a 429, wait and try again.",
+                  title: "Back off when you poll.",
+                  desc: "This endpoint allows 30 requests per minute for each calling IP address, shared by every session you check from that address, so one order polled every two seconds uses the whole budget. Check once when the customer lands on the success URL, then again after about 2, 5 and 10 seconds. If the status is still created, leave the order to a background job that checks it about once a minute. On a 429, wait before the next attempt instead of retrying straight away.",
                 },
               ].map((item) => (
                 <div
@@ -832,14 +876,14 @@ window.location.href = url;`}</CodeBlock>
                       Cause
                     </th>
                     <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
-                      Fix
+                      Retry?
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {ERROR_ROWS.map((row) => (
                     <tr
-                      key={row.status}
+                      key={row.cause}
                       className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]"
                     >
                       <td className="px-6 py-4 font-black text-slate-900 dark:text-white transition-colors">
@@ -848,12 +892,17 @@ window.location.href = url;`}</CodeBlock>
                       <td className="px-6 py-4 text-slate-600 dark:text-slate-300 transition-colors">
                         {row.cause}
                       </td>
-                      <td className="px-6 py-4 text-xs transition-colors">{row.fix}</td>
+                      <td className="px-6 py-4 text-xs transition-colors">{row.retry}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            <p className="mt-6 text-sm text-slate-600 dark:text-slate-400 leading-relaxed transition-colors">
+              A 502 or 503 returned while the API restarts during a deploy comes from the proxy in
+              front of it, so it has neither this JSON body nor the X-Request-Id header. Check the
+              status code before you parse the body.
+            </p>
           </section>
 
           {/* Rules */}
@@ -871,7 +920,7 @@ window.location.href = url;`}</CodeBlock>
                 },
                 {
                   title: "Always use a new Idempotency-Key (a UUID) per payment attempt.",
-                  desc: "Store it with your order and reuse it only to retry the same request.",
+                  desc: "A key covers one attempt, not one order. Store it with the sessionId, reuse it only to retry a failed or timed-out request within 24 hours, and generate a new one when the customer starts checkout again.",
                 },
                 {
                   title: "Amounts are in cents.",

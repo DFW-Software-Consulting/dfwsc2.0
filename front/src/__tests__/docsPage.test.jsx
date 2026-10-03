@@ -13,6 +13,39 @@ describe("Docs page", () => {
     expect(container.textContent).toContain("LEDGER_PERSISTENCE_FAILED");
   });
 
+  it("lists the error codes /payments/create returns for caller errors and key conflicts", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+
+    for (const code of [
+      "INVALID_REQUEST",
+      "CARD_DECLINED",
+      "IDEMPOTENCY_KEY_REUSED",
+      "IDEMPOTENCY_KEY_IN_USE",
+      "RATE_LIMITED",
+      "STRIPE_FAILED",
+      "STRIPE_CIRCUIT_OPEN",
+    ]) {
+      expect(container.textContent).toContain(code);
+    }
+  });
+
+  it("says an idempotency key covers one attempt for at most 24 hours", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+
+    expect(container.textContent).toMatch(/one payment attempt, not one order/i);
+    expect(container.textContent).toMatch(/never more than 24 hours/i);
+    expect(container.textContent).toMatch(/218 characters/);
+    expect(container.textContent).not.toMatch(/unique\s+Idempotency-Key/i);
+  });
+
+  it("states the confirmation endpoint limit and a polling backoff", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+
+    expect(container.textContent).toMatch(/30 requests per minute for each calling IP address/i);
+    expect(container.textContent).toMatch(/2, 5 and 10 seconds/);
+    expect(container.textContent).not.toMatch(/couple of seconds/i);
+  });
+
   it("does not describe request fields or notifications the API does not support", () => {
     const { container } = render(<Docs />, { wrapper: MemoryRouter });
 

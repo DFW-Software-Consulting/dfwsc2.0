@@ -56,12 +56,19 @@ POST /api/v1/payments/create
 | Header | Value |
 |--------|-------|
 | `X-Api-Key` | Your API key |
-| `Idempotency-Key` | A new unique value (UUID) for each payment attempt |
+| `Idempotency-Key` | A new UUID for each payment attempt (at most 218 characters) |
 | `Content-Type` | `application/json` |
 
 ### What is an Idempotency Key?
 
-Every request needs an `Idempotency-Key`. Use a new unique value (a UUID) for each payment attempt and store it with your order. It prevents double-charges if a network error causes a retry: if a request fails or times out, retry the same request with the same key and you get the same result — no duplicate charge.
+Every request needs an `Idempotency-Key`. It prevents double-charges if a network error causes a retry: if a request fails or times out, send the same request again with the same key and you get the same result — no duplicate charge.
+
+A key identifies one payment attempt, not one order:
+
+- **Generate a UUID per attempt** and store it with the `sessionId` you get back. Keys are scoped to your account, so another integrator's keys never clash with yours. A key can be at most 218 characters; a longer one returns `400` and the message states the exact limit.
+- **Reuse a key only to repeat a request** that failed or timed out, with the same body, and never more than 24 hours after you first sent it.
+- **Retire the key and generate a new one** when the customer abandons checkout and starts again later, when the order changed, or after a `400` that says Stripe rejected a field. Store the new `sessionId` against the order.
+- Sending a key again for a different payment returns `409 IDEMPOTENCY_KEY_REUSED`. Retrying it will not help: use a new key.
 
 ### Request Body
 
@@ -140,7 +147,7 @@ GET /api/v1/payments/session/{sessionId}
 | Status | Meaning |
 |--------|---------|
 | `paid` | The customer paid. This is the only status to fulfil an order on. |
-| `created` | Not finished yet. Wait a couple of seconds and check again. |
+| `created` | Not finished yet. Check again later, using the schedule below. |
 | `expired` | Not paid. The checkout session ran out of time. |
 | `failed` | Not paid. The payment did not go through. |
 | `canceled` | Not paid. The payment was canceled. |
@@ -149,7 +156,7 @@ GET /api/v1/payments/session/{sessionId}
 
 - **Fulfil only on `paid`.** Compare `baseAmountCents` and `currency` to your order first. If they do not match, do not fulfil it.
 - **Customers do not always come back.** If someone pays and closes the tab, your success page never loads. Re-check any order that is still pending using its stored `sessionId`.
-- **Do not poll faster than every couple of seconds.** This endpoint is rate limited. If you get a `429`, wait and try again.
+- **Back off when you poll.** This endpoint allows 30 requests per minute for each calling IP address, shared by every session you check from that address, so one order polled every two seconds uses the whole budget. Check once when the customer lands on the success URL, then again after about 2, 5 and 10 seconds. If the status is still `created`, leave the order to a background job that checks it about once a minute. On a `429`, wait before the next attempt instead of retrying straight away.
 
 ---
 
@@ -159,8 +166,9 @@ GET /api/v1/payments/session/{sessionId}
 
 ```javascript
 // idempotencyKey: a UUID you generate once per payment attempt (for example with
-// require('crypto').randomUUID()) and store with your order. If a request fails or
-// times out, retry with the same key so you never create a second payment.
+// require('crypto').randomUUID()) and store with the sessionId. If a request fails or
+// times out, retry with the same key (within 24 hours) so you never create a second
+// payment. If the customer starts checkout again, generate a new key.
 async function createPayment(amountCents, description, idempotencyKey) {
   const response = await fetch('https://<your-api-base-url>/api/v1/payments/create', {
     method: 'POST',
@@ -185,8 +193,9 @@ async function createPayment(amountCents, description, idempotencyKey) {
   });
 
   if (!response.ok) {
-    const err = await response.json();
-    throw new Error(`Payment error ${response.status} (${err.code ?? 'no code'}): ${err.error}`);
+    // A proxy error during a deploy has no JSON body, so do not assume one.
+    const err = await response.json().catch(() => ({}));
+    throw new Error(`Payment error ${response.status} (${err.code ?? 'no code'}): ${err.error ?? 'no message'}`);
   }
 
   return response.json(); // { url, sessionId } — store sessionId with your order
@@ -220,8 +229,9 @@ import requests
 DFWSC_API_KEY = 'your-api-key'
 
 # idempotency_key: a UUID you generate once per payment attempt (str(uuid.uuid4()))
-# and store with your order. If a request fails or times out, retry with the same
-# key so you never create a second payment.
+# and store with the sessionId. If a request fails or times out, retry with the same
+# key (within 24 hours) so you never create a second payment. If the customer starts
+# checkout again, generate a new key.
 def create_payment(amount_cents: int, description: str, idempotency_key: str) -> dict:
     response = requests.post(
         'https://<your-api-base-url>/api/v1/payments/create',
@@ -266,9 +276,10 @@ def verify_payment(session_id: str, expected_amount_cents: int, expected_currenc
 ### PHP
 
 ```php
-// $idempotencyKey: a UUID you generate once per payment attempt and store with your
-// order. If a request fails or times out, retry with the same key so you never
-// create a second payment.
+// $idempotencyKey: a UUID you generate once per payment attempt and store with the
+// sessionId. If a request fails or times out, retry with the same key (within 24
+// hours) so you never create a second payment. If the customer starts checkout
+// again, generate a new key.
 function createPayment(int $amountCents, string $description, string $idempotencyKey): array {
     $ch = curl_init('https://<your-api-base-url>/api/v1/payments/create');
     curl_setopt_array($ch, [
@@ -308,7 +319,7 @@ function verifyPayment(string $sessionId, int $expectedAmountCents, string $expe
     curl_close($ch);
 
     if ($httpCode !== 200) {
-        return false; // a 429 is retryable — try again in a few seconds
+        return false; // a 429 is retryable — back off before checking again
     }
 
     $payment = json_decode($result, true);
@@ -334,22 +345,29 @@ Errors return a JSON body with an `error` message. Most errors also include a `c
 
 Every response also carries an `X-Request-Id` header. Log it, and quote it when you contact DFWSC support.
 
-| Status | Cause | Fix |
-|--------|-------|-----|
-| `400` | Missing or invalid field | Check request body — the error message says what's wrong |
-| `401` | Bad, missing or deactivated API key | Verify your `X-Api-Key` header. A deactivated client gets the same response — ask your DFWSC administrator |
-| `409` | Stripe onboarding is not finished (`code`: `ACCOUNT_NOT_CONNECTED`) | Retrying will not help. Finish the Stripe onboarding for this account, or ask your DFWSC administrator to confirm it can accept charges |
-| `429` | Too many requests | Slow down and retry |
+These are the statuses `POST /api/v1/payments/create` can return for a failed request.
+
+| Status | Cause | Retry? |
+|--------|-------|--------|
+| `400` | Missing or invalid field, an `Idempotency-Key` that is too long, or Stripe rejected a field of the request (`code`: `INVALID_REQUEST`, with `param` naming the field when Stripe says which) | No. Fix the request; the error message says what is wrong. After `INVALID_REQUEST`, send the corrected request with a new `Idempotency-Key`, because Stripe keeps its first answer for a key, errors included, for 24 hours |
+| `401` | Bad, missing or deactivated API key | No. Verify your `X-Api-Key` header. A deactivated client gets the same response — ask your DFWSC administrator |
+| `402` | The card was declined (`code`: `CARD_DECLINED`) | No, not with the same key. Start a new attempt with a new `Idempotency-Key` |
+| `409` | Stripe onboarding is not finished, or the account cannot take payments (`code`: `ACCOUNT_NOT_CONNECTED`) | No. Finish the Stripe onboarding for this account, or ask your DFWSC administrator to confirm it can accept charges |
+| `409` | The key was already used for a different payment (`code`: `IDEMPOTENCY_KEY_REUSED`) | No, not with this key. Generate a new `Idempotency-Key` for the new payment |
+| `409` | A request with this key is still in progress (`code`: `IDEMPOTENCY_KEY_IN_USE`) | Yes. Wait a moment and retry the same request with the same key |
+| `429` | Too many requests, or Stripe is busy (`code`: `RATE_LIMITED`) | Yes. Back off, then retry with the same key |
 | `500` | Server error | Contact DFWSC support and quote the `X-Request-Id` |
-| `502` | Stripe unreachable | Retry with the same `Idempotency-Key` — usually temporary |
-| `503` | The payment was created but could not be recorded (`code`: `LEDGER_PERSISTENCE_FAILED`), or the payment service is temporarily unavailable | Retry the same request with the same `Idempotency-Key`. Do not generate a new key, and do not fulfil the order until Step 3 reports `paid` |
+| `502` | Stripe could not be reached, or failed in a way that is not covered above (`code`: `STRIPE_FAILED`) | Yes, with the same key. If it still fails after a few attempts, stop and contact DFWSC support with the `X-Request-Id` |
+| `503` | The payment service is temporarily unavailable (`code`: `STRIPE_CIRCUIT_OPEN`), or the payment was created but could not be recorded (`code`: `LEDGER_PERSISTENCE_FAILED`) | Yes. Retry the same request with the same key; the first usually clears within about 30 seconds. Do not generate a new key, and do not fulfil the order until Step 3 reports `paid` |
+
+A `502` or `503` returned while the API restarts during a deploy comes from the proxy in front of it, so it has neither this JSON body nor the `X-Request-Id` header. Check the status code before you parse the body.
 
 ---
 
 ## Rules to Follow
 
 - **Your API key goes on your backend only.** Never put it in frontend JavaScript or a mobile app binary.
-- **Always use a new `Idempotency-Key` (a UUID) per payment attempt.** Store it with your order and reuse it only to retry the same request.
+- **Always use a new `Idempotency-Key` (a UUID) per payment attempt.** A key covers one attempt, not one order. Store it with the `sessionId`, reuse it only to retry a failed or timed-out request within 24 hours, and generate a new one when the customer starts checkout again.
 - **Confirm before you fulfil.** Check `GET /api/v1/payments/session/{sessionId}` from your backend and fulfil only on `paid`. The API does not send webhooks.
 - **Amounts are in cents.** $1.00 = `100`, $25.50 = `2550`, $100.00 = `10000`.
 - **Use HTTPS.** Never send your API key over plain HTTP.

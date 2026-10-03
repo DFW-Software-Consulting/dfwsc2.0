@@ -26,8 +26,8 @@ Create a `.env` file based on `.env.example`.
 | `SMTP_USER` | ✅ | Username/login for the SMTP server. |
 | `SMTP_PASS` | ✅ | Password/API key for the SMTP server. |
 | `SMTP_FROM` | ❌ | Friendly from address used in onboarding emails. Defaults to `SMTP_USER` when omitted. |
-| `ADMIN_USERNAME` | ❌ | Username for the first admin, created at startup when no admin with this username exists. Remove it from the environment once the admin is confirmed. |
-| `ADMIN_PASSWORD` | ❌ | Plaintext password for the first admin (at least 12 characters in production). The server hashes it with bcrypt when it creates the admin, so do not supply a pre-computed hash: the hash string itself would become the password. Remove it from the environment once the admin is confirmed. |
+| `ADMIN_USERNAME` | ❌ | Username for the first admin, created at startup only when the `admins` table is empty. Remove it from the environment once the admin is confirmed. |
+| `ADMIN_PASSWORD` | ❌ | Plaintext password for the first admin (at least 12 characters in production). The server hashes it with bcrypt when it creates the admin, so do not supply a pre-computed hash: the hash string itself would become the password. Once any admin exists it is ignored, and the server logs a startup warning while it is still set. Remove it from the environment once the admin is confirmed. |
 | `JWT_SECRET` | ✅ | Secret key for signing JWT tokens. Must be minimum 32 characters. Generate with: `openssl rand -base64 32` |
 | `JWT_EXPIRY` | ❌ | JWT token expiration time. Defaults to `1h`. Supported formats: `1h`, `30m`, `7d`, `24h`. |
 | `ALLOW_ADMIN_SETUP` | ❌ | When `true`, an admin created from `ADMIN_USERNAME`/`ADMIN_PASSWORD` at startup is left unconfirmed: log in, then choose permanent credentials with `POST /api/v1/auth/confirm-bootstrap`. When not `true`, that admin is created already confirmed. It does not enable `POST /api/v1/auth/setup`, which always returns `410 Gone`. |
@@ -68,7 +68,7 @@ Non-listed endpoints from earlier versions have been removed (invoices, refunds,
 
 - The caller supplies the desired `application_fee_amount` for each payment request.
 - The API always creates a Checkout Session from the required `lineItems`, applies platform fees via `payment_intent_data.application_fee_amount`, and returns the hosted session URL and session ID.
-- Idempotency is enforced via the standard `Idempotency-Key` request header on write routes.
+- Idempotency is enforced via the standard `Idempotency-Key` request header on write routes. On `POST /api/v1/payments/create` keys are scoped per client and at most 218 characters, a key reused for a different payment returns `409 IDEMPOTENCY_KEY_REUSED`, and a key should not be reused more than 24 hours after its first use (Stripe stops honouring it). See `CLIENT_INTEGRATION.md` for the full error list.
 
 Refunds are **not** exposed through this API. Handle all refunds directly in the Stripe Dashboard so Stripe remains the source of truth.
 
@@ -145,7 +145,7 @@ The first admin is created from environment variables at startup. There is no br
 ### First-run steps
 
 1. Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` (plaintext, at least 12 characters in production), and `ALLOW_ADMIN_SETUP=true`.
-2. Start the application. If no admin with that username exists, one is created with the password hashed by bcrypt and left unconfirmed.
+2. Start the application. If the `admins` table is empty, one admin is created with the password hashed by bcrypt and left unconfirmed. If any admin already exists, nothing is created.
 3. Open `/admin` and log in with those credentials. The login response reports `bootstrapPending: true` until the admin is confirmed.
 4. Choose permanent credentials (the new password must also meet the password rules) with `POST /api/v1/auth/confirm-bootstrap`.
 5. **Remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment, set `ALLOW_ADMIN_SETUP=false`, and restart.**
@@ -153,5 +153,5 @@ The first admin is created from environment variables at startup. There is no br
 ### Security considerations
 
 - `ADMIN_PASSWORD` is hashed as given. Never put a bcrypt hash in it; the hash string would become the password.
-- Remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` once the admin is confirmed. If you renamed the admin when you confirmed, a startup with the original `ADMIN_USERNAME` still set finds no admin by that name and creates another one with the original bootstrap password.
+- Remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` once the admin is confirmed. Bootstrap only seeds an empty `admins` table, so a leftover `ADMIN_PASSWORD` does not create a second admin, even if you renamed the admin when you confirmed. It is ignored, but a plaintext admin password has no reason to stay in the environment: while it is set and a confirmed admin exists, startup logs a warning, and names any active admin whose password is still the bootstrap one.
 - `POST /api/v1/auth/confirm-bootstrap` requires an admin JWT and is rate limited to 3 requests per 15 minutes.

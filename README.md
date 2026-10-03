@@ -217,7 +217,7 @@ DEFAULT_PROCESS_FEE_CENTS=100
 
 ```
 
-**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, set `ADMIN_USERNAME`/`ADMIN_PASSWORD` (with `ALLOW_ADMIN_SETUP=true`) to bootstrap the first admin from env vars, log in, then confirm the credentials via `/auth/confirm-bootstrap`. After confirming, remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment and set `ALLOW_ADMIN_SETUP=false`. `ADMIN_PASSWORD` is plaintext (at least 12 characters in production) and is hashed by the server when it creates the admin; a pre-computed bcrypt hash would itself become the password. The `/auth/setup` endpoint is deprecated and always returns 410 Gone. See `.env.example` for detailed documentation.
+**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, set `ADMIN_USERNAME`/`ADMIN_PASSWORD` (with `ALLOW_ADMIN_SETUP=true`) to bootstrap the first admin from env vars (only done when no admin exists yet), log in, then confirm the credentials via `/auth/confirm-bootstrap`. After confirming, remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment and set `ALLOW_ADMIN_SETUP=false`. `ADMIN_PASSWORD` is plaintext (at least 12 characters in production) and is hashed by the server when it creates the admin; a pre-computed bcrypt hash would itself become the password. The `/auth/setup` endpoint is deprecated and always returns 410 Gone. See `.env.example` for detailed documentation.
 
 ### Frontend (.env)
 
