@@ -1,4 +1,4 @@
-import { and, count, eq, ne } from "drizzle-orm";
+import { and, asc, count, desc, eq, ne } from "drizzle-orm";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../db/client";
@@ -174,6 +174,9 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           status: clients.status,
           workspace: clients.workspace,
           groupId: clients.groupId,
+          chargesEnabled: clients.chargesEnabled,
+          detailsSubmitted: clients.detailsSubmitted,
+          payoutsEnabled: clients.payoutsEnabled,
           processingFeePercent: clients.processingFeePercent,
           processingFeeCents: clients.processingFeeCents,
           createdAt: clients.createdAt,
@@ -201,7 +204,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           )
         : and(eq(clients.workspace, workspace), ne(clients.status, "archived"));
       const [{ total }] = await db.select({ total: count() }).from(clients).where(where);
-      const clientList = await query.where(where).limit(pagination.limit).offset(pagination.offset);
+      const clientList = await query
+        .where(where)
+        .orderBy(desc(clients.createdAt), asc(clients.id))
+        .limit(pagination.limit)
+        .offset(pagination.offset);
 
       return res.status(200).send({
         data: clientList.map((client) => ({

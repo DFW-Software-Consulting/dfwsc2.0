@@ -13,6 +13,8 @@ vi.mock("bcryptjs", () => ({
 }));
 
 vi.mock("drizzle-orm", () => ({
+  asc: (field: unknown) => ({ asc: true, field }),
+  desc: (field: unknown) => ({ desc: true, field }),
   count: () => ({ fn: "count" }),
   eq: (field: unknown, value: unknown) => ({ value, field }),
   ne: (field: unknown, value: unknown) => ({ not: true, value, field }),
