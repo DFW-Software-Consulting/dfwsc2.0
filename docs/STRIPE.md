@@ -38,6 +38,8 @@ Every payment creation inserts a row into the `payment_ledger` table synchronous
 
 `GET /api/v1/payments/session/:sessionId` returns payer-safe fields from the ledger (`status`, `baseAmountCents`, `totalAmountCents`, `feeAmountCents`, `currency`, `createdAt`; no internal IDs or metadata leaked). It is public (no API key) and rate-limited to 30 requests/minute per IP. Integrators should fulfil only on `paid` and compare `baseAmountCents`/`currency` to their order; the public guide is the `/docs` page (Step 3).
 
+**Stripe fallback for missed webhooks.** If the row is still `created` and older than 30 seconds, the endpoint retrieves the Checkout Session from Stripe on the row's connected account (skipped while the Stripe circuit breaker is open, but its own failures are not counted towards the breaker) and applies the same transition the webhook would: a `complete` session that is `paid` or `no_payment_required` becomes `paid`, an `expired` session becomes `expired`, and an open or unsettled session leaves the row `created`. Stripe is asked at most once per session per 30 seconds per API process. A Stripe failure or open breaker never fails the request; the stored row is returned. Reconciliation does not advance `last_stripe_event_created_at` beyond the newest event already recorded, so later webhooks still apply. The fallback cannot recover a failed delayed payment: that still needs the `checkout.session.async_payment_failed` webhook.
+
 ## 4. Fee Resolution
 `application_fee_amount` is collected on every transaction via a 6-level priority chain (first non-null wins):
 1. Client `processingFeePercent`
@@ -55,6 +57,8 @@ Pass `waiveFee: true` in the payment request body to skip the platform fee for a
 `POST /api/v1/webhooks/stripe`
 - Validates Stripe signature via `STRIPE_WEBHOOK_SECRET`.
 - Deduplicates events using the `webhook_events` table (`stripeEventId` unique constraint) with a reclaimable lease mechanism.
+- **Required endpoint and events**: payments are direct charges on connected accounts, so Stripe delivers these events only to a webhook endpoint registered with "Listen to events on Connected accounts" (a Connect endpoint). It must be subscribed to `checkout.session.completed`, `checkout.session.expired`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `payment_intent.canceled`, `charge.refunded`, `charge.dispute.created` and `account.updated`, and `STRIPE_WEBHOOK_SECRET` must be that endpoint's signing secret. Without it rows stay `created` (the status endpoint's Stripe fallback only covers completed and expired sessions).
+- `checkout.session.completed` marks the row `paid` only when `payment_status` is `paid` or `no_payment_required`. For delayed-notification methods (e.g. bank debits) it arrives `unpaid`: the row stays `created` (the PaymentIntent id is still recorded) and `async_payment_succeeded` / `async_payment_failed` move it to `paid` / `failed`.
 - Updates the `payment_ledger` table for: `checkout.session.completed`, `checkout.session.expired`, `checkout.session.async_payment_succeeded/failed`, `payment_intent.succeeded/failed/canceled`, `charge.refunded`, `charge.dispute.created`.
 - **account.updated ordering protection**: Retrieves current account state from Stripe rather than trusting the event payload, handling out-of-order delivery.
 - Ledger updates use `last_stripe_event_created_at` to ignore stale events.

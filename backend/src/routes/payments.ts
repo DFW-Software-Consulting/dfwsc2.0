@@ -6,7 +6,7 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients, paymentLedger } from "../db/schema";
 import { requireAdminJwt, requireApiKey } from "../lib/auth";
-import { withStripeCircuit } from "../lib/circuit-breakers";
+import { getCircuitBreakerStates, withStripeCircuit } from "../lib/circuit-breakers";
 import { getClientIp } from "../lib/client-ip";
 import {
   appendCheckoutSessionId,
@@ -21,6 +21,7 @@ import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
 import { mapStripeError } from "../lib/stripe-errors";
 import { parseBody, validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
+import { applyCheckoutSessionOutcome } from "./webhooks";
 
 // ── Sanitize Stripe PaymentIntent for reports ──────────────────────────────────
 // Returns only the fields needed by the frontend/admin reports.
@@ -43,6 +44,88 @@ function sanitizePaymentIntent(
     ...(extra?.clientId ? { clientId: extra.clientId } : {}),
     ...(extra?.clientName ? { clientName: extra.clientName } : {}),
   };
+}
+
+// ── Stale checkout reconciliation ──────────────────────────────────────────────
+// Ledger status is normally written by webhooks. If the row is still "created"
+// after RECONCILE_MIN_AGE_MS the completion event may have been lost, so the
+// status endpoint asks Stripe and applies the transition the webhook would.
+const RECONCILE_MIN_AGE_MS = 30_000;
+// At most one Stripe lookup per session per interval, so a polling client
+// cannot turn this public endpoint into a Stripe call per request. In-memory
+// and per process: with several API instances the worst case is one lookup per
+// instance per interval.
+const RECONCILE_INTERVAL_MS = 30_000;
+const RECONCILE_MAX_TRACKED = 1000;
+// This endpoint is public and polled, so the fallback lookup gets a much
+// shorter per-request budget than the shared Stripe client (10s, 1 retry).
+const RECONCILE_STRIPE_TIMEOUT_MS = 3000;
+const lastReconcileAttempt = new Map<string, number>();
+
+function shouldAttemptReconcile(sessionId: string, now: number): boolean {
+  const last = lastReconcileAttempt.get(sessionId);
+  if (last !== undefined && now - last < RECONCILE_INTERVAL_MS) return false;
+  if (lastReconcileAttempt.size >= RECONCILE_MAX_TRACKED) {
+    for (const [id, at] of lastReconcileAttempt) {
+      if (now - at >= RECONCILE_INTERVAL_MS) lastReconcileAttempt.delete(id);
+    }
+    // Still full of recent entries: drop the oldest (insertion order) to stay bounded.
+    if (lastReconcileAttempt.size >= RECONCILE_MAX_TRACKED) {
+      const oldest = lastReconcileAttempt.keys().next().value;
+      if (oldest !== undefined) lastReconcileAttempt.delete(oldest);
+    }
+  }
+  lastReconcileAttempt.set(sessionId, now);
+  return true;
+}
+
+// Returns the ledger row to report: the refreshed row if Stripe moved it, else
+// the stored row. Never throws; any Stripe or DB failure degrades to the stored row.
+async function reconcileStaleCheckout(
+  row: typeof paymentLedger.$inferSelect,
+  request: FastifyRequest
+): Promise<typeof paymentLedger.$inferSelect> {
+  const sessionId = row.stripeSessionId;
+  const now = Date.now();
+  if (!sessionId || now - row.createdAt.getTime() < RECONCILE_MIN_AGE_MS) return row;
+  // Best-effort read on a public, polled endpoint: honour an open Stripe breaker
+  // but run the lookup outside it. Routing it through withStripeCircuit would
+  // count its failures (timeouts, 4xx for an inaccessible account) towards the
+  // breaker that guards payment creation and could open it for every merchant.
+  if (getCircuitBreakerStates().stripe.open) return row;
+  if (!shouldAttemptReconcile(sessionId, now)) return row;
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(
+      sessionId,
+      {},
+      {
+        stripeAccount: row.connectedAccountId,
+        timeout: RECONCILE_STRIPE_TIMEOUT_MS,
+        maxNetworkRetries: 0,
+      }
+    );
+    // An open session has nothing to apply yet.
+    const outcome =
+      session.status === "complete" ? "completed" : session.status === "expired" ? "expired" : null;
+    if (!outcome) return row;
+
+    // Reconciliation is not a Stripe event, so it must not advance the ordering
+    // clock (a later, genuinely newer webhook would be discarded as stale) nor
+    // lose to it. Reuse the newest event time already recorded on the row.
+    const eventCreatedAt = Math.max(session.created, row.lastStripeEventCreatedAt ?? 0);
+    await applyCheckoutSessionOutcome(outcome, session, eventCreatedAt, request.log);
+
+    const [updated] = await db
+      .select()
+      .from(paymentLedger)
+      .where(eq(paymentLedger.id, row.id))
+      .limit(1);
+    return updated ?? row;
+  } catch (err) {
+    request.log.warn({ err, sessionId }, "Checkout status reconciliation with Stripe failed");
+    return row;
+  }
 }
 
 interface RequestWithClient extends FastifyRequest {
@@ -504,13 +587,19 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         .limit(1);
 
       if (ledgerRow) {
+        // A row still "created" after the webhook should have landed means the
+        // event may have been lost; ask Stripe and apply the same transition.
+        const current =
+          ledgerRow.status === "created"
+            ? await reconcileStaleCheckout(ledgerRow, request)
+            : ledgerRow;
         return reply.send({
-          status: ledgerRow.status,
-          baseAmountCents: ledgerRow.baseAmountCents,
-          totalAmountCents: ledgerRow.totalAmountCents,
-          feeAmountCents: ledgerRow.feeAmountCents,
-          currency: ledgerRow.currency,
-          createdAt: ledgerRow.createdAt,
+          status: current.status,
+          baseAmountCents: current.baseAmountCents,
+          totalAmountCents: current.totalAmountCents,
+          feeAmountCents: current.feeAmountCents,
+          currency: current.currency,
+          createdAt: current.createdAt,
         });
       }
 
