@@ -13,6 +13,15 @@ import "@fontsource/inter/latin-700.css";
 import "@fontsource/inter/latin-800.css";
 import "./index.css";
 
+// A deploy removes the old hashed chunks, so a tab opened before it fails to
+// import the next lazy route. Reload once (guarded) to pick up the new index.html.
+window.addEventListener("vite:preloadError", (event) => {
+  event.preventDefault();
+  if (sessionStorage.getItem("preload-reloaded")) return;
+  sessionStorage.setItem("preload-reloaded", "1");
+  window.location.reload();
+});
+
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false } },
   queryCache: new QueryCache({
