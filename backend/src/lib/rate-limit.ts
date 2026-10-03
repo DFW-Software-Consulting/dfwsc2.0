@@ -63,7 +63,9 @@ function logRedisFailure(request: FastifyRequest, err: unknown): void {
 function limiterNamespace(request: FastifyRequest, name?: string): string {
   if (name) return name;
   const route = request.routeOptions?.url;
-  return route ? `${request.method}:${route}` : "default";
+  // Fastify serves HEAD from every GET route, so both share one bucket.
+  const method = request.method === "HEAD" ? "GET" : request.method;
+  return route ? `${method}:${route}` : "default";
 }
 
 export const hitBuckets = new Map<string, number[]>();

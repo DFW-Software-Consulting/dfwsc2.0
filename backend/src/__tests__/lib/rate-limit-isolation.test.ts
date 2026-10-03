@@ -92,6 +92,16 @@ describe("rateLimit bucket isolation - in-memory", () => {
     await guard(post.request as any, post.reply as any);
     expect(post.reply.code).not.toHaveBeenCalled();
   });
+
+  it("shares one bucket between GET and the HEAD Fastify derives from it", async () => {
+    const { rateLimit } = await import("../../lib/rate-limit");
+    const guard = rateLimit({ max: 1, windowMs: 60_000 });
+    const get = makeMocks("/x", "GET");
+    const head = makeMocks("/x", "HEAD");
+    await guard(get.request as any, get.reply as any);
+    await guard(head.request as any, head.reply as any);
+    expect(head.reply.code).toHaveBeenCalledWith(429);
+  });
 });
 
 describe("rateLimit bucket isolation - Redis path", () => {
