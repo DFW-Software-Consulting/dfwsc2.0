@@ -49,14 +49,22 @@ const STATUS_PRECEDENCE: Record<LedgerStatus, number> = {
  * Update a payment ledger row by session ID or payment intent ID.
  * Uses lastStripeEventCreatedAt to ignore out-of-order events.
  * Enforces status precedence: refunded/disputed cannot be overwritten by paid.
+ *
+ * `attachPaymentIntentId` (session lookups only) records the PaymentIntent id
+ * on the row. A Checkout Session's PaymentIntent does not exist when the ledger
+ * row is created, so this is the only place the id is learned; without it every
+ * later PaymentIntent-keyed event (refunds, disputes, failures) finds no row.
+ * It is identity data, not status, so it is persisted even when the status
+ * update is skipped as stale or as a precedence downgrade.
  */
 async function updateLedgerStatus(
   lookup: { stripeSessionId?: string; stripePaymentIntentId?: string },
   newStatus: LedgerStatus,
   eventCreatedAt: number,
   logger: FastifyBaseLogger,
-  refundedAmountCents?: number
+  options: { refundedAmountCents?: number; attachPaymentIntentId?: string } = {}
 ): Promise<void> {
+  const { refundedAmountCents, attachPaymentIntentId } = options;
   let condition: ReturnType<typeof eq> | undefined;
   if (lookup.stripeSessionId) {
     condition = eq(paymentLedger.stripeSessionId, lookup.stripeSessionId);
@@ -73,6 +81,7 @@ async function updateLedgerStatus(
       lastStripeEventCreatedAt: paymentLedger.lastStripeEventCreatedAt,
       status: paymentLedger.status,
       refundedAmountCents: paymentLedger.refundedAmountCents,
+      stripePaymentIntentId: paymentLedger.stripePaymentIntentId,
     })
     .from(paymentLedger)
     .where(condition)
@@ -85,6 +94,33 @@ async function updateLedgerStatus(
     );
     return;
   }
+
+  // Decide whether to record the PaymentIntent id (never overwrite a different one).
+  let paymentIntentIdToAttach: string | undefined;
+  if (lookup.stripeSessionId && attachPaymentIntentId) {
+    if (existing.stripePaymentIntentId === null) {
+      paymentIntentIdToAttach = attachPaymentIntentId;
+    } else if (existing.stripePaymentIntentId !== attachPaymentIntentId) {
+      logger.warn(
+        {
+          ledgerId: existing.id,
+          existingPaymentIntentId: existing.stripePaymentIntentId,
+          incomingPaymentIntentId: attachPaymentIntentId,
+        },
+        "Ledger row already has a different PaymentIntent id; not overwriting"
+      );
+    }
+  }
+
+  // Persist the PaymentIntent id without touching status/ordering, for the
+  // early returns below where the status update itself is skipped.
+  const attachOnly = async (): Promise<void> => {
+    if (!paymentIntentIdToAttach) return;
+    await db
+      .update(paymentLedger)
+      .set({ stripePaymentIntentId: paymentIntentIdToAttach, updatedAt: new Date() })
+      .where(eq(paymentLedger.id, existing.id));
+  };
 
   // Ordering protection: ignore stale events (same-second events use precedence).
   if (
@@ -99,6 +135,7 @@ async function updateLedgerStatus(
       },
       "Ignoring out-of-order Stripe event for ledger update"
     );
+    await attachOnly();
     return;
   }
 
@@ -110,6 +147,7 @@ async function updateLedgerStatus(
       { ledgerId: existing.id, existingStatus: existing.status, newStatus },
       "Ledger status precedence prevents downgrade"
     );
+    await attachOnly();
     return;
   }
 
@@ -123,6 +161,10 @@ async function updateLedgerStatus(
     updatedAt: new Date(),
   };
 
+  if (paymentIntentIdToAttach) {
+    updateData.stripePaymentIntentId = paymentIntentIdToAttach;
+  }
+
   // Track refunded amount for partial vs full refund distinction.
   if (refundedAmountCents !== undefined) {
     const currentRefunded = existing.refundedAmountCents ?? 0;
@@ -131,6 +173,15 @@ async function updateLedgerStatus(
   }
 
   await db.update(paymentLedger).set(updateData).where(eq(paymentLedger.id, existing.id));
+}
+
+// The PaymentIntent id carried by a Checkout Session event, when present as a
+// string (webhook payloads are not expanded). Null for sessions that never
+// created a PaymentIntent.
+function sessionPaymentIntentId(session: Stripe.Checkout.Session): string | undefined {
+  return typeof session.payment_intent === "string" && session.payment_intent.length > 0
+    ? session.payment_intent
+    : undefined;
 }
 
 /**
@@ -190,34 +241,33 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
         { sessionId: session.id, paymentStatus: session.payment_status },
         "Checkout session completed."
       );
-      await updateLedgerStatus({ stripeSessionId: session.id }, "paid", eventCreatedAt, logger);
-      // If the session has a payment_intent, also update by PI ID.
-      if (session.payment_intent && typeof session.payment_intent === "string") {
-        await updateLedgerStatus(
-          { stripePaymentIntentId: session.payment_intent },
-          "paid",
-          eventCreatedAt,
-          logger
-        );
-      }
+      await updateLedgerStatus({ stripeSessionId: session.id }, "paid", eventCreatedAt, logger, {
+        attachPaymentIntentId: sessionPaymentIntentId(session),
+      });
       break;
     }
     case "checkout.session.expired": {
       const session = event.data.object as Stripe.Checkout.Session;
       logger.info({ sessionId: session.id }, "Checkout session expired.");
-      await updateLedgerStatus({ stripeSessionId: session.id }, "expired", eventCreatedAt, logger);
+      await updateLedgerStatus({ stripeSessionId: session.id }, "expired", eventCreatedAt, logger, {
+        attachPaymentIntentId: sessionPaymentIntentId(session),
+      });
       break;
     }
     case "checkout.session.async_payment_succeeded": {
       const session = event.data.object as Stripe.Checkout.Session;
       logger.info({ sessionId: session.id }, "Checkout async payment succeeded.");
-      await updateLedgerStatus({ stripeSessionId: session.id }, "paid", eventCreatedAt, logger);
+      await updateLedgerStatus({ stripeSessionId: session.id }, "paid", eventCreatedAt, logger, {
+        attachPaymentIntentId: sessionPaymentIntentId(session),
+      });
       break;
     }
     case "checkout.session.async_payment_failed": {
       const session = event.data.object as Stripe.Checkout.Session;
       logger.info({ sessionId: session.id }, "Checkout async payment failed.");
-      await updateLedgerStatus({ stripeSessionId: session.id }, "failed", eventCreatedAt, logger);
+      await updateLedgerStatus({ stripeSessionId: session.id }, "failed", eventCreatedAt, logger, {
+        attachPaymentIntentId: sessionPaymentIntentId(session),
+      });
       break;
     }
     case "payment_intent.succeeded": {
@@ -267,7 +317,7 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
           "refunded",
           eventCreatedAt,
           logger,
-          charge.amount_refunded
+          { refundedAmountCents: charge.amount_refunded }
         );
       }
       break;

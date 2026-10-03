@@ -8,6 +8,7 @@ vi.mock("../../lib/stripe", () => ({
     },
     accounts: { create: vi.fn(), retrieve: vi.fn() },
     accountLinks: { create: vi.fn() },
+    charges: { retrieve: vi.fn() },
     subscriptions: {
       retrieve: vi.fn().mockResolvedValue({
         id: "sub_test",
@@ -34,10 +35,10 @@ vi.mock("../../lib/stripe", () => ({
 
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
-import { clients, webhookEvents } from "../../db/schema";
+import { clients, paymentLedger, webhookEvents } from "../../db/schema";
 import { stripe } from "../../lib/stripe";
 
 const mockConstructEvent = stripe.webhooks.constructEvent as ReturnType<typeof vi.fn>;
@@ -645,5 +646,276 @@ describe("POST /api/v1/webhooks/stripe", () => {
     expect(afterRetry[0].processedAt).not.toBeNull();
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  describe("payment ledger PaymentIntent linkage", () => {
+    let clientId: string;
+    const ledgerIds: string[] = [];
+    const eventIds: string[] = [];
+
+    beforeAll(async () => {
+      clientId = randomUUID();
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Ledger Linkage Client",
+        email: `ledger-${clientId}@example.com`,
+        status: "active",
+        stripeAccountId: `acct_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      });
+    });
+
+    afterAll(async () => {
+      // Ledger rows cascade-delete with the client.
+      await db.delete(clients).where(eq(clients.id, clientId));
+    });
+
+    afterEach(async () => {
+      for (const id of ledgerIds.splice(0)) {
+        await db.delete(paymentLedger).where(eq(paymentLedger.id, id));
+      }
+      for (const id of eventIds.splice(0)) {
+        await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, id));
+      }
+      vi.restoreAllMocks();
+    });
+
+    async function seedLedgerRow(
+      overrides: Partial<typeof paymentLedger.$inferInsert> = {}
+    ): Promise<{ id: string; sessionId: string; paymentIntentId: string }> {
+      const id = randomUUID();
+      const suffix = randomUUID().replace(/-/g, "");
+      const sessionId = `cs_test_${suffix}`;
+      await db.insert(paymentLedger).values({
+        id,
+        idempotencyKey: `idem_${suffix}`,
+        connectedAccountId: "acct_ledger_test",
+        stripeSessionId: sessionId,
+        stripePaymentIntentId: null,
+        clientId,
+        source: "checkout",
+        status: "created",
+        baseAmountCents: 5000,
+        totalAmountCents: 5150,
+        feeAmountCents: 150,
+        currency: "usd",
+        ...overrides,
+      });
+      ledgerIds.push(id);
+      return { id, sessionId, paymentIntentId: `pi_${suffix}` };
+    }
+
+    async function getRow(id: string) {
+      const [row] = await db.select().from(paymentLedger).where(eq(paymentLedger.id, id));
+      return row;
+    }
+
+    async function deliver(type: string, dataObject: Record<string, unknown>, created?: number) {
+      const event = makeStripeEvent(type, dataObject);
+      if (created !== undefined) event.created = created;
+      eventIds.push(event.id);
+      mockConstructEvent.mockReturnValueOnce(event);
+      const response = await sendWebhook(app, event);
+      expect(response.statusCode).toBe(200);
+      return event;
+    }
+
+    it("checkout.session.completed marks the row paid and records the PaymentIntent id", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.completed", {
+        id: row.sessionId,
+        payment_status: "paid",
+        payment_intent: row.paymentIntentId,
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("paid");
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("lets PaymentIntent-keyed charge.refunded reach the row after the id is recorded", async () => {
+      const row = await seedLedgerRow();
+      const created = Math.floor(Date.now() / 1000);
+
+      await deliver(
+        "checkout.session.completed",
+        { id: row.sessionId, payment_status: "paid", payment_intent: row.paymentIntentId },
+        created
+      );
+      await deliver(
+        "charge.refunded",
+        { id: "ch_linkage_refund", payment_intent: row.paymentIntentId, amount_refunded: 5150 },
+        created + 10
+      );
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("refunded");
+      expect(updated.refundedAmountCents).toBe(5150);
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("lets payment_intent.payment_failed and charge.dispute.created reach the row after the id is recorded", async () => {
+      const failedRow = await seedLedgerRow();
+      await deliver("checkout.session.completed", {
+        id: failedRow.sessionId,
+        payment_intent: failedRow.paymentIntentId,
+      });
+      // A PaymentIntent-keyed failure finds the row (it is already paid, so
+      // precedence keeps `paid`, but the lookup must succeed rather than skip).
+      const debugSpy = vi.spyOn(app.log, "debug");
+      await deliver("payment_intent.payment_failed", {
+        id: failedRow.paymentIntentId,
+        status: "requires_payment_method",
+      });
+      expect(
+        debugSpy.mock.calls.some(([, msg]) => String(msg).includes("No ledger row found"))
+      ).toBe(false);
+      expect(
+        debugSpy.mock.calls.some(([, msg]) => String(msg).includes("precedence prevents downgrade"))
+      ).toBe(true);
+
+      // charge.dispute.created retrieves the charge from Stripe; mock that call.
+      const disputeRow = await seedLedgerRow();
+      const created = Math.floor(Date.now() / 1000);
+      await deliver(
+        "checkout.session.completed",
+        { id: disputeRow.sessionId, payment_intent: disputeRow.paymentIntentId },
+        created
+      );
+      const chargesRetrieve = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+      chargesRetrieve.mockResolvedValueOnce({
+        id: "ch_linkage_dispute",
+        payment_intent: disputeRow.paymentIntentId,
+      });
+      await deliver(
+        "charge.dispute.created",
+        { id: "dp_linkage", charge: "ch_linkage_dispute" },
+        created + 10
+      );
+
+      expect(chargesRetrieve).toHaveBeenCalledTimes(1);
+      expect((await getRow(disputeRow.id)).status).toBe("disputed");
+    });
+
+    it("does not overwrite a different existing PaymentIntent id and logs a warning", async () => {
+      const row = await seedLedgerRow({ stripePaymentIntentId: "pi_original" });
+      const warnSpy = vi.spyOn(app.log, "warn");
+
+      await deliver("checkout.session.completed", {
+        id: row.sessionId,
+        payment_intent: "pi_different",
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.stripePaymentIntentId).toBe("pi_original");
+      expect(updated.status).toBe("paid");
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ledgerId: row.id,
+          existingPaymentIntentId: "pi_original",
+          incomingPaymentIntentId: "pi_different",
+        }),
+        expect.stringContaining("different PaymentIntent id")
+      );
+    });
+
+    it("does not warn when the incoming PaymentIntent id equals the recorded one", async () => {
+      const row = await seedLedgerRow({ stripePaymentIntentId: "pi_same" });
+      const warnSpy = vi.spyOn(app.log, "warn");
+
+      await deliver("checkout.session.completed", { id: row.sessionId, payment_intent: "pi_same" });
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      const updated = await getRow(row.id);
+      expect(updated.stripePaymentIntentId).toBe("pi_same");
+      expect(updated.status).toBe("paid");
+    });
+
+    it("a stale checkout.session.completed still records the PaymentIntent id without changing status or ordering", async () => {
+      const lastEventAt = Math.floor(Date.now() / 1000);
+      const row = await seedLedgerRow({
+        status: "refunded",
+        lastStripeEventCreatedAt: lastEventAt,
+      });
+
+      await deliver(
+        "checkout.session.completed",
+        { id: row.sessionId, payment_intent: row.paymentIntentId },
+        lastEventAt - 60
+      );
+
+      const updated = await getRow(row.id);
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+      expect(updated.status).toBe("refunded");
+      expect(updated.lastStripeEventCreatedAt).toBe(lastEventAt);
+    });
+
+    it("records the PaymentIntent id even when status precedence blocks the update", async () => {
+      const lastEventAt = Math.floor(Date.now() / 1000);
+      const row = await seedLedgerRow({
+        status: "disputed",
+        lastStripeEventCreatedAt: lastEventAt,
+      });
+
+      await deliver(
+        "checkout.session.completed",
+        { id: row.sessionId, payment_intent: row.paymentIntentId },
+        lastEventAt + 5
+      );
+
+      const updated = await getRow(row.id);
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+      expect(updated.status).toBe("disputed");
+      expect(updated.lastStripeEventCreatedAt).toBe(lastEventAt);
+    });
+
+    it("checkout.session.async_payment_succeeded records the PaymentIntent id", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.async_payment_succeeded", {
+        id: row.sessionId,
+        payment_intent: row.paymentIntentId,
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("paid");
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("checkout.session.async_payment_failed records the PaymentIntent id", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.async_payment_failed", {
+        id: row.sessionId,
+        payment_intent: row.paymentIntentId,
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("failed");
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("checkout.session.expired records a PaymentIntent id when the session carries one", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.expired", {
+        id: row.sessionId,
+        payment_intent: row.paymentIntentId,
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("expired");
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("leaves the PaymentIntent id null when the session has none", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.completed", { id: row.sessionId, payment_intent: null });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("paid");
+      expect(updated.stripePaymentIntentId).toBeNull();
+    });
   });
 });
