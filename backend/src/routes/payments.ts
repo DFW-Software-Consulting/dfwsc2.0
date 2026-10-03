@@ -211,7 +211,12 @@ const paymentCreateBodySchema = z.object({
 // If Stripe succeeds but DB insert fails, we return a 503 and the caller can retry
 // with the same idempotency key — Stripe will return the existing object and we
 // can then insert the ledger row.
-// Uses ON CONFLICT DO NOTHING on idempotency_key to handle retries idempotently.
+// Idempotency keys are scoped per client: (client_id, idempotency_key) and
+// stripe_session_id are both unique. A conflict on either is not an error by
+// itself, so the helper reports whether the session is recorded under this
+// client's key: "recorded" (inserted, or an identical retry) or "key_reused"
+// (the key already belongs to a different session). Any other state throws so
+// the caller never returns a session that has no ledger row.
 async function insertPaymentLedger(row: {
   id: string;
   idempotencyKey: string;
@@ -227,11 +232,30 @@ async function insertPaymentLedger(row: {
   refundedAmountCents: number;
   currency: string;
   metadata: string | null;
-}): Promise<void> {
-  await db
+}): Promise<"recorded" | "key_reused"> {
+  const inserted = await db
     .insert(paymentLedger)
     .values(row)
-    .onConflictDoNothing({ target: paymentLedger.idempotencyKey });
+    .onConflictDoNothing()
+    .returning({ id: paymentLedger.id });
+  if (inserted.length > 0) return "recorded";
+
+  const [existing] = await db
+    .select({ stripeSessionId: paymentLedger.stripeSessionId })
+    .from(paymentLedger)
+    .where(
+      and(
+        eq(paymentLedger.clientId, row.clientId),
+        eq(paymentLedger.idempotencyKey, row.idempotencyKey)
+      )
+    )
+    .limit(1);
+  if (!existing) {
+    // Conflicted on stripe_session_id under a different client/key: the session
+    // is not recorded for this request.
+    throw new Error("Ledger conflict without a matching row for this client and key");
+  }
+  return existing.stripeSessionId === row.stripeSessionId ? "recorded" : "key_reused";
 }
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
@@ -302,6 +326,15 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
 
       const clientId = client.id;
       const stripeAccountId = client.stripeAccountId;
+
+      // Keys are scoped per client: namespace the key sent to Stripe so two
+      // clients using the same key never collide on the platform.
+      const stripeIdempotencyKey = `${clientId}:${idempotencyKey}`;
+      if (stripeIdempotencyKey.length > 255) {
+        throw errors.badRequest(
+          `Idempotency-Key must not exceed ${255 - clientId.length - 1} characters.`
+        );
+      }
 
       const group = client.groupId
         ? ((
@@ -430,7 +463,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         session = await withStripeCircuit(() =>
           stripe.checkout.sessions.create(sessionParams, {
             stripeAccount: stripeAccountId,
-            idempotencyKey,
+            idempotencyKey: stripeIdempotencyKey,
           })
         );
       } catch (err) {
@@ -449,8 +482,9 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       // CRITICAL: Persist ledger synchronously BEFORE returning the checkout URL.
       // If this fails, we return 503 — the caller can retry with the same
       // idempotency key and Stripe will return the existing session.
+      let ledgerResult: "recorded" | "key_reused";
       try {
-        await insertPaymentLedger({
+        ledgerResult = await insertPaymentLedger({
           id: uuidv4(),
           idempotencyKey,
           connectedAccountId: stripeAccountId,
@@ -475,6 +509,18 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           error:
             "Payment recorded but confirmation failed. Please retry with the same Idempotency-Key.",
           code: "LEDGER_PERSISTENCE_FAILED",
+        });
+      }
+
+      if (ledgerResult === "key_reused") {
+        request.log.warn(
+          { clientId, stripeSessionId: session.id },
+          "Idempotency-Key already used for a different payment session"
+        );
+        return reply.code(409).send({
+          error:
+            "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.",
+          code: "IDEMPOTENCY_KEY_REUSED",
         });
       }
 
