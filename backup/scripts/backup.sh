@@ -61,6 +61,21 @@ if ! gzip -t "$PARTIAL_FILE"; then
   exit 1
 fi
 
+# A dump that stops early is still valid gzip. Keep the file only when it ends with
+# the trailer a finished plain-format pg_dump writes, the same test restore.sh applies.
+echo "[backup] Verifying the dump is complete"
+if ! DUMP_TAIL=$(gunzip -c "$PARTIAL_FILE" | tail -n 20); then
+  echo "[backup] ERROR: could not read the end of the dump; no backup file was kept" >&2
+  exit 1
+fi
+case "$DUMP_TAIL" in
+  *"-- PostgreSQL database dump complete"*) ;;
+  *)
+    echo "[backup] ERROR: dump is incomplete (no completion trailer); no backup file was kept" >&2
+    exit 1
+    ;;
+esac
+
 mv "$PARTIAL_FILE" "$BACKUP_FILE"
 
 # ---------------------------------------------------------------------------

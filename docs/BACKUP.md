@@ -5,8 +5,8 @@ The production stack uses a dedicated, locally built `dfwsc-backup` image that r
 ## Image
 
 - `backup/Dockerfile` — multi-tool image with `pg_dump`, `aws-cli`, `supercronic`, and healthcheck scripts.
-- `backup/scripts/backup.sh` — dumps the database to a `.partial` temp file, renames it to `<timestamp>_<db>.sql.gz` only after the dump and `gzip -t` succeed (a failed dump never leaves a normal-looking file), optionally uploads it, then writes a success heartbeat.
-- `backup/scripts/restore.sh` — checks the archive with `gzip -t`, restores only after explicit confirmation, and runs `psql` with `ON_ERROR_STOP` in a single transaction so the first SQL error aborts and rolls back.
+- `backup/scripts/backup.sh` — dumps the database to a `.partial` temp file, renames it to `<timestamp>_<db>.sql.gz` only after the dump, `gzip -t` and the completeness check succeed (a failed or cut-short dump never leaves a normal-looking file), optionally uploads it, then writes a success heartbeat.
+- `backup/scripts/restore.sh` — checks the archive with `gzip -t` and refuses a dump that lacks the `-- PostgreSQL database dump complete` trailer, restores only after explicit confirmation, and runs `psql` with `ON_ERROR_STOP` in a single transaction so the first SQL error aborts and rolls back.
 - `backup/scripts/healthcheck.sh` — checks the success heartbeat age.
 - `backup/scripts/scheduler.sh` — foreground cron-like scheduler using `supercronic`.
 
@@ -87,7 +87,7 @@ docker compose -f docker-compose.prod.yml run --rm \
 
    `DATABASE_URL` is the container's own, so to restore into a scratch database add `-e DATABASE_URL=postgres://user:pass@host:5432/scratch`.
 
-   A restore stops at the first SQL error and rolls back, so a failed restore leaves the target as it was; it exits non-zero instead of printing "Restore complete". A corrupt or truncated archive is rejected before anything is written. Dumps are made with `--clean --if-exists`, so restore into a freshly created empty database where possible.
+   A restore stops at the first SQL error and rolls back, so a failed restore leaves the target as it was; it exits non-zero instead of printing "Restore complete". A corrupt or truncated archive, and a dump that is valid gzip but ends before the `-- PostgreSQL database dump complete` trailer, is rejected before anything is written. Dumps are made with `--clean --if-exists`, so restore into a freshly created empty database where possible.
 
 4. Verify the restore:
 
@@ -96,7 +96,19 @@ docker compose -f docker-compose.prod.yml run --rm \
    psql "$DATABASE_URL" -c "SELECT COUNT(*) FROM clients;" -c "SELECT COUNT(*) FROM payment_ledger;"
    ```
 
-Last restore drill: 2026-10-03, a dump of a disposable Postgres 17 restored into a scratch database with the built image (good dump restored; truncated archive and a dump with a failing statement both refused with a non-zero exit). A drill against a real production dump is still owed; record its date here when done.
+Last restore drill: 2026-10-03, a dump of a disposable Postgres 17 restored into a scratch database with the built image (good dump restored; truncated archive, a dump with a failing statement, a 20-byte dump from a `pg_dump` that could not connect, and a good dump cut mid-COPY and re-gzipped were each refused with a non-zero exit and the target left unchanged). A drill against a real production dump is still owed; record its date here when done.
+
+## Dumps taken before the completeness check
+
+Before the completeness check existed, a failed `pg_dump` could leave a valid-gzip `<timestamp>_<db>.sql.gz` that is empty or stops part way, and `make backup-list` keeps offering it until retention removes it. Dumps made now are only kept when complete, and `restore.sh` refuses any dump that is not, but older files stay on the volume. List the ones that fail the same test and delete them (run inside the backup container, for example with `make backup-shell`):
+
+```sh
+for f in /backups/postgres/*.sql.gz; do
+  gunzip -c "$f" | tail -n 20 | grep -q -- '-- PostgreSQL database dump complete' || echo "incomplete: $f"
+done
+```
+
+Check the same prefix in the S3 bucket if uploads are enabled; an incomplete dump from before this change may have been uploaded too.
 
 ## Healthcheck
 

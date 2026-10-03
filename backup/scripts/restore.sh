@@ -89,6 +89,24 @@ if ! gzip -t "$LOCAL_FILE"; then
   exit 1
 fi
 
+# gzip -t only proves the compressed stream is intact. A dump cut short inside a
+# COPY block, or the near-empty output of a pg_dump that could not connect, is
+# still valid gzip, and psql would commit whatever arrived. A finished plain-format
+# pg_dump ends with this trailer, so refuse any file that lacks it. The tail is
+# matched with case rather than grep -q so pipefail cannot turn an early grep exit
+# into a false refusal.
+if ! DUMP_TAIL=$(gunzip -c "$LOCAL_FILE" | tail -n 20); then
+  echo "[restore] ERROR: could not read the end of the dump: ${LOCAL_FILE}" >&2
+  exit 1
+fi
+case "$DUMP_TAIL" in
+  *"-- PostgreSQL database dump complete"*) ;;
+  *)
+    echo "[restore] ERROR: dump is incomplete (no 'PostgreSQL database dump complete' trailer): ${LOCAL_FILE}" >&2
+    exit 1
+    ;;
+esac
+
 # Identify the actual target database name.
 TARGET_DB=$(psql "$DATABASE_URL" -At -c "SELECT current_database();" 2>/dev/null || true)
 if [ -z "$TARGET_DB" ]; then
