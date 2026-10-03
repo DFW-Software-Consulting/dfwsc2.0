@@ -10,6 +10,7 @@ import ErrorMessage from "./shared/ErrorMessage";
 import FeeConfigSection from "./shared/FeeConfigSection";
 import FormInput from "./shared/FormInput";
 import LoadingSpinner from "./shared/LoadingSpinner";
+import { getOnboardingState } from "./shared/onboardingState";
 import StatusBadge from "./shared/StatusBadge";
 
 function formatFee(group) {
@@ -389,12 +390,19 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                                     </div>
                                     <div className="flex items-center gap-3">
                                       <StatusBadge status={m.status} />
-                                      {m.stripeAccountId ? (
+                                      {getOnboardingState(m) === "ready" ? (
                                         <span
                                           className="text-xs text-blue-400"
                                           title="Stripe connected"
                                         >
                                           ✓ Connected
+                                        </span>
+                                      ) : getOnboardingState(m) === "in_progress" ? (
+                                        <span
+                                          className="text-xs text-yellow-400"
+                                          title="Stripe onboarding started but not finished"
+                                        >
+                                          ⚠ In progress
                                         </span>
                                       ) : (
                                         <span

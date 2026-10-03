@@ -12,6 +12,7 @@ import ConfirmModal from "./ConfirmModal";
 import EditClientModal from "./EditClientModal";
 import AdminTable from "./shared/AdminTable";
 import Button from "./shared/Button";
+import { getOnboardingState } from "./shared/onboardingState";
 import StatusBadge from "./shared/StatusBadge";
 
 function formatFee(client, groups) {
@@ -151,9 +152,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
           },
           {
             header: "Onboarding",
-            render: (client) => (
-              <StatusBadge status={client.stripeAccountId ? "completed" : "pending"} />
-            ),
+            render: (client) => <StatusBadge status={getOnboardingState(client)} />,
           },
         ]
       : []),
@@ -203,6 +202,9 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
         const isTogglingStatus =
           patchClientStatusMutation.isPending &&
           patchClientStatusMutation.variables?.id === client.id;
+        const isOnboarded = getOnboardingState(client) === "ready";
+        const isResending =
+          resendMutation.isPending && resendMutation.variables?.clientId === client.id;
         const isDeleting =
           deleteClientMutation.isPending && deleteClientMutation.variables === client.id;
         return (
@@ -212,8 +214,8 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
                 size="sm"
                 variant="ghost"
                 className="bg-purple-600 hover:bg-purple-700 text-white"
-                disabled={!!client.stripeAccountId}
-                title={client.stripeAccountId ? "Already onboarded" : "Resend onboarding link"}
+                disabled={isOnboarded || isResending}
+                title={isOnboarded ? "Already onboarded" : "Resend onboarding link"}
                 onClick={() => handleResendLink(client)}
               >
                 Resend Link
