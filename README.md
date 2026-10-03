@@ -209,7 +209,8 @@ JWT_EXPIRY=1h
 # First-run Admin Bootstrap (remove ADMIN_USERNAME and ADMIN_PASSWORD once the admin is confirmed)
 ALLOW_ADMIN_SETUP=true
 ADMIN_USERNAME=your-admin-username
-ADMIN_PASSWORD=a-strong-password-12-chars-min  # plaintext, hashed by the server; never a bcrypt hash
+# ADMIN_PASSWORD is plaintext, hashed by the server; never a bcrypt hash
+ADMIN_PASSWORD=a-strong-password-12-chars-min
 
 # Payment Config
 DEFAULT_PROCESS_FEE_CENTS=100

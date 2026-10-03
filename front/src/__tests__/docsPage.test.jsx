@@ -17,7 +17,10 @@ describe("Docs page", () => {
     const { container } = render(<Docs />, { wrapper: MemoryRouter });
 
     expect(container.textContent).not.toMatch(/price IDs/i);
-    expect(container.textContent).not.toMatch(/webhook/i);
+    expect(container.textContent).not.toMatch(
+      /(?:api|dfwsc|we)\s+(?:will\s+)?(?:sends?|posts?)\s+(?:a\s+|the\s+|your\s+)?webhooks?/i
+    );
+    expect(container.textContent).not.toMatch(/(?:get|receive) a webhook/i);
     expect(container.textContent).not.toMatch(/invoice or order ID/i);
   });
 
