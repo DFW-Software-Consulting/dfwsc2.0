@@ -115,7 +115,7 @@ fi
 if [ "${ALLOW_CONSOLE}" != "1" ]; then
   STAGED_SRC=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$' | grep -v '\.(test|spec)\.' || true)
   if [ -n "$STAGED_SRC" ]; then
-    hits=$(git diff --cached -- $STAGED_SRC | grep -E '^\+[^+].*\b(console\.(log|warn|error|info|debug)|debugger)\b' || true)
+    hits=$(git diff --cached -- $STAGED_SRC | grep -E '^\+([^+].*)?\b(console\.(log|warn|error|info|debug)|debugger)\b' || true)
     if [ -n "$hits" ]; then
       echo "❌ console.log/debugger found in staged source files:"
       echo "$hits"
@@ -128,7 +128,7 @@ fi
 # 9. Guard: no .only or .skip in staged test files
 STAGED_TESTS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true)
 if [ -n "$STAGED_TESTS" ]; then
-  hits=$(git diff --cached -- $STAGED_TESTS | grep -E '^\+[^+].*(it|test|describe)\.(only|skip)\(' || true)
+  hits=$(git diff --cached -- $STAGED_TESTS | grep -E '^\+([^+].*)?(it|test|describe)\.(only|skip)\(' || true)
   if [ -n "$hits" ]; then
     echo "❌ .only or .skip found in staged test files (silences the rest of the suite):"
     echo "$hits"
