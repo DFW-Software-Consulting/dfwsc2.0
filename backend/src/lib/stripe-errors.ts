@@ -15,6 +15,13 @@ export interface StripeErrorMapping {
   cardDeclinedCode?: string;
   /** Response body sent for a Stripe rate-limit (`StripeRateLimitError`) error. Omit to skip this branch. */
   rateLimited?: StripeErrorBody;
+  /**
+   * Map permanent caller errors instead of letting them fall through as retryable:
+   * `StripeInvalidRequestError` -> 400 (Stripe's message), `StripeIdempotencyError` -> 409
+   * `IDEMPOTENCY_KEY_REUSED`, `StripePermissionError` -> 409 `ACCOUNT_NOT_CONNECTED`.
+   * Opt-in because other call sites rely on their own fallback for these errors.
+   */
+  permanentErrors?: boolean;
 }
 
 /**
@@ -43,6 +50,29 @@ export function mapStripeError(
   if (mapping.rateLimited && err instanceof Error && err.name === "StripeRateLimitError") {
     reply.code(429).send(mapping.rateLimited);
     return true;
+  }
+
+  if (mapping.permanentErrors && err instanceof Error) {
+    if (err.name === "StripeInvalidRequestError") {
+      const param = (err as { param?: unknown }).param;
+      reply.code(400).send({
+        error: err.message,
+        code: "INVALID_REQUEST",
+        ...(typeof param === "string" ? { param } : {}),
+      });
+      return true;
+    }
+    if (err.name === "StripeIdempotencyError") {
+      reply.code(409).send({ error: err.message, code: "IDEMPOTENCY_KEY_REUSED" });
+      return true;
+    }
+    if (err.name === "StripePermissionError") {
+      reply.code(409).send({
+        error: "Client Stripe account is not connected or cannot accept charges.",
+        code: "ACCOUNT_NOT_CONNECTED",
+      });
+      return true;
+    }
   }
 
   return false;
