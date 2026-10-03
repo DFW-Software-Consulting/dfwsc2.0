@@ -7,7 +7,12 @@ import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
 import { apiKeyRegenerationTokens, clientGroups, clients, onboardingTokens } from "../db/schema";
-import { createRegenerationToken, validateAndRegenerate } from "../lib/api-key-regeneration";
+import {
+  createRegenerationToken,
+  createRegenerationTokenUnlessRecent,
+  revokeRegenerationToken,
+  validateAndRegenerate,
+} from "../lib/api-key-regeneration";
 import { requireAdminJwt } from "../lib/auth";
 import { withStripeCircuit } from "../lib/circuit-breakers";
 import { createClientWithOnboardingToken, hashOnboardingToken } from "../lib/client-factory";
@@ -883,48 +888,62 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         .limit(1);
 
       if (clientRecord) {
-        const rawToken = await createRegenerationToken({
-          clientId: clientRecord.id,
-          email: clientRecord.email,
-        });
+        // Detached so both branches respond in the same time: token creation and the
+        // SMTP round trip must not be observable by the caller. The catch keeps a
+        // failure from becoming an unhandled rejection, and a token whose email was not
+        // sent is revoked so the cooldown does not lock the client out.
+        let rawToken: string | null = null;
+        void (async () => {
+          rawToken = await createRegenerationTokenUnlessRecent({
+            clientId: clientRecord.id,
+            email: clientRecord.email,
+          });
+          if (!rawToken) return;
 
-        const settings = await getSettings();
-        const companyName = settings.company_name || "DFW Software Consulting";
-        const frontendOrigin = resolveFrontendOrigin();
-        const regenerateUrl = `${frontendOrigin}/regenerate-key#token=${encodeURIComponent(rawToken)}`;
+          const settings = await getSettings();
+          const companyName = settings.company_name || "DFW Software Consulting";
+          const frontendOrigin = resolveFrontendOrigin();
+          const regenerateUrl = `${frontendOrigin}/regenerate-key#token=${encodeURIComponent(rawToken)}`;
 
-        const safeName = he.encode(clientRecord.name);
-        const mailHtml = `
-          <h1>API Key Regeneration</h1>
-          <p>Hi ${safeName},</p>
-          <p>A request was made to regenerate your API key.</p>
-          <p>Click the link below to generate a new key. This link will expire in 15 minutes.</p>
-          <a href="${regenerateUrl}">Regenerate API Key</a>
-          <p>If you did not request this, please ignore this email. Your current API key will remain valid.</p>
-        `;
+          const safeName = he.encode(clientRecord.name);
+          const mailHtml = `
+            <h1>API Key Regeneration</h1>
+            <p>Hi ${safeName},</p>
+            <p>A request was made to regenerate your API key.</p>
+            <p>Click the link below to generate a new key. This link will expire in 15 minutes.</p>
+            <a href="${regenerateUrl}">Regenerate API Key</a>
+            <p>If you did not request this, please ignore this email. Your current API key will remain valid.</p>
+          `;
 
-        const mailText = `
-          API Key Regeneration
-          Hi ${clientRecord.name},
-          A request was made to regenerate your API key.
-          Click the link below to generate a new key. This link will expire in 15 minutes.
-          ${regenerateUrl}
-          If you did not request this, please ignore this email. Your current API key will remain valid.
-        `;
+          const mailText = `
+            API Key Regeneration
+            Hi ${clientRecord.name},
+            A request was made to regenerate your API key.
+            Click the link below to generate a new key. This link will expire in 15 minutes.
+            ${regenerateUrl}
+            If you did not request this, please ignore this email. Your current API key will remain valid.
+          `;
 
-        try {
           await sendMail({
             to: clientRecord.email,
             subject: `${companyName} - Regenerate API Key`,
             html: mailHtml,
             text: mailText,
           });
-        } catch (err) {
+        })().catch(async (err) => {
           request.log.error(
             { err, clientId: clientRecord.id },
             "Failed to send regeneration email"
           );
-        }
+          if (rawToken) {
+            await revokeRegenerationToken(rawToken).catch((revokeErr) => {
+              request.log.error(
+                { err: revokeErr, clientId: clientRecord.id },
+                "Failed to revoke regeneration token after email failure"
+              );
+            });
+          }
+        });
       }
 
       return reply.code(200).send({
