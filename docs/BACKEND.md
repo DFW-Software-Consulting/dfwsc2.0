@@ -50,7 +50,8 @@ If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environm
 
 ## 4. Rate Limiting
 - **Implementation**: Sliding-window limiter (`lib/rate-limit.ts`) — Redis-backed (shared across replicas) when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets and logs a one-time startup warning, since limits are then effectively multiplied by replica count under horizontal scaling.
-- **Production**: Requires a working Redis connection. If Redis is unavailable in production, requests are rejected (fail-closed) rather than silently degrading to in-memory limits.
+- **Bucket isolation**: Each limiter keeps its own bucket, namespaced by an optional `name` or, by default, the request's method and route pattern (`ratelimit:<METHOD>:<route>:<key>`), so hits on one route never count against or prune another's.
+- **Redis outage**: If Redis is unreachable or any pipeline command fails, the request is limited by the per-process in-memory buckets instead (fail-soft, not 503) and the error is logged at most once every 30 seconds. With a single API instance the in-memory limiter is as accurate as Redis, and failing closed would reject payments whenever Redis restarts.
 - **Admin/Onboard Routes**: 10 req/min per IP.
 - **Resend Route**: 5 req/min per IP.
 - **Payment Routes**: 20 req/min per Stripe Account ID (fallback to IP).

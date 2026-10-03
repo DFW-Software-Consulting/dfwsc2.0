@@ -90,7 +90,7 @@ describe("rateLimit - Redis path", () => {
       code: vi.fn().mockReturnThis(),
       send: vi.fn().mockReturnThis(),
     };
-    const request = { ip, headers: {} };
+    const request = { ip, headers: {}, log: { error: vi.fn() } };
     return { request, reply };
   }
 
