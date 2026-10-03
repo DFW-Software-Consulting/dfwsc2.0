@@ -74,8 +74,9 @@ export function usePatchClientStatus() {
       const isClientsQuery = (query) => query.queryKey[0] === "clients";
       await queryClient.cancelQueries({ predicate: isClientsQuery });
       const prev = queryClient.getQueriesData({ predicate: isClientsQuery });
-      queryClient.setQueriesData({ predicate: isClientsQuery }, (old) =>
-        old?.map((c) => (c.id === id ? { ...c, status } : c))
+      queryClient.setQueriesData(
+        { predicate: isClientsQuery },
+        (old) => old && { ...old, data: old.data.map((c) => (c.id === id ? { ...c, status } : c)) }
       );
       return { prev };
     },

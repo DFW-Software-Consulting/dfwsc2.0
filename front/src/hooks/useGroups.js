@@ -42,8 +42,9 @@ export function usePatchGroup() {
       const isGroupsQuery = (query) => query.queryKey[0] === "groups";
       await queryClient.cancelQueries({ predicate: isGroupsQuery });
       const prev = queryClient.getQueriesData({ predicate: isGroupsQuery });
-      queryClient.setQueriesData({ predicate: isGroupsQuery }, (old) =>
-        old?.map((g) => (g.id === id ? { ...g, ...body } : g))
+      queryClient.setQueriesData(
+        { predicate: isGroupsQuery },
+        (old) => old && { ...old, data: old.data.map((g) => (g.id === id ? { ...g, ...body } : g)) }
       );
       return { prev };
     },
