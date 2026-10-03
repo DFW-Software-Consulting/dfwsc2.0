@@ -184,6 +184,63 @@ function sessionPaymentIntentId(session: Stripe.Checkout.Session): string | unde
     : undefined;
 }
 
+export type CheckoutSessionOutcome = "completed" | "expired" | "async_succeeded" | "async_failed";
+
+/**
+ * Apply a Checkout Session outcome to the ledger. This is the single place the
+ * checkout.session.* transition rules live: the webhook handler and the
+ * payment status endpoint's Stripe fallback both go through it.
+ *
+ * `completed` only means the customer finished checkout. For delayed-notification
+ * methods (bank debits) Stripe sends it with payment_status "unpaid" and settles
+ * later via async_payment_succeeded / async_payment_failed, so the row is marked
+ * paid only when the money is actually secured ("paid" or "no_payment_required").
+ * Otherwise the row stays "created" (still recording the PaymentIntent id) and
+ * the async events decide.
+ */
+export async function applyCheckoutSessionOutcome(
+  outcome: CheckoutSessionOutcome,
+  session: Stripe.Checkout.Session,
+  eventCreatedAt: number,
+  logger: FastifyBaseLogger
+): Promise<void> {
+  const options = { attachPaymentIntentId: sessionPaymentIntentId(session) };
+  const lookup = { stripeSessionId: session.id };
+
+  switch (outcome) {
+    case "completed": {
+      const settled =
+        session.payment_status === "paid" || session.payment_status === "no_payment_required";
+      logger.info(
+        { sessionId: session.id, paymentStatus: session.payment_status, settled },
+        settled
+          ? "Checkout session completed."
+          : "Checkout session completed but payment is not settled; awaiting async payment events."
+      );
+      await updateLedgerStatus(
+        lookup,
+        settled ? "paid" : "created",
+        eventCreatedAt,
+        logger,
+        options
+      );
+      break;
+    }
+    case "expired":
+      logger.info({ sessionId: session.id }, "Checkout session expired.");
+      await updateLedgerStatus(lookup, "expired", eventCreatedAt, logger, options);
+      break;
+    case "async_succeeded":
+      logger.info({ sessionId: session.id }, "Checkout async payment succeeded.");
+      await updateLedgerStatus(lookup, "paid", eventCreatedAt, logger, options);
+      break;
+    case "async_failed":
+      logger.info({ sessionId: session.id }, "Checkout async payment failed.");
+      await updateLedgerStatus(lookup, "failed", eventCreatedAt, logger, options);
+      break;
+  }
+}
+
 /**
  * For account.updated events, retrieve the current state from Stripe
  * rather than trusting the event payload. This handles out-of-order
@@ -237,37 +294,22 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
     }
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      logger.info(
-        { sessionId: session.id, paymentStatus: session.payment_status },
-        "Checkout session completed."
-      );
-      await updateLedgerStatus({ stripeSessionId: session.id }, "paid", eventCreatedAt, logger, {
-        attachPaymentIntentId: sessionPaymentIntentId(session),
-      });
+      await applyCheckoutSessionOutcome("completed", session, eventCreatedAt, logger);
       break;
     }
     case "checkout.session.expired": {
       const session = event.data.object as Stripe.Checkout.Session;
-      logger.info({ sessionId: session.id }, "Checkout session expired.");
-      await updateLedgerStatus({ stripeSessionId: session.id }, "expired", eventCreatedAt, logger, {
-        attachPaymentIntentId: sessionPaymentIntentId(session),
-      });
+      await applyCheckoutSessionOutcome("expired", session, eventCreatedAt, logger);
       break;
     }
     case "checkout.session.async_payment_succeeded": {
       const session = event.data.object as Stripe.Checkout.Session;
-      logger.info({ sessionId: session.id }, "Checkout async payment succeeded.");
-      await updateLedgerStatus({ stripeSessionId: session.id }, "paid", eventCreatedAt, logger, {
-        attachPaymentIntentId: sessionPaymentIntentId(session),
-      });
+      await applyCheckoutSessionOutcome("async_succeeded", session, eventCreatedAt, logger);
       break;
     }
     case "checkout.session.async_payment_failed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      logger.info({ sessionId: session.id }, "Checkout async payment failed.");
-      await updateLedgerStatus({ stripeSessionId: session.id }, "failed", eventCreatedAt, logger, {
-        attachPaymentIntentId: sessionPaymentIntentId(session),
-      });
+      await applyCheckoutSessionOutcome("async_failed", session, eventCreatedAt, logger);
       break;
     }
     case "payment_intent.succeeded": {

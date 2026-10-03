@@ -36,6 +36,8 @@ function isColumn(column: any, name: string): boolean {
 
 function createWhereResult(rowsPromise: Promise<any[]>) {
   return {
+    // Ordering is not simulated; the in-memory rows keep insertion order.
+    orderBy: (..._columns: unknown[]) => createWhereResult(rowsPromise),
     limit: (n: number) => ({
       offset: async (offset: number) => (await rowsPromise).slice(offset, offset + n),
       then: (resolve: any, reject: any) =>
