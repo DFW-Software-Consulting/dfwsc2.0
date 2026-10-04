@@ -315,7 +315,8 @@ describe("failureRateLimit (Redis)", () => {
 
   it("charges with the Lua script: key, window, max, member, no force", async () => {
     mockRedis.eval.mockResolvedValue([2, 0]);
-    const { failureRateLimit, FAILURE_CHARGE_LUA } = await load();
+    process.env.REDIS_URL = "redis://localhost:6379";
+    const { failureRateLimit, FAILURE_CHARGE_LUA } = await import("../../lib/rate-limit");
     const limiter = failureRateLimit({
       max: 3,
       windowMs: 60_000,
