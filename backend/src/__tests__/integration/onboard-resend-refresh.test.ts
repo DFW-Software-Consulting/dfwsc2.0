@@ -21,6 +21,7 @@ vi.mock("../../lib/rate-limit", () => ({
   adminRateLimit: () => async () => {},
   rateLimit: () => async () => {},
   tokenBucketRateLimit: () => async () => {},
+  failureRateLimit: () => ({ check: async () => ({ blocked: false }), record: async () => {} }),
   warnIfInMemoryRateLimit: vi.fn(),
 }));
 
