@@ -30,7 +30,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
 - **Containers**: that compose file defines four services:
   - `migrator` - runs `npm run db:migrate` once against `DATABASE_URL`, then exits; `api` will not start until this completes successfully
   - `api` (reachable as `dfwsc-api` via a network alias on Coolify's `coolify` network; Coolify ignores `container_name`) - the Fastify server, `node dist/index.js`, port 4242
-  - `redis` - backs rate limiting and circuit-breaker state; `api`'s `REDIS_URL` defaults to `redis://redis:6379`, the in-stack service, so it rarely needs to be set explicitly
+  - `redis` - backs rate limiting and circuit-breaker state; it has the network alias `dfwsc-redis` on the stack's `backend` network, and `docker-compose.prod.yml` sets the API's `REDIS_URL` to `redis://dfwsc-redis:6379`. The plain name `redis` is not used because the `api` service also sits on Coolify's shared `coolify` network, where Coolify's own control-plane Redis (password-protected) answers to `redis` too. The Coolify `REDIS_URL` variable is **not read** by the API in production; it is not interpolated into the compose file, so it can be deleted, and leaving a stale value there does nothing. To use an external Redis instead, edit the `REDIS_URL` line in `docker-compose.prod.yml`.
   - `backup` - runs `scripts/backup-db.sh` on a nightly cron schedule (`0 2 * * *`) into the `postgres_backups` volume, optionally pushing to S3 if `AWS_S3_BACKUP_BUCKET` is set
 - **Build**: Use existing Dockerfile (multi-stage production build)
 - **Port**: 4242 (expose for internal communication)
@@ -241,6 +241,11 @@ The existing `front/nginx.conf` is already configured correctly:
    - Double-check variable names match exactly
    - Verify secrets are properly injected
    - Check for extra spaces or quotes in values
+
+5. **`Rate limiter Redis error` / `NOAUTH Authentication required` in the API log**
+   - The API is talking to a Redis other than the stack's own, usually Coolify's control-plane Redis reached through the short name `redis` on the shared `coolify` network. Limits still work through the in-memory fallback, but are no longer shared or persistent.
+   - Confirm `docker-compose.prod.yml` points `REDIS_URL` at `redis://dfwsc-redis:6379`, and that `docker exec <api container> getent hosts dfwsc-redis` returns an address on the stack's `backend` network.
+   - Any hostname the `api` service uses must be unique across everything on the `coolify` network; give shared-network services an explicit alias rather than relying on the compose service name.
 
 ## Maintenance
 

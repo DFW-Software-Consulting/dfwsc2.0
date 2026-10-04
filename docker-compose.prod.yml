@@ -45,7 +45,11 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Deliberately not ${REDIS_URL}: this is the stack's own Redis, addressed by
+      # its unique alias. The plain name `redis` also resolves to Coolify's
+      # control-plane Redis on the shared `coolify` network (which needs a
+      # password), so a Coolify-level REDIS_URL must not override this.
+      REDIS_URL: redis://dfwsc-redis:6379
     ports:
       - "127.0.0.1:4242:4242"
     depends_on:
@@ -83,7 +87,11 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     networks:
-      - backend
+      backend:
+        # Unique name for the API to connect to. The service name `redis` is
+        # not unique on a host running Coolify, whose own Redis answers to it.
+        aliases:
+          - dfwsc-redis
 
   backup:
     build:
