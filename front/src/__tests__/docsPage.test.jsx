@@ -90,6 +90,34 @@ describe("Docs page", () => {
     expect(text).toMatch(/waiting screen/i);
   });
 
+  it("does not promise that a burst is served without delay", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).not.toMatch(/without delay/i);
+    expect(text).toMatch(/admits a burst of 200, but only 25 Stripe calls run at a time/i);
+    expect(text).toMatch(/waits at most 10 seconds for its turn/i);
+    expect(text).toMatch(
+      /tail of a large burst can run out of that time and get a 503 STRIPE_BUSY/i
+    );
+  });
+
+  it("tells integrators to add a random extra delay to the Retry-After wait", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).toMatch(/Retry-After seconds plus a small random extra delay/i);
+    expect(text).toMatch(/all come back at the same moment and are refused again/i);
+  });
+
+  it("documents the per-IP limit on rejected API keys", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+
+    expect(container.textContent).toMatch(
+      /Rejected keys are counted per calling IP address: after 30 of them in a minute/i
+    );
+  });
+
   it("does not describe request fields or notifications the API does not support", () => {
     const { container } = render(<Docs />, { wrapper: MemoryRouter });
 

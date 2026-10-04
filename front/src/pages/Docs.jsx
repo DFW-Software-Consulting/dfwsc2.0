@@ -54,8 +54,9 @@ const NODE_CODE = `// idempotencyKey: a UUID you generate once per payment attem
 // times out, retry with the same key (within 24 hours) so you never create a second
 // payment. If the customer starts checkout again, generate a new key.
 // A 429 or 503 means wait, then try again: wait the number of seconds in the Retry-After
-// response header and call this again with the same idempotencyKey while the customer sees a
-// waiting screen. Do not ask them to click again.
+// response header plus a small random extra delay (for example up to one second, different
+// for each request) and call this again with the same idempotencyKey while the customer sees
+// a waiting screen. Do not ask them to click again.
 async function createPayment(amountCents, description, idempotencyKey) {
   const response = await fetch(
     'https://<your-api-base-url>/api/v1/payments/create',
@@ -100,7 +101,7 @@ async function verifyPayment(sessionId, expectedAmountCents, expectedCurrency) {
   );
 
   if (!response.ok) {
-    // A 429 is retryable: wait its Retry-After seconds before checking again.
+    // A 429 is retryable: wait its Retry-After seconds plus a small random delay before checking again.
     throw new Error(\`Could not check payment: \${response.status}\`);
   }
 
@@ -121,8 +122,9 @@ DFWSC_API_KEY = 'your-api-key'
 # key (within 24 hours) so you never create a second payment. If the customer starts
 # checkout again, generate a new key.
 # A 429 or 503 means wait, then try again: wait the number of seconds in the Retry-After
-# response header and call this again with the same idempotency_key while the customer sees a
-# waiting screen. Do not ask them to click again.
+# response header plus a small random extra delay (for example up to one second, different
+# for each request) and call this again with the same idempotency_key while the customer sees
+# a waiting screen. Do not ask them to click again.
 def create_payment(amount_cents: int, description: str, idempotency_key: str) -> dict:
     response = requests.post(
         'https://<your-api-base-url>/api/v1/payments/create',
@@ -156,7 +158,7 @@ def verify_payment(session_id: str, expected_amount_cents: int, expected_currenc
         f'https://<your-api-base-url>/api/v1/payments/session/{session_id}',
         headers={'X-Api-Key': DFWSC_API_KEY},
     )
-    response.raise_for_status()  # a 429 is retryable: wait its Retry-After seconds
+    response.raise_for_status()  # a 429 is retryable: wait its Retry-After seconds plus a small random delay
     payment = response.json()
     return (
         payment['status'] == 'paid'
@@ -169,8 +171,9 @@ const PHP_CODE = `// $idempotencyKey: a UUID you generate once per payment attem
 // hours) so you never create a second payment. If the customer starts checkout
 // again, generate a new key.
 // A 429 or 503 means wait, then try again: wait the number of seconds in the Retry-After
-// response header and call this again with the same $idempotencyKey while the customer sees a
-// waiting screen. Do not ask them to click again.
+// response header plus a small random extra delay (for example up to one second, different
+// for each request) and call this again with the same $idempotencyKey while the customer sees
+// a waiting screen. Do not ask them to click again.
 function createPayment(int $amountCents, string $description, string $idempotencyKey): array {
     $ch = curl_init(
         'https://<your-api-base-url>/api/v1/payments/create'
@@ -213,7 +216,7 @@ function verifyPayment(string $sessionId, int $expectedAmountCents, string $expe
     curl_close($ch);
 
     if ($httpCode !== 200) {
-        return false; // a 429 is retryable — wait its Retry-After seconds before checking again
+        return false; // a 429 is retryable: wait its Retry-After seconds plus a small random delay
     }
 
     $payment = json_decode($result, true);
@@ -268,7 +271,8 @@ const ERROR_ROWS = [
     status: "429",
     cause:
       'Too many requests, or Stripe is rate limiting the platform (code "RATE_LIMITED"). The response has a Retry-After header',
-    retry: "Yes. Wait the Retry-After seconds, then retry automatically with the same key",
+    retry:
+      "Yes. Wait the Retry-After seconds plus a small random extra delay, then retry automatically with the same key",
   },
   {
     status: "500",
@@ -287,7 +291,7 @@ const ERROR_ROWS = [
     cause:
       'The payment service is busy with other requests (code "STRIPE_BUSY"). The response has Retry-After: 5',
     retry:
-      "Yes. Wait the Retry-After seconds, then retry automatically with the same key, while the customer sees a waiting screen. Nothing was created",
+      "Yes. Wait the Retry-After seconds plus a small random extra delay, then retry automatically with the same key, while the customer sees a waiting screen. Nothing was created",
   },
   {
     status: "503",
@@ -689,16 +693,16 @@ export default function Docs() {
             <div className="grid gap-4">
               {[
                 {
-                  title: "A burst of 200 is fine.",
-                  desc: "Many customers can pay at the same moment, for example when rent is due. Each account (the account behind your API key) can create 200 checkouts at once, and the allowance refills at 120 per minute (2 per second) as you use it. The limit is a backstop against a runaway loop or a leaked key, not a throttle on normal traffic.",
+                  title: "A burst of 200 is admitted, but may need a retry.",
+                  desc: "Many customers can pay at the same moment, for example when rent is due. Each account (the account behind your API key) can create 200 checkouts at once, and the allowance refills at 120 per minute (2 per second) as you use it. The portal's own limit admits a burst of 200, but only 25 Stripe calls run at a time and a request waits at most 10 seconds for its turn. When Stripe is slow, the tail of a large burst can run out of that time and get a 503 STRIPE_BUSY instead of a checkout, so build in the retry. The limit is a backstop against a runaway loop or a leaked key, not a throttle on normal traffic.",
                 },
                 {
                   title: "A refused request tells you when to retry.",
-                  desc: 'A 429 with code "RATE_LIMITED" carries a Retry-After header: the whole number of seconds to wait (at least 1). Every 429 from this API carries both. You also get a 429 if Stripe itself is rate limiting the platform; then Retry-After is 2. A 503 with code "STRIPE_BUSY" and Retry-After: 5 means the platform is already making many Stripe calls and yours could not get its turn in time. Nothing was created.',
+                  desc: 'A 429 with code "RATE_LIMITED" carries a Retry-After header: the whole number of seconds to wait (at least 1). Every 429 from this API carries both. You also get a 429 if Stripe itself is rate limiting the platform; then Retry-After is 2. A 503 with code "STRIPE_BUSY" and Retry-After: 5 means the platform is already making its maximum of 25 Stripe calls at once, and yours did not get its turn within 10 seconds (or too many requests were already waiting). Nothing was created.',
                 },
                 {
                   title: "Retry automatically, with the same Idempotency-Key.",
-                  desc: "On a 429 or a 503, wait the Retry-After seconds and send the same request again with the same key, while your customer sees a waiting screen such as Preparing your payment. The customer should never have to click twice, and you should not generate a new key: a refused request created nothing, and a request that did get through is never created a second time under the same key. If the request is still refused after a few minutes of retries, stop and contact DFWSC support with the X-Request-Id.",
+                  desc: "On a 429 or a 503, wait the Retry-After seconds plus a small random extra delay (for example up to one second, chosen separately for each request) and send the same request again with the same key, while your customer sees a waiting screen such as Preparing your payment. The customer should never have to click twice, and you should not generate a new key: a refused request created nothing, and a request that did get through is never created a second time under the same key. The random extra matters when many requests are refused together, as in a rent-day burst: if they all wait exactly the same time, they all come back at the same moment and are refused again. If the request is still refused after a few minutes of retries, stop and contact DFWSC support with the X-Request-Id.",
                 },
               ].map((item) => (
                 <div
@@ -795,12 +799,16 @@ window.location.href = url;`}</CodeBlock>
               600 requests per minute for your account, shared by every session you check, and you
               only see your own account&apos;s sessions (a session that belongs to another account
               returns 404, the same as an unknown session). A wrong or deactivated key returns 401;
-              it is not treated as an anonymous call. Without it: the call is anonymous and limited
-              to 30 requests per minute for each calling IP address, shared by everything calling
-              from that address. This is the limit a customer&apos;s browser has when it loads the
-              payment success page. Other errors: 400 for a sessionId that is not a Checkout session
-              ID, and 404 for an unknown session. A 429 carries code RATE_LIMITED and a Retry-After
-              header, as in Step 1.
+              it is not treated as an anonymous call. Rejected keys are counted per calling IP
+              address: after 30 of them in a minute, further calls from that address that send an
+              X-Api-Key get a 429 with a Retry-After header until the minute has passed, without the
+              key being checked. Successful calls are never counted, and a key that was checked
+              successfully within the last minute is still served. Without it: the call is anonymous
+              and limited to 30 requests per minute for each calling IP address, shared by
+              everything calling from that address. This is the limit a customer&apos;s browser has
+              when it loads the payment success page. Other errors: 400 for a sessionId that is not
+              a Checkout session ID, and 404 for an unknown session. A 429 carries code RATE_LIMITED
+              and a Retry-After header, as in Step 1.
             </p>
 
             <div className="mt-8 p-4 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] font-mono text-brand-600 dark:text-brand-400 font-bold transition-colors">
@@ -866,7 +874,7 @@ window.location.href = url;`}</CodeBlock>
                 },
                 {
                   title: "Send your API key and back off when you poll.",
-                  desc: "Sent with your X-Api-Key, this endpoint allows 600 requests per minute for your account, shared by every session you check; without the key it allows 30 requests per minute for each calling IP address. Check once when the customer lands on the success URL, then again after about 2, 5 and 10 seconds. If the status is still created, leave the order to a background job. Treat that job's polling as one budget shared by all your pending orders, not a rate per order: check a pending order once a minute for its first ten minutes, then every 15 minutes, and stop once the status is expired or 24 hours have passed since you created it (an abandoned checkout stays created until Stripe expires it). Keep the job's total to about 300 requests a minute across every order, so the check you make when a customer returns to the success URL always has headroom; if more orders are due than fit, check the oldest first and let the rest wait for the next minute. On a 429, wait the number of seconds in its Retry-After header before the next attempt instead of retrying straight away.",
+                  desc: "Sent with your X-Api-Key, this endpoint allows 600 requests per minute for your account, shared by every session you check; without the key it allows 30 requests per minute for each calling IP address. Check once when the customer lands on the success URL, then again after about 2, 5 and 10 seconds. If the status is still created, leave the order to a background job. Treat that job's polling as one budget shared by all your pending orders, not a rate per order: check a pending order once a minute for its first ten minutes, then every 15 minutes, and stop once the status is expired or 24 hours have passed since you created it (an abandoned checkout stays created until Stripe expires it). Keep the job's total to about 300 requests a minute across every order, so the check you make when a customer returns to the success URL always has headroom; if more orders are due than fit, check the oldest first and let the rest wait for the next minute. On a 429, wait the number of seconds in its Retry-After header, plus a small random extra delay, before the next attempt instead of retrying straight away.",
                 },
               ].map((item) => (
                 <div
@@ -1001,7 +1009,7 @@ window.location.href = url;`}</CodeBlock>
                 },
                 {
                   title: "Retry 429 and 503 automatically.",
-                  desc: "Wait the Retry-After seconds, then send the same request with the same Idempotency-Key, and show the customer a waiting screen so they never have to click twice.",
+                  desc: "Wait the Retry-After seconds plus a small random extra delay, then send the same request with the same Idempotency-Key, and show the customer a waiting screen so they never have to click twice.",
                 },
                 {
                   title: "Amounts are in cents.",

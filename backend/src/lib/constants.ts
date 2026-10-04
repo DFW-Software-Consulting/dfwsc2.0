@@ -16,6 +16,8 @@ export const DEFAULT_DB_POOL_MAX = 10;
 // a burst of up to CAPACITY checkouts is admitted at once, then REFILL_PER_MINUTE on average.
 // Sized for rent day (many tenants clicking "Pay rent" together) while still stopping a
 // runaway loop or a leaked key. Retune here; there are deliberately no environment variables.
+// The bucket only admits the burst: Stripe calls still run MAX_CONCURRENT at a time (below), so
+// when Stripe is slow the tail of a burst can wait out QUEUE_MAX_WAIT_MS and get STRIPE_BUSY.
 export const PAYMENT_CREATE_BUCKET_CAPACITY = 200;
 export const PAYMENT_CREATE_REFILL_PER_MINUTE = 120;
 
