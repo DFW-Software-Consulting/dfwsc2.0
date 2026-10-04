@@ -8,16 +8,24 @@ vi.mock("../../lib/stripe", () => ({
 }));
 
 import { eq, inArray } from "drizzle-orm";
+import Stripe from "stripe";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, paymentLedger } from "../../db/schema";
 import { hashApiKey, sha256Lookup } from "../../lib/auth";
-import { resetCircuitBreakersForTests } from "../../lib/circuit-breakers";
+import {
+  configureStripeConcurrencyForTests,
+  openStripeCircuitForTests,
+  resetCircuitBreakersForTests,
+  resetStripeConcurrencyForTests,
+  withStripeCircuit,
+} from "../../lib/circuit-breakers";
 import {
   PAYMENT_CREATE_BUCKET_CAPACITY,
   PAYMENT_CREATE_REFILL_PER_MINUTE,
 } from "../../lib/constants";
+import { tokenBuckets } from "../../lib/rate-limit";
 import { stripe } from "../../lib/stripe";
 
 const mockCreate = stripe.checkout.sessions.create as ReturnType<typeof vi.fn>;
@@ -99,6 +107,7 @@ describe("POST /payments/create burst handling (token bucket)", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    resetStripeConcurrencyForTests();
   });
 
   it("is configured for a 200 burst refilling at 2 per second", () => {
@@ -177,4 +186,109 @@ describe("POST /payments/create burst handling (token bucket)", () => {
       .where(eq(paymentLedger.clientId, building.id));
     expect(rows).toHaveLength(200);
   }, 60_000);
+
+  // A request refused because Stripe had no free slot (or the circuit was open) never reached
+  // Stripe, and the caller is told to retry it. The refusal must not cost a token, or the retried
+  // tail of a large burst would be refused by the portal's own limit.
+  describe("refusals that never reached Stripe", () => {
+    const BURST = PAYMENT_CREATE_BUCKET_CAPACITY;
+
+    async function burst(apiKey: string, count = BURST) {
+      const responses = await Promise.all(
+        Array.from({ length: count }, () => createCheckout(apiKey))
+      );
+      return responses.map((r: any) => r);
+    }
+
+    it("leaves the tokens available after a drained burst is refused as STRIPE_BUSY", async () => {
+      const building = await seedBuilding("Busy Refund Building");
+      configureStripeConcurrencyForTests({ maxConcurrent: 1, maxWaiting: 0, maxWaitMs: 10_000 });
+      const gate = new Promise<string>(() => {});
+      void withStripeCircuit(() => gate);
+
+      // Every request in the burst takes a token, then is refused for want of a Stripe slot.
+      const busy = await burst(building.apiKey);
+      expect(busy.every((r) => r.statusCode === 503 && r.json().code === "STRIPE_BUSY")).toBe(true);
+      expect(mockCreate).not.toHaveBeenCalled();
+
+      // Slots are free again: the full retried burst succeeds and is only then refused.
+      resetStripeConcurrencyForTests();
+      const retried = await burst(building.apiKey);
+      expect(retried.every((r) => r.statusCode === 201)).toBe(true);
+      expect(mockCreate).toHaveBeenCalledTimes(BURST);
+      expect((await createCheckout(building.apiKey)).statusCode).toBe(429);
+    }, 60_000);
+
+    it("leaves the tokens available after refusals from an open Stripe circuit", async () => {
+      const building = await seedBuilding("Circuit Refund Building");
+      openStripeCircuitForTests();
+
+      const refused = await burst(building.apiKey);
+      expect(refused.every((r) => r.statusCode === 503)).toBe(true);
+      expect(mockCreate).not.toHaveBeenCalled();
+
+      resetCircuitBreakersForTests();
+      const retried = await burst(building.apiKey);
+      expect(retried.every((r) => r.statusCode === 201)).toBe(true);
+      expect((await createCheckout(building.apiKey)).statusCode).toBe(429);
+    }, 60_000);
+
+    it("keeps the token of a request Stripe answered with 429", async () => {
+      const building = await seedBuilding("Stripe 429 Building");
+      mockCreate.mockRejectedValue(
+        Stripe.errors.StripeError.generate({
+          type: "rate_limit_error",
+          statusCode: 429,
+          message: "Too many requests hit the API too quickly.",
+        } as never)
+      );
+
+      const answered = await burst(building.apiKey);
+      expect(answered.every((r) => r.statusCode === 429)).toBe(true);
+      expect(mockCreate).toHaveBeenCalledTimes(BURST);
+
+      // The bucket is empty: this refusal is the portal's own, and Stripe is not called again.
+      const refused = await createCheckout(building.apiKey);
+      expect(refused.statusCode).toBe(429);
+      expect(refused.json()).toEqual({ error: "Too Many Requests", code: "RATE_LIMITED" });
+      expect(mockCreate).toHaveBeenCalledTimes(BURST);
+    }, 60_000);
+
+    it("keeps the token of a request that failed validation", async () => {
+      const building = await seedBuilding("Validation Building");
+
+      const invalid = await Promise.all(
+        Array.from({ length: BURST }, () =>
+          app.inject({
+            method: "POST",
+            url: "/api/v1/payments/create",
+            headers: { "x-api-key": building.apiKey, "idempotency-key": `rent-${randomUUID()}` },
+            payload: { lineItems: [] },
+          })
+        )
+      );
+      expect(invalid.every((r: any) => r.statusCode === 400)).toBe(true);
+
+      expect((await createCheckout(building.apiKey)).statusCode).toBe(429);
+      expect(mockCreate).not.toHaveBeenCalled();
+    }, 60_000);
+
+    it("keeps the token when the Stripe call itself timed out", async () => {
+      const building = await seedBuilding("Timeout Building");
+      // The call goes out and never answers; the breaker gives up on it after its own timeout.
+      // That surfaces as a circuit error, but Stripe was called, so the token stays spent.
+      mockCreate.mockImplementation(() => new Promise(() => {}));
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      vi.setSystemTime(new Date("2026-11-01T09:00:00Z"));
+
+      const pending = createCheckout(building.apiKey);
+      await vi.waitFor(() => expect(mockCreate).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(26_000);
+      expect((await pending).statusCode).toBe(503);
+
+      // The date is frozen, so the bucket holds exactly the capacity minus the one token taken.
+      const bucketKey = `ratelimit:bucket:POST:/api/v1/payments/create:stripe:acct_burst_${building.id.slice(0, 8)}`;
+      expect(tokenBuckets.get(bucketKey)?.tokens).toBe(BURST - 1);
+    }, 60_000);
+  });
 });

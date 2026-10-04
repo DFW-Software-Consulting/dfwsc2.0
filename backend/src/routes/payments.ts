@@ -11,7 +11,12 @@ import {
   requireApiKey,
   sha256Lookup,
 } from "../lib/auth";
-import { getCircuitBreakerStates, withStripeCircuit } from "../lib/circuit-breakers";
+import {
+  getCircuitBreakerStates,
+  isCircuitOpenError,
+  isStripeBusyError,
+  withStripeCircuit,
+} from "../lib/circuit-breakers";
 import { getClientIp } from "../lib/client-ip";
 import {
   appendCheckoutSessionId,
@@ -434,17 +439,16 @@ async function insertPaymentLedger(row: {
 }
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
+  const paymentCreateBucket = tokenBucketRateLimit({
+    capacity: PAYMENT_CREATE_BUCKET_CAPACITY,
+    refillPerMinute: PAYMENT_CREATE_REFILL_PER_MINUTE,
+    keyGenerator: resolvePaymentRateLimitKey,
+  });
+
   fastify.post(
     "/payments/create",
     {
-      preHandler: [
-        requireClientOrAdmin,
-        tokenBucketRateLimit({
-          capacity: PAYMENT_CREATE_BUCKET_CAPACITY,
-          refillPerMinute: PAYMENT_CREATE_REFILL_PER_MINUTE,
-          keyGenerator: resolvePaymentRateLimitKey,
-        }),
-      ],
+      preHandler: [requireClientOrAdmin, paymentCreateBucket],
     },
     async (request, reply) => {
       const idempotencyKeyHeader = extractIdempotencyKey(request);
@@ -632,18 +636,27 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       };
 
       let session: Stripe.Checkout.Session;
+      let stripeCalled = false;
       try {
         if (sessionParams.payment_intent_data && !effectiveWaiveFee) {
           sessionParams.payment_intent_data.application_fee_amount = feeAmount;
         }
-        session = await withStripeCircuit(() =>
-          stripe.checkout.sessions.create(sessionParams, {
+        session = await withStripeCircuit(() => {
+          stripeCalled = true;
+          return stripe.checkout.sessions.create(sessionParams, {
             stripeAccount: stripeAccountId,
             idempotencyKey: stripeIdempotencyKey,
-          })
-        );
+          });
+        });
       } catch (err) {
         request.log.error({ err }, "Stripe Checkout session creation failed");
+        // A request refused before it reached Stripe (no slot in time, or the circuit already
+        // open) is told to retry, so it gives its rate-limit token back and the retry is not
+        // charged twice. A circuit-open error after the call started is a timeout of a call
+        // that did go out, so it keeps its token like every other outcome that reached Stripe.
+        if (isStripeBusyError(err) || (isCircuitOpenError(err) && !stripeCalled)) {
+          await paymentCreateBucket.refund(request);
+        }
         if (
           mapStripeError(err, reply, {
             circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,

@@ -141,6 +141,123 @@ describe.runIf(Boolean(REDIS_URL))("rate limiters against a real Redis", () => {
     expect(outcomes.filter((o) => o.admitted)).toHaveLength(50);
   });
 
+  const bucketKey = (id: string) => `ratelimit:bucket:POST:/live-test:${id}`;
+  const storedTokens = async (id: string) => Number(await inspector.hget(bucketKey(id), "tokens"));
+
+  it("refund: gives back exactly one token to the bucket the request took it from", async () => {
+    const { tokenBucketRateLimit } = await loadModule();
+    const guard = tokenBucketRateLimit({ capacity: 3, refillPerMinute: 0.6, keyGenerator: byId });
+    const id = freshId();
+
+    const taken = [];
+    for (let i = 0; i < 3; i++) taken.push(await take(guard, id));
+    expect((await take(guard, id)).admitted).toBe(false);
+
+    expect(await guard.refund(taken[0].request)).toBe(true);
+    expect((await take(guard, id)).admitted).toBe(true);
+    expect((await take(guard, id)).admitted).toBe(false);
+    // Served by Redis, not by the in-memory fallback.
+    expect(taken[0].request.log.error).not.toHaveBeenCalled();
+  });
+
+  it("refund: a second refund of the same request adds nothing", async () => {
+    const { tokenBucketRateLimit } = await loadModule();
+    const guard = tokenBucketRateLimit({ capacity: 5, refillPerMinute: 0.6, keyGenerator: byId });
+    const id = freshId();
+
+    const first = await take(guard, id);
+    await take(guard, id);
+    expect(await guard.refund(first.request)).toBe(true);
+    const afterOne = await storedTokens(id);
+    expect(await guard.refund(first.request)).toBe(false);
+    expect(await guard.refund(first.request)).toBe(false);
+    expect(await storedTokens(id)).toBe(afterOne);
+    expect(afterOne).toBeCloseTo(4, 1);
+  });
+
+  it("refund: never raises the bucket above capacity", async () => {
+    const { tokenBucketRateLimit } = await loadModule();
+    // 100 tokens per second: full again within ~20 ms.
+    const guard = tokenBucketRateLimit({ capacity: 2, refillPerMinute: 6000, keyGenerator: byId });
+    const id = freshId();
+
+    const first = await take(guard, id);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(await guard.refund(first.request)).toBe(true);
+    expect(await storedTokens(id)).toBe(2);
+  });
+
+  it("refund: leaves a bucket that has expired as full, creating nothing", async () => {
+    const { tokenBucketRateLimit } = await loadModule();
+    // Full in 1 s; the key expires about 2 s after the take.
+    const guard = tokenBucketRateLimit({ capacity: 1, refillPerMinute: 60, keyGenerator: byId });
+    const id = freshId();
+
+    const first = await take(guard, id);
+    await new Promise((resolve) => setTimeout(resolve, 2_300));
+    expect(await inspector.exists(bucketKey(id))).toBe(0);
+    await guard.refund(first.request);
+    expect(await inspector.exists(bucketKey(id))).toBe(0);
+  });
+
+  it("refund: concurrent refunds from independent connections return each token once", async () => {
+    const id = freshId();
+    const guards = await Promise.all(
+      Array.from({ length: 6 }, async () => {
+        const { tokenBucketRateLimit } = await loadModule();
+        return tokenBucketRateLimit({ capacity: 50, refillPerMinute: 0.6, keyGenerator: byId });
+      })
+    );
+
+    const outcomes = await Promise.all(
+      guards.flatMap((guard) =>
+        Array.from({ length: 30 }, async () => ({ guard, ...(await take(guard, id)) }))
+      )
+    );
+    const admitted = outcomes.filter((o) => o.admitted);
+    expect(admitted).toHaveLength(50);
+    expect(await storedTokens(id)).toBeLessThan(1);
+
+    // Every admitted request is refunded three times at once; only the first of each counts.
+    const refunds = await Promise.all(
+      admitted.flatMap((o) => Array.from({ length: 3 }, () => o.guard.refund(o.request)))
+    );
+    expect(refunds.filter(Boolean)).toHaveLength(50);
+    expect(await storedTokens(id)).toBeCloseTo(50, 1);
+
+    // The bucket holds exactly its capacity again: 50 more are admitted, then none.
+    const again = await Promise.all(
+      guards.flatMap((guard) => Array.from({ length: 12 }, () => take(guard, id)))
+    );
+    expect(again.filter((o) => o.admitted)).toHaveLength(50);
+  });
+
+  it("refund: concurrent takes and refunds interleave without losing or inventing a token", async () => {
+    const id = freshId();
+    const guards = await Promise.all(
+      Array.from({ length: 6 }, async () => {
+        const { tokenBucketRateLimit } = await loadModule();
+        return tokenBucketRateLimit({ capacity: 10, refillPerMinute: 0.6, keyGenerator: byId });
+      })
+    );
+
+    // Each admitted request hands its token straight back, while others are still taking.
+    const results = await Promise.all(
+      guards.flatMap((guard) =>
+        Array.from({ length: 25 }, async () => {
+          const attempt = await take(guard, id);
+          if (attempt.admitted) await guard.refund(attempt.request);
+          return attempt.admitted;
+        })
+      )
+    );
+
+    expect(results.filter(Boolean).length).toBeGreaterThanOrEqual(10);
+    // Every token taken was returned once, so the bucket is exactly full, never above.
+    expect(await storedTokens(id)).toBeCloseTo(10, 1);
+    expect(await storedTokens(id)).toBeLessThanOrEqual(10);
+  });
+
   it("keeps separate buckets per key", async () => {
     const { tokenBucketRateLimit } = await loadModule();
     const guard = tokenBucketRateLimit({ capacity: 1, refillPerMinute: 1, keyGenerator: byId });

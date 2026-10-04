@@ -189,6 +189,101 @@ describe("tokenBucketRateLimit (in-memory)", () => {
     vi.advanceTimersByTime(10 * 60_000 + 1);
     expect(tokenBuckets.size).toBe(0);
   });
+
+  describe("refund", () => {
+    // Admits one request through the guard and returns it, so the same object can be refunded.
+    async function admit(guard: Guard, opts: Parameters<typeof makeMocks>[0] = {}) {
+      const { request, reply } = makeMocks(opts);
+      await guard(request, reply);
+      expect(reply.code).not.toHaveBeenCalled();
+      return request;
+    }
+
+    it("gives back the one token the request took", async () => {
+      const { tokenBucketRateLimit } = await load();
+      const guard = tokenBucketRateLimit({ capacity: 3, refillPerMinute: 1 });
+
+      const requests = [];
+      for (let i = 0; i < 3; i++) requests.push(await admit(guard));
+      expect((await take(guard)).admitted).toBe(false);
+
+      expect(await guard.refund(requests[0] as any)).toBe(true);
+      expect((await take(guard)).admitted).toBe(true);
+      expect((await take(guard)).admitted).toBe(false);
+    });
+
+    it("never raises the bucket above capacity", async () => {
+      const { tokenBucketRateLimit, tokenBuckets } = await load();
+      const guard = tokenBucketRateLimit({ capacity: 3, refillPerMinute: 60 });
+
+      const request = await admit(guard);
+      // Idle long enough to refill completely (3 s) before the refund arrives, but not long
+      // enough for the sweep (10 min) to drop the bucket.
+      vi.advanceTimersByTime(5 * 60_000);
+      await guard.refund(request as any);
+
+      const [bucket] = [...tokenBuckets.values()];
+      expect(bucket.tokens).toBe(3);
+      const outcomes: boolean[] = [];
+      for (let i = 0; i < 5; i++) outcomes.push((await take(guard)).admitted);
+      expect(outcomes).toEqual([true, true, true, false, false]);
+    });
+
+    it("refunds at most once per request", async () => {
+      const { tokenBucketRateLimit } = await load();
+      const guard = tokenBucketRateLimit({ capacity: 2, refillPerMinute: 1 });
+
+      const request = await admit(guard);
+      await admit(guard);
+      expect(await guard.refund(request as any)).toBe(true);
+      expect(await guard.refund(request as any)).toBe(false);
+      expect(await guard.refund(request as any)).toBe(false);
+
+      // One token back, not three.
+      expect((await take(guard)).admitted).toBe(true);
+      expect((await take(guard)).admitted).toBe(false);
+    });
+
+    it("refunds nothing for a request that was refused or never took a token", async () => {
+      const { tokenBucketRateLimit } = await load();
+      const guard = tokenBucketRateLimit({ capacity: 1, refillPerMinute: 1 });
+      await admit(guard);
+
+      const refused = makeMocks();
+      await guard(refused.request as any, refused.reply as any);
+      expect(refused.reply.code).toHaveBeenCalledWith(429);
+      expect(await guard.refund(refused.request as any)).toBe(false);
+      expect(await guard.refund(makeMocks().request as any)).toBe(false);
+
+      expect((await take(guard)).admitted).toBe(false);
+    });
+
+    it("returns the token to the bucket it was taken from, not another key or limiter", async () => {
+      const { tokenBucketRateLimit } = await load();
+      const guard = tokenBucketRateLimit({ capacity: 1, refillPerMinute: 1 });
+      const other = tokenBucketRateLimit({ capacity: 1, refillPerMinute: 1 });
+
+      const a = await admit(guard, { ip: "10.0.0.1" });
+      await admit(guard, { ip: "10.0.0.2" });
+      // A different limiter instance does not know this request's token.
+      expect(await other.refund(a as any)).toBe(false);
+      await guard.refund(a as any);
+
+      expect((await take(guard, { ip: "10.0.0.1" })).admitted).toBe(true);
+      expect((await take(guard, { ip: "10.0.0.2" })).admitted).toBe(false);
+    });
+
+    it("does nothing when the bucket has already been swept as full", async () => {
+      const { tokenBucketRateLimit, tokenBuckets } = await load();
+      const guard = tokenBucketRateLimit({ capacity: 2, refillPerMinute: 60 });
+      const request = await admit(guard);
+
+      vi.advanceTimersByTime(10 * 60_000 + 1);
+      expect(tokenBuckets.size).toBe(0);
+      await guard.refund(request as any);
+      expect(tokenBuckets.size).toBe(0);
+    });
+  });
 });
 
 describe("tokenBucketRateLimit (Redis path, mocked client)", () => {
@@ -272,5 +367,95 @@ describe("tokenBucketRateLimit (Redis path, mocked client)", () => {
 
     expect((await take(guard)).admitted).toBe(true);
     expect((await take(guard)).admitted).toBe(false);
+  });
+  describe("refund", () => {
+    it("runs the refund script against the same key, capacity, rate and TTL as the take", async () => {
+      evalMock.mockResolvedValue([1, 0]);
+      const { tokenBucketRateLimit, TOKEN_BUCKET_REFUND_LUA } = await import(
+        "../../lib/rate-limit"
+      );
+      const guard = tokenBucketRateLimit({
+        capacity: 200,
+        refillPerMinute: 120,
+        keyGenerator: () => "stripe:acct_A",
+      });
+      const { request, reply } = makeMocks({ url: "/payments/create" });
+      await guard(request as any, reply as any);
+
+      evalMock.mockResolvedValue(1);
+      expect(await guard.refund(request as any)).toBe(true);
+      expect(evalMock).toHaveBeenCalledTimes(2);
+      const take = evalMock.mock.calls[0];
+      const [script, numKeys, key, capacity, refillPerMs, ttl] = evalMock.mock.calls[1];
+      expect(script).toBe(TOKEN_BUCKET_REFUND_LUA);
+      expect(numKeys).toBe(1);
+      expect([key, capacity, refillPerMs, ttl]).toEqual([take[2], take[3], take[4], take[5]]);
+    });
+
+    it("sends one refund script call however many times it is asked", async () => {
+      evalMock.mockResolvedValue([1, 0]);
+      const { tokenBucketRateLimit } = await import("../../lib/rate-limit");
+      const guard = tokenBucketRateLimit({ capacity: 5, refillPerMinute: 60 });
+      const { request, reply } = makeMocks();
+      await guard(request as any, reply as any);
+
+      evalMock.mockResolvedValue(1);
+      const results = await Promise.all([
+        guard.refund(request as any),
+        guard.refund(request as any),
+        guard.refund(request as any),
+      ]);
+      expect(results.filter(Boolean)).toHaveLength(1);
+      expect(evalMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("sends no refund for a request that Redis refused", async () => {
+      evalMock.mockResolvedValue([0, 1500]);
+      const { tokenBucketRateLimit } = await import("../../lib/rate-limit");
+      const guard = tokenBucketRateLimit({ capacity: 5, refillPerMinute: 60 });
+      const { request, reply } = makeMocks();
+      await guard(request as any, reply as any);
+
+      expect(await guard.refund(request as any)).toBe(false);
+      expect(evalMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("refunds to the in-memory bucket, never to Redis, when the take used the fallback", async () => {
+      evalMock.mockRejectedValue(new Error("Connection is closed."));
+      const { tokenBucketRateLimit } = await import("../../lib/rate-limit");
+      const guard = tokenBucketRateLimit({ capacity: 2, refillPerMinute: 1 });
+
+      const first = makeMocks();
+      await guard(first.request as any, first.reply as any);
+      await take(guard);
+      expect((await take(guard)).admitted).toBe(false);
+      expect(evalMock).toHaveBeenCalledTimes(3);
+
+      // Redis has recovered by the time the handler refunds; the token still goes to memory.
+      evalMock.mockResolvedValue(1);
+      expect(await guard.refund(first.request as any)).toBe(true);
+      expect(evalMock).toHaveBeenCalledTimes(3);
+
+      evalMock.mockRejectedValue(new Error("Connection is closed."));
+      expect((await take(guard)).admitted).toBe(true);
+      expect((await take(guard)).admitted).toBe(false);
+    });
+
+    it("leaves a failed Redis refund unretried, does not throw and does not touch memory", async () => {
+      evalMock.mockResolvedValue([1, 0]);
+      const { tokenBucketRateLimit, tokenBuckets } = await import("../../lib/rate-limit");
+      const guard = tokenBucketRateLimit({ capacity: 5, refillPerMinute: 60 });
+      const { request, reply } = makeMocks();
+      await guard(request as any, reply as any);
+
+      evalMock.mockRejectedValue(new Error("Connection is closed."));
+      await expect(guard.refund(request as any)).resolves.toBe(false);
+      expect(tokenBuckets.size).toBe(0);
+      expect(request.log.error).toHaveBeenCalledTimes(1);
+
+      evalMock.mockResolvedValue(1);
+      expect(await guard.refund(request as any)).toBe(false);
+      expect(evalMock).toHaveBeenCalledTimes(2);
+    });
   });
 });

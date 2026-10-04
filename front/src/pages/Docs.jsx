@@ -698,7 +698,7 @@ export default function Docs() {
                 },
                 {
                   title: "A refused request tells you when to retry.",
-                  desc: 'A 429 with code "RATE_LIMITED" carries a Retry-After header: the whole number of seconds to wait (at least 1). Every 429 from this API carries both. You also get a 429 if Stripe itself is rate limiting the platform; then Retry-After is 2. A 503 with code "STRIPE_BUSY" and Retry-After: 5 means the platform is already making its maximum of 25 Stripe calls at once, and yours did not get its turn within 10 seconds (or too many requests were already waiting). Nothing was created.',
+                  desc: 'A 429 with code "RATE_LIMITED" carries a Retry-After header: the whole number of seconds to wait (at least 1). Every 429 from this API carries both. You also get a 429 if Stripe itself is rate limiting the platform; then Retry-After is 2. A 503 with code "STRIPE_BUSY" and Retry-After: 5 means the platform is already making its maximum of 25 Stripe calls at once, and yours did not get its turn within 10 seconds (or too many requests were already waiting). Nothing was created. A 503 STRIPE_BUSY does not use up any of your allowance of 200, so retrying it is not counted twice.',
                 },
                 {
                   title: "Retry automatically, with the same Idempotency-Key.",

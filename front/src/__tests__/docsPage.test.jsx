@@ -88,6 +88,7 @@ describe("Docs page", () => {
     expect(text).toMatch(/Retry automatically, with the same Idempotency-Key/i);
     expect(text).toMatch(/never have to click twice/i);
     expect(text).toMatch(/waiting screen/i);
+    expect(text).toMatch(/503 STRIPE_BUSY does not use up any of your allowance of 200/i);
   });
 
   it("does not promise that a burst is served without delay", () => {

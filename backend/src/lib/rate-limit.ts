@@ -230,6 +230,62 @@ async function redisTokenBucket(
   return Number(allowed) === 1 ? { allowed: true } : { allowed: false, retryAfterMs };
 }
 
+// Atomic give-back of one token. Same clock, refill and key layout as TOKEN_BUCKET_LUA: the
+// bucket is first brought up to date, then one token is added, never above capacity. A missing
+// key means the bucket has already refilled completely and expired, so there is nothing to give
+// back. Returns 1 when a token was added to a stored bucket, 0 otherwise.
+//   KEYS[1] bucket hash, ARGV[1] capacity, ARGV[2] refill tokens per millisecond, ARGV[3] TTL ms
+export const TOKEN_BUCKET_REFUND_LUA = `
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local capacity = tonumber(ARGV[1])
+local rate = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+local data = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+local tokens = tonumber(data[1])
+local ts = tonumber(data[2])
+if tokens == nil or ts == nil then
+  return 0
+end
+local elapsed = now - ts
+if elapsed < 0 then elapsed = 0 end
+tokens = math.min(capacity, tokens + elapsed * rate)
+tokens = math.min(capacity, tokens + 1)
+redis.call('HSET', KEYS[1], 'tokens', tostring(tokens), 'ts', tostring(now))
+redis.call('PEXPIRE', KEYS[1], ttl)
+return 1
+`;
+
+async function redisTokenRefund(
+  client: Redis,
+  key: string,
+  capacity: number,
+  refillPerMs: number,
+  fullRefillMs: number
+): Promise<void> {
+  await client.eval(
+    TOKEN_BUCKET_REFUND_LUA,
+    1,
+    key,
+    String(capacity),
+    String(refillPerMs),
+    String(Math.ceil(fullRefillMs) + 1000)
+  );
+}
+
+function memoryTokenRefund(key: string, capacity: number, refillPerMs: number, now: number): void {
+  const bucket = tokenBuckets.get(key);
+  // No stored bucket: it refilled completely and was swept, so there is nothing to give back.
+  if (!bucket) return;
+  const elapsed = Math.max(0, now - bucket.updatedAt);
+  const tokens = Math.min(capacity, bucket.tokens + elapsed * refillPerMs);
+  tokenBuckets.set(key, {
+    tokens: Math.min(capacity, tokens + 1),
+    updatedAt: now,
+    fullRefillMs: bucket.fullRefillMs,
+  });
+}
+
 function memoryTokenBucket(
   key: string,
   capacity: number,
@@ -262,12 +318,21 @@ export function tokenBucketRateLimit(options: TokenBucketOptions) {
   const refillPerMs = refillPerMinute / 60_000;
   const fullRefillMs = capacity / refillPerMs;
 
-  return async function tokenBucketGuard(request: FastifyRequest, reply: FastifyReply) {
+  // What this request took and from where, so a refund goes to exactly that bucket in exactly
+  // that store. Keyed by request: a request that was refused, or never reached this guard, has no
+  // entry and so can never refund anything.
+  const taken = new WeakMap<
+    FastifyRequest,
+    { key: string; store: "redis" | "memory"; refunded: boolean }
+  >();
+
+  async function tokenBucketGuard(request: FastifyRequest, reply: FastifyReply) {
     const id = options.keyGenerator ? options.keyGenerator(request) : getClientIp(request);
     // Own key prefix: a Redis hash must never share a key with a sliding-window sorted set.
     const key = `ratelimit:bucket:${limiterNamespace(request, options.name)}:${id}`;
 
     let result: TokenBucketResult | undefined;
+    let store: "redis" | "memory" = "redis";
     if (redis) {
       try {
         result = await redisTokenBucket(redis, key, capacity, refillPerMs, fullRefillMs);
@@ -277,12 +342,43 @@ export function tokenBucketRateLimit(options: TokenBucketOptions) {
         logRedisFailure(request, err);
       }
     }
-    result ??= memoryTokenBucket(key, capacity, refillPerMs, fullRefillMs, Date.now());
+    if (!result) {
+      store = "memory";
+      result = memoryTokenBucket(key, capacity, refillPerMs, fullRefillMs, Date.now());
+    }
 
     if (!result.allowed) {
       return sendRateLimited(reply, result.retryAfterMs);
     }
-  };
+    taken.set(request, { key, store, refunded: false });
+  }
+
+  /**
+   * Gives back the token this request took, for a request that was admitted but then refused
+   * before it did any work the limit exists to protect. It returns exactly one token to the
+   * bucket and store the take came from (memory if Redis had failed at the time), never raises
+   * the bucket above capacity, and does nothing the second time or for a request that took no
+   * token. It never throws: a failed refund only means the token stays spent.
+   */
+  async function refund(request: FastifyRequest): Promise<boolean> {
+    const entry = taken.get(request);
+    if (!entry || entry.refunded) return false;
+    entry.refunded = true;
+    if (entry.store === "memory") {
+      memoryTokenRefund(entry.key, capacity, refillPerMs, Date.now());
+      return true;
+    }
+    try {
+      if (!redis) return false;
+      await redisTokenRefund(redis, entry.key, capacity, refillPerMs, fullRefillMs);
+      return true;
+    } catch (err) {
+      logRedisFailure(request, err);
+      return false;
+    }
+  }
+
+  return Object.assign(tokenBucketGuard, { refund });
 }
 
 export function rateLimit(options: RateLimitOptions) {
