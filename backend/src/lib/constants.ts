@@ -27,6 +27,8 @@ export const STRIPE_MAX_CONCURRENT_CALLS = 25;
 export const STRIPE_QUEUE_MAX_WAITING = 500;
 export const STRIPE_QUEUE_MAX_WAIT_MS = 10_000;
 export const STRIPE_BUSY_RETRY_AFTER_SECONDS = 5;
+// Stripe's own 429 carries no Retry-After; this is what we tell the caller instead.
+export const STRIPE_RATE_LIMITED_RETRY_AFTER_SECONDS = 2;
 
 // webhook_events retention: how long to keep processed rows before pruning,
 // and how often the prune sweep runs.

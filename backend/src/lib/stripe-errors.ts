@@ -1,6 +1,9 @@
 import type { FastifyReply } from "fastify";
 import { isCircuitOpenError, isStripeBusyError } from "./circuit-breakers";
-import { STRIPE_BUSY_RETRY_AFTER_SECONDS } from "./constants";
+import {
+  STRIPE_BUSY_RETRY_AFTER_SECONDS,
+  STRIPE_RATE_LIMITED_RETRY_AFTER_SECONDS,
+} from "./constants";
 
 /**
  * Body for a Stripe call that could not get a concurrency slot in time. Always mapped (503 with
@@ -24,7 +27,10 @@ export interface StripeErrorMapping {
   circuitOpenStatus?: number;
   /** `code` value used for a declined-card (`StripeCardError`) response. Omit to skip this branch. */
   cardDeclinedCode?: string;
-  /** Response body sent for a Stripe rate-limit (`StripeRateLimitError`) error. Omit to skip this branch. */
+  /**
+   * Response body sent for a Stripe rate-limit (`StripeRateLimitError`) error, with
+   * `Retry-After` (Stripe sends none). Omit to skip this branch.
+   */
   rateLimited?: StripeErrorBody;
   /**
    * Map permanent caller errors instead of letting them fall through as retryable:
@@ -78,6 +84,7 @@ export function mapStripeError(
   }
 
   if (mapping.rateLimited && err instanceof Error && kind === "StripeRateLimitError") {
+    reply.header("Retry-After", String(STRIPE_RATE_LIMITED_RETRY_AFTER_SECONDS));
     reply.code(429).send(mapping.rateLimited);
     return true;
   }

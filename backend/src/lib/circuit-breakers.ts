@@ -24,21 +24,20 @@ const breakerOptions = {
 };
 
 /**
- * opossum treats an error the filter returns true for as a success, not a failure.
- * Stripe 4xx responses other than 429 and 401 (invalid request, idempotency mismatch,
- * permission, card errors) mean Stripe answered and the caller's input was wrong, so they
- * must not count toward opening the process-wide breaker. A 401 means the platform key is
- * revoked or wrong, which is a platform-wide failure, so it still counts. Connection errors
- * (no status), 5xx, 429 and opossum timeouts also count.
+ * opossum treats an error the filter returns true for as a success, not a failure: it emits
+ * "success", which also resets the consecutive-failure count below and closes a half-open breaker.
+ * Stripe 4xx responses other than 401 (invalid request, idempotency mismatch, permission, card
+ * errors, and 429 rate limiting) mean Stripe answered and the request, not the service, was the
+ * problem, so they must not count toward opening the process-wide breaker. A 429 in particular
+ * is Stripe asking us to slow down, which the concurrency limit and callers' Retry-After handle;
+ * opening the breaker would turn that into a 30 s outage for every building. A 401 means the
+ * platform key is revoked or wrong, which is a platform-wide failure, so it still counts.
+ * Connection errors (no status), 5xx and opossum timeouts also count.
  */
 function isStripeCallerError(error: unknown): boolean {
   const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
   return (
-    typeof statusCode === "number" &&
-    statusCode >= 400 &&
-    statusCode < 500 &&
-    statusCode !== 429 &&
-    statusCode !== 401
+    typeof statusCode === "number" && statusCode >= 400 && statusCode < 500 && statusCode !== 401
   );
 }
 

@@ -6,7 +6,8 @@ import { mapStripeError } from "../../lib/stripe-errors";
 function fakeReply() {
   const send = vi.fn();
   const code = vi.fn().mockReturnValue({ send });
-  return { reply: { code } as unknown as FastifyReply, code, send };
+  const header = vi.fn();
+  return { reply: { code, header } as unknown as FastifyReply, code, send, header };
 }
 
 // Legacy shape: some errors identify themselves via `name` only.
