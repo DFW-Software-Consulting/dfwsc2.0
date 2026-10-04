@@ -180,7 +180,7 @@ describe("tokenBucketRateLimit (in-memory)", () => {
   });
 
   it("sweeps buckets that have fully refilled so the map stays bounded", async () => {
-    const { tokenBucketRateLimit, tokenBuckets } = await load();
+    const { tokenBucketRateLimit, tokenBuckets } = await import("../../lib/rate-limit");
     const guard = tokenBucketRateLimit({ capacity: 2, refillPerMinute: 60 }); // full in 2 s
     await take(guard, { ip: "10.0.0.1" });
     await take(guard, { ip: "10.0.0.2" });
