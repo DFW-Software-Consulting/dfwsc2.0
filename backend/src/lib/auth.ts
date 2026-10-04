@@ -64,6 +64,13 @@ const BAD_API_KEY_TTL_MS = 60_000;
 const BAD_API_KEY_MAX_ENTRIES = 1000;
 const badApiKeys = new Map<string, number>();
 
+// Bumped by every forgetBadApiKey. A verification remembers the value it started under and does
+// not record a "no active client" result if it has changed: its row may have been read just
+// before the admin's status change, and recording it would undo the forget for up to
+// BAD_API_KEY_TTL_MS. A single counter for all keys is enough: a forget only ever costs another
+// key's in-flight verification one skipped record, never a wrong answer.
+let badApiKeyGeneration = 0;
+
 function isKnownBadApiKey(lookup: string): boolean {
   const expiresAt = badApiKeys.get(lookup);
   if (expiresAt === undefined) return false;
@@ -89,6 +96,7 @@ function rememberBadApiKey(lookup: string): void {
 // Drops the record for a key's lookup so that key is checked against the database again. Call it
 // when an admin changes a client's status.
 export function forgetBadApiKey(lookup: string): void {
+  badApiKeyGeneration += 1;
   badApiKeys.delete(lookup);
 }
 
@@ -100,15 +108,45 @@ type ClientRow = typeof clients.$inferSelect;
 // every request that joined it.
 const inFlightVerifications = new Map<string, Promise<ClientRow | null>>();
 
-async function verifyApiKey(apiKey: string, lookup: string): Promise<ClientRow | null> {
+// The longest a shared verification may run. The database pool has no query timeout, so a stalled
+// query would otherwise hold its map entry, and every later request for the same key, forever.
+// When the time is up the entry is removed (later requests start a fresh lookup) and the requests
+// waiting on it fail like any other database error.
+const API_KEY_VERIFICATION_TIMEOUT_MS = 10_000;
+
+class ApiKeyVerificationTimeoutError extends Error {
+  constructor() {
+    super(`API key verification did not finish within ${API_KEY_VERIFICATION_TIMEOUT_MS} ms`);
+    this.name = "ApiKeyVerificationTimeoutError";
+  }
+}
+
+type VerificationRun = {
+  // badApiKeyGeneration when the verification started.
+  generation: number;
+  // Set when the timeout fired: whatever this run finds afterwards is out of date, and must not
+  // be written to the bad-key record or the verification cache.
+  expired: boolean;
+};
+
+async function verifyApiKey(
+  apiKey: string,
+  lookup: string,
+  run: VerificationRun
+): Promise<ClientRow | null> {
   const [clientByLookup] = await db
     .select()
     .from(clients)
     .where(and(eq(clients.apiKeyLookup, lookup), eq(clients.status, "active")))
     .limit(1);
 
+  // Out of date by now (see VerificationRun): nobody is waiting for this answer.
+  if (run.expired) return null;
+
   if (!clientByLookup) {
-    rememberBadApiKey(lookup);
+    // Skip the record when this run is out of date or an admin cleared bad-key records since it
+    // started: the client may have been reactivated after the row was read.
+    if (!run.expired && run.generation === badApiKeyGeneration) rememberBadApiKey(lookup);
     return null;
   }
 
@@ -116,10 +154,23 @@ async function verifyApiKey(apiKey: string, lookup: string): Promise<ClientRow |
   if (!storedHash) return null;
   if (isVerifiedApiKey(lookup, storedHash)) return clientByLookup;
   if (await verifyPassword(apiKey, storedHash)) {
-    rememberVerifiedApiKey(lookup, storedHash);
+    if (!run.expired) rememberVerifiedApiKey(lookup, storedHash);
     return clientByLookup;
   }
   return null;
+}
+
+function verifyApiKeyWithTimeout(apiKey: string, lookup: string): Promise<ClientRow | null> {
+  const run: VerificationRun = { generation: badApiKeyGeneration, expired: false };
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      run.expired = true;
+      reject(new ApiKeyVerificationTimeoutError());
+    }, API_KEY_VERIFICATION_TIMEOUT_MS);
+    verifyApiKey(apiKey, lookup, run)
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timer));
+  });
 }
 
 export async function requireApiKey(request: FastifyRequest, reply: FastifyReply) {
@@ -138,10 +189,14 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
 
     let verification = inFlightVerifications.get(lookup);
     if (!verification) {
-      verification = verifyApiKey(apiKey, lookup).finally(() => {
-        inFlightVerifications.delete(lookup);
-      });
-      inFlightVerifications.set(lookup, verification);
+      const started: Promise<ClientRow | null> = verifyApiKeyWithTimeout(apiKey, lookup).finally(
+        () => {
+          // Only this verification's own entry: after a timeout a newer one may own the key.
+          if (inFlightVerifications.get(lookup) === started) inFlightVerifications.delete(lookup);
+        }
+      );
+      verification = started;
+      inFlightVerifications.set(lookup, started);
     }
 
     const client = await verification;

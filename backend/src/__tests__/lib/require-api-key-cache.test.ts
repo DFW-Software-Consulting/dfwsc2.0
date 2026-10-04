@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockSelect = vi.hoisted(() => vi.fn());
 
@@ -331,6 +331,181 @@ describe("requireApiKey - verification cache", () => {
       await callMany(5, apiKey);
       await callMany(5, apiKey);
       expect(mockSelect).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // A lookup the test settles by hand, so the order of events is exact.
+  function controlledLookup() {
+    let resolve!: (rows: unknown[]) => void;
+    let reject!: (error: Error) => void;
+    const result = new Promise<unknown[]>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    const chain = {
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue(result) }),
+      }),
+    };
+    return { chain, resolve, reject };
+  }
+
+  function startCall(key: string) {
+    const request = makeRequest(key) as any;
+    const reply = makeReply();
+    const done = requireApiKey(request, reply as any);
+    return { request, reply, done };
+  }
+
+  describe("a reactivation racing an in-flight verification", () => {
+    it("does not record a no-active-client result that started before forgetBadApiKey", async () => {
+      const { forgetBadApiKey, sha256Lookup } = await import("../../lib/auth");
+      const client = { id: "c1", apiKeyHash: hash, status: "active" };
+      const stale = controlledLookup();
+      mockSelect.mockReturnValueOnce(stale.chain);
+
+      // The verification reads the row as inactive; the admin reactivates the client and clears
+      // the record; only then does the verification finish.
+      const racing = startCall(apiKey);
+      forgetBadApiKey(sha256Lookup(apiKey));
+      stale.resolve([]);
+      await racing.done;
+      expect(racing.reply.code).toHaveBeenCalledWith(401);
+
+      // Nothing was recorded, so the next request looks the key up and is accepted.
+      const { request, reply } = await call(apiKey, [client]);
+      expect(reply.code).not.toHaveBeenCalled();
+      expect(request.client).toBe(client);
+      expect(mockSelect).toHaveBeenCalledTimes(2);
+    });
+
+    it("still records a result from a verification that started after the forget", async () => {
+      const { forgetBadApiKey, sha256Lookup } = await import("../../lib/auth");
+      forgetBadApiKey(sha256Lookup(apiKey));
+
+      await call(apiKey, []);
+      const repeat = makeReply();
+      await requireApiKey(makeRequest(apiKey) as any, repeat as any);
+      expect(repeat.code).toHaveBeenCalledWith(401);
+      expect(mockSelect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("a verification that never finishes", () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("fails every waiting request like a database error after 10 s, then starts fresh", async () => {
+      const { isRecentlyVerifiedApiKey } = await import("../../lib/auth");
+      const stalled = controlledLookup();
+      mockSelect.mockReturnValueOnce(stalled.chain);
+
+      const first = startCall(apiKey);
+      const joined = startCall(apiKey);
+      expect(mockSelect).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(first.reply.code).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.all([first.done, joined.done]);
+      for (const r of [first, joined]) {
+        expect(r.reply.code).toHaveBeenCalledWith(500);
+        expect(r.reply.send).toHaveBeenCalledWith({
+          error: "Internal server error during API key validation.",
+        });
+        expect(r.request.log.error).toHaveBeenCalledTimes(1);
+      }
+      // Not recorded as a bad key, not cached as verified.
+      expect(isRecentlyVerifiedApiKey(apiKey)).toBe(false);
+
+      const client = { id: "c1", apiKeyHash: hash, status: "active" };
+      const { request, reply } = await call(apiKey, [client]);
+      expect(reply.code).not.toHaveBeenCalled();
+      expect(request.client).toBe(client);
+      expect(mockSelect).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not time out a lookup that finishes in time, and leaves no timer behind", async () => {
+      const client = { id: "c1", apiKeyHash: hash, status: "active" };
+      const slow = controlledLookup();
+      mockSelect.mockReturnValueOnce(slow.chain);
+
+      const running = startCall(apiKey);
+      await vi.advanceTimersByTimeAsync(9_000);
+      slow.resolve([client]);
+      await running.done;
+      expect(running.reply.code).not.toHaveBeenCalled();
+      expect(running.request.client).toBe(client);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("lets a late no-active-client result neither record a bad key nor overwrite newer state", async () => {
+      const { isRecentlyVerifiedApiKey } = await import("../../lib/auth");
+      const client = { id: "c1", apiKeyHash: hash, status: "active" };
+      const stalled = controlledLookup();
+      mockSelect.mockReturnValueOnce(stalled.chain);
+
+      const timedOut = startCall(apiKey);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await timedOut.done;
+      expect(timedOut.reply.code).toHaveBeenCalledWith(500);
+
+      // A fresh verification succeeds and is cached; then the stalled lookup comes back late.
+      await call(apiKey, [client]);
+      expect(isRecentlyVerifiedApiKey(apiKey)).toBe(true);
+      stalled.resolve([]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(isRecentlyVerifiedApiKey(apiKey)).toBe(true);
+      const { reply } = await call(apiKey, [client]);
+      expect(reply.code).not.toHaveBeenCalled();
+      expect(mockSelect).toHaveBeenCalledTimes(3);
+    });
+
+    it("lets a late verified result neither fill the cache nor run bcrypt", async () => {
+      const { isRecentlyVerifiedApiKey } = await import("../../lib/auth");
+      const client = { id: "c1", apiKeyHash: hash, status: "active" };
+      const stalled = controlledLookup();
+      mockSelect.mockReturnValueOnce(stalled.chain);
+
+      const timedOut = startCall(apiKey);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await timedOut.done;
+
+      stalled.resolve([client]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(isRecentlyVerifiedApiKey(apiKey)).toBe(false);
+      expect(compareSpy).not.toHaveBeenCalled();
+    });
+
+    it("lets a late failure settle quietly and leaves the newer verification in the map", async () => {
+      const client = { id: "c1", apiKeyHash: hash, status: "active" };
+      const stalled = controlledLookup();
+      const fresh = controlledLookup();
+      mockSelect.mockReturnValueOnce(stalled.chain).mockReturnValueOnce(fresh.chain);
+
+      const timedOut = startCall(apiKey);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await timedOut.done;
+
+      // A new verification is in flight when the old one finally fails, and a request that
+      // arrives after that still joins the new one rather than starting a third lookup.
+      const newer = startCall(apiKey);
+      stalled.reject(new Error("socket closed"));
+      await vi.advanceTimersByTimeAsync(0);
+      const joiner = startCall(apiKey);
+      expect(mockSelect).toHaveBeenCalledTimes(2);
+
+      fresh.resolve([client]);
+      await Promise.all([newer.done, joiner.done]);
+      expect(newer.reply.code).not.toHaveBeenCalled();
+      expect(joiner.reply.code).not.toHaveBeenCalled();
+      expect(joiner.request.client).toBe(client);
     });
   });
 });
