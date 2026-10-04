@@ -24,6 +24,7 @@ describe("Docs page", () => {
       "RATE_LIMITED",
       "STRIPE_FAILED",
       "STRIPE_CIRCUIT_OPEN",
+      "STRIPE_BUSY",
     ]) {
       expect(container.textContent).toContain(code);
     }
@@ -51,15 +52,42 @@ describe("Docs page", () => {
     expect(text).not.toMatch(/store the new sessionId against the order/i);
   });
 
-  it("states the confirmation endpoint limit and a polling backoff", () => {
+  it("states the confirmation endpoint limits and a polling backoff", () => {
     const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
 
-    expect(container.textContent).toMatch(/30 requests per minute for each calling IP address/i);
-    expect(container.textContent).toMatch(/2, 5 and 10 seconds/);
-    expect(container.textContent).toMatch(/one budget shared by all your pending orders/i);
-    expect(container.textContent).toMatch(/every 15 minutes/i);
-    expect(container.textContent).toMatch(/about 20 requests a minute across every order/i);
-    expect(container.textContent).not.toMatch(/couple of seconds/i);
+    expect(text).toMatch(/30 requests per minute for each calling IP address/i);
+    expect(text).toMatch(/600 requests per minute for your account/i);
+    expect(text).toMatch(/2, 5 and 10 seconds/);
+    expect(text).toMatch(/one budget shared by all your pending orders/i);
+    expect(text).toMatch(/every 15 minutes/i);
+    expect(text).toMatch(/about 300 requests a minute across every order/i);
+    expect(text).not.toMatch(/about 20 requests a minute/i);
+    expect(text).not.toMatch(/No API key is needed/i);
+    expect(text).not.toMatch(/couple of seconds/i);
+  });
+
+  it("explains sending the API key on the confirmation call", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).toMatch(/Send your X-Api-Key header with this call/i);
+    expect(text).toMatch(/only see your own account.s sessions/i);
+    expect(text).toMatch(/returns 404, the same as an unknown session/i);
+    expect(text).toMatch(/wrong or deactivated key returns 401/i);
+  });
+
+  it("documents the checkout burst limit, Retry-After and automatic retries", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).toMatch(/200 checkouts at once/i);
+    expect(text).toMatch(/refills at 120 per minute \(2 per second\)/i);
+    expect(text).toMatch(/Every 429 from this API carries both/i);
+    expect(text).toMatch(/Retry-After: 5/);
+    expect(text).toMatch(/Retry automatically, with the same Idempotency-Key/i);
+    expect(text).toMatch(/never have to click twice/i);
+    expect(text).toMatch(/waiting screen/i);
   });
 
   it("does not describe request fields or notifications the API does not support", () => {

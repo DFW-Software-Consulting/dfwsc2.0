@@ -49,13 +49,14 @@ If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environm
 6. **Refresh**: `GET /api/v1/connect/refresh?client_id=...&state=...` regenerates an expired account link and redirects the client.
 
 ## 4. Rate Limiting
-- **Implementation**: Sliding-window limiter (`lib/rate-limit.ts`) — Redis-backed (shared across replicas) when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets and logs a one-time startup warning, since limits are then effectively multiplied by replica count under horizontal scaling.
+- **Implementation**: Sliding-window limiter (`rateLimit` in `lib/rate-limit.ts`) — Redis-backed (shared across replicas) when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets and logs a one-time startup warning, since limits are then effectively multiplied by replica count under horizontal scaling.
 - **Bucket isolation**: Each limiter keeps its own bucket, namespaced by an optional `name` or, by default, the request's method and route pattern (`ratelimit:<METHOD>:<route>:<key>`), so hits on one route never count against or prune another's.
 - **Redis outage**: If Redis is unreachable or any pipeline command fails, the request is limited by the per-process in-memory buckets instead (fail-soft, not 503) and the error is logged at most once every 30 seconds. With a single API instance the in-memory limiter is as accurate as Redis, and failing closed would reject payments whenever Redis restarts.
 - **Admin/Onboard Routes**: 10 req/min per IP.
 - **Resend Route**: 5 req/min per IP.
-- **Payment Routes**: 20 req/min per Stripe Account ID (fallback to IP).
-- **Session Lookup**: 30 req/min per IP.
+- **Checkout creation** (`POST /payments/create`): a token bucket (`tokenBucketRateLimit`, same file) per Stripe Account ID (fallback to IP): capacity 200, refilling at 120 per minute (`PAYMENT_CREATE_BUCKET_CAPACITY` and `PAYMENT_CREATE_REFILL_PER_MINUTE` in `lib/constants.ts`). In Redis it is one Lua script per request (atomic, so concurrent requests cannot both take the last token, with the refill computed from Redis's clock); it has the same per-route namespacing and the same in-memory fallback on Redis errors as the sliding window. Bucket keys are `ratelimit:bucket:<METHOD>:<route>:<key>`.
+- **Session Lookup** (`GET /payments/session/:sessionId`): 30 req/min per IP when anonymous. A request with an `X-Api-Key` header is authenticated with `requireApiKey` (a bad or inactive key is `401`, not a fall back to anonymous), is limited to 600 req/min per client in its own bucket, and only sees its own client's sessions (another client's session is the same `404` as an unknown one).
+- **Refusals**: every `429` from these limiters is `{ "error": "Too Many Requests", "code": "RATE_LIMITED" }` with a `Retry-After` header in whole seconds (at least 1): for the sliding window, the time until the oldest counted hit leaves the window; for the token bucket, the time until one token is available.
 
 ## 5. Workspace
 All clients and groups belong to the `client_portal` workspace. The `workspace` query parameter is required on all admin list endpoints and validated server-side.
@@ -64,10 +65,11 @@ All clients and groups belong to the `client_portal` workspace. The `workspace` 
 Outbound calls to Stripe and SMTP are wrapped by in-process circuit breakers (`lib/circuit-breakers.ts`, built on `opossum`). Each breaker opens after 5 consecutive failures and stays open for a 30-second reset timeout; while open, calls fail fast instead of hitting the upstream service.
 
 A "failure" is defined per breaker. Errors that mean the caller's input was wrong are not counted (opossum records them as successes, so they also reset the consecutive count):
-- **Stripe** counts calls with no HTTP status (connection errors), 5xx, 429, 401 (platform key revoked or wrong) and opossum timeouts. Any other 4xx (invalid request, idempotency mismatch, permission, card errors) does not count.
+- **Stripe** counts calls with no HTTP status (connection errors), 5xx, 401 (platform key revoked or wrong) and opossum timeouts. Any other 4xx (invalid request, idempotency mismatch, permission, card errors, and 429 rate limiting) does not count. A Stripe 429 therefore never opens the breaker, and because opossum emits "success" for it, it also resets the consecutive-failure count. `POST /payments/create` answers it with `429 RATE_LIMITED` and `Retry-After: 2` (Stripe sends none).
 - **SMTP** counts every error except a permanent 5xx rejection of a recipient (`RCPT TO`). Auth, connection, `MAIL FROM`, `DATA` and temporary 4xx failures still count.
 
 - **Stripe** (`withStripeCircuit`): wraps Stripe API calls in the `payments`, `connect`, `products`, and `webhooks` routes. When the breaker is open, these routes catch `isCircuitOpenError` and respond `503` with `{ "error": "Payment service is temporarily unavailable.", "code": "STRIPE_CIRCUIT_OPEN" }`.
+- **Stripe concurrency cap**: `withStripeCircuit` also limits Stripe calls in flight (`lib/concurrency-limiter.ts`, in front of the breaker): at most 25 at once (`STRIPE_MAX_CONCURRENT_CALLS`); further calls wait FIFO for a slot. A call that waits longer than 10 s (`STRIPE_QUEUE_MAX_WAIT_MS`), or arrives when 500 are already waiting (`STRIPE_QUEUE_MAX_WAITING`), fails with a busy error that is never counted by the breaker. `mapStripeError` turns it into `503 { "error", "code": "STRIPE_BUSY" }` with `Retry-After: 5` at every call site. A webhook that cannot get a slot answers `503`, releases its claim and is not marked processed, so Stripe redelivers it. The checkout status reconciliation lookup in `routes/payments.ts` stays outside `withStripeCircuit` (and so outside the cap) with its own 3 s timeout. The cap is per process.
 - **SMTP** (`withSmtpCircuit`): wraps outbound mail in `lib/mailer.ts` (onboarding and API-key-regeneration emails).
 - Breaker state (open/half-open/closed, plus fire/failure/success counts) is exposed via `GET /metrics` (bearer-token protected; the endpoint is disabled and returns 404 if `METRICS_TOKEN` is unset).
 
@@ -116,7 +118,7 @@ All routes are prefixed with `/api/v1`.
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | POST | `/payments/create` | Create Checkout Session | API Key or Admin JWT + Idempotency-Key |
-| GET | `/payments/session/:sessionId` | Get checkout session result from ledger (how integrators confirm payment; 30 req/min per IP) | Public (rate-limited) |
+| GET | `/payments/session/:sessionId` | Get checkout session result from ledger (how integrators confirm payment; 30 req/min per IP, or 600 req/min per client with `X-Api-Key`) | Public, or API key |
 | GET | `/reports/payments` | List Stripe PaymentIntents by client or group | Admin JWT |
 
 ### Products & Settings
