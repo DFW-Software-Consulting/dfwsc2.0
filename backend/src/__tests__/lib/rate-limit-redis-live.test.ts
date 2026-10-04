@@ -183,4 +183,45 @@ describe.runIf(Boolean(REDIS_URL))("rate limiters against a real Redis", () => {
     expect(Number(seconds)).toBeGreaterThanOrEqual(8);
     expect(Number(seconds)).toBeLessThanOrEqual(9);
   });
+  it("failure limiter: check does not charge, record does, Retry-After from the oldest failure", async () => {
+    const { failureRateLimit } = await loadModule();
+    const limiter = failureRateLimit({ max: 2, windowMs: 10_000, keyGenerator: byId });
+    const id = freshId();
+    const { request } = makeMocks(id);
+
+    for (let i = 0; i < 5; i++) expect((await limiter.check(request)).blocked).toBe(false);
+    await limiter.record(request);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect((await limiter.check(request)).blocked).toBe(false);
+    await limiter.record(request);
+
+    const blocked = await limiter.check(request);
+    expect(blocked.blocked).toBe(true);
+    if (blocked.blocked) {
+      // The oldest failure is ~1.5 s old, so ~8.5 s remain.
+      expect(blocked.retryAfterMs).toBeGreaterThan(7_500);
+      expect(blocked.retryAfterMs).toBeLessThanOrEqual(8_600);
+    }
+    // Checking added nothing (two failures recorded), and Redis served all of it.
+    expect(await inspector.zcard(`ratelimit:POST:/live-test:${id}`)).toBe(2);
+    expect(request.log.error).not.toHaveBeenCalled();
+  });
+
+  it("failure limiter: concurrent records from independent connections are all counted", async () => {
+    const id = freshId();
+    const limiters = await Promise.all(
+      Array.from({ length: 4 }, async () => {
+        const { failureRateLimit } = await loadModule();
+        return failureRateLimit({ max: 10, windowMs: 10_000, keyGenerator: byId });
+      })
+    );
+    await Promise.all(
+      limiters.flatMap((limiter) =>
+        Array.from({ length: 5 }, () => limiter.record(makeMocks(id).request as any))
+      )
+    );
+    const { request } = makeMocks(id);
+    expect((await limiters[0].check(request)).blocked).toBe(true);
+    expect(await inspector.zcard(`ratelimit:POST:/live-test:${id}`)).toBe(20);
+  });
 });

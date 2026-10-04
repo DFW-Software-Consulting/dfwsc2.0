@@ -64,7 +64,7 @@ function logRedisFailure(request: FastifyRequest, err: unknown): void {
 // seconds (at least 1) so a caller can wait exactly as long as needed and retry.
 const RATE_LIMITED_BODY = { error: "Too Many Requests", code: "RATE_LIMITED" } as const;
 
-function sendRateLimited(reply: FastifyReply, retryAfterMs: number) {
+export function sendRateLimited(reply: FastifyReply, retryAfterMs: number) {
   const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
   return reply
     .code(429)
@@ -312,6 +312,97 @@ export function rateLimit(options: RateLimitOptions) {
     }
     recentHits.push(now);
     hitBuckets.set(key, recentHits);
+  };
+}
+
+type FailureLimiterOptions = {
+  /** Failures allowed per window; the next request after that is refused. */
+  max: number;
+  windowMs: number;
+  // Bucket namespace, as for the sliding window.
+  name?: string;
+  keyGenerator?: (request: FastifyRequest) => string;
+};
+
+type FailureCheckResult = { blocked: false } | { blocked: true; retryAfterMs: number };
+
+/**
+ * Counts failures (for example failed authentications) per key, separately from deciding
+ * whether to refuse. `check` reads the count without charging anything; `record` charges one
+ * failure. Unlike `rateLimit`, a request that succeeds is never counted, and a refusal is not
+ * counted either, so the window drains on its own. Same storage as `rateLimit`: a Redis sorted
+ * set (in-memory fallback when Redis errors), namespaced by `name`. The check and the record are
+ * separate calls, so a burst of concurrent requests can overshoot `max` slightly.
+ */
+export function failureRateLimit(options: FailureLimiterOptions) {
+  const { max, windowMs } = options;
+  maxRegisteredWindowMs = Math.max(maxRegisteredWindowMs, windowMs);
+
+  function keyFor(request: FastifyRequest): string {
+    const id = options.keyGenerator ? options.keyGenerator(request) : getClientIp(request);
+    return `ratelimit:${limiterNamespace(request, options.name)}:${id}`;
+  }
+
+  async function redisCheck(client: Redis, key: string, now: number): Promise<FailureCheckResult> {
+    const pipeline = client.pipeline();
+    pipeline.zremrangebyscore(key, 0, now - windowMs);
+    pipeline.zcard(key);
+    pipeline.zrange(key, 0, 0, "WITHSCORES");
+    const results = await pipeline.exec();
+    if (!results) throw new Error("Redis pipeline returned no results");
+    const failed = results.find(([err]) => err);
+    if (failed) throw failed[0];
+    const count = Number(results[1]?.[1]);
+    if (count < max) return { blocked: false };
+    const oldest = Number((results[2]?.[1] as string[] | undefined)?.[1]);
+    return {
+      blocked: true,
+      retryAfterMs: Number.isFinite(oldest) ? oldest + windowMs - now : windowMs,
+    };
+  }
+
+  function memoryCheck(key: string, now: number): FailureCheckResult {
+    const recent = (hitBuckets.get(key) ?? []).filter((t) => t > now - windowMs);
+    hitBuckets.set(key, recent);
+    if (recent.length < max) return { blocked: false };
+    return { blocked: true, retryAfterMs: (recent[0] ?? now) + windowMs - now };
+  }
+
+  return {
+    async check(request: FastifyRequest): Promise<FailureCheckResult> {
+      const key = keyFor(request);
+      const now = Date.now();
+      if (redis) {
+        try {
+          return await redisCheck(redis, key, now);
+        } catch (err) {
+          logRedisFailure(request, err);
+        }
+      }
+      return memoryCheck(key, now);
+    },
+
+    async record(request: FastifyRequest): Promise<void> {
+      const key = keyFor(request);
+      const now = Date.now();
+      if (redis) {
+        try {
+          const pipeline = redis.pipeline();
+          pipeline.zadd(key, now.toString(), `${now}:${Math.random()}`);
+          pipeline.pexpire(key, windowMs);
+          const results = await pipeline.exec();
+          if (!results) throw new Error("Redis pipeline returned no results");
+          const failed = results.find(([err]) => err);
+          if (failed) throw failed[0];
+          return;
+        } catch (err) {
+          logRedisFailure(request, err);
+        }
+      }
+      const hits = (hitBuckets.get(key) ?? []).filter((t) => t > now - windowMs);
+      hits.push(now);
+      hitBuckets.set(key, hits);
+    },
   };
 }
 

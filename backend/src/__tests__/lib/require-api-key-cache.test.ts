@@ -116,4 +116,37 @@ describe("requireApiKey - verification cache", () => {
     expect(second.reply.code).toHaveBeenCalledWith(401);
     expect(compareSpy).toHaveBeenCalledTimes(2);
   });
+
+  describe("isRecentlyVerifiedApiKey", () => {
+    it("is false for a key that was never verified, without touching the database", async () => {
+      const { isRecentlyVerifiedApiKey } = await import("../../lib/auth");
+      expect(isRecentlyVerifiedApiKey(apiKey)).toBe(false);
+      expect(mockSelect).not.toHaveBeenCalled();
+    });
+
+    it("is true after a successful verification and false after a failed one", async () => {
+      const { isRecentlyVerifiedApiKey } = await import("../../lib/auth");
+      const client = { id: "c1", apiKeyHash: hash, status: "active" };
+      await call("wrong-key", [client]);
+      expect(isRecentlyVerifiedApiKey("wrong-key")).toBe(false);
+
+      await call(apiKey, [client]);
+      expect(isRecentlyVerifiedApiKey(apiKey)).toBe(true);
+      expect(isRecentlyVerifiedApiKey("another-key")).toBe(false);
+      expect(mockSelect).toHaveBeenCalledTimes(2);
+    });
+
+    it("is false once the cache entry expires", async () => {
+      vi.useFakeTimers();
+      try {
+        const { isRecentlyVerifiedApiKey } = await import("../../lib/auth");
+        await call(apiKey, [{ id: "c1", apiKeyHash: hash, status: "active" }]);
+        expect(isRecentlyVerifiedApiKey(apiKey)).toBe(true);
+        vi.advanceTimersByTime(61_000);
+        expect(isRecentlyVerifiedApiKey(apiKey)).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });

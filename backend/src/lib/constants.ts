@@ -35,6 +35,10 @@ export const STRIPE_RATE_LIMITED_RETRY_AFTER_SECONDS = 2;
 // so an integrator confirming many payments from one server is not throttled by the shared IP limit.
 export const SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX = 30;
 export const SESSION_STATUS_API_KEY_RATE_LIMIT_MAX = 600;
+// Failed X-Api-Key authentications per client IP per minute on that endpoint. Successful ones
+// are not counted. Over this, a request with an unrecognised key is refused before any database
+// lookup, so junk keys cannot be used to drive lookups.
+export const SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX = 30;
 
 // webhook_events retention: how long to keep processed rows before pruning,
 // and how often the prune sweep runs.

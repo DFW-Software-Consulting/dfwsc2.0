@@ -38,6 +38,21 @@ function rememberVerifiedApiKey(lookup: string, hash: string): void {
   verifiedApiKeys.set(lookup, { hash, expiresAt: Date.now() + VERIFIED_KEY_TTL_MS });
 }
 
+// True when this exact key passed full verification within the last VERIFIED_KEY_TTL_MS. It is
+// answered from memory (no database access) and says nothing about the client's current status:
+// callers must still run requireApiKey before trusting the key. It exists so a rate limiter can
+// recognise a known-good key without a lookup.
+export function isRecentlyVerifiedApiKey(apiKey: string): boolean {
+  const lookup = sha256Lookup(apiKey);
+  const entry = verifiedApiKeys.get(lookup);
+  if (!entry) return false;
+  if (entry.expiresAt <= Date.now()) {
+    verifiedApiKeys.delete(lookup);
+    return false;
+  }
+  return true;
+}
+
 export async function requireApiKey(request: FastifyRequest, reply: FastifyReply) {
   const apiKeyHeader = request.headers["x-api-key"];
   const apiKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;

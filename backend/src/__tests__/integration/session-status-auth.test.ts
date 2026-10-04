@@ -18,6 +18,7 @@ import { resetCircuitBreakersForTests } from "../../lib/circuit-breakers";
 import {
   SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX,
   SESSION_STATUS_API_KEY_RATE_LIMIT_MAX,
+  SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX,
 } from "../../lib/constants";
 
 // GET /payments/session/:sessionId: anonymous (per-IP limit) or authenticated with X-Api-Key
@@ -107,6 +108,10 @@ describe("GET /payments/session/:sessionId authentication and limits", () => {
   it("is configured for 30 anonymous and 600 authenticated requests per minute", () => {
     expect(SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX).toBe(30);
     expect(SESSION_STATUS_API_KEY_RATE_LIMIT_MAX).toBe(600);
+  });
+
+  it("allows 30 failed key authentications a minute per IP", () => {
+    expect(SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX).toBe(30);
   });
 
   describe("anonymous", () => {
@@ -255,7 +260,10 @@ describe("GET /payments/session/:sessionId authentication and limits", () => {
 
     it("does not count a 401 against the anonymous limit or the client's limit", async () => {
       const a = await seedBuilding();
-      for (let i = 0; i < 40; i++) {
+      // Verify the key first: once the IP is at its failed-auth budget, only a recently verified
+      // key still gets through (see "failed key authentications" below).
+      expect((await getStatus(a.sessionId, a.apiKey)).statusCode).toBe(200);
+      for (let i = 0; i < SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX; i++) {
         expect((await getStatus(a.sessionId, "wrong")).statusCode).toBe(401);
       }
       expect((await getStatus(a.sessionId)).statusCode).toBe(200);
@@ -266,6 +274,135 @@ describe("GET /payments/session/:sessionId authentication and limits", () => {
       const a = await seedBuilding();
       const response = await getStatus("not-a-session", a.apiKey);
       expect(response.statusCode).toBe(400);
+    });
+  });
+
+  describe("failed key authentications", () => {
+    const BUDGET = SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX;
+
+    async function exhaustBudget(sessionId: string) {
+      for (let i = 0; i < BUDGET; i++) {
+        expect((await getStatus(sessionId, `junk-${i}`)).statusCode).toBe(401);
+      }
+    }
+
+    it("turns a flood of junk keys from one IP into 429 with no further database lookups", async () => {
+      const a = await seedBuilding();
+      await exhaustBudget(a.sessionId);
+
+      const select = vi.spyOn(db, "select");
+      for (let i = 0; i < 20; i++) {
+        const refused = await getStatus(a.sessionId, `more-junk-${i}`);
+        expect(refused.statusCode).toBe(429);
+        expect(refused.headers["retry-after"]).toBe("60");
+        expect(refused.json()).toEqual({ error: "Too Many Requests", code: "RATE_LIMITED" });
+      }
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("refuses over-budget requests before the lookup even when the key is a real, uncached one", async () => {
+      const a = await seedBuilding();
+      await exhaustBudget(a.sessionId);
+
+      const select = vi.spyOn(db, "select");
+      const refused = await getStatus(a.sessionId, a.apiKey);
+      expect(refused.statusCode).toBe(429);
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("reports Retry-After as the time until the oldest failure leaves the window", async () => {
+      const a = await seedBuilding();
+      await exhaustBudget(a.sessionId);
+
+      vi.setSystemTime(clock + 20_000);
+      const refused = await getStatus(a.sessionId, "junk-late");
+      expect(refused.statusCode).toBe(429);
+      expect(refused.headers["retry-after"]).toBe("40");
+    });
+
+    it("does not charge refusals, so the window drains and junk keys get 401 again", async () => {
+      const a = await seedBuilding();
+      await exhaustBudget(a.sessionId);
+      for (let i = 0; i < 10; i++) {
+        expect((await getStatus(a.sessionId, "junk-again")).statusCode).toBe(429);
+      }
+
+      vi.setSystemTime(clock + 60_001);
+      expect((await getStatus(a.sessionId, "junk-after-window")).statusCode).toBe(401);
+    });
+
+    it("never charges successful authentications", async () => {
+      const a = await seedBuilding();
+      for (let i = 0; i < BUDGET * 3; i++) {
+        expect((await getStatus(a.sessionId, a.apiKey)).statusCode).toBe(200);
+      }
+      // The whole failed-auth budget is still available afterwards.
+      await exhaustBudget(a.sessionId);
+      expect((await getStatus(a.sessionId, "junk-over")).statusCode).toBe(429);
+    });
+
+    it("does not charge a valid key that merely asks for a missing session (404) or a bad id (400)", async () => {
+      const a = await seedBuilding();
+      const unknown = `cs_test_${randomUUID().replace(/-/g, "")}`;
+      for (let i = 0; i < BUDGET; i++) {
+        expect((await getStatus(unknown, a.apiKey)).statusCode).toBe(404);
+        expect((await getStatus("bad-id", a.apiKey)).statusCode).toBe(400);
+      }
+      await exhaustBudget(a.sessionId);
+    });
+
+    it("lets a recently verified valid key through while the IP is over budget", async () => {
+      const a = await seedBuilding();
+      // Verified once (cached), then a misconfigured key from the same IP burns the budget.
+      expect((await getStatus(a.sessionId, a.apiKey)).statusCode).toBe(200);
+      await exhaustBudget(a.sessionId);
+      expect((await getStatus(a.sessionId, "junk-over")).statusCode).toBe(429);
+
+      const served = await getStatus(a.sessionId, a.apiKey);
+      expect(served.statusCode).toBe(200);
+      expect(served.json().status).toBe("paid");
+    });
+
+    it("still refuses a valid key that has not been verified recently while over budget", async () => {
+      const verified = await seedBuilding();
+      const cold = await seedBuilding();
+      expect((await getStatus(verified.sessionId, verified.apiKey)).statusCode).toBe(200);
+      await exhaustBudget(verified.sessionId);
+
+      expect((await getStatus(cold.sessionId, cold.apiKey)).statusCode).toBe(429);
+    });
+
+    it("rejects a cached key whose client has since been deactivated", async () => {
+      const a = await seedBuilding();
+      expect((await getStatus(a.sessionId, a.apiKey)).statusCode).toBe(200);
+      await exhaustBudget(a.sessionId);
+
+      await db.update(clients).set({ status: "inactive" }).where(eq(clients.id, a.id));
+      const response = await getStatus(a.sessionId, a.apiKey);
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: "Invalid API key." });
+    });
+
+    it("leaves anonymous requests from an over-budget IP unchanged", async () => {
+      const a = await seedBuilding();
+      await exhaustBudget(a.sessionId);
+      expect((await getStatus(a.sessionId, "junk-over")).statusCode).toBe(429);
+
+      for (let i = 0; i < SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX; i++) {
+        expect((await getStatus(a.sessionId)).statusCode).toBe(200);
+      }
+      const refused = await getStatus(a.sessionId);
+      expect(refused.statusCode).toBe(429);
+      expect(refused.headers["retry-after"]).toBe("60");
+    });
+
+    it("does not charge anonymous requests to the failed-auth budget", async () => {
+      const a = await seedBuilding();
+      for (let i = 0; i < SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX; i++) {
+        await getStatus(a.sessionId);
+      }
+      // Anonymous budget is gone, but a junk key still gets its own 401 rather than a 429.
+      expect((await getStatus(a.sessionId, "junk")).statusCode).toBe(401);
     });
   });
 

@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients, paymentLedger } from "../db/schema";
-import { requireAdminJwt, requireApiKey } from "../lib/auth";
+import { isRecentlyVerifiedApiKey, requireAdminJwt, requireApiKey } from "../lib/auth";
 import { getCircuitBreakerStates, withStripeCircuit } from "../lib/circuit-breakers";
 import { getClientIp } from "../lib/client-ip";
 import {
@@ -20,9 +20,16 @@ import {
   REPORT_MAX_CONCURRENCY,
   SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX,
   SESSION_STATUS_API_KEY_RATE_LIMIT_MAX,
+  SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX,
 } from "../lib/constants";
 import { errors } from "../lib/errors";
-import { adminRateLimit, rateLimit, tokenBucketRateLimit } from "../lib/rate-limit";
+import {
+  adminRateLimit,
+  failureRateLimit,
+  rateLimit,
+  sendRateLimited,
+  tokenBucketRateLimit,
+} from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
 import { mapStripeError } from "../lib/stripe-errors";
@@ -216,7 +223,8 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
 
 // ── Session status auth + limits ───────────────────────────────────────────────
 // The endpoint stays anonymous (per-IP limit). Sending X-Api-Key opts into API-key auth and a
-// higher per-client limit; a bad key is a 401, never a silent fall back to anonymous.
+// higher per-client limit; a bad key is a 401, never a silent fall back to anonymous, and failed
+// attempts are limited per IP.
 const anonymousStatusRateLimit = rateLimit({
   max: SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX,
   windowMs: 60_000,
@@ -229,15 +237,41 @@ const apiKeyStatusRateLimit = rateLimit({
   keyGenerator: (request) => `client:${(request as RequestWithClient).client?.id}`,
 });
 
+// Failed key authentications are charged to the caller's IP, so a flood of junk keys turns into
+// 429s instead of unlimited database lookups. Successful ones are never charged.
+const failedStatusAuthLimit = failureRateLimit({
+  max: SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+  name: "GET:/payments/session/:sessionId:failed-auth",
+});
+
 async function sessionStatusGuard(request: FastifyRequest, reply: FastifyReply) {
-  if (request.headers["x-api-key"] === undefined) {
+  const header = request.headers["x-api-key"];
+  if (header === undefined) {
     return anonymousStatusRateLimit(request, reply);
   }
+
+  // Over the failed-auth budget: refuse before requireApiKey (and its database lookup), unless
+  // this exact key passed verification within the last minute. That exception keeps one
+  // misconfigured key from locking out the same IP's working keys. The cache only vouches for the
+  // key's recent past, so requireApiKey below still loads the client row and rejects a client
+  // that has since been deactivated.
+  const budget = await failedStatusAuthLimit.check(request);
+  if (budget.blocked) {
+    const apiKey = Array.isArray(header) ? header[0] : header;
+    if (typeof apiKey !== "string" || !isRecentlyVerifiedApiKey(apiKey)) {
+      return sendRateLimited(reply, budget.retryAfterMs);
+    }
+  }
+
   // requireApiKey hashes the key and looks it up first; bcrypt only runs for a key that matches
-  // an active client (and is skipped while that key's verification is cached), so keys that do
-  // not match cost one indexed query and are rejected before reaching any limiter.
+  // an active client (and is skipped while that key's verification is cached).
   await requireApiKey(request, reply);
-  if (reply.sent) return reply;
+  if (reply.sent) {
+    // Only a rejected key counts; a 500 from our own database error is not the caller's failure.
+    if (reply.statusCode === 401) await failedStatusAuthLimit.record(request);
+    return reply;
+  }
   return apiKeyStatusRateLimit(request, reply);
 }
 
