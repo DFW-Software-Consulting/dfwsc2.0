@@ -20,6 +20,7 @@ import {
   SESSION_STATUS_API_KEY_RATE_LIMIT_MAX,
   SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX,
 } from "../../lib/constants";
+import { makeAdminToken } from "../helpers/auth";
 
 // GET /payments/session/:sessionId: anonymous (per-IP limit) or authenticated with X-Api-Key
 // (higher per-client limit, scoped to the caller's own sessions).
@@ -260,11 +261,11 @@ describe("GET /payments/session/:sessionId authentication and limits", () => {
 
     it("does not count a 401 against the anonymous limit or the client's limit", async () => {
       const a = await seedBuilding();
-      // Verify the key first: once the IP is at its failed-auth budget, only a recently verified
-      // key still gets through (see "failed key authentications" below).
+      // Verify the key first: once the IP is at its failed-auth budget (30 distinct failing
+      // keys), only a recently verified key still gets through (see "failed key authentications").
       expect((await getStatus(a.sessionId, a.apiKey)).statusCode).toBe(200);
       for (let i = 0; i < SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX; i++) {
-        expect((await getStatus(a.sessionId, "wrong")).statusCode).toBe(401);
+        expect((await getStatus(a.sessionId, `wrong-${i}`)).statusCode).toBe(401);
       }
       expect((await getStatus(a.sessionId)).statusCode).toBe(200);
       expect((await getStatus(a.sessionId, a.apiKey)).statusCode).toBe(200);
@@ -394,6 +395,152 @@ describe("GET /payments/session/:sessionId authentication and limits", () => {
       const refused = await getStatus(a.sessionId);
       expect(refused.statusCode).toBe(429);
       expect(refused.headers["retry-after"]).toBe("60");
+    });
+
+    it("200 concurrent requests with 200 different junk keys do at most the budget in lookups", async () => {
+      const a = await seedBuilding();
+      const select = vi.spyOn(db, "select");
+
+      const responses = await Promise.all(
+        Array.from({ length: 200 }, (_, i) => getStatus(a.sessionId, `flood-${i}`))
+      );
+
+      const statuses = responses.map((r: any) => r.statusCode);
+      expect(select.mock.calls.length).toBeLessThanOrEqual(BUDGET);
+      expect(statuses.filter((c: number) => c === 401)).toHaveLength(BUDGET);
+      expect(statuses.filter((c: number) => c === 429)).toHaveLength(200 - BUDGET);
+    });
+
+    it("200 concurrent requests with the same junk key do at most one lookup", async () => {
+      const a = await seedBuilding();
+      const select = vi.spyOn(db, "select");
+
+      const responses = await Promise.all(
+        Array.from({ length: 200 }, () => getStatus(a.sessionId, "the-same-junk-key"))
+      );
+
+      expect(select.mock.calls.length).toBeLessThanOrEqual(1);
+      expect(responses.every((r: any) => r.statusCode === 401)).toBe(true);
+    });
+
+    it("a mix of junk and valid keys never costs more junk lookups than the budget", async () => {
+      const buildings = await Promise.all(Array.from({ length: 5 }, () => seedBuilding()));
+      const select = vi.spyOn(db, "select");
+      const isValid = (i: number) => i % 30 === 0;
+
+      const responses = await Promise.all(
+        Array.from({ length: 150 }, (_, i) =>
+          isValid(i)
+            ? getStatus(buildings[i / 30].sessionId, buildings[i / 30].apiKey)
+            : getStatus(buildings[0].sessionId, `mixed-${i % 40}`)
+        )
+      );
+
+      // A served valid key is two selects (the key lookup and the ledger row); everything else
+      // that reached the database was a junk key, once however often it was sent.
+      const served = responses.filter((r: any, i) => isValid(i) && r.statusCode === 200).length;
+      expect(select.mock.calls.length - served * 2).toBeLessThanOrEqual(BUDGET);
+      expect(responses.some((r: any, i) => !isValid(i) && r.statusCode === 401)).toBe(true);
+    });
+
+    it("one bad key sent 100 times uses one unit, so another key from the same IP is served", async () => {
+      const a = await seedBuilding();
+      const b = await seedBuilding();
+      for (let i = 0; i < 100; i++) {
+        expect((await getStatus(a.sessionId, "stale-rotated-key")).statusCode).toBe(401);
+      }
+
+      // b's key has never been verified (not in the cache) and is served.
+      const served = await getStatus(b.sessionId, b.apiKey);
+      expect(served.statusCode).toBe(200);
+      // Only one unit was used: BUDGET - 1 more distinct junk keys still get their own 401.
+      for (let i = 0; i < BUDGET - 1; i++) {
+        expect((await getStatus(a.sessionId, `junk-${i}`)).statusCode).toBe(401);
+      }
+      expect((await getStatus(a.sessionId, "junk-over")).statusCode).toBe(429);
+    });
+
+    it("repeats of a bad key do no further lookups", async () => {
+      const a = await seedBuilding();
+      expect((await getStatus(a.sessionId, "stale-key")).statusCode).toBe(401);
+
+      const select = vi.spyOn(db, "select");
+      for (let i = 0; i < 20; i++) {
+        expect((await getStatus(a.sessionId, "stale-key")).statusCode).toBe(401);
+      }
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("20 concurrent requests with the same valid, uncached key all succeed", async () => {
+      const a = await seedBuilding();
+
+      const responses = await Promise.all(
+        Array.from({ length: 20 }, () => getStatus(a.sessionId, a.apiKey))
+      );
+
+      expect(responses.map((r: any) => r.statusCode)).toEqual(Array(20).fill(200));
+      // Nothing was charged: the whole budget is still available.
+      await exhaustBudget(a.sessionId);
+    });
+
+    it("serves many different uncached valid keys at once, more than the budget, none refused", async () => {
+      const buildings = await Promise.all(
+        Array.from({ length: BUDGET + 10 }, () => seedBuilding())
+      );
+
+      const responses = await Promise.all(buildings.map((b) => getStatus(b.sessionId, b.apiKey)));
+
+      expect(responses.map((r: any) => r.statusCode)).toEqual(Array(buildings.length).fill(200));
+    }, 60_000);
+
+    it("a deactivated client stays 401 on every repeat", async () => {
+      const inactive = await seedBuilding("inactive");
+      for (let i = 0; i < 5; i++) {
+        const response = await getStatus(inactive.sessionId, inactive.apiKey);
+        expect(response.statusCode).toBe(401);
+        expect(response.json()).toEqual({ error: "Invalid API key." });
+      }
+    });
+
+    it("a reactivated client works again once the known-bad record expires (60 seconds)", async () => {
+      const client = await seedBuilding("inactive");
+      expect((await getStatus(client.sessionId, client.apiKey)).statusCode).toBe(401);
+
+      await db.update(clients).set({ status: "active" }).where(eq(clients.id, client.id));
+      expect((await getStatus(client.sessionId, client.apiKey)).statusCode).toBe(401);
+
+      vi.setSystemTime(clock + 60_001);
+      expect((await getStatus(client.sessionId, client.apiKey)).statusCode).toBe(200);
+    });
+
+    it("a client reactivated by an admin works again immediately", async () => {
+      const client = await seedBuilding("inactive");
+      expect((await getStatus(client.sessionId, client.apiKey)).statusCode).toBe(401);
+
+      const patched = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${client.id}`,
+        headers: { authorization: `Bearer ${makeAdminToken(process.env.JWT_SECRET)}` },
+        payload: { status: "active" },
+      });
+      expect(patched.statusCode).toBe(200);
+
+      expect((await getStatus(client.sessionId, client.apiKey)).statusCode).toBe(200);
+    });
+
+    it("a database error during verification is a 500 and is never charged", async () => {
+      const a = await seedBuilding();
+      const select = vi.spyOn(db, "select").mockImplementation(() => {
+        throw new Error("connection reset");
+      });
+      for (let i = 0; i < BUDGET + 5; i++) {
+        expect((await getStatus(a.sessionId, `erroring-${i}`)).statusCode).toBe(500);
+      }
+      select.mockRestore();
+
+      // The budget is intact, and the keys that errored were not remembered as bad.
+      await exhaustBudget(a.sessionId);
+      expect((await getStatus(a.sessionId, "junk-over")).statusCode).toBe(429);
     });
 
     it("does not charge anonymous requests to the failed-auth budget", async () => {

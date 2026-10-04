@@ -53,6 +53,75 @@ export function isRecentlyVerifiedApiKey(apiKey: string): boolean {
   return true;
 }
 
+// A key that matches no active client is remembered briefly, by lookup, so repeats are answered
+// 401 without touching the database. Only a lookup that found no active client is recorded: a
+// database error never is. It is a short-lived record, not a verdict: a client an admin has since
+// reactivated is accepted again as soon as the record is cleared (forgetBadApiKey, called when an
+// admin changes a client's status) or expires, whichever comes first, so BAD_API_KEY_TTL_MS is the
+// longest a reactivated client can keep getting 401. A key that is valid is never affected: the
+// record only exists for keys the database had no active client for.
+const BAD_API_KEY_TTL_MS = 60_000;
+const BAD_API_KEY_MAX_ENTRIES = 1000;
+const badApiKeys = new Map<string, number>();
+
+function isKnownBadApiKey(lookup: string): boolean {
+  const expiresAt = badApiKeys.get(lookup);
+  if (expiresAt === undefined) return false;
+  if (expiresAt <= Date.now()) {
+    badApiKeys.delete(lookup);
+    return false;
+  }
+  return true;
+}
+
+function rememberBadApiKey(lookup: string): void {
+  // A key that was verified a moment ago and has no active client now must stop counting as
+  // recently verified.
+  verifiedApiKeys.delete(lookup);
+  badApiKeys.delete(lookup);
+  if (badApiKeys.size >= BAD_API_KEY_MAX_ENTRIES) {
+    const oldest = badApiKeys.keys().next().value;
+    if (oldest !== undefined) badApiKeys.delete(oldest);
+  }
+  badApiKeys.set(lookup, Date.now() + BAD_API_KEY_TTL_MS);
+}
+
+// Drops the record for a key's lookup so that key is checked against the database again. Call it
+// when an admin changes a client's status.
+export function forgetBadApiKey(lookup: string): void {
+  badApiKeys.delete(lookup);
+}
+
+type ClientRow = typeof clients.$inferSelect;
+
+// Concurrent requests carrying the same key share one verification (one row load, at most one
+// bcrypt) instead of each running their own. The entry exists only while that verification is in
+// flight, so a request that arrives after it settles starts a fresh one, and an error reaches
+// every request that joined it.
+const inFlightVerifications = new Map<string, Promise<ClientRow | null>>();
+
+async function verifyApiKey(apiKey: string, lookup: string): Promise<ClientRow | null> {
+  const [clientByLookup] = await db
+    .select()
+    .from(clients)
+    .where(and(eq(clients.apiKeyLookup, lookup), eq(clients.status, "active")))
+    .limit(1);
+
+  if (!clientByLookup) {
+    rememberBadApiKey(lookup);
+    return null;
+  }
+
+  const storedHash = clientByLookup.apiKeyHash;
+  if (!storedHash) return null;
+  if (isVerifiedApiKey(lookup, storedHash)) return clientByLookup;
+  if (await verifyPassword(apiKey, storedHash)) {
+    rememberVerifiedApiKey(lookup, storedHash);
+    return clientByLookup;
+  }
+  return null;
+}
+
 export async function requireApiKey(request: FastifyRequest, reply: FastifyReply) {
   const apiKeyHeader = request.headers["x-api-key"];
   const apiKey = Array.isArray(apiKeyHeader) ? apiKeyHeader[0] : apiKeyHeader;
@@ -63,28 +132,22 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
 
   try {
     const lookup = sha256Lookup(apiKey);
-    const [clientByLookup] = await db
-      .select()
-      .from(clients)
-      .where(and(eq(clients.apiKeyLookup, lookup), eq(clients.status, "active")))
-      .limit(1);
+    if (isKnownBadApiKey(lookup)) {
+      return reply.code(401).send({ error: "Invalid API key." });
+    }
 
-    if (clientByLookup) {
-      const storedHash = clientByLookup.apiKeyHash;
-      let isValid = false;
-      if (storedHash) {
-        if (isVerifiedApiKey(lookup, storedHash)) {
-          isValid = true;
-        } else if (await verifyPassword(apiKey, storedHash)) {
-          isValid = true;
-          rememberVerifiedApiKey(lookup, storedHash);
-        }
-      }
-      if (isValid) {
-        (request as FastifyRequest & { client?: typeof clients.$inferSelect }).client =
-          clientByLookup;
-        return;
-      }
+    let verification = inFlightVerifications.get(lookup);
+    if (!verification) {
+      verification = verifyApiKey(apiKey, lookup).finally(() => {
+        inFlightVerifications.delete(lookup);
+      });
+      inFlightVerifications.set(lookup, verification);
+    }
+
+    const client = await verification;
+    if (client) {
+      (request as FastifyRequest & { client?: ClientRow }).client = client;
+      return;
     }
 
     return reply.code(401).send({ error: "Invalid API key." });

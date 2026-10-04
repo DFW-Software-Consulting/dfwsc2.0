@@ -5,7 +5,12 @@ import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients, paymentLedger } from "../db/schema";
-import { isRecentlyVerifiedApiKey, requireAdminJwt, requireApiKey } from "../lib/auth";
+import {
+  isRecentlyVerifiedApiKey,
+  requireAdminJwt,
+  requireApiKey,
+  sha256Lookup,
+} from "../lib/auth";
 import { getCircuitBreakerStates, withStripeCircuit } from "../lib/circuit-breakers";
 import { getClientIp } from "../lib/client-ip";
 import {
@@ -25,6 +30,7 @@ import {
 import { errors } from "../lib/errors";
 import {
   adminRateLimit,
+  type FailureCharge,
   failureRateLimit,
   rateLimit,
   sendRateLimited,
@@ -237,8 +243,10 @@ const apiKeyStatusRateLimit = rateLimit({
   keyGenerator: (request) => `client:${(request as RequestWithClient).client?.id}`,
 });
 
-// Failed key authentications are charged to the caller's IP, so a flood of junk keys turns into
-// 429s instead of unlimited database lookups. Successful ones are never charged.
+// Failed key authentications are limited per caller IP by DISTINCT key (the key's SHA-256 lookup
+// is the member), so a flood of junk keys turns into 429s instead of unlimited database lookups
+// while one bad key polled in a loop still uses a single unit. The unit is charged before the
+// lookup, atomically, and given back when the key turns out to be valid or the lookup errors.
 const failedStatusAuthLimit = failureRateLimit({
   max: SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX,
   windowMs: 60_000,
@@ -251,27 +259,44 @@ async function sessionStatusGuard(request: FastifyRequest, reply: FastifyReply) 
     return anonymousStatusRateLimit(request, reply);
   }
 
-  // Over the failed-auth budget: refuse before requireApiKey (and its database lookup), unless
-  // this exact key passed verification within the last minute. That exception keeps one
-  // misconfigured key from locking out the same IP's working keys. The cache only vouches for the
-  // key's recent past, so requireApiKey below still loads the client row and rejects a client
-  // that has since been deactivated.
-  const budget = await failedStatusAuthLimit.check(request);
-  if (budget.blocked) {
-    const apiKey = Array.isArray(header) ? header[0] : header;
-    if (typeof apiKey !== "string" || !isRecentlyVerifiedApiKey(apiKey)) {
-      return sendRateLimited(reply, budget.retryAfterMs);
-    }
-  }
-
-  // requireApiKey hashes the key and looks it up first; bcrypt only runs for a key that matches
-  // an active client (and is skipped while that key's verification is cached).
-  await requireApiKey(request, reply);
-  if (reply.sent) {
-    // Only a rejected key counts; a 500 from our own database error is not the caller's failure.
-    if (reply.statusCode === 401) await failedStatusAuthLimit.record(request);
+  const apiKey = Array.isArray(header) ? header[0] : header;
+  if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
+    // A missing or blank key never reaches the database, so it is not counted.
+    await requireApiKey(request, reply);
     return reply;
   }
+
+  // Reserve one unit of the IP's failed-auth budget for this key before looking it up. A key
+  // already counted this window (a repeat) costs nothing more. Over budget, the request is
+  // refused with no lookup, except a key that passed verification within the last minute: that
+  // exception keeps one IP's junk keys from locking out its working ones, and such a key is
+  // only charged after the fact if it turns out to have been rejected. The cache only vouches
+  // for the key's recent past, so requireApiKey below still loads the client row and rejects a
+  // client that has since been deactivated.
+  const lookup = sha256Lookup(apiKey);
+  let charge: Extract<FailureCharge, { blocked: false }> | undefined;
+  if (!isRecentlyVerifiedApiKey(apiKey)) {
+    const result = await failedStatusAuthLimit.charge(request, lookup);
+    if (result.blocked) return sendRateLimited(reply, result.retryAfterMs);
+    charge = result;
+  }
+
+  // Only a rejected key (401) stays counted. A key that is accepted, or a 500 from our own
+  // database error, is not the caller's failure and gives the unit back.
+  let rejected = false;
+  try {
+    await requireApiKey(request, reply);
+    rejected = reply.sent && reply.statusCode === 401;
+  } finally {
+    if (!rejected) {
+      await charge?.release();
+    } else if (charge) {
+      charge.keep();
+    } else {
+      await failedStatusAuthLimit.record(request, lookup);
+    }
+  }
+  if (reply.sent) return reply;
   return apiKeyStatusRateLimit(request, reply);
 }
 

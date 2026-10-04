@@ -164,7 +164,7 @@ describe("requireApiKey", () => {
     });
 
     const reply = makeReply();
-    await requireApiKey(makeRequest("any-key") as any, reply as any);
+    await requireApiKey(makeRequest("db-error-key") as any, reply as any);
     expect(reply.code).toHaveBeenCalledWith(500);
     expect(reply.send).toHaveBeenCalledWith({
       error: "Internal server error during API key validation.",

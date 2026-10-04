@@ -183,31 +183,100 @@ describe.runIf(Boolean(REDIS_URL))("rate limiters against a real Redis", () => {
     expect(Number(seconds)).toBeGreaterThanOrEqual(8);
     expect(Number(seconds)).toBeLessThanOrEqual(9);
   });
-  it("failure limiter: check does not charge, record does, Retry-After from the oldest failure", async () => {
+
+  // The failure limiter's charges, as the status endpoint uses them: charge, then keep (a failed
+  // key) or release (a valid one).
+  type Charged = { blocked: false; keep: () => void; release: () => Promise<void> };
+  const key = (id: string) => `ratelimit:POST:/live-test:${id}`;
+
+  it("failure limiter: charges distinct members, counts a repeat once, refuses past the max", async () => {
+    const { failureRateLimit } = await loadModule();
+    const limiter = failureRateLimit({ max: 3, windowMs: 10_000, keyGenerator: byId });
+    const id = freshId();
+    const { request } = makeMocks(id);
+
+    for (let i = 0; i < 20; i++) ((await limiter.charge(request, "same")) as Charged).keep();
+    expect(await inspector.zcard(key(id))).toBe(1);
+    for (const member of ["b", "c"]) ((await limiter.charge(request, member)) as Charged).keep();
+    expect(await inspector.zcard(key(id))).toBe(3);
+
+    expect((await limiter.charge(request, "d")).blocked).toBe(true);
+    // A refusal adds nothing, and an already counted member is still admitted at the max.
+    expect(await inspector.zcard(key(id))).toBe(3);
+    expect((await limiter.charge(request, "same")).blocked).toBe(false);
+    expect(request.log.error).not.toHaveBeenCalled();
+  });
+
+  it("failure limiter: Retry-After comes from the oldest member, on Redis's clock", async () => {
     const { failureRateLimit } = await loadModule();
     const limiter = failureRateLimit({ max: 2, windowMs: 10_000, keyGenerator: byId });
     const id = freshId();
     const { request } = makeMocks(id);
 
-    for (let i = 0; i < 5; i++) expect((await limiter.check(request)).blocked).toBe(false);
-    await limiter.record(request);
+    ((await limiter.charge(request, "a")) as Charged).keep();
     await new Promise((resolve) => setTimeout(resolve, 1500));
-    expect((await limiter.check(request)).blocked).toBe(false);
-    await limiter.record(request);
+    ((await limiter.charge(request, "b")) as Charged).keep();
 
-    const blocked = await limiter.check(request);
+    const blocked = await limiter.charge(request, "c");
     expect(blocked.blocked).toBe(true);
     if (blocked.blocked) {
-      // The oldest failure is ~1.5 s old, so ~8.5 s remain.
+      // The oldest member is ~1.5 s old, so ~8.5 s remain.
       expect(blocked.retryAfterMs).toBeGreaterThan(7_500);
       expect(blocked.retryAfterMs).toBeLessThanOrEqual(8_600);
     }
-    // Checking added nothing (two failures recorded), and Redis served all of it.
-    expect(await inspector.zcard(`ratelimit:POST:/live-test:${id}`)).toBe(2);
     expect(request.log.error).not.toHaveBeenCalled();
   });
 
-  it("failure limiter: concurrent records from independent connections are all counted", async () => {
+  it("failure limiter: a member leaves the window, and the key expires with it", async () => {
+    const { failureRateLimit } = await loadModule();
+    const limiter = failureRateLimit({ max: 1, windowMs: 1_000, keyGenerator: byId });
+    const id = freshId();
+    const { request } = makeMocks(id);
+
+    ((await limiter.charge(request, "a")) as Charged).keep();
+    expect((await limiter.charge(request, "b")).blocked).toBe(true);
+    const ttl = await inspector.pttl(key(id));
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(1_000);
+
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    expect((await limiter.charge(request, "b")).blocked).toBe(false);
+  });
+
+  it("failure limiter: release removes only what the request added", async () => {
+    const { failureRateLimit } = await loadModule();
+    const limiter = failureRateLimit({ max: 5, windowMs: 10_000, keyGenerator: byId });
+    const id = freshId();
+    const { request } = makeMocks(id);
+
+    const failed = (await limiter.charge(request, "failed")) as Charged;
+    failed.keep();
+    const repeat = (await limiter.charge(request, "failed")) as Charged;
+    await repeat.release();
+    expect(await inspector.zscore(key(id), "failed")).not.toBeNull();
+
+    const ok = (await limiter.charge(request, "valid")) as Charged;
+    expect(await inspector.zscore(key(id), "valid")).not.toBeNull();
+    await ok.release();
+    expect(await inspector.zscore(key(id), "valid")).toBeNull();
+    expect(await inspector.zcard(key(id))).toBe(1);
+  });
+
+  it("failure limiter: record adds a member past the max, once", async () => {
+    const { failureRateLimit } = await loadModule();
+    const limiter = failureRateLimit({ max: 1, windowMs: 10_000, keyGenerator: byId });
+    const id = freshId();
+    const { request } = makeMocks(id);
+
+    ((await limiter.charge(request, "a")) as Charged).keep();
+    await limiter.record(request, "late");
+    const score = await inspector.zscore(key(id), "late");
+    await limiter.record(request, "late");
+    expect(await inspector.zcard(key(id))).toBe(2);
+    expect(await inspector.zscore(key(id), "late")).toBe(score);
+  });
+
+  it("failure limiter: concurrent charges of distinct members from independent connections admit exactly max", async () => {
     const id = freshId();
     const limiters = await Promise.all(
       Array.from({ length: 4 }, async () => {
@@ -215,13 +284,59 @@ describe.runIf(Boolean(REDIS_URL))("rate limiters against a real Redis", () => {
         return failureRateLimit({ max: 10, windowMs: 10_000, keyGenerator: byId });
       })
     );
-    await Promise.all(
-      limiters.flatMap((limiter) =>
-        Array.from({ length: 5 }, () => limiter.record(makeMocks(id).request as any))
+    const outcomes = await Promise.all(
+      limiters.flatMap((limiter, c) =>
+        Array.from({ length: 25 }, async (_, i) => {
+          const charge = await limiter.charge(makeMocks(id).request, `m-${c}-${i}`);
+          if (!charge.blocked) charge.keep();
+          return charge.blocked ? "refused" : "admitted";
+        })
       )
     );
-    const { request } = makeMocks(id);
-    expect((await limiters[0].check(request)).blocked).toBe(true);
-    expect(await inspector.zcard(`ratelimit:POST:/live-test:${id}`)).toBe(20);
+
+    expect(outcomes).toHaveLength(100);
+    expect(outcomes.filter((o) => o === "admitted")).toHaveLength(10);
+    expect(await inspector.zcard(key(id))).toBe(10);
+  });
+
+  it("failure limiter: the same member charged concurrently from independent connections is one unit", async () => {
+    const id = freshId();
+    const limiters = await Promise.all(
+      Array.from({ length: 4 }, async () => {
+        const { failureRateLimit } = await loadModule();
+        return failureRateLimit({ max: 1, windowMs: 10_000, keyGenerator: byId });
+      })
+    );
+    const charges = await Promise.all(
+      limiters.flatMap((limiter) =>
+        Array.from({ length: 10 }, () => limiter.charge(makeMocks(id).request, "same"))
+      )
+    );
+
+    expect(charges.every((c) => !c.blocked)).toBe(true);
+    for (const c of charges) if (!c.blocked) c.keep();
+    expect(await inspector.zcard(key(id))).toBe(1);
+  });
+
+  it("failure limiter: valid members released after their lookup never fill the budget", async () => {
+    const id = freshId();
+    const limiter = await (async () => {
+      const { failureRateLimit } = await loadModule();
+      return failureRateLimit({ max: 5, windowMs: 10_000, keyGenerator: byId });
+    })();
+
+    // 40 concurrent valid members against a max of 5: each holds a unit only while "looking up".
+    const outcomes = await Promise.all(
+      Array.from({ length: 40 }, async (_, i) => {
+        const charge = await limiter.charge(makeMocks(id).request, `valid-${i}`);
+        if (charge.blocked) return "refused";
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await charge.release();
+        return "served";
+      })
+    );
+
+    expect(outcomes.every((o) => o === "served")).toBe(true);
+    expect(await inspector.zcard(key(id))).toBe(0);
   });
 });

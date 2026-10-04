@@ -3,7 +3,7 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
-import { requireAdminJwt } from "../lib/auth";
+import { forgetBadApiKey, requireAdminJwt } from "../lib/auth";
 import { MAX_FEE_PERCENT, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { errors, isUniqueViolation } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
@@ -391,6 +391,12 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const updatedClient = updatedClients[0];
+
+      // A client switched back to active must not keep being refused from the short-lived record
+      // of its key having had no active client.
+      if (status !== undefined && updatedClient.apiKeyLookup) {
+        forgetBadApiKey(updatedClient.apiKeyLookup);
+      }
 
       const { apiKeyHash, apiKeyLookup, ...safeUpdatedClient } = updatedClient;
       return res.status(200).send({

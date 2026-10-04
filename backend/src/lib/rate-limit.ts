@@ -95,6 +95,13 @@ setInterval(() => {
     }
   }
   const now = Date.now();
+  for (const [key, members] of failureSets) {
+    for (const [member, addedAt] of members) {
+      if (addedAt >= cutoff) break;
+      members.delete(member);
+    }
+    if (members.size === 0) failureSets.delete(key);
+  }
   for (const [key, bucket] of tokenBuckets) {
     // A bucket that has had time to refill completely behaves like a new one.
     if (now - bucket.updatedAt >= bucket.fullRefillMs) {
@@ -316,7 +323,7 @@ export function rateLimit(options: RateLimitOptions) {
 }
 
 type FailureLimiterOptions = {
-  /** Failures allowed per window; the next request after that is refused. */
+  /** Distinct failing members allowed per window; the next new member is refused. */
   max: number;
   windowMs: number;
   // Bucket namespace, as for the sliding window.
@@ -324,84 +331,233 @@ type FailureLimiterOptions = {
   keyGenerator?: (request: FastifyRequest) => string;
 };
 
-type FailureCheckResult = { blocked: false } | { blocked: true; retryAfterMs: number };
+/**
+ * Outcome of `charge`. A refusal carries the time until the oldest counted member leaves the
+ * window. A charge that went through hands back a slot that must be settled exactly once, with
+ * `keep` (the attempt failed: the member stays counted) or `release` (it succeeded or errored:
+ * the member this request added is taken back out). Settling twice is harmless.
+ */
+export type FailureCharge =
+  | { blocked: true; retryAfterMs: number }
+  | { blocked: false; keep: () => void; release: () => Promise<void> };
+
+// Members of the failure limiters, per limiter key, for the in-memory fallback: member -> time it
+// was added. Entries are only ever appended, so the first one is the oldest.
+const failureSets = new Map<string, Map<string, number>>();
+
+// Atomic check-and-add of one member to a sliding-window set, on Redis's own clock (TIME).
+//   KEYS[1] sorted set of members (score = time added)
+//   ARGV[1] window in ms, ARGV[2] max members, ARGV[3] member, ARGV[4] "1" to add past the max
+// Returns { status, retryAfterMs } where status is 2 (member added), 1 (member already counted;
+// nothing changes, its time is not refreshed) or 0 (set full and member new; retryAfterMs is the
+// time until the oldest member expires).
+export const FAILURE_CHARGE_LUA = `
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local window = tonumber(ARGV[1])
+local max = tonumber(ARGV[2])
+local member = ARGV[3]
+local force = ARGV[4] == '1'
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - window)
+if redis.call('ZSCORE', KEYS[1], member) then
+  return { 1, 0 }
+end
+if (not force) and redis.call('ZCARD', KEYS[1]) >= max then
+  local oldest = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+  local retry = window
+  if oldest[2] then
+    retry = tonumber(oldest[2]) + window - now
+  end
+  return { 0, retry }
+end
+redis.call('ZADD', KEYS[1], now, member)
+redis.call('PEXPIRE', KEYS[1], window)
+return { 2, 0 }
+`;
+
+type ChargeAttempt =
+  | { store: "redis" | "memory"; status: "added" | "existing" }
+  | { store: "redis" | "memory"; status: "blocked"; retryAfterMs: number };
+
+async function redisFailureCharge(
+  client: Redis,
+  key: string,
+  member: string,
+  max: number,
+  windowMs: number,
+  force: boolean
+): Promise<ChargeAttempt> {
+  const reply = (await client.eval(
+    FAILURE_CHARGE_LUA,
+    1,
+    key,
+    String(windowMs),
+    String(max),
+    member,
+    force ? "1" : "0"
+  )) as [number, number] | null;
+  if (!Array.isArray(reply)) throw new Error("Redis failure charge script returned no result");
+  const [status, retryAfterMs] = reply.map(Number);
+  if (status === 2) return { store: "redis", status: "added" };
+  if (status === 1) return { store: "redis", status: "existing" };
+  return { store: "redis", status: "blocked", retryAfterMs };
+}
+
+function memoryFailureCharge(
+  key: string,
+  member: string,
+  max: number,
+  windowMs: number,
+  force: boolean,
+  now: number
+): ChargeAttempt {
+  let members = failureSets.get(key);
+  if (!members) {
+    members = new Map();
+    failureSets.set(key, members);
+  }
+  for (const [existing, addedAt] of members) {
+    if (addedAt > now - windowMs) break;
+    members.delete(existing);
+  }
+  if (members.has(member)) return { store: "memory", status: "existing" };
+  if (!force && members.size >= max) {
+    const oldest = members.values().next().value ?? now;
+    return { store: "memory", status: "blocked", retryAfterMs: oldest + windowMs - now };
+  }
+  members.set(member, now);
+  return { store: "memory", status: "added" };
+}
 
 /**
- * Counts failures (for example failed authentications) per key, separately from deciding
- * whether to refuse. `check` reads the count without charging anything; `record` charges one
- * failure. Unlike `rateLimit`, a request that succeeds is never counted, and a refusal is not
- * counted either, so the window drains on its own. Same storage as `rateLimit`: a Redis sorted
- * set (in-memory fallback when Redis errors), namespaced by `name`. The check and the record are
- * separate calls, so a burst of concurrent requests can overshoot `max` slightly.
+ * Per-key limit on DISTINCT failing members, for example the SHA-256 lookup of each API key that
+ * failed to authenticate, charged per client IP. `charge` is an atomic check-and-add made BEFORE
+ * the work it protects, so a burst of concurrent requests cannot all slip past a count that is
+ * only updated afterwards: at most `max` distinct members are ever in flight or counted. The
+ * member is what makes repeats cheap: a member that is already counted costs nothing more, so one
+ * failing member repeated any number of times uses one unit.
+ *
+ * A charged member is tentative until its slot is settled: `release` takes it back (the attempt
+ * succeeded or hit an error that is not the caller's failure), `keep` leaves it counted until it
+ * ages out of the window. A request that is over the max while earlier charges from this process
+ * are still unsettled waits for them, since some may yet be released, and is refused only when
+ * none are left in flight here. `record` charges a member after the fact (it can exceed the max),
+ * for a request that skipped `charge`.
+ *
+ * Same storage as `rateLimit`: a Redis sorted set (atomic Lua script) with an in-memory fallback
+ * when Redis errors, namespaced by `name`. Refusals are not counted, so the window drains by
+ * itself.
  */
 export function failureRateLimit(options: FailureLimiterOptions) {
   const { max, windowMs } = options;
   maxRegisteredWindowMs = Math.max(maxRegisteredWindowMs, windowMs);
+
+  // Unsettled charges made by this process, per limiter key, and the requests waiting on them.
+  const inFlight = new Map<string, { count: number; waiters: Array<() => void> }>();
+  // Bumped on every settlement, so a request can tell that a charge settled while it was deciding.
+  let settlements = 0;
 
   function keyFor(request: FastifyRequest): string {
     const id = options.keyGenerator ? options.keyGenerator(request) : getClientIp(request);
     return `ratelimit:${limiterNamespace(request, options.name)}:${id}`;
   }
 
-  async function redisCheck(client: Redis, key: string, now: number): Promise<FailureCheckResult> {
-    const pipeline = client.pipeline();
-    pipeline.zremrangebyscore(key, 0, now - windowMs);
-    pipeline.zcard(key);
-    pipeline.zrange(key, 0, 0, "WITHSCORES");
-    const results = await pipeline.exec();
-    if (!results) throw new Error("Redis pipeline returned no results");
-    const failed = results.find(([err]) => err);
-    if (failed) throw failed[0];
-    const count = Number(results[1]?.[1]);
-    if (count < max) return { blocked: false };
-    const oldest = Number((results[2]?.[1] as string[] | undefined)?.[1]);
+  async function attempt(
+    request: FastifyRequest,
+    key: string,
+    member: string,
+    force: boolean
+  ): Promise<ChargeAttempt> {
+    if (redis) {
+      try {
+        return await redisFailureCharge(redis, key, member, max, windowMs, force);
+      } catch (err) {
+        logRedisFailure(request, err);
+      }
+    }
+    return memoryFailureCharge(key, member, max, windowMs, force, Date.now());
+  }
+
+  function track(key: string) {
+    const entry = inFlight.get(key) ?? { count: 0, waiters: [] };
+    entry.count += 1;
+    inFlight.set(key, entry);
+  }
+
+  function untrack(key: string) {
+    settlements += 1;
+    const entry = inFlight.get(key);
+    if (!entry) return;
+    entry.count -= 1;
+    const waiters = entry.waiters;
+    entry.waiters = [];
+    if (entry.count <= 0) inFlight.delete(key);
+    for (const wake of waiters) wake();
+  }
+
+  async function remove(request: FastifyRequest, key: string, member: string, store: string) {
+    if (store === "redis" && redis) {
+      try {
+        await redis.zrem(key, member);
+      } catch (err) {
+        // The member simply stays counted until it ages out: the conservative outcome.
+        logRedisFailure(request, err);
+      }
+      return;
+    }
+    failureSets.get(key)?.delete(member);
+  }
+
+  function slotFor(
+    request: FastifyRequest,
+    key: string,
+    member: string,
+    charged: Extract<ChargeAttempt, { status: "added" | "existing" }>
+  ): FailureCharge {
+    // Only the request that added a member may take it back out, and only it is waited on.
+    const added = charged.status === "added";
+    if (added) track(key);
+    let settled = false;
     return {
-      blocked: true,
-      retryAfterMs: Number.isFinite(oldest) ? oldest + windowMs - now : windowMs,
+      blocked: false,
+      keep() {
+        if (settled) return;
+        settled = true;
+        if (added) untrack(key);
+      },
+      async release() {
+        if (settled) return;
+        settled = true;
+        if (!added) return;
+        try {
+          await remove(request, key, member, charged.store);
+        } finally {
+          untrack(key);
+        }
+      },
     };
   }
 
-  function memoryCheck(key: string, now: number): FailureCheckResult {
-    const recent = (hitBuckets.get(key) ?? []).filter((t) => t > now - windowMs);
-    hitBuckets.set(key, recent);
-    if (recent.length < max) return { blocked: false };
-    return { blocked: true, retryAfterMs: (recent[0] ?? now) + windowMs - now };
-  }
-
   return {
-    async check(request: FastifyRequest): Promise<FailureCheckResult> {
+    async charge(request: FastifyRequest, member: string): Promise<FailureCharge> {
       const key = keyFor(request);
-      const now = Date.now();
-      if (redis) {
-        try {
-          return await redisCheck(redis, key, now);
-        } catch (err) {
-          logRedisFailure(request, err);
+      for (;;) {
+        const before = settlements;
+        const result = await attempt(request, key, member, false);
+        if (result.status !== "blocked") return slotFor(request, key, member, result);
+        // Over the max. If a charge settled meanwhile the count may have dropped; if some are
+        // still in flight here, wait for the next one to settle and look again.
+        if (settlements !== before) continue;
+        const entry = inFlight.get(key);
+        if (!entry || entry.count <= 0) {
+          return { blocked: true, retryAfterMs: result.retryAfterMs };
         }
+        await new Promise<void>((resolve) => entry.waiters.push(resolve));
       }
-      return memoryCheck(key, now);
     },
 
-    async record(request: FastifyRequest): Promise<void> {
-      const key = keyFor(request);
-      const now = Date.now();
-      if (redis) {
-        try {
-          const pipeline = redis.pipeline();
-          pipeline.zadd(key, now.toString(), `${now}:${Math.random()}`);
-          pipeline.pexpire(key, windowMs);
-          const results = await pipeline.exec();
-          if (!results) throw new Error("Redis pipeline returned no results");
-          const failed = results.find(([err]) => err);
-          if (failed) throw failed[0];
-          return;
-        } catch (err) {
-          logRedisFailure(request, err);
-        }
-      }
-      const hits = (hitBuckets.get(key) ?? []).filter((t) => t > now - windowMs);
-      hits.push(now);
-      hitBuckets.set(key, hits);
+    async record(request: FastifyRequest, member: string): Promise<void> {
+      await attempt(request, keyFor(request), member, true);
     },
   };
 }
