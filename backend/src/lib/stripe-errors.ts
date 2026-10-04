@@ -1,5 +1,19 @@
 import type { FastifyReply } from "fastify";
-import { isCircuitOpenError } from "./circuit-breakers";
+import { isCircuitOpenError, isStripeBusyError } from "./circuit-breakers";
+import {
+  STRIPE_BUSY_RETRY_AFTER_SECONDS,
+  STRIPE_RATE_LIMITED_RETRY_AFTER_SECONDS,
+} from "./constants";
+
+/**
+ * Body for a Stripe call that could not get a concurrency slot in time. Always mapped (503 with
+ * `Retry-After`), whatever the call site: nothing was sent to Stripe, so retrying is safe, and a
+ * webhook answering non-2xx here makes Stripe redeliver the event.
+ */
+const STRIPE_BUSY_ERROR: StripeErrorBody = {
+  error: "Payment service is handling a high volume of requests. Please retry shortly.",
+  code: "STRIPE_BUSY",
+};
 
 export interface StripeErrorBody {
   error: string;
@@ -13,7 +27,10 @@ export interface StripeErrorMapping {
   circuitOpenStatus?: number;
   /** `code` value used for a declined-card (`StripeCardError`) response. Omit to skip this branch. */
   cardDeclinedCode?: string;
-  /** Response body sent for a Stripe rate-limit (`StripeRateLimitError`) error. Omit to skip this branch. */
+  /**
+   * Response body sent for a Stripe rate-limit (`StripeRateLimitError`) error, with
+   * `Retry-After` (Stripe sends none). Omit to skip this branch.
+   */
   rateLimited?: StripeErrorBody;
   /**
    * Map permanent caller errors instead of letting them fall through as retryable:
@@ -53,6 +70,12 @@ export function mapStripeError(
     return true;
   }
 
+  if (isStripeBusyError(err)) {
+    reply.header("Retry-After", String(STRIPE_BUSY_RETRY_AFTER_SECONDS));
+    reply.code(503).send(STRIPE_BUSY_ERROR);
+    return true;
+  }
+
   const kind = err instanceof Error ? stripeErrorKind(err) : undefined;
 
   if (mapping.cardDeclinedCode && err instanceof Error && kind === "StripeCardError") {
@@ -61,6 +84,7 @@ export function mapStripeError(
   }
 
   if (mapping.rateLimited && err instanceof Error && kind === "StripeRateLimitError") {
+    reply.header("Retry-After", String(STRIPE_RATE_LIMITED_RETRY_AFTER_SECONDS));
     reply.code(429).send(mapping.rateLimited);
     return true;
   }

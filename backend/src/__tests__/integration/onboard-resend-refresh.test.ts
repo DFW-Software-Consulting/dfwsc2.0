@@ -20,6 +20,11 @@ vi.mock("../../lib/mailer", () => ({
 vi.mock("../../lib/rate-limit", () => ({
   adminRateLimit: () => async () => {},
   rateLimit: () => async () => {},
+  tokenBucketRateLimit: () => async () => {},
+  failureRateLimit: () => ({
+    charge: async () => ({ blocked: false, keep: () => {}, release: async () => {} }),
+    record: async () => {},
+  }),
   warnIfInMemoryRateLimit: vi.fn(),
 }));
 

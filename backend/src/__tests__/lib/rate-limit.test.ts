@@ -21,6 +21,7 @@ function makeMocks(ip = "127.0.0.1") {
   const reply = {
     code: vi.fn().mockReturnThis(),
     send: vi.fn().mockReturnThis(),
+    header: vi.fn().mockReturnThis(),
   };
   const request = {
     ip,
@@ -102,7 +103,7 @@ describe("rateLimit", () => {
     await guard(request as any, reply as any);
 
     expect(reply.code).toHaveBeenCalledWith(429);
-    expect(reply.send).toHaveBeenCalledWith({ error: "Too Many Requests" });
+    expect(reply.send).toHaveBeenCalledWith({ error: "Too Many Requests", code: "RATE_LIMITED" });
   });
 
   it("uses a custom keyGenerator when provided", async () => {
@@ -142,6 +143,7 @@ describe("rateLimit", () => {
     const reply = {
       code: vi.fn().mockReturnThis(),
       send: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
     };
     const request = { ip: "", headers: {} };
 

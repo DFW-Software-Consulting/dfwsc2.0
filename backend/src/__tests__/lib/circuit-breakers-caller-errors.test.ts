@@ -34,6 +34,7 @@ describe("circuit-breakers caller-error handling", () => {
     ["StripeInvalidRequestError", 409],
     ["StripePermissionError", 403],
     ["StripeCardError", 402],
+    ["StripeRateLimitError", 429],
   ])("does not open the Stripe circuit on repeated %s (%i)", async (name, status) => {
     const { getCircuitBreakerStates, withStripeCircuit } = await getCircuitBreakers();
 
@@ -51,7 +52,6 @@ describe("circuit-breakers caller-error handling", () => {
     ["StripeConnectionError", undefined],
     ["StripeAPIError", 500],
     ["StripeAPIError", 503],
-    ["StripeRateLimitError", 429],
     ["StripeAuthenticationError", 401],
   ])("still opens the Stripe circuit on five consecutive %s (%s)", async (name, status) => {
     const { getCircuitBreakerStates, withStripeCircuit } = await getCircuitBreakers();

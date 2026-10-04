@@ -24,6 +24,7 @@ describe("Docs page", () => {
       "RATE_LIMITED",
       "STRIPE_FAILED",
       "STRIPE_CIRCUIT_OPEN",
+      "STRIPE_BUSY",
     ]) {
       expect(container.textContent).toContain(code);
     }
@@ -51,15 +52,76 @@ describe("Docs page", () => {
     expect(text).not.toMatch(/store the new sessionId against the order/i);
   });
 
-  it("states the confirmation endpoint limit and a polling backoff", () => {
+  it("states the confirmation endpoint limits and a polling backoff", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).toMatch(/30 requests per minute for each calling IP address/i);
+    expect(text).toMatch(/600 requests per minute for your account/i);
+    expect(text).toMatch(/2, 5 and 10 seconds/);
+    expect(text).toMatch(/one budget shared by all your pending orders/i);
+    expect(text).toMatch(/every 15 minutes/i);
+    expect(text).toMatch(/about 300 requests a minute across every order/i);
+    expect(text).not.toMatch(/about 20 requests a minute/i);
+    expect(text).not.toMatch(/No API key is needed/i);
+    expect(text).not.toMatch(/couple of seconds/i);
+  });
+
+  it("explains sending the API key on the confirmation call", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).toMatch(/Send your X-Api-Key header with this call/i);
+    expect(text).toMatch(/only see your own account.s sessions/i);
+    expect(text).toMatch(/returns 404, the same as an unknown session/i);
+    expect(text).toMatch(/wrong or deactivated key returns 401/i);
+  });
+
+  it("documents the checkout burst limit, Retry-After and automatic retries", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).toMatch(/200 checkouts at once/i);
+    expect(text).toMatch(/refills at 120 per minute \(2 per second\)/i);
+    expect(text).toMatch(/Every 429 from this API carries both/i);
+    expect(text).toMatch(/Retry-After: 5/);
+    expect(text).toMatch(/Retry automatically, with the same Idempotency-Key/i);
+    expect(text).toMatch(/never have to click twice/i);
+    expect(text).toMatch(/waiting screen/i);
+    expect(text).toMatch(/503 STRIPE_BUSY does not use up any of your allowance of 200/i);
+  });
+
+  it("does not promise that a burst is served without delay", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).not.toMatch(/without delay/i);
+    expect(text).toMatch(/admits a burst of 200, but only 25 Stripe calls run at a time/i);
+    expect(text).toMatch(/waits at most 10 seconds for its turn/i);
+    expect(text).toMatch(
+      /tail of a large burst can run out of that time and get a 503 STRIPE_BUSY/i
+    );
+  });
+
+  it("tells integrators to add a random extra delay to the Retry-After wait", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+    const text = container.textContent;
+
+    expect(text).toMatch(/Retry-After seconds plus a small random extra delay/i);
+    expect(text).toMatch(/all come back at the same moment and are refused again/i);
+  });
+
+  it("documents the per-IP limit on rejected API keys", () => {
     const { container } = render(<Docs />, { wrapper: MemoryRouter });
 
-    expect(container.textContent).toMatch(/30 requests per minute for each calling IP address/i);
-    expect(container.textContent).toMatch(/2, 5 and 10 seconds/);
-    expect(container.textContent).toMatch(/one budget shared by all your pending orders/i);
-    expect(container.textContent).toMatch(/every 15 minutes/i);
-    expect(container.textContent).toMatch(/about 20 requests a minute across every order/i);
-    expect(container.textContent).not.toMatch(/couple of seconds/i);
+    const text = container.textContent;
+
+    expect(text).toMatch(
+      /Rejected keys are counted per calling IP address, once for each different key/i
+    );
+    expect(text).toMatch(/sending the same wrong key again and again uses one of the 30 allowed/i);
+    expect(text).toMatch(/After 30 different rejected keys in a minute/i);
+    expect(text).toMatch(/keeps getting 401 for up to a minute without being checked again/i);
   });
 
   it("does not describe request fields or notifications the API does not support", () => {

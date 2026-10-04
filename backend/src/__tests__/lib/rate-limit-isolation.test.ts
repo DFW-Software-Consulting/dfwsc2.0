@@ -12,6 +12,7 @@ function makeMocks(route = "/auth/login", method = "POST", ip = "127.0.0.1") {
   const reply = {
     code: vi.fn().mockReturnThis(),
     send: vi.fn().mockReturnThis(),
+    header: vi.fn().mockReturnThis(),
   };
   const request = {
     ip,

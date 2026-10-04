@@ -106,13 +106,16 @@ Rate limiting is per-IP (IPv6 visitors are limited per /64 prefix) or per Stripe
 | `POST /onboard-client/resend` | 5 req / min |
 | `GET /onboard-client` | 10 req / min |
 | `GET /connect/refresh` | 10 req / min |
-| `POST /payments/create` | 20 req / min |
+| `POST /payments/create` | Burst of 200, refilling at 120 / min (per Stripe account) |
+| `GET /payments/session/:sessionId` | 30 req / min per IP; 600 req / min per client when `X-Api-Key` is sent (and 30 distinct rejected keys / min per IP; the same bad key counts once) |
+
+`POST /payments/create` uses a token bucket: a burst of up to 200 requests is admitted by the limiter at once, then requests are admitted at 120 per minute (2 per second) as the bucket refills. Admitted requests then wait for one of 25 concurrent Stripe slots, for at most 10 seconds; when Stripe is slow, the tail of a burst can get `503` `STRIPE_BUSY` and should be retried. The other limits are sliding windows.
 
 **Rate limit exceeded response:**
 ```json
-{ "error": "Too Many Requests" }
+{ "error": "Too Many Requests", "code": "RATE_LIMITED" }
 ```
-Status: `429`
+Status: `429`, with a `Retry-After` header giving the number of whole seconds (at least 1) until the request can succeed. Stripe rate limiting on `POST /payments/create` also returns `429` with `code` `RATE_LIMITED`, with `Retry-After: 2`.
 
 ---
 
@@ -138,9 +141,10 @@ The `requestId` is also in the `X-Request-Id` response header — useful for deb
 | 403 | Forbidden — you're authenticated but don't have permission |
 | 404 | Resource not found |
 | 409 | Conflict — concurrent operation in progress |
-| 429 | Too many requests — back off and retry |
+| 429 | Too many requests — wait the `Retry-After` seconds and retry |
 | 500 | Server error |
 | 502 | External service (Stripe) failed |
+| 503 | Temporarily unavailable — Stripe busy (`STRIPE_BUSY`, `Retry-After: 5`), circuit open (`STRIPE_CIRCUIT_OPEN`), or ledger write failed (`LEDGER_PERSISTENCE_FAILED`) |
 
 ---
 
@@ -429,6 +433,8 @@ Redirect the user to this URL to complete payment. After payment, Stripe redirec
 - `400` — Missing or empty `Idempotency-Key`
 - `400` — Missing or empty `lineItems`
 - `401` — Missing or invalid API key
+- `429` — `RATE_LIMITED`; wait the `Retry-After` seconds plus a small random extra delay and retry with the same `Idempotency-Key`
+- `503` — `STRIPE_BUSY`; too many Stripe calls in progress, wait `Retry-After` (5) seconds plus a small random extra delay and retry with the same `Idempotency-Key`
 
 ---
 

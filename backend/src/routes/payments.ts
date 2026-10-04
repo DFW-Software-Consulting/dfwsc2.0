@@ -5,8 +5,18 @@ import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients, paymentLedger } from "../db/schema";
-import { requireAdminJwt, requireApiKey } from "../lib/auth";
-import { getCircuitBreakerStates, withStripeCircuit } from "../lib/circuit-breakers";
+import {
+  isRecentlyVerifiedApiKey,
+  requireAdminJwt,
+  requireApiKey,
+  sha256Lookup,
+} from "../lib/auth";
+import {
+  getCircuitBreakerStates,
+  isCircuitOpenError,
+  isStripeBusyError,
+  withStripeCircuit,
+} from "../lib/circuit-breakers";
 import { getClientIp } from "../lib/client-ip";
 import {
   appendCheckoutSessionId,
@@ -14,9 +24,23 @@ import {
   resolveDefaultPaymentSuccessUrl,
   resolveFrontendOrigin,
 } from "../lib/config";
-import { REPORT_MAX_CONCURRENCY } from "../lib/constants";
+import {
+  PAYMENT_CREATE_BUCKET_CAPACITY,
+  PAYMENT_CREATE_REFILL_PER_MINUTE,
+  REPORT_MAX_CONCURRENCY,
+  SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX,
+  SESSION_STATUS_API_KEY_RATE_LIMIT_MAX,
+  SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX,
+} from "../lib/constants";
 import { errors } from "../lib/errors";
-import { adminRateLimit, rateLimit } from "../lib/rate-limit";
+import {
+  adminRateLimit,
+  type FailureCharge,
+  failureRateLimit,
+  rateLimit,
+  sendRateLimited,
+  tokenBucketRateLimit,
+} from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
 import { mapStripeError } from "../lib/stripe-errors";
@@ -208,6 +232,79 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
   return getClientIp(request);
 }
 
+// ── Session status auth + limits ───────────────────────────────────────────────
+// The endpoint stays anonymous (per-IP limit). Sending X-Api-Key opts into API-key auth and a
+// higher per-client limit; a bad key is a 401, never a silent fall back to anonymous, and failed
+// attempts are limited per IP.
+const anonymousStatusRateLimit = rateLimit({
+  max: SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+});
+const apiKeyStatusRateLimit = rateLimit({
+  max: SESSION_STATUS_API_KEY_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+  // Own bucket namespace: never shares hits with the anonymous per-IP limiter.
+  name: "GET:/payments/session/:sessionId:api-key",
+  keyGenerator: (request) => `client:${(request as RequestWithClient).client?.id}`,
+});
+
+// Failed key authentications are limited per caller IP by DISTINCT key (the key's SHA-256 lookup
+// is the member), so a flood of junk keys turns into 429s instead of unlimited database lookups
+// while one bad key polled in a loop still uses a single unit. The unit is charged before the
+// lookup, atomically, and given back when the key turns out to be valid or the lookup errors.
+const failedStatusAuthLimit = failureRateLimit({
+  max: SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+  name: "GET:/payments/session/:sessionId:failed-auth",
+});
+
+async function sessionStatusGuard(request: FastifyRequest, reply: FastifyReply) {
+  const header = request.headers["x-api-key"];
+  if (header === undefined) {
+    return anonymousStatusRateLimit(request, reply);
+  }
+
+  const apiKey = Array.isArray(header) ? header[0] : header;
+  if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
+    // A missing or blank key never reaches the database, so it is not counted.
+    await requireApiKey(request, reply);
+    return reply;
+  }
+
+  // Reserve one unit of the IP's failed-auth budget for this key before looking it up. A key
+  // already counted this window (a repeat) costs nothing more. Over budget, the request is
+  // refused with no lookup, except a key that passed verification within the last minute: that
+  // exception keeps one IP's junk keys from locking out its working ones, and such a key is
+  // only charged after the fact if it turns out to have been rejected. The cache only vouches
+  // for the key's recent past, so requireApiKey below still loads the client row and rejects a
+  // client that has since been deactivated.
+  const lookup = sha256Lookup(apiKey);
+  let charge: Extract<FailureCharge, { blocked: false }> | undefined;
+  if (!isRecentlyVerifiedApiKey(apiKey)) {
+    const result = await failedStatusAuthLimit.charge(request, lookup);
+    if (result.blocked) return sendRateLimited(reply, result.retryAfterMs);
+    charge = result;
+  }
+
+  // Only a rejected key (401) stays counted. A key that is accepted, or a 500 from our own
+  // database error, is not the caller's failure and gives the unit back.
+  let rejected = false;
+  try {
+    await requireApiKey(request, reply);
+    rejected = reply.sent && reply.statusCode === 401;
+  } finally {
+    if (!rejected) {
+      await charge?.release();
+    } else if (charge) {
+      charge.keep();
+    } else {
+      await failedStatusAuthLimit.record(request, lookup);
+    }
+  }
+  if (reply.sent) return reply;
+  return apiKeyStatusRateLimit(request, reply);
+}
+
 const STRIPE_CIRCUIT_OPEN_ERROR = {
   error: "Payment service is temporarily unavailable.",
   code: "STRIPE_CIRCUIT_OPEN",
@@ -342,13 +439,16 @@ async function insertPaymentLedger(row: {
 }
 
 export default async function paymentsRoutes(fastify: FastifyInstance) {
+  const paymentCreateBucket = tokenBucketRateLimit({
+    capacity: PAYMENT_CREATE_BUCKET_CAPACITY,
+    refillPerMinute: PAYMENT_CREATE_REFILL_PER_MINUTE,
+    keyGenerator: resolvePaymentRateLimitKey,
+  });
+
   fastify.post(
     "/payments/create",
     {
-      preHandler: [
-        requireClientOrAdmin,
-        rateLimit({ max: 20, windowMs: 60_000, keyGenerator: resolvePaymentRateLimitKey }),
-      ],
+      preHandler: [requireClientOrAdmin, paymentCreateBucket],
     },
     async (request, reply) => {
       const idempotencyKeyHeader = extractIdempotencyKey(request);
@@ -536,18 +636,27 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       };
 
       let session: Stripe.Checkout.Session;
+      let stripeCalled = false;
       try {
         if (sessionParams.payment_intent_data && !effectiveWaiveFee) {
           sessionParams.payment_intent_data.application_fee_amount = feeAmount;
         }
-        session = await withStripeCircuit(() =>
-          stripe.checkout.sessions.create(sessionParams, {
+        session = await withStripeCircuit(() => {
+          stripeCalled = true;
+          return stripe.checkout.sessions.create(sessionParams, {
             stripeAccount: stripeAccountId,
             idempotencyKey: stripeIdempotencyKey,
-          })
-        );
+          });
+        });
       } catch (err) {
         request.log.error({ err }, "Stripe Checkout session creation failed");
+        // A request refused before it reached Stripe (no slot in time, or the circuit already
+        // open) is told to retry, so it gives its rate-limit token back and the retry is not
+        // charged twice. A circuit-open error after the call started is a timeout of a call
+        // that did go out, so it keeps its token like every other outcome that reached Stripe.
+        if (isStripeBusyError(err) || (isCircuitOpenError(err) && !stripeCalled)) {
+          await paymentCreateBucket.refund(request);
+        }
         if (
           mapStripeError(err, reply, {
             circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
@@ -610,12 +719,13 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
   );
 
   // ── GET /payments/session/:sessionId ─────────────────────────────────────────
-  // Rate-limited public endpoint for retrieving checkout session result.
-  // Uses the payment ledger as primary source. Returns only payer-safe fields.
+  // Rate-limited endpoint for retrieving checkout session result; anonymous by default, or with
+  // an X-Api-Key (see sessionStatusGuard). Uses the payment ledger as primary source. Returns
+  // only payer-safe fields.
   fastify.get(
     "/payments/session/:sessionId",
     {
-      preHandler: [rateLimit({ max: 30, windowMs: 60_000 })],
+      preHandler: [sessionStatusGuard],
     },
     async (request, reply) => {
       const { sessionId } = request.params as { sessionId: string };
@@ -630,7 +740,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         .where(eq(paymentLedger.stripeSessionId, sessionId))
         .limit(1);
 
-      if (ledgerRow) {
+      // An authenticated caller only sees its own client's sessions; another client's session
+      // is indistinguishable from an unknown one.
+      const caller = (request as RequestWithClient).client;
+      if (ledgerRow && (!caller || ledgerRow.clientId === caller.id)) {
         // A row still "created" after the webhook should have landed means the
         // event may have been lost; ask Stripe and apply the same transition.
         const current =

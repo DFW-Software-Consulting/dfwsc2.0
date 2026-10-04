@@ -25,6 +25,7 @@ describe("rateLimit - in-memory fallback (no REDIS_URL)", () => {
     const reply = {
       code: vi.fn().mockReturnThis(),
       send: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
     };
     const request = { ip, headers: {} };
     return { request, reply };
@@ -48,7 +49,7 @@ describe("rateLimit - in-memory fallback (no REDIS_URL)", () => {
     await guard(request as any, reply as any);
     await guard(request as any, reply as any);
     expect(reply.code).toHaveBeenCalledWith(429);
-    expect(reply.send).toHaveBeenCalledWith({ error: "Too Many Requests" });
+    expect(reply.send).toHaveBeenCalledWith({ error: "Too Many Requests", code: "RATE_LIMITED" });
   });
 });
 
@@ -89,6 +90,7 @@ describe("rateLimit - Redis path", () => {
     const reply = {
       code: vi.fn().mockReturnThis(),
       send: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
     };
     const request = { ip, headers: {}, log: { error: vi.fn() } };
     return { request, reply };

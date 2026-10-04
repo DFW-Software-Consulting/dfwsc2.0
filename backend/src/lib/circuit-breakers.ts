@@ -1,4 +1,10 @@
 import CircuitBreaker from "opossum";
+import { ConcurrencyLimitError, ConcurrencyLimiter } from "./concurrency-limiter";
+import {
+  STRIPE_MAX_CONCURRENT_CALLS,
+  STRIPE_QUEUE_MAX_WAIT_MS,
+  STRIPE_QUEUE_MAX_WAITING,
+} from "./constants";
 
 type AsyncAction<T> = () => Promise<T>;
 
@@ -18,21 +24,20 @@ const breakerOptions = {
 };
 
 /**
- * opossum treats an error the filter returns true for as a success, not a failure.
- * Stripe 4xx responses other than 429 and 401 (invalid request, idempotency mismatch,
- * permission, card errors) mean Stripe answered and the caller's input was wrong, so they
- * must not count toward opening the process-wide breaker. A 401 means the platform key is
- * revoked or wrong, which is a platform-wide failure, so it still counts. Connection errors
- * (no status), 5xx, 429 and opossum timeouts also count.
+ * opossum treats an error the filter returns true for as a success, not a failure: it emits
+ * "success", which also resets the consecutive-failure count below and closes a half-open breaker.
+ * Stripe 4xx responses other than 401 (invalid request, idempotency mismatch, permission, card
+ * errors, and 429 rate limiting) mean Stripe answered and the request, not the service, was the
+ * problem, so they must not count toward opening the process-wide breaker. A 429 in particular
+ * is Stripe asking us to slow down, which the concurrency limit and callers' Retry-After handle;
+ * opening the breaker would turn that into a 30 s outage for every building. A 401 means the
+ * platform key is revoked or wrong, which is a platform-wide failure, so it still counts.
+ * Connection errors (no status), 5xx and opossum timeouts also count.
  */
 function isStripeCallerError(error: unknown): boolean {
   const statusCode = (error as { statusCode?: unknown } | null)?.statusCode;
   return (
-    typeof statusCode === "number" &&
-    statusCode >= 400 &&
-    statusCode < 500 &&
-    statusCode !== 429 &&
-    statusCode !== 401
+    typeof statusCode === "number" && statusCode >= 400 && statusCode < 500 && statusCode !== 401
   );
 }
 
@@ -105,15 +110,34 @@ export function isCircuitOpenError(error: unknown): error is CircuitOpenError {
   return error instanceof CircuitOpenError;
 }
 
+/**
+ * Stripe calls are limited to a fixed number in flight. The limit sits in front of the breaker,
+ * so time spent waiting for a slot, and a refusal to wait, never reach it: only calls that
+ * actually go to Stripe can count as failures.
+ */
+const stripeConcurrency = new ConcurrencyLimiter({
+  maxConcurrent: STRIPE_MAX_CONCURRENT_CALLS,
+  maxWaiting: STRIPE_QUEUE_MAX_WAITING,
+  maxWaitMs: STRIPE_QUEUE_MAX_WAIT_MS,
+});
+
+/** A Stripe call could not get a slot in time (waiting line full, or waited too long). Retryable. */
+export function isStripeBusyError(error: unknown): error is ConcurrencyLimitError {
+  return error instanceof ConcurrencyLimitError;
+}
+
 export async function withStripeCircuit<T>(action: AsyncAction<T>): Promise<T> {
   if (stripeCircuitBreaker.opened) {
     throw new CircuitOpenError("Stripe");
   }
-  try {
-    return (await stripeCircuitBreaker.fire(action as AsyncAction<unknown>)) as T;
-  } catch (error) {
-    normalizeCircuitError(error, "Stripe");
-  }
+  return stripeConcurrency.run(async () => {
+    try {
+      return (await stripeCircuitBreaker.fire(action as AsyncAction<unknown>)) as T;
+    } catch (error) {
+      // The breaker may have opened while this call waited for its slot.
+      normalizeCircuitError(error, "Stripe");
+    }
+  });
 }
 
 export async function withSmtpCircuit<T>(action: AsyncAction<T>): Promise<T> {
@@ -156,4 +180,22 @@ export function resetCircuitBreakersForTests() {
 
 export function openStripeCircuitForTests() {
   stripeCircuitBreaker.open();
+}
+
+export function configureStripeConcurrencyForTests(
+  limits: Parameters<ConcurrencyLimiter["configure"]>[0]
+) {
+  stripeConcurrency.configure(limits);
+}
+
+export function resetStripeConcurrencyForTests() {
+  stripeConcurrency.configure({
+    maxConcurrent: STRIPE_MAX_CONCURRENT_CALLS,
+    maxWaiting: STRIPE_QUEUE_MAX_WAITING,
+    maxWaitMs: STRIPE_QUEUE_MAX_WAIT_MS,
+  });
+}
+
+export function getStripeConcurrencyForTests() {
+  return { inFlight: stripeConcurrency.inFlight, waiting: stripeConcurrency.waiting };
 }

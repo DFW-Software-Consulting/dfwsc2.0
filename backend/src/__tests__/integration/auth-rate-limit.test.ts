@@ -109,7 +109,7 @@ describe("Auth Rate Limit Integration", () => {
 
     // The 6th request should be blocked (429)
     expect(sixthResponse.statusCode).toBe(429);
-    expect(sixthResponse.json()).toEqual({ error: "Too Many Requests" });
+    expect(sixthResponse.json()).toEqual({ error: "Too Many Requests", code: "RATE_LIMITED" });
 
     await server.close();
   });
@@ -150,7 +150,7 @@ describe("Auth Rate Limit Integration", () => {
     });
 
     expect(response.statusCode).toBe(429);
-    expect(response.json()).toEqual({ error: "Too Many Requests" });
+    expect(response.json()).toEqual({ error: "Too Many Requests", code: "RATE_LIMITED" });
 
     await server.close();
   });
@@ -249,7 +249,7 @@ describe("Auth Rate Limit Integration", () => {
     });
 
     expect(blockedResponse.statusCode).toBe(429);
-    expect(blockedResponse.json()).toEqual({ error: "Too Many Requests" });
+    expect(blockedResponse.json()).toEqual({ error: "Too Many Requests", code: "RATE_LIMITED" });
 
     // Close the first server to clear its rate limit state
     await server.close();
