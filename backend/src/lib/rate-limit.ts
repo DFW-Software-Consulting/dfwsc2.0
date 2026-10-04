@@ -62,7 +62,7 @@ function logRedisFailure(request: FastifyRequest, err: unknown): void {
 
 // Every refusal from our own limiters carries the same body and a Retry-After in whole
 // seconds (at least 1) so a caller can wait exactly as long as needed and retry.
-export const RATE_LIMITED_BODY = { error: "Too Many Requests", code: "RATE_LIMITED" } as const;
+const RATE_LIMITED_BODY = { error: "Too Many Requests", code: "RATE_LIMITED" } as const;
 
 function sendRateLimited(reply: FastifyReply, retryAfterMs: number) {
   const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
@@ -81,6 +81,8 @@ function limiterNamespace(request: FastifyRequest, name?: string): string {
 }
 
 export const hitBuckets = new Map<string, number[]>();
+type TokenBucketState = { tokens: number; updatedAt: number; fullRefillMs: number };
+export const tokenBuckets = new Map<string, TokenBucketState>();
 const SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 let maxRegisteredWindowMs = 0;
 setInterval(() => {
@@ -90,6 +92,13 @@ setInterval(() => {
   for (const [key, hits] of hitBuckets) {
     if (hits.every((t) => t < cutoff)) {
       hitBuckets.delete(key);
+    }
+  }
+  const now = Date.now();
+  for (const [key, bucket] of tokenBuckets) {
+    // A bucket that has had time to refill completely behaves like a new one.
+    if (now - bucket.updatedAt >= bucket.fullRefillMs) {
+      tokenBuckets.delete(key);
     }
   }
 }, SWEEP_INTERVAL_MS).unref();
@@ -143,6 +152,130 @@ async function redisOldestHitExpiryMs(
     // fall through to the conservative default
   }
   return windowMs;
+}
+
+type TokenBucketOptions = {
+  /** Largest burst: the bucket holds at most this many tokens and starts full. */
+  capacity: number;
+  /** Sustained rate: tokens added back per minute. */
+  refillPerMinute: number;
+  // Bucket namespace, as for the sliding window.
+  name?: string;
+  keyGenerator?: (request: FastifyRequest) => string;
+};
+
+type TokenBucketResult = { allowed: true } | { allowed: false; retryAfterMs: number };
+
+// Atomic take of one token. The refill is computed from Redis's own clock (TIME) so replicas
+// with skewed clocks agree, and the whole read-refill-take-write runs inside one script so
+// concurrent requests can never both take the last token.
+//   KEYS[1] bucket hash (fields: tokens, ts)
+//   ARGV[1] capacity, ARGV[2] refill tokens per millisecond, ARGV[3] key TTL in ms
+// Returns { allowed (1/0), retryAfterMs }.
+export const TOKEN_BUCKET_LUA = `
+local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local capacity = tonumber(ARGV[1])
+local rate = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+local data = redis.call('HMGET', KEYS[1], 'tokens', 'ts')
+local tokens = tonumber(data[1])
+local ts = tonumber(data[2])
+if tokens == nil or ts == nil then
+  tokens = capacity
+  ts = now
+end
+local elapsed = now - ts
+if elapsed < 0 then elapsed = 0 end
+tokens = math.min(capacity, tokens + elapsed * rate)
+local allowed = 0
+local retry = 0
+if tokens >= 1 then
+  tokens = tokens - 1
+  allowed = 1
+else
+  retry = math.ceil((1 - tokens) / rate)
+end
+redis.call('HSET', KEYS[1], 'tokens', tostring(tokens), 'ts', tostring(now))
+redis.call('PEXPIRE', KEYS[1], ttl)
+return { allowed, retry }
+`;
+
+async function redisTokenBucket(
+  client: Redis,
+  key: string,
+  capacity: number,
+  refillPerMs: number,
+  fullRefillMs: number
+): Promise<TokenBucketResult> {
+  const reply = (await client.eval(
+    TOKEN_BUCKET_LUA,
+    1,
+    key,
+    String(capacity),
+    String(refillPerMs),
+    // Keep the key until the bucket would be full again, plus slack; after that a missing
+    // key and a full bucket are the same thing.
+    String(Math.ceil(fullRefillMs) + 1000)
+  )) as [number, number] | null;
+  if (!Array.isArray(reply)) throw new Error("Redis token bucket script returned no result");
+  const [allowed, retryAfterMs] = reply;
+  return Number(allowed) === 1 ? { allowed: true } : { allowed: false, retryAfterMs };
+}
+
+function memoryTokenBucket(
+  key: string,
+  capacity: number,
+  refillPerMs: number,
+  fullRefillMs: number,
+  now: number
+): TokenBucketResult {
+  const bucket = tokenBuckets.get(key) ?? { tokens: capacity, updatedAt: now, fullRefillMs };
+  const elapsed = Math.max(0, now - bucket.updatedAt);
+  const tokens = Math.min(capacity, bucket.tokens + elapsed * refillPerMs);
+  if (tokens >= 1) {
+    tokenBuckets.set(key, { tokens: tokens - 1, updatedAt: now, fullRefillMs });
+    return { allowed: true };
+  }
+  tokenBuckets.set(key, { tokens, updatedAt: now, fullRefillMs });
+  return { allowed: false, retryAfterMs: Math.ceil((1 - tokens) / refillPerMs) };
+}
+
+/**
+ * Token-bucket limiter: absorbs a burst of up to `capacity` requests, then admits requests at
+ * `refillPerMinute` on average. Same shape as `rateLimit`: per-route namespacing, a Redis
+ * implementation (atomic Lua script) with an in-memory fallback when Redis errors. A refusal
+ * is a 429 whose Retry-After is the time until one token is available.
+ */
+export function tokenBucketRateLimit(options: TokenBucketOptions) {
+  const { capacity, refillPerMinute } = options;
+  if (!(capacity >= 1) || !(refillPerMinute > 0)) {
+    throw new Error("tokenBucketRateLimit requires capacity >= 1 and refillPerMinute > 0");
+  }
+  const refillPerMs = refillPerMinute / 60_000;
+  const fullRefillMs = capacity / refillPerMs;
+
+  return async function tokenBucketGuard(request: FastifyRequest, reply: FastifyReply) {
+    const id = options.keyGenerator ? options.keyGenerator(request) : getClientIp(request);
+    // Own key prefix: a Redis hash must never share a key with a sliding-window sorted set.
+    const key = `ratelimit:bucket:${limiterNamespace(request, options.name)}:${id}`;
+
+    let result: TokenBucketResult | undefined;
+    if (redis) {
+      try {
+        result = await redisTokenBucket(redis, key, capacity, refillPerMs, fullRefillMs);
+      } catch (err) {
+        // Same stance as the sliding window: a single instance is as accurate in memory, and
+        // failing closed would reject payments whenever Redis restarts.
+        logRedisFailure(request, err);
+      }
+    }
+    result ??= memoryTokenBucket(key, capacity, refillPerMs, fullRefillMs, Date.now());
+
+    if (!result.allowed) {
+      return sendRateLimited(reply, result.retryAfterMs);
+    }
+  };
 }
 
 export function rateLimit(options: RateLimitOptions) {

@@ -14,9 +14,13 @@ import {
   resolveDefaultPaymentSuccessUrl,
   resolveFrontendOrigin,
 } from "../lib/config";
-import { REPORT_MAX_CONCURRENCY } from "../lib/constants";
+import {
+  PAYMENT_CREATE_BUCKET_CAPACITY,
+  PAYMENT_CREATE_REFILL_PER_MINUTE,
+  REPORT_MAX_CONCURRENCY,
+} from "../lib/constants";
 import { errors } from "../lib/errors";
-import { adminRateLimit, rateLimit } from "../lib/rate-limit";
+import { adminRateLimit, rateLimit, tokenBucketRateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
 import { mapStripeError } from "../lib/stripe-errors";
@@ -347,7 +351,11 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
     {
       preHandler: [
         requireClientOrAdmin,
-        rateLimit({ max: 20, windowMs: 60_000, keyGenerator: resolvePaymentRateLimitKey }),
+        tokenBucketRateLimit({
+          capacity: PAYMENT_CREATE_BUCKET_CAPACITY,
+          refillPerMinute: PAYMENT_CREATE_REFILL_PER_MINUTE,
+          keyGenerator: resolvePaymentRateLimitKey,
+        }),
       ],
     },
     async (request, reply) => {

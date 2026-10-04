@@ -12,6 +12,13 @@ export const STRICT_RATE_LIMIT_MAX = 10;
 export const AUTH_RATE_LIMIT_MAX = 5;
 export const DEFAULT_DB_POOL_MAX = 10;
 
+// POST /payments/create is limited per connected account (building) with a token bucket:
+// a burst of up to CAPACITY checkouts is admitted at once, then REFILL_PER_MINUTE on average.
+// Sized for rent day (many tenants clicking "Pay rent" together) while still stopping a
+// runaway loop or a leaked key. Retune here; there are deliberately no environment variables.
+export const PAYMENT_CREATE_BUCKET_CAPACITY = 200;
+export const PAYMENT_CREATE_REFILL_PER_MINUTE = 120;
+
 // webhook_events retention: how long to keep processed rows before pruning,
 // and how often the prune sweep runs.
 export const WEBHOOK_EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
