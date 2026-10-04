@@ -1,4 +1,10 @@
 import CircuitBreaker from "opossum";
+import { ConcurrencyLimitError, ConcurrencyLimiter } from "./concurrency-limiter";
+import {
+  STRIPE_MAX_CONCURRENT_CALLS,
+  STRIPE_QUEUE_MAX_WAIT_MS,
+  STRIPE_QUEUE_MAX_WAITING,
+} from "./constants";
 
 type AsyncAction<T> = () => Promise<T>;
 
@@ -105,15 +111,34 @@ export function isCircuitOpenError(error: unknown): error is CircuitOpenError {
   return error instanceof CircuitOpenError;
 }
 
+/**
+ * Stripe calls are limited to a fixed number in flight. The limit sits in front of the breaker,
+ * so time spent waiting for a slot, and a refusal to wait, never reach it: only calls that
+ * actually go to Stripe can count as failures.
+ */
+const stripeConcurrency = new ConcurrencyLimiter({
+  maxConcurrent: STRIPE_MAX_CONCURRENT_CALLS,
+  maxWaiting: STRIPE_QUEUE_MAX_WAITING,
+  maxWaitMs: STRIPE_QUEUE_MAX_WAIT_MS,
+});
+
+/** A Stripe call could not get a slot in time (waiting line full, or waited too long). Retryable. */
+export function isStripeBusyError(error: unknown): error is ConcurrencyLimitError {
+  return error instanceof ConcurrencyLimitError;
+}
+
 export async function withStripeCircuit<T>(action: AsyncAction<T>): Promise<T> {
   if (stripeCircuitBreaker.opened) {
     throw new CircuitOpenError("Stripe");
   }
-  try {
-    return (await stripeCircuitBreaker.fire(action as AsyncAction<unknown>)) as T;
-  } catch (error) {
-    normalizeCircuitError(error, "Stripe");
-  }
+  return stripeConcurrency.run(async () => {
+    try {
+      return (await stripeCircuitBreaker.fire(action as AsyncAction<unknown>)) as T;
+    } catch (error) {
+      // The breaker may have opened while this call waited for its slot.
+      normalizeCircuitError(error, "Stripe");
+    }
+  });
 }
 
 export async function withSmtpCircuit<T>(action: AsyncAction<T>): Promise<T> {
@@ -156,4 +181,22 @@ export function resetCircuitBreakersForTests() {
 
 export function openStripeCircuitForTests() {
   stripeCircuitBreaker.open();
+}
+
+export function configureStripeConcurrencyForTests(
+  limits: Parameters<ConcurrencyLimiter["configure"]>[0]
+) {
+  stripeConcurrency.configure(limits);
+}
+
+export function resetStripeConcurrencyForTests() {
+  stripeConcurrency.configure({
+    maxConcurrent: STRIPE_MAX_CONCURRENT_CALLS,
+    maxWaiting: STRIPE_QUEUE_MAX_WAITING,
+    maxWaitMs: STRIPE_QUEUE_MAX_WAIT_MS,
+  });
+}
+
+export function getStripeConcurrencyForTests() {
+  return { inFlight: stripeConcurrency.inFlight, waiting: stripeConcurrency.waiting };
 }

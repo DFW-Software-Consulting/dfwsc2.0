@@ -4,7 +4,7 @@ import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../db/client";
 import { clients, paymentLedger, webhookEvents } from "../db/schema";
-import { isCircuitOpenError, withStripeCircuit } from "../lib/circuit-breakers";
+import { isCircuitOpenError, isStripeBusyError, withStripeCircuit } from "../lib/circuit-breakers";
 import { isUniqueViolation } from "../lib/errors";
 import { stripe } from "../lib/stripe";
 import { mapStripeError } from "../lib/stripe-errors";
@@ -251,8 +251,10 @@ async function syncAccountFromStripe(accountId: string, logger: FastifyBaseLogge
   try {
     account = await withStripeCircuit(() => stripe.accounts.retrieve(accountId));
   } catch (err) {
-    if (isCircuitOpenError(err)) {
-      throw err; // Let the outer handler deal with circuit open.
+    if (isCircuitOpenError(err) || isStripeBusyError(err)) {
+      // Let the outer handler deal with it: the event must not be marked processed, so
+      // Stripe redelivers it.
+      throw err;
     }
     logger.warn(
       { err, accountId },

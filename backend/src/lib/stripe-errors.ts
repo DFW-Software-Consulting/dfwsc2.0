@@ -1,5 +1,16 @@
 import type { FastifyReply } from "fastify";
-import { isCircuitOpenError } from "./circuit-breakers";
+import { isCircuitOpenError, isStripeBusyError } from "./circuit-breakers";
+import { STRIPE_BUSY_RETRY_AFTER_SECONDS } from "./constants";
+
+/**
+ * Body for a Stripe call that could not get a concurrency slot in time. Always mapped (503 with
+ * `Retry-After`), whatever the call site: nothing was sent to Stripe, so retrying is safe, and a
+ * webhook answering non-2xx here makes Stripe redeliver the event.
+ */
+const STRIPE_BUSY_ERROR: StripeErrorBody = {
+  error: "Payment service is handling a high volume of requests. Please retry shortly.",
+  code: "STRIPE_BUSY",
+};
 
 export interface StripeErrorBody {
   error: string;
@@ -50,6 +61,12 @@ export function mapStripeError(
 ): boolean {
   if (isCircuitOpenError(err)) {
     reply.code(mapping.circuitOpenStatus ?? 503).send(mapping.circuitOpen);
+    return true;
+  }
+
+  if (isStripeBusyError(err)) {
+    reply.header("Retry-After", String(STRIPE_BUSY_RETRY_AFTER_SECONDS));
+    reply.code(503).send(STRIPE_BUSY_ERROR);
     return true;
   }
 

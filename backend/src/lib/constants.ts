@@ -19,6 +19,15 @@ export const DEFAULT_DB_POOL_MAX = 10;
 export const PAYMENT_CREATE_BUCKET_CAPACITY = 200;
 export const PAYMENT_CREATE_REFILL_PER_MINUTE = 120;
 
+// Stripe calls made through withStripeCircuit share one in-process concurrency limit so a burst
+// queues for a slot instead of fanning out to Stripe all at once. Calls beyond MAX_CONCURRENT
+// wait FIFO; one that waits longer than QUEUE_MAX_WAIT_MS, or arrives with QUEUE_MAX_WAITING
+// already waiting, fails with a retryable STRIPE_BUSY (503, Retry-After BUSY_RETRY_AFTER_SECONDS).
+export const STRIPE_MAX_CONCURRENT_CALLS = 25;
+export const STRIPE_QUEUE_MAX_WAITING = 500;
+export const STRIPE_QUEUE_MAX_WAIT_MS = 10_000;
+export const STRIPE_BUSY_RETRY_AFTER_SECONDS = 5;
+
 // webhook_events retention: how long to keep processed rows before pruning,
 // and how often the prune sweep runs.
 export const WEBHOOK_EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
