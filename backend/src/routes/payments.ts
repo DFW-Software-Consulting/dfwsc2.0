@@ -18,6 +18,8 @@ import {
   PAYMENT_CREATE_BUCKET_CAPACITY,
   PAYMENT_CREATE_REFILL_PER_MINUTE,
   REPORT_MAX_CONCURRENCY,
+  SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX,
+  SESSION_STATUS_API_KEY_RATE_LIMIT_MAX,
 } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { adminRateLimit, rateLimit, tokenBucketRateLimit } from "../lib/rate-limit";
@@ -210,6 +212,33 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
     return `stripe:${req.client.stripeAccountId}`;
   }
   return getClientIp(request);
+}
+
+// ── Session status auth + limits ───────────────────────────────────────────────
+// The endpoint stays anonymous (per-IP limit). Sending X-Api-Key opts into API-key auth and a
+// higher per-client limit; a bad key is a 401, never a silent fall back to anonymous.
+const anonymousStatusRateLimit = rateLimit({
+  max: SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+});
+const apiKeyStatusRateLimit = rateLimit({
+  max: SESSION_STATUS_API_KEY_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+  // Own bucket namespace: never shares hits with the anonymous per-IP limiter.
+  name: "GET:/payments/session/:sessionId:api-key",
+  keyGenerator: (request) => `client:${(request as RequestWithClient).client?.id}`,
+});
+
+async function sessionStatusGuard(request: FastifyRequest, reply: FastifyReply) {
+  if (request.headers["x-api-key"] === undefined) {
+    return anonymousStatusRateLimit(request, reply);
+  }
+  // requireApiKey hashes the key and looks it up first; bcrypt only runs for a key that matches
+  // an active client (and is skipped while that key's verification is cached), so keys that do
+  // not match cost one indexed query and are rejected before reaching any limiter.
+  await requireApiKey(request, reply);
+  if (reply.sent) return reply;
+  return apiKeyStatusRateLimit(request, reply);
 }
 
 const STRIPE_CIRCUIT_OPEN_ERROR = {
@@ -618,12 +647,13 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
   );
 
   // ── GET /payments/session/:sessionId ─────────────────────────────────────────
-  // Rate-limited public endpoint for retrieving checkout session result.
-  // Uses the payment ledger as primary source. Returns only payer-safe fields.
+  // Rate-limited endpoint for retrieving checkout session result; anonymous by default, or with
+  // an X-Api-Key (see sessionStatusGuard). Uses the payment ledger as primary source. Returns
+  // only payer-safe fields.
   fastify.get(
     "/payments/session/:sessionId",
     {
-      preHandler: [rateLimit({ max: 30, windowMs: 60_000 })],
+      preHandler: [sessionStatusGuard],
     },
     async (request, reply) => {
       const { sessionId } = request.params as { sessionId: string };
@@ -638,7 +668,10 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         .where(eq(paymentLedger.stripeSessionId, sessionId))
         .limit(1);
 
-      if (ledgerRow) {
+      // An authenticated caller only sees its own client's sessions; another client's session
+      // is indistinguishable from an unknown one.
+      const caller = (request as RequestWithClient).client;
+      if (ledgerRow && (!caller || ledgerRow.clientId === caller.id)) {
         // A row still "created" after the webhook should have landed means the
         // event may have been lost; ask Stripe and apply the same transition.
         const current =

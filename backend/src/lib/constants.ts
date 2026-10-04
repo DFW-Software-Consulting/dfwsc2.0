@@ -30,6 +30,12 @@ export const STRIPE_BUSY_RETRY_AFTER_SECONDS = 5;
 // Stripe's own 429 carries no Retry-After; this is what we tell the caller instead.
 export const STRIPE_RATE_LIMITED_RETRY_AFTER_SECONDS = 2;
 
+// GET /payments/session/:sessionId is public (the payment-success page polls it), limited per
+// client IP. A caller that sends its X-Api-Key instead gets a separate, higher limit per client,
+// so an integrator confirming many payments from one server is not throttled by the shared IP limit.
+export const SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX = 30;
+export const SESSION_STATUS_API_KEY_RATE_LIMIT_MAX = 600;
+
 // webhook_events retention: how long to keep processed rows before pruning,
 // and how often the prune sweep runs.
 export const WEBHOOK_EVENT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
