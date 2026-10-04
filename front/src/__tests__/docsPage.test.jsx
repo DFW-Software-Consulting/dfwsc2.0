@@ -113,9 +113,14 @@ describe("Docs page", () => {
   it("documents the per-IP limit on rejected API keys", () => {
     const { container } = render(<Docs />, { wrapper: MemoryRouter });
 
-    expect(container.textContent).toMatch(
-      /Rejected keys are counted per calling IP address: after 30 of them in a minute/i
+    const text = container.textContent;
+
+    expect(text).toMatch(
+      /Rejected keys are counted per calling IP address, once for each different key/i
     );
+    expect(text).toMatch(/sending the same wrong key again and again uses one of the 30 allowed/i);
+    expect(text).toMatch(/After 30 different rejected keys in a minute/i);
+    expect(text).toMatch(/keeps getting 401 for up to a minute without being checked again/i);
   });
 
   it("does not describe request fields or notifications the API does not support", () => {

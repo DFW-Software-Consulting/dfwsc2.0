@@ -58,7 +58,7 @@ The database only stores the connected account mapping and raw webhook payloads.
 | `GET /api/v1/onboard-client` | Exchange onboarding token for a Stripe onboarding link. | Public |
 | `GET /api/v1/connect/callback` | Stripe onboarding return URL. Persists the `account` query parameter to the client record and redirects to the frontend success page. | Public |
 | `POST /api/v1/payments/create` | Create a Checkout Session for a client's connected account. Requires an `Idempotency-Key` header and a `lineItems` array; returns `{ url, sessionId }`. | Admin or Client |
-| `GET /api/v1/payments/session/:sessionId` | Confirm a payment by Checkout session ID (status and amounts). Rate limited: 30 requests per minute per IP, or 600 per minute per client when `X-Api-Key` is sent; 30 rejected keys per minute per IP. | Public, or API key |
+| `GET /api/v1/payments/session/:sessionId` | Confirm a payment by Checkout session ID (status and amounts). Rate limited: 30 requests per minute per IP, or 600 per minute per client when `X-Api-Key` is sent; 30 distinct rejected keys per minute per IP (the same bad key counts once). | Public, or API key |
 | `POST /api/v1/webhooks/stripe` | Verify the Stripe signature, store the raw event payload, mark the event as processed, and log basic status updates. | Stripe |
 | `GET /api/v1/reports/payments` | List PaymentIntents for a client's connected account with Stripe pagination parameters. | Admin |
 

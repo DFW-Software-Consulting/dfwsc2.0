@@ -107,7 +107,7 @@ Rate limiting is per-IP (IPv6 visitors are limited per /64 prefix) or per Stripe
 | `GET /onboard-client` | 10 req / min |
 | `GET /connect/refresh` | 10 req / min |
 | `POST /payments/create` | Burst of 200, refilling at 120 / min (per Stripe account) |
-| `GET /payments/session/:sessionId` | 30 req / min per IP; 600 req / min per client when `X-Api-Key` is sent (and 30 rejected keys / min per IP) |
+| `GET /payments/session/:sessionId` | 30 req / min per IP; 600 req / min per client when `X-Api-Key` is sent (and 30 distinct rejected keys / min per IP; the same bad key counts once) |
 
 `POST /payments/create` uses a token bucket: a burst of up to 200 requests is admitted by the limiter at once, then requests are admitted at 120 per minute (2 per second) as the bucket refills. Admitted requests then wait for one of 25 concurrent Stripe slots, for at most 10 seconds; when Stripe is slow, the tail of a burst can get `503` `STRIPE_BUSY` and should be retried. The other limits are sliding windows.
 

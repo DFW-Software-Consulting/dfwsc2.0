@@ -800,15 +800,20 @@ window.location.href = url;`}</CodeBlock>
               only see your own account&apos;s sessions (a session that belongs to another account
               returns 404, the same as an unknown session). A wrong or deactivated key returns 401;
               it is not treated as an anonymous call. Rejected keys are counted per calling IP
-              address: after 30 of them in a minute, further calls from that address that send an
-              X-Api-Key get a 429 with a Retry-After header until the minute has passed, without the
-              key being checked. Successful calls are never counted, and a key that was checked
-              successfully within the last minute is still served. Without it: the call is anonymous
-              and limited to 30 requests per minute for each calling IP address, shared by
-              everything calling from that address. This is the limit a customer&apos;s browser has
-              when it loads the payment success page. Other errors: 400 for a sessionId that is not
-              a Checkout session ID, and 404 for an unknown session. A 429 carries code RATE_LIMITED
-              and a Retry-After header, as in Step 1.
+              address, once for each different key: sending the same wrong key again and again uses
+              one of the 30 allowed in a minute, so one stale key does not stop your other keys from
+              working. After 30 different rejected keys in a minute, further calls from that address
+              that send a key not checked successfully within the last minute get a 429 with a
+              Retry-After header until the minute has passed, without the key being checked.
+              Successful calls are never counted, and a key that was checked successfully within the
+              last minute is still served. A key that has been rejected keeps getting 401 for up to
+              a minute without being checked again; if its account is then reactivated, the key
+              works again within that minute (at once when DFWSC reactivates it). Without it: the
+              call is anonymous and limited to 30 requests per minute for each calling IP address,
+              shared by everything calling from that address. This is the limit a customer&apos;s
+              browser has when it loads the payment success page. Other errors: 400 for a sessionId
+              that is not a Checkout session ID, and 404 for an unknown session. A 429 carries code
+              RATE_LIMITED and a Retry-After header, as in Step 1.
             </p>
 
             <div className="mt-8 p-4 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] font-mono text-brand-600 dark:text-brand-400 font-bold transition-colors">
