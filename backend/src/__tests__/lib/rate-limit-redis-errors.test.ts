@@ -39,7 +39,11 @@ describe("rateLimit - Redis per-command errors", () => {
   });
 
   function makeMocks() {
-    const reply = { code: vi.fn().mockReturnThis(), send: vi.fn().mockReturnThis() };
+    const reply = {
+      code: vi.fn().mockReturnThis(),
+      header: vi.fn().mockReturnThis(),
+      send: vi.fn().mockReturnThis(),
+    };
     const request = {
       ip: "127.0.0.1",
       method: "POST",

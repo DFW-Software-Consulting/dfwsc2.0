@@ -60,6 +60,18 @@ function logRedisFailure(request: FastifyRequest, err: unknown): void {
   );
 }
 
+// Every refusal from our own limiters carries the same body and a Retry-After in whole
+// seconds (at least 1) so a caller can wait exactly as long as needed and retry.
+export const RATE_LIMITED_BODY = { error: "Too Many Requests", code: "RATE_LIMITED" } as const;
+
+function sendRateLimited(reply: FastifyReply, retryAfterMs: number) {
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  return reply
+    .code(429)
+    .header("Retry-After", String(seconds))
+    .send({ ...RATE_LIMITED_BODY });
+}
+
 function limiterNamespace(request: FastifyRequest, name?: string): string {
   if (name) return name;
   const route = request.routeOptions?.url;
@@ -82,12 +94,14 @@ setInterval(() => {
   }
 }, SWEEP_INTERVAL_MS).unref();
 
+type SlidingWindowResult = { allowed: true } | { allowed: false; retryAfterMs: number };
+
 async function redisSlidingWindow(
   client: Redis,
   key: string,
   maxHits: number,
   windowMs: number
-): Promise<boolean> {
+): Promise<SlidingWindowResult> {
   const now = Date.now();
   const windowStart = now - windowMs;
   const pipeline = client.pipeline();
@@ -104,9 +118,31 @@ async function redisSlidingWindow(
   const count = results[1]?.[1] as number;
   if (count >= maxHits) {
     await client.zremrangebyscore(key, now, now);
-    return false;
+    return {
+      allowed: false,
+      retryAfterMs: await redisOldestHitExpiryMs(client, key, now, windowMs),
+    };
   }
-  return true;
+  return { allowed: true };
+}
+
+// Time until the oldest counted hit leaves the window. A failure to read it must not turn
+// a refusal into a Redis error (which would fall back to memory and let the request
+// through), so it degrades to the full window, which is always a safe upper bound.
+async function redisOldestHitExpiryMs(
+  client: Redis,
+  key: string,
+  now: number,
+  windowMs: number
+): Promise<number> {
+  try {
+    const oldest = await client.zrange(key, 0, 0, "WITHSCORES");
+    const score = Number(oldest[1]);
+    if (Number.isFinite(score)) return score + windowMs - now;
+  } catch {
+    // fall through to the conservative default
+  }
+  return windowMs;
 }
 
 export function rateLimit(options: RateLimitOptions) {
@@ -120,9 +156,9 @@ export function rateLimit(options: RateLimitOptions) {
 
     if (redis) {
       try {
-        const allowed = await redisSlidingWindow(redis, key, maxForRequest, windowMs);
-        if (!allowed) {
-          return reply.code(429).send({ error: "Too Many Requests" });
+        const result = await redisSlidingWindow(redis, key, maxForRequest, windowMs);
+        if (!result.allowed) {
+          return sendRateLimited(reply, result.retryAfterMs);
         }
         return;
       } catch (err) {
@@ -138,7 +174,8 @@ export function rateLimit(options: RateLimitOptions) {
     const recentHits = hits.filter((timestamp) => timestamp > windowStart);
     if (recentHits.length >= maxForRequest) {
       hitBuckets.set(key, recentHits);
-      return reply.code(429).send({ error: "Too Many Requests" });
+      // Hits are appended in time order, so the first is the oldest counted one.
+      return sendRateLimited(reply, (recentHits[0] ?? now) + windowMs - now);
     }
     recentHits.push(now);
     hitBuckets.set(key, recentHits);
