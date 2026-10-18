@@ -1,9 +1,7 @@
-import { useEffect } from "react";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 export default function PaymentCancel() {
-  useEffect(() => {
-    document.title = "Payment Canceled - DFW Software Consulting";
-  }, []);
+  usePageTitle("Payment Canceled");
 
   return (
     <div className="min-h-[90vh] flex items-center justify-center transition-colors duration-300">

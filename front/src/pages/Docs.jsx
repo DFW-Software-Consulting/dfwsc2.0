@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { usePageTitle } from "../hooks/usePageTitle.js";
 
 const sidebarSections = [
   { id: "what-you-have", label: "What You Have" },
@@ -316,6 +317,7 @@ const STATUS_ROWS = [
 ];
 
 export default function Docs() {
+  usePageTitle("API Docs");
   const [activeLang, setActiveLang] = useState("node");
 
   const handleSidebarClick = (id) => {

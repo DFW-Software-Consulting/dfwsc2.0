@@ -4,6 +4,7 @@ import DiegoImage from "../assets/diego.jpg";
 import HectorImage from "../assets/hector.webp";
 import JcImage from "../assets/jc.jpg";
 import Banner from "../components/Banner.jsx";
+import { usePageTitle } from "../hooks/usePageTitle.js";
 
 const teamMembers = [
   {
@@ -27,6 +28,8 @@ const teamMembers = [
 ];
 
 export default function Team() {
+  usePageTitle("Our Team");
+
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import Banner from "../components/Banner.jsx";
+import { usePageTitle } from "../hooks/usePageTitle.js";
 
 const plans = [
   {
@@ -45,6 +46,8 @@ const plans = [
 ];
 
 export default function Pricing() {
+  usePageTitle("Pricing");
+
   return (
     <div className="mx-auto w-full max-w-6xl space-y-24 px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
       <section className="mx-auto max-w-4xl text-center">

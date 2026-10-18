@@ -17,7 +17,7 @@ This document details the frontend implementation, state management, and UI patt
   - **Marketing components**: Banner, CaseStudies, Contact (public lead-capture form), Footer, Hero, Navbar, Process, Services, TechStrip, ValueProps, Values.
   - **App utilities**: `Analytics` conditionally loads a Plausible-compatible script when `VITE_ANALYTICS_SRC` is configured; it is a no-op otherwise. `VITE_ANALYTICS_DOMAIN` optionally sets the tracked domain.
 - **`contexts/`**: `AuthContext` (admin JWT state), `ThemeContext` (light/dark toggle).
-- **`hooks/`**: TanStack Query hooks — `useClients`, `useContact`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus`.
+- **`hooks/`**: TanStack Query hooks — `useClients`, `useContact`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus` — plus UI hooks such as `usePageTitle`.
 - **`pages/`**: Route-level components.
 - **`utils/`**: `scrollToSection`, `validation`, `logger`.
 
@@ -53,3 +53,6 @@ Glassmorphism surfaces use the `.glass` and `.glass-dark` utility classes.
 - **PaymentReports**: Stripe PaymentIntent history per client or group.
 - **SettingsPanel**: system settings (company name, default payment terms).
 - **AddClientModal**: surfaced via an "Add Client" button; creates a new client account in the portal.
+
+## 7. Page Titles
+Route-level pages use `usePageTitle(title)`, which applies the shared `<page> - DFW Software Consulting` convention. Status pages pass their current state label to the hook rather than writing `document.title` directly.

@@ -6,11 +6,13 @@ import Hero from "../components/Hero.jsx";
 import Services from "../components/Services.jsx";
 import ValueProps from "../components/ValueProps.jsx";
 import Values from "../components/Values.jsx";
+import { usePageTitle } from "../hooks/usePageTitle.js";
 import { scrollToSection } from "../utils/scrollToSection.js";
 
 export default function Home() {
   const location = useLocation();
   const navigate = useNavigate();
+  usePageTitle("Home");
 
   useEffect(() => {
     if (location.state?.scrollTo) {

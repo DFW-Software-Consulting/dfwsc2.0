@@ -1,10 +1,8 @@
-import { useEffect } from "react";
 import { Link } from "react-router-dom";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 export default function NotFound() {
-  useEffect(() => {
-    document.title = "Page Not Found - DFW Software Consulting";
-  }, []);
+  usePageTitle("Page Not Found");
 
   return (
     <div className="min-h-[90vh] flex items-center justify-center transition-colors duration-300">
