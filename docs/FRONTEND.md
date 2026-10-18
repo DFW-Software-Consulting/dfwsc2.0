@@ -15,6 +15,7 @@ This document details the frontend implementation, state management, and UI patt
   - **`admin/`**: Dashboard components (ClientList, EditClientModal, GroupPanel, PaymentReports, SettingsPanel, etc.).
   - **`admin/shared/`**: Reusable admin primitives (AdminTable, BaseModal, Button, FormInput, StatusBadge, etc.).
   - **Marketing components**: Banner, CaseStudies, Contact (public lead-capture form), Footer, Hero, Navbar, Process, Services, TechStrip, ValueProps, Values.
+  - **App utilities**: `Analytics` conditionally loads a Plausible-compatible script when `VITE_ANALYTICS_SRC` is configured; it is a no-op otherwise. `VITE_ANALYTICS_DOMAIN` optionally sets the tracked domain.
 - **`contexts/`**: `AuthContext` (admin JWT state), `ThemeContext` (light/dark toggle).
 - **`hooks/`**: TanStack Query hooks — `useClients`, `useContact`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus`.
 - **`pages/`**: Route-level components.
