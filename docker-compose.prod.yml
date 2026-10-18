@@ -45,6 +45,7 @@ services:
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
+      CONTACT_INBOX: ${CONTACT_INBOX}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     ports:
       - "127.0.0.1:4242:4242"

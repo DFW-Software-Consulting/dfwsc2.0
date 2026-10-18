@@ -137,5 +137,10 @@ All routes are prefixed with `/api/v1`.
 | POST | `/api-key/regenerate-request/admin` | Admin-initiated API key regeneration | Admin JWT |
 | POST | `/api-key/regenerate` | Consume regeneration token, return new API key | Public (rate-limited, token in body) |
 
+### Contact
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/contact` | Lead-capture/contact form submission, emailed to `CONTACT_INBOX` (honeypot-filtered) | Public (rate-limited) |
+
 ## 8. Swagger
 Swagger UI is available at `/docs` when the backend is started with `ENABLE_SWAGGER=true`. It is disabled by default in production to keep the build lean.

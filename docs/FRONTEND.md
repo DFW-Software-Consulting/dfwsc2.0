@@ -10,13 +10,13 @@ This document details the frontend implementation, state management, and UI patt
 - **Styling**: TailwindCSS v4
 
 ## 2. Directory Structure (`front/src/`)
-- **`api/`**: API client wrappers per domain (`auth`, `clients`, `groups`, `onboarding`, `payments`, `settings`), built on the shared `client.js` base wrapper.
+- **`api/`**: API client wrappers per domain (`auth`, `clients`, `contact`, `groups`, `onboarding`, `payments`, `settings`), built on the shared `client.js` base wrapper.
 - **`components/`**: UI components organized by domain:
   - **`admin/`**: Dashboard components (ClientList, EditClientModal, GroupPanel, PaymentReports, SettingsPanel, etc.).
   - **`admin/shared/`**: Reusable admin primitives (AdminTable, BaseModal, Button, FormInput, StatusBadge, etc.).
-  - **Marketing components**: Banner, CaseStudies, Contact, Footer, Hero, Navbar, Process, Services, TechStrip, ValueProps, Values.
+  - **Marketing components**: Banner, CaseStudies, Contact (public lead-capture form), Footer, Hero, Navbar, Process, Services, TechStrip, ValueProps, Values.
 - **`contexts/`**: `AuthContext` (admin JWT state), `ThemeContext` (light/dark toggle).
-- **`hooks/`**: TanStack Query hooks — `useClients`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus`.
+- **`hooks/`**: TanStack Query hooks — `useClients`, `useContact`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus`.
 - **`pages/`**: Route-level components.
 - **`utils/`**: `scrollToSection`, `validation`, `logger`.
 
@@ -35,6 +35,8 @@ This document details the frontend implementation, state management, and UI patt
 
 ## 4. Data Fetching
 TanStack Query manages all server state. API logic lives in `src/api/`; hooks in `src/hooks/` compose queries/mutations on top. Components never call `fetch` directly.
+
+The `Contact` form submits through `api/contact.js` and `useContactForm`. Name, email, company, and message limits mirror the public backend endpoint; company is optional and limited to 100 characters.
 
 ## 5. Theme System
 The app supports light and dark modes via `ThemeContext`. The active mode applies a `.dark` class on the root element, toggling CSS custom properties defined in `index.css`:
