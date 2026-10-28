@@ -7,7 +7,7 @@ const navItems = [
   { type: "scroll", id: "services", label: "Solutions" },
   { type: "scroll", id: "values", label: "Values" },
   { type: "link", href: "/pricing", label: "Pricing" },
-  { type: "route", href: "/team", label: "Meet our team" },
+  { type: "route", href: "/team", label: "Our team" },
 ];
 
 function ThemeToggle({ theme, toggleTheme, mobile = false }) {

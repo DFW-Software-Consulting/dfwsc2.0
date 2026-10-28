@@ -109,7 +109,7 @@ export default function Footer() {
                   { label: "Services", to: "/", state: { scrollTo: "services" } },
                   { label: "Values", to: "/", state: { scrollTo: "values" } },
                   { label: "Pricing", to: "/pricing" },
-                  { label: "Meet our team", to: "/team" },
+                  { label: "Our team", to: "/team" },
                   { label: "Contact", to: "/", state: { scrollTo: "contact" } },
                 ].map((item) => (
                   <Link
