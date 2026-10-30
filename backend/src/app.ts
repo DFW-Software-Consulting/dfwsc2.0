@@ -214,6 +214,14 @@ export async function buildServer() {
   server.register(settingsRoutes, { prefix: "/api/v1" });
   server.register(metricsRoutes, { prefix: "/api/v1" });
 
+  // Cerebo (client/project workspace) is off unless CEREBO_ENABLED=true. Its
+  // tables are created by the normal migrations either way; the flag only
+  // controls whether its API is served.
+  if (process.env.CEREBO_ENABLED === "true") {
+    const { default: cereboRoutes } = await import("./cerebo/routes");
+    server.register(cereboRoutes, { prefix: "/api/v1/cerebo" });
+  }
+
   server.setNotFoundHandler((_request, reply) => {
     reply.code(404).send({ error: "Not Found" });
   });
