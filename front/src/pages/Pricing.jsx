@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import "./StudioHome.css";
-import "./StudioPages.css";
+import "../styles/studio.css";
+import "./Pricing.css";
 
-const plans = [
+const hostingPlans = [
   {
     name: "Basic Hosting",
-    price: "$40 / mo",
+    price: "$40",
     includes: "Hosting + uptime monitoring, minor edits, payment setup",
     idealFor: "Business websites and landing pages",
     specs: [
@@ -20,7 +20,7 @@ const plans = [
   },
   {
     name: "Pro Hosting",
-    price: "$100 / mo",
+    price: "$100",
     includes:
       "Multi-page site hosting, domain management, maintenance, backups, backend API hosting, and database storage — we keep it running so you don't have to",
     idealFor: "Custom applications and client portals",
@@ -35,7 +35,7 @@ const plans = [
   },
   {
     name: "Business Hosting",
-    price: "$200 / mo",
+    price: "$200",
     includes:
       "Application hosting, maintenance, backups, monthly performance review, and priority support for businesses with more demanding storage and processing needs",
     idealFor: "Businesses with larger applications and data needs",
@@ -48,24 +48,22 @@ const plans = [
       ["Support", "Priority"],
     ],
   },
-  {
-    name: "Dev Retainer",
-    price: "Custom",
-    includes: "Ongoing dev team, new features, priority support, and dedicated engineering hours",
-    idealFor: "Growing products that need a consistent team",
-    cta: true,
-  },
 ];
+
+const retainer = {
+  name: "Dev Retainer",
+  price: "Custom",
+  includes: "Ongoing dev team, new features, priority support, and dedicated engineering hours",
+};
 
 export default function Pricing() {
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, []);
-  const retainer = plans.find((plan) => plan.cta);
   return (
     <div className="studio studio-page">
-      <section className="studio-page-hero">
-        <div className="studio-wrap">
+      <section className="studio-inverse studio-page-hero">
+        <div className="page-wrap">
           <p className="studio-eyebrow">A GOOD FIT STARTS WITH A CLEAR PLAN</p>
           <h1>
             The right support.
@@ -86,7 +84,7 @@ export default function Pricing() {
           </div>
         </div>
       </section>
-      <section className="studio-section studio-wrap">
+      <section className="studio-section page-wrap">
         <div className="studio-section-heading">
           <div>
             <p className="studio-eyebrow">TWO WAYS TO BUILD WITH US</p>
@@ -121,7 +119,7 @@ export default function Pricing() {
               Tell us what you have in mind <span aria-hidden="true">↗</span>
             </Link>
           </article>
-          <article className="studio-engagement-card studio-engagement-featured">
+          <article className="studio-engagement-card studio-engagement-featured studio-inverse">
             <p className="studio-mini-label">{retainer.name} · AN ONGOING PARTNERSHIP</p>
             <h3>
               Your development team.
@@ -142,8 +140,8 @@ export default function Pricing() {
           </article>
         </div>
       </section>
-      <section id="hosting" className="studio-hosting-section">
-        <div className="studio-wrap">
+      <section id="hosting" className="studio-band">
+        <div className="page-wrap">
           <div className="studio-section-heading">
             <div>
               <p className="studio-eyebrow">HOSTING & MAINTENANCE</p>
@@ -164,30 +162,28 @@ export default function Pricing() {
             be confirmed in your hosting proposal.
           </p>
           <div className="studio-plan-grid">
-            {plans
-              .filter((plan) => !plan.cta)
-              .map((plan) => (
-                <article className="studio-plan-card" key={plan.name}>
-                  <h3>{plan.name}</h3>
-                  <p className="studio-plan-price">
-                    {plan.price.split(" ")[0]} <span>/ month</span>
-                  </p>
-                  <p className="studio-mini-label">Hosting + maintenance retainer</p>
-                  <p className="studio-plan-fit">{plan.idealFor}</p>
-                  <dl className="studio-plan-specs">
-                    {plan.specs.map(([label, value]) => (
-                      <div key={label}>
-                        <dt>{label}</dt>
-                        <dd>{value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <p className="studio-plan-includes">{plan.includes}</p>
-                  <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
-                    Discuss this plan <span aria-hidden="true">↗</span>
-                  </Link>
-                </article>
-              ))}
+            {hostingPlans.map((plan) => (
+              <article className="studio-plan-card" key={plan.name}>
+                <h3>{plan.name}</h3>
+                <p className="studio-plan-price">
+                  {plan.price} <span>/ month</span>
+                </p>
+                <p className="studio-mini-label">Hosting + maintenance retainer</p>
+                <p className="studio-plan-fit">{plan.idealFor}</p>
+                <dl className="studio-plan-specs">
+                  {plan.specs.map(([label, value]) => (
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="studio-plan-includes">{plan.includes}</p>
+                <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
+                  Discuss this plan <span aria-hidden="true">↗</span>
+                </Link>
+              </article>
+            ))}
             <article className="studio-plan-help">
               <span aria-hidden="true">↗</span>
               <h3>
@@ -212,7 +208,7 @@ export default function Pricing() {
           </p>
         </div>
       </section>
-      <section className="studio-section studio-wrap">
+      <section className="studio-section page-wrap">
         <div className="studio-section-heading">
           <div>
             <p className="studio-eyebrow">BEFORE WE GET STARTED</p>
@@ -276,8 +272,8 @@ export default function Pricing() {
           </details>
         </div>
       </section>
-      <section className="studio-contact">
-        <div className="studio-wrap">
+      <section className="studio-contact studio-inverse">
+        <div className="page-wrap">
           <p className="studio-eyebrow">LET’S FIND THE RIGHT STARTING POINT</p>
           <h2>
             What do you need

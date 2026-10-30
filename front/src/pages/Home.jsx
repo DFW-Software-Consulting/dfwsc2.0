@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { scrollToSection } from "../utils/scrollToSection.js";
-import "./StudioHome.css";
+import "../styles/studio.css";
+import "./Home.css";
 
 const workflows = [
   {
@@ -66,6 +67,8 @@ const services = [
     "Keep improving with development support, hosting, and maintenance beyond the initial launch.",
   ],
 ];
+const twoDigits = (n) => String(n).padStart(2, "0");
+
 export default function Home() {
   const [active, setActive] = useState(0);
   const workflow = workflows[active];
@@ -81,8 +84,8 @@ export default function Home() {
 
   return (
     <div className="studio">
-      <section id="top" className="studio-hero">
-        <div className="studio-wrap studio-hero-grid">
+      <section id="top" className="studio-hero studio-inverse">
+        <div className="page-wrap studio-hero-grid">
           <div>
             <p className="studio-eyebrow">
               <span className="studio-status" /> SMALL BUSINESS. BIG POSSIBILITIES.
@@ -118,7 +121,9 @@ export default function Home() {
           <div className="studio-preview">
             <div className="studio-preview-label">
               <span className="studio-status" /> THE POSSIBILITIES, IN PRACTICE{" "}
-              <span>0{active + 1} / 03</span>
+              <span>
+                {twoDigits(active + 1)} / {twoDigits(workflows.length)}
+              </span>
             </div>
             <div className="studio-window">
               <div className="studio-window-bar">
@@ -148,9 +153,9 @@ export default function Home() {
                     </button>
                   ))}
                 </fieldset>
-                <div className="studio-workflow-content" aria-live="polite">
+                <div className="studio-workflow-content">
                   <p className="studio-mini-label">FROM SCATTERED TO CONNECTED</p>
-                  <h2>{workflow.title}</h2>
+                  <h2 aria-live="polite">{workflow.title}</h2>
                   <p>{workflow.description}</p>
                   <div className="studio-flow">
                     {workflow.steps.map((step, index) => (
@@ -178,25 +183,27 @@ export default function Home() {
                 </div>
               </div>
             </div>
-            <p className="studio-preview-caption">
-              Interactive concept · Illustrative data, not a client dashboard
-            </p>
-            <div className="studio-floating-note">
-              <span aria-hidden="true">↳</span> Software should fit your business.
-              <br />
-              <strong>Not the other way around.</strong>
+            <div className="studio-preview-foot">
+              <p className="studio-preview-caption">
+                Interactive concept · Illustrative data, not a client dashboard
+              </p>
+              <div className="studio-floating-note">
+                <span aria-hidden="true">↳</span> Software should fit your business.
+                <br />
+                <strong>Not the other way around.</strong>
+              </div>
             </div>
           </div>
         </div>
       </section>
       <div className="studio-promise-strip">
-        <div className="studio-wrap">
+        <div className="page-wrap">
           <span>Small team. Direct access.</span>
           <span>Clear scope. Visible progress.</span>
           <span>Your business. Your code.</span>
         </div>
       </div>
-      <section id="services" className="studio-section studio-wrap">
+      <section id="services" className="studio-section page-wrap">
         <div className="studio-section-heading">
           <div>
             <p className="studio-eyebrow">WHAT WE CAN BUILD TOGETHER</p>
@@ -225,8 +232,8 @@ export default function Home() {
           ))}
         </div>
       </section>
-      <section id="values" className="studio-process">
-        <div className="studio-wrap">
+      <section id="values" className="studio-band">
+        <div className="page-wrap">
           <div className="studio-section-heading">
             <div>
               <p className="studio-eyebrow">A PARTNERSHIP, WITH A PLAN</p>
@@ -268,7 +275,7 @@ export default function Home() {
           </div>
         </div>
       </section>
-      <section id="mission" className="studio-section studio-wrap studio-mission">
+      <section id="mission" className="studio-section page-wrap studio-mission">
         <div>
           <p className="studio-eyebrow">OUR MISSION</p>
           <h2>
@@ -288,8 +295,8 @@ export default function Home() {
           </Link>
         </div>
       </section>
-      <section id="contact" className="studio-contact">
-        <div className="studio-wrap">
+      <section id="contact" className="studio-contact studio-inverse">
+        <div className="page-wrap">
           <p className="studio-eyebrow">LET’S MAKE SOMETHING USEFUL</p>
           <h2>
             What’s slowing

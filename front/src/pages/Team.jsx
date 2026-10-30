@@ -3,26 +3,32 @@ import { Link } from "react-router-dom";
 import DiegoImage from "../assets/diego.jpg";
 import HectorImage from "../assets/hector.webp";
 import JcImage from "../assets/jc.jpg";
-import "./StudioHome.css";
-import "./StudioPages.css";
+import "../styles/studio.css";
+import "./Team.css";
 
 const teamMembers = [
   {
     name: "Jeremy Ashley",
     role: "Founder & CTO",
+    intro: "Your partner in figuring out what to build—and why.",
     bio: "Drives technical strategy and architecture across the organization. Oversees full-stack product delivery, DevOps automation, and scalable cloud infrastructure design.",
+    focus: "Discovery · Technical direction · Full-stack delivery",
     image: JcImage,
   },
   {
     name: "Diego Espino",
     role: "Full Stack & DevOps Engineer",
+    intro: "Turning the plan into software your team can use.",
     bio: "Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.",
+    focus: "Application development · Deployment · Performance",
     image: DiegoImage,
   },
   {
     name: "Hector Oropesa",
     role: "Full Stack Developer • DevOps & Network Engineer",
+    intro: "Bringing your software, systems, and infrastructure together.",
     bio: "Combines full-stack development with deep IT and network engineering experience. Bridges software, systems, and networking by managing cloud environments, hardening systems, and supporting scalable, reliable deployments across DevOps workflows.",
+    focus: "Application development · Cloud systems · Networking",
     image: HectorImage,
   },
 ];
@@ -33,8 +39,8 @@ export default function Team() {
   }, []);
   return (
     <div className="studio studio-page">
-      <section className="studio-page-hero studio-team-hero">
-        <div className="studio-wrap">
+      <section className="studio-inverse studio-page-hero studio-team-hero">
+        <div className="page-wrap">
           <p className="studio-eyebrow">SMALL TEAM. DIRECT CONNECTION.</p>
           <h1>
             Good software.
@@ -58,7 +64,7 @@ export default function Team() {
           </div>
         </div>
       </section>
-      <section id="people" className="studio-section studio-wrap">
+      <section id="people" className="studio-section page-wrap">
         <div className="studio-section-heading">
           <div>
             <p className="studio-eyebrow">THE PEOPLE BEHIND THE WORK</p>
@@ -78,40 +84,24 @@ export default function Team() {
             <article className="studio-member" key={member.name}>
               <div className="studio-member-photo">
                 <img src={member.image} alt={member.name} loading="lazy" />
-                <span>0{index + 1} / DFWSC</span>
+                <span aria-hidden="true">0{index + 1} / DFWSC</span>
               </div>
               <div className="studio-member-copy">
                 <p className="studio-mini-label">{member.role}</p>
                 <h3>{member.name}</h3>
-                <p className="studio-member-intro">
-                  {
-                    [
-                      "Your partner in figuring out what to build—and why.",
-                      "Turning the plan into software your team can use.",
-                      "Bringing your software, systems, and infrastructure together.",
-                    ][index]
-                  }
-                </p>
-                <p>{member.bio}</p>
-                <div className="studio-member-focus">
-                  <span>FOCUS</span>
-                  <p>
-                    {
-                      [
-                        "Discovery · Technical direction · Full-stack delivery",
-                        "Application development · Deployment · Performance",
-                        "Application development · Cloud systems · Networking",
-                      ][index]
-                    }
-                  </p>
-                </div>
+                <p className="studio-member-intro">{member.intro}</p>
+                <p className="studio-member-bio">{member.bio}</p>
+                <dl className="studio-member-focus">
+                  <dt>FOCUS</dt>
+                  <dd>{member.focus}</dd>
+                </dl>
               </div>
             </article>
           ))}
         </div>
       </section>
-      <section className="studio-process">
-        <div className="studio-wrap">
+      <section className="studio-band">
+        <div className="page-wrap">
           <div className="studio-section-heading">
             <div>
               <p className="studio-eyebrow">HOW WE WORK WITH YOU</p>
@@ -153,8 +143,8 @@ export default function Team() {
           </div>
         </div>
       </section>
-      <section className="studio-contact">
-        <div className="studio-wrap">
+      <section className="studio-contact studio-inverse">
+        <div className="page-wrap">
           <p className="studio-eyebrow">YOUR NEXT PROJECT STARTS WITH A CONVERSATION</p>
           <h2>
             Let’s put a team
