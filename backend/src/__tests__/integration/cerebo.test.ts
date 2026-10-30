@@ -131,6 +131,17 @@ describe("Cerebo API", () => {
       expect(res.json().error).toBe("endsOn must be on or after startsOn.");
     });
 
+    it.each([
+      "2026-02-31",
+      "2026-99-01",
+    ])("rejects the invalid calendar date %s", async (startsOn) => {
+      const res = await call("POST", `/clients/${clientA}/projects`, {
+        name: "Invalid calendar date",
+        startsOn,
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
     it("lists only the requested client's projects", async () => {
       const a = await createProject(clientA, { name: "A only" });
       const b = await createProject(clientB, { name: "B only" });
@@ -171,6 +182,15 @@ describe("Cerebo API", () => {
   });
 
   describe("milestones", () => {
+    it.each(["2026-02-31", "2026-99-01"])("rejects the invalid calendar date %s", async (dueOn) => {
+      const p = await createProject(clientA);
+      const res = await call("POST", `/projects/${p.id}/milestones`, {
+        title: "Invalid calendar date",
+        dueOn,
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
     it("sets and clears completedAt as status enters and leaves done", async () => {
       const p = await createProject(clientA);
       const created = await call("POST", `/projects/${p.id}/milestones`, { title: "Launch" });
@@ -297,6 +317,20 @@ describe("Cerebo API", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().deck[0].status).toBe("not_configured");
       expect((await call("GET", "/nextcloud/status")).json().status).toBe("not_configured");
+    });
+
+    it("does not send credentials over a plaintext Nextcloud URL", async () => {
+      process.env.NEXTCLOUD_BASE_URL = "http://cloud.example.com";
+      process.env.NEXTCLOUD_USERNAME = "cerebo-bot";
+      process.env.NEXTCLOUD_APP_PASSWORD = "secret";
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      const status = await call("GET", "/nextcloud/status");
+
+      expect(status.statusCode).toBe(200);
+      expect(status.json().status).toBe("unavailable");
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("summarizes the board when Nextcloud answers", async () => {

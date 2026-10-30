@@ -14,11 +14,20 @@ interface NextcloudConfig {
   appPassword: string;
 }
 
-function getConfig(): NextcloudConfig | null {
+export type Unavailable = { status: "not_configured" } | { status: "unavailable"; reason: string };
+
+function getConfig(): NextcloudConfig | Unavailable | null {
   const baseUrl = process.env.NEXTCLOUD_BASE_URL?.trim();
   const username = process.env.NEXTCLOUD_USERNAME?.trim();
   const appPassword = process.env.NEXTCLOUD_APP_PASSWORD;
   if (!baseUrl || !username || !appPassword) return null;
+  try {
+    if (new URL(baseUrl).protocol !== "https:") {
+      return { status: "unavailable", reason: "Nextcloud requires a valid HTTPS base URL." };
+    }
+  } catch {
+    return { status: "unavailable", reason: "Nextcloud requires a valid HTTPS base URL." };
+  }
   return { baseUrl: baseUrl.replace(/\/+$/, ""), username, appPassword };
 }
 
@@ -71,8 +80,6 @@ const breaker = new CircuitBreaker(
 async function getJson(config: NextcloudConfig, path: string): Promise<unknown> {
   return breaker.fire(config, path);
 }
-
-export type Unavailable = { status: "not_configured" } | { status: "unavailable"; reason: string };
 
 function unavailable(error: unknown): Unavailable {
   if (CircuitBreaker.isOurError(error as Error)) {
@@ -150,6 +157,7 @@ export function summarizeDeckStacks(
 export async function getDeckBoardSummary(boardId: string): Promise<DeckBoardSummary> {
   const config = getConfig();
   if (!config) return { status: "not_configured" };
+  if ("status" in config) return config;
   if (!/^\d+$/.test(boardId)) return { status: "unavailable", reason: "Invalid Deck board id." };
   try {
     const stacks = (await getJson(
@@ -167,6 +175,7 @@ export type NextcloudStatus = { status: "ok"; version: string } | Unavailable;
 export async function getNextcloudStatus(): Promise<NextcloudStatus> {
   const config = getConfig();
   if (!config) return { status: "not_configured" };
+  if ("status" in config) return config;
   try {
     const body = (await getJson(config, "/ocs/v2.php/cloud/capabilities?format=json")) as {
       ocs?: { data?: { version?: { string?: string } } };
