@@ -132,6 +132,7 @@ describe("Cerebo API", () => {
     });
 
     it.each([
+      "0000-01-01",
       "2026-02-31",
       "2026-99-01",
     ])("rejects the invalid calendar date %s", async (startsOn) => {

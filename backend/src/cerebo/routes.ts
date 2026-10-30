@@ -28,6 +28,7 @@ const isoDate = z
     const [year, month, day] = value.split("-").map(Number);
     const date = new Date(`${value}T00:00:00.000Z`);
     return (
+      year !== 0 &&
       !Number.isNaN(date.getTime()) &&
       date.getUTCFullYear() === year &&
       date.getUTCMonth() + 1 === month &&
