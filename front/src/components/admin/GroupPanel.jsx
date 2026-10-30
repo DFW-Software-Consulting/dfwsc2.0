@@ -236,16 +236,17 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
   return (
     <div>
       {/* Create form */}
-      <div className="mb-6 p-4 bg-gray-700/50 rounded-lg">
-        <h4 className="text-md font-semibold text-white mb-3">Create New Company</h4>
-        <form onSubmit={handleCreate} className="flex gap-3">
+      <div className="mb-6 p-4 bg-surface border border-line rounded-lg">
+        <h4 className="text-md font-semibold text-fg mb-3">Create New Company</h4>
+        <form onSubmit={handleCreate} className="flex flex-wrap gap-3">
           <input
             type="text"
             value={newGroupName}
             onChange={(e) => setNewGroupName(e.target.value)}
             placeholder="Company name"
-            className="flex-1 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                       placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Company name"
+            className="min-w-0 flex-1 basis-48 rounded-md border border-line bg-card px-3 py-2 text-fg
+                       placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus"
             disabled={createGroupMutation.isPending}
           />
           <Button
@@ -259,46 +260,48 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
       </div>
 
       {/* List header */}
-      <div className="flex justify-between items-center mb-3">
-        <h4 className="text-md font-semibold text-white">Client Companies</h4>
+      <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
+        <h4 className="text-md font-semibold text-fg">Client Companies</h4>
         <button
           type="button"
           onClick={() => refetch()}
-          className="text-sm bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded-md transition-colors"
+          className="text-sm border border-line bg-surface hover:border-line-strong text-fg py-1 px-3 rounded-md transition-colors"
         >
           Refresh
         </button>
       </div>
 
       {isLoading && <LoadingSpinner message="Loading groups..." />}
-      {isError && <p className="text-red-400 text-sm py-4 text-center">{error?.message}</p>}
+      {isError && (
+        <p className="text-red-700 dark:text-red-400 text-sm py-4 text-center">{error?.message}</p>
+      )}
       {!isLoading && !isError && groups.length === 0 && (
-        <p className="text-gray-400 text-sm py-4 text-center">No groups yet</p>
+        <p className="text-fg-muted text-sm py-4 text-center">No groups yet</p>
       )}
 
       <TruncationNotice shown={groups.length} total={groups.pagination?.total} noun="companies" />
       {clients.pagination && clients.length < clients.pagination.total && (
-        <p className="text-xs text-yellow-400 pb-2 text-center">
+        <p className="text-xs text-yellow-800 dark:text-yellow-400 pb-2 text-center">
           Member counts only include the {clients.length} clients loaded.
         </p>
       )}
 
       {groups.length > 0 && (
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-700">
+          <table className="min-w-full divide-y divide-line">
             <thead>
               <tr>
                 {["", "Name", "Status", "Fee", "Members", "Actions"].map((h) => (
                   <th
                     key={h}
-                    className="px-3 py-2 text-left text-xs font-medium text-gray-300 uppercase tracking-wider"
+                    className="px-3 py-2 text-left text-xs font-medium text-fg-muted uppercase tracking-wider"
                   >
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-800">
+            <tbody className="divide-y divide-line">
               {groups.map((g) => {
                 const members = getGroupMembers(g.id);
                 const isExpanded = expandedGroupId === g.id;
@@ -308,12 +311,12 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                   deleteGroupMutation.isPending && deleteGroupMutation.variables === g.id;
                 return (
                   <Fragment key={g.id}>
-                    <tr className="hover:bg-gray-700/50">
+                    <tr className="hover:bg-surface">
                       <td className="px-3 py-2">
                         <button
                           type="button"
                           onClick={() => handleToggleExpand(g.id)}
-                          className="text-gray-400 hover:text-white transition-colors"
+                          className="text-fg-muted hover:text-fg transition-colors"
                           aria-label={isExpanded ? "Collapse" : "Expand"}
                         >
                           <svg
@@ -332,13 +335,13 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                           </svg>
                         </button>
                       </td>
-                      <td className="px-3 py-2 text-sm text-gray-200">{g.name}</td>
+                      <td className="px-3 py-2 text-sm text-fg">{g.name}</td>
                       <td className="px-3 py-2 text-sm">
                         <StatusBadge status={g.status} />
                       </td>
-                      <td className="px-3 py-2 text-sm text-gray-200">{formatFee(g)}</td>
-                      <td className="px-3 py-2 text-sm text-gray-200">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-800 text-blue-200">
+                      <td className="px-3 py-2 text-sm text-fg">{formatFee(g)}</td>
+                      <td className="px-3 py-2 text-sm text-fg">
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-200">
                           {members.length} {members.length === 1 ? "client" : "clients"}
                         </span>
                       </td>
@@ -347,12 +350,7 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                           <Button size="sm" onClick={() => setEditingGroup(g)}>
                             Edit
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="bg-purple-600 hover:bg-purple-700 text-white"
-                            onClick={() => setManagingGroup(g)}
-                          >
+                          <Button size="sm" variant="secondary" onClick={() => setManagingGroup(g)}>
                             View Profile
                           </Button>
                           <Button
@@ -375,14 +373,14 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                       </td>
                     </tr>
                     {isExpanded && (
-                      <tr className="bg-gray-800/50">
+                      <tr className="bg-surface/60">
                         <td colSpan={6} className="px-3 py-4">
                           <div className="ml-4">
-                            <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                            <h4 className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-3">
                               Clients in {g.name} ({members.length})
                             </h4>
                             {members.length === 0 ? (
-                              <p className="text-gray-500 text-sm italic">
+                              <p className="text-fg-muted text-sm italic">
                                 No clients in this group yet.
                               </p>
                             ) : (
@@ -390,31 +388,31 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                                 {members.map((m) => (
                                   <div
                                     key={m.id}
-                                    className="flex justify-between items-center bg-gray-700/50 rounded-md px-3 py-2"
+                                    className="flex justify-between items-center bg-card border border-line rounded-md px-3 py-2"
                                   >
                                     <div>
-                                      <p className="text-sm text-gray-200 font-medium">{m.name}</p>
-                                      <p className="text-xs text-gray-400">{m.email}</p>
+                                      <p className="text-sm text-fg font-medium">{m.name}</p>
+                                      <p className="text-xs text-fg-muted">{m.email}</p>
                                     </div>
                                     <div className="flex items-center gap-3">
                                       <StatusBadge status={m.status} />
                                       {getOnboardingState(m) === "ready" ? (
                                         <span
-                                          className="text-xs text-blue-400"
+                                          className="text-xs text-blue-700 dark:text-blue-400"
                                           title="Stripe connected"
                                         >
                                           ✓ Connected
                                         </span>
                                       ) : getOnboardingState(m) === "in_progress" ? (
                                         <span
-                                          className="text-xs text-yellow-400"
+                                          className="text-xs text-yellow-800 dark:text-yellow-400"
                                           title="Stripe onboarding started but not finished"
                                         >
                                           ⚠ In progress
                                         </span>
                                       ) : (
                                         <span
-                                          className="text-xs text-yellow-400"
+                                          className="text-xs text-yellow-800 dark:text-yellow-400"
                                           title="Not onboarded"
                                         >
                                           ⚠ Pending

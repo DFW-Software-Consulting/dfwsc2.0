@@ -136,11 +136,11 @@ export default function ClientProfileView({
       titleId="client-profile-title"
       size="xl"
     >
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
         {/* Left Column: Company Settings */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
-            <h4 className="text-sm font-semibold text-white mb-4 uppercase tracking-wider">
+        <div className="min-w-0 lg:col-span-1 space-y-6">
+          <div className="p-4 bg-surface rounded-lg border border-line">
+            <h4 className="text-sm font-semibold text-fg mb-4 uppercase tracking-wider">
               Company Settings
             </h4>
 
@@ -196,20 +196,20 @@ export default function ClientProfileView({
         </div>
 
         {/* Right Column: Linked Accounts (Stripe Connections) */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+        <div className="min-w-0 lg:col-span-2 space-y-6">
+          <div className="p-4 bg-surface rounded-lg border border-line">
             <div className="flex justify-between items-center mb-4">
-              <h4 className="text-sm font-semibold text-white uppercase tracking-wider">
+              <h4 className="text-sm font-semibold text-fg uppercase tracking-wider">
                 Linked Accounts ({members.length})
               </h4>
             </div>
 
             {members.length === 0 ? (
-              <div className="py-10 text-center border-2 border-dashed border-gray-700 rounded-lg">
-                <p className="text-gray-500 italic">
+              <div className="py-10 text-center border-2 border-dashed border-line rounded-lg">
+                <p className="text-fg-muted italic">
                   No Stripe accounts linked to this company yet.
                 </p>
-                <p className="text-xs text-gray-600 mt-1">
+                <p className="text-xs text-fg-muted mt-1">
                   Add accounts below to manage them together.
                 </p>
               </div>
@@ -218,19 +218,21 @@ export default function ClientProfileView({
                 {members.map((client) => (
                   <div
                     key={client.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-gray-700/30 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-card rounded-lg border border-line hover:border-line-strong transition-colors"
                   >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-semibold text-gray-100">{client.name}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <span className="font-semibold text-fg break-words">{client.name}</span>
                         <StatusBadge status={client.status} />
                       </div>
-                      <p className="text-xs text-gray-400 font-mono mb-2">{client.email}</p>
+                      <p className="text-xs text-fg-muted font-mono mb-2 break-all">
+                        {client.email}
+                      </p>
 
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         <div className="flex items-center gap-1.5 text-xs">
-                          <span className="text-gray-500">Fee:</span>
-                          <span className="text-gray-300">
+                          <span className="text-fg-muted">Fee:</span>
+                          <span className="text-fg">
                             {client.processingFeePercent != null
                               ? `${client.processingFeePercent}%`
                               : client.processingFeeCents != null
@@ -239,27 +241,25 @@ export default function ClientProfileView({
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5 text-xs">
-                          <span className="text-gray-500">Stripe ID:</span>
-                          <code className="text-blue-400 bg-blue-400/10 px-1 rounded">
+                          <span className="text-fg-muted">Stripe ID:</span>
+                          <code className="text-blue-700 bg-blue-50 dark:text-blue-400 dark:bg-blue-400/10 px-1 rounded break-all">
                             {client.stripeAccountId || "Not Connected"}
                           </code>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <Button
                         size="sm"
-                        variant="ghost"
-                        className="text-blue-400 hover:bg-blue-400/10"
+                        variant="ghost-info"
                         onClick={() => setEditingClient(client)}
                       >
                         Edit
                       </Button>
                       <Button
                         size="sm"
-                        variant="ghost"
-                        className="text-yellow-400 hover:bg-yellow-400/10"
+                        variant="ghost-warning"
                         onClick={() => handleUnlinkAccount(client)}
                         isLoading={
                           patchClientMutation.isPending &&
@@ -271,10 +271,7 @@ export default function ClientProfileView({
                       </Button>
                       <Button
                         size="sm"
-                        variant={client.status === "active" ? "ghost" : "success"}
-                        className={
-                          client.status === "active" ? "text-red-400 hover:bg-red-400/10" : ""
-                        }
+                        variant={client.status === "active" ? "ghost-danger" : "success"}
                         onClick={() => handleToggleClientStatus(client)}
                         isLoading={
                           patchClientMutation.isPending &&
@@ -292,19 +289,19 @@ export default function ClientProfileView({
 
             {/* Link Existing Accounts */}
             {available.length > 0 && (
-              <div className="mt-8 border-t border-gray-700 pt-6">
-                <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+              <div className="mt-8 border-t border-line pt-6">
+                <h4 className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-4">
                   Add Independent Accounts to Company
                 </h4>
                 <div className="space-y-2">
                   {available.map((c) => (
                     <div
                       key={c.id}
-                      className="flex items-center justify-between p-2 bg-gray-900/30 rounded border border-gray-800"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2 bg-card rounded border border-line"
                     >
-                      <div>
-                        <span className="text-sm text-gray-300 font-medium">{c.name}</span>
-                        <span className="text-xs text-gray-500 ml-2">({c.email})</span>
+                      <div className="min-w-0">
+                        <span className="text-sm text-fg font-medium break-words">{c.name}</span>
+                        <span className="text-xs text-fg-muted ml-2 break-all">({c.email})</span>
                       </div>
                       <Button
                         size="sm"

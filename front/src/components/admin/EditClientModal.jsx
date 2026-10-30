@@ -219,17 +219,17 @@ export default function EditClientModal({
 
   return (
     <BaseModal isOpen onClose={onClose} title="Edit Client" titleId="edit-client-title">
-      <p className="text-sm text-gray-400 mb-5">
+      <p className="text-sm text-fg-muted mb-5">
         {client.name} &bull; {client.email}
       </p>
 
       {isDfwscMode && (
         <>
           {clientLoading ? (
-            <p className="text-sm text-gray-400 mb-4">Loading profile...</p>
+            <p className="text-sm text-fg-muted mb-4">Loading profile...</p>
           ) : (
             <>
-              <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">
+              <h3 className="text-sm font-semibold text-fg-muted uppercase tracking-wide mb-3">
                 Contact
               </h3>
 
@@ -268,7 +268,7 @@ export default function EditClientModal({
                 />
               </div>
 
-              <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">
+              <h3 className="text-sm font-semibold text-fg-muted uppercase tracking-wide mb-3">
                 Address
               </h3>
 
@@ -337,7 +337,7 @@ export default function EditClientModal({
               <div className="mb-4">
                 <label
                   htmlFor="edit-client-notes"
-                  className="block text-sm font-medium text-gray-300 mb-1"
+                  className="block text-sm font-medium text-fg mb-1"
                 >
                   Notes
                 </label>
@@ -347,8 +347,8 @@ export default function EditClientModal({
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Any additional notes..."
                   rows={3}
-                  className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                           focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted
+                           focus:outline-none focus:ring-2 focus:ring-focus"
                 />
               </div>
             </>
@@ -359,18 +359,15 @@ export default function EditClientModal({
       {!isDfwscMode && (
         <>
           <div className="mb-4">
-            <label
-              htmlFor="edit-client-group"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
+            <label htmlFor="edit-client-group" className="block text-sm font-medium text-fg mb-1">
               Group
             </label>
             <select
               id="edit-client-group"
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
-              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                       focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted
+                       focus:outline-none focus:ring-2 focus:ring-focus"
             >
               <option value="">— No group —</option>
               {groups
