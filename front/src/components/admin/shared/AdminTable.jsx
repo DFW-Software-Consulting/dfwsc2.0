@@ -34,36 +34,33 @@ export default function AdminTable({
   if (!rows || rows.length === 0) {
     return (
       <div className="text-center py-8">
-        <p className="text-gray-400 text-sm">{emptyMessage}</p>
+        <p className="text-fg-muted text-sm">{emptyMessage}</p>
       </div>
     );
   }
 
   return (
     <div className="overflow-x-auto transition-colors duration-300">
-      <table className="min-w-full divide-y divide-slate-200 dark:divide-gray-700 transition-colors">
+      <table className="min-w-full divide-y divide-line transition-colors">
         <thead>
           <tr>
             {columns.map((col) => (
               <th
                 key={col.header}
-                className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-gray-300 uppercase tracking-wider transition-colors"
+                className="px-3 py-2 text-left text-xs font-medium text-fg-muted uppercase tracking-wider transition-colors"
               >
                 {col.header}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-gray-800 transition-colors">
+        <tbody className="divide-y divide-line text-fg transition-colors">
           {rows.map((row) => (
-            <tr
-              key={row[keyField]}
-              className="hover:bg-slate-50 dark:hover:bg-gray-700/50 transition-colors"
-            >
+            <tr key={row[keyField]} className="hover:bg-surface transition-colors">
               {columns.map((col) => (
                 <td
                   key={col.header}
-                  className={`px-3 py-2 whitespace-nowrap text-sm text-slate-700 dark:text-gray-200 transition-colors ${col.tdClassName ?? ""}`}
+                  className={`px-3 py-2 whitespace-nowrap text-sm transition-colors ${col.tdClassName ?? ""}`}
                 >
                   {col.render ? col.render(row) : col.key ? row[col.key] : null}
                 </td>

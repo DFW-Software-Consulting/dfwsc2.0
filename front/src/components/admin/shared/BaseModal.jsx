@@ -1,63 +1,19 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
+import { createPortal } from "react-dom";
+import { useModalLayer } from "./useModalLayer";
 
 const SIZE_CLASSES = {
   sm: "max-w-sm",
   md: "max-w-lg",
   lg: "max-w-2xl",
+  xl: "max-w-5xl",
 };
 
 export default function BaseModal({ isOpen, onClose, title, titleId, size = "md", children }) {
   const backdropRef = useRef(null);
   const modalRef = useRef(null);
-  const previousFocusRef = useRef(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      previousFocusRef.current = document.activeElement;
-      const timer = setTimeout(() => {
-        modalRef.current?.focus();
-      }, 0);
-      return () => clearTimeout(timer);
-    } else if (previousFocusRef.current) {
-      previousFocusRef.current.focus();
-      previousFocusRef.current = null;
-    }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (e.key === "Tab") {
-        const focusableElements = modalRef.current?.querySelectorAll(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        );
-        if (!focusableElements || focusableElements.length === 0) return;
-        const first = focusableElements[0];
-        const last = focusableElements[focusableElements.length - 1];
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else {
-          if (document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        }
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
-    };
-  }, [isOpen, onClose]);
+  useModalLayer({ isOpen, onClose, containerRef: modalRef });
 
   if (!isOpen) return null;
 
@@ -65,12 +21,14 @@ export default function BaseModal({ isOpen, onClose, title, titleId, size = "md"
     if (e.target === backdropRef.current) onClose();
   };
 
-  return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener
+  // Portaled to <body> so the dialog escapes <main>'s stacking context and
+  // always layers above the sticky site header.
+  return createPortal(
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape is handled via document-level keydown listener in useModalLayer
     <div
       ref={backdropRef}
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-sm p-4 sm:p-6"
+      className="fixed inset-0 z-[60] overflow-y-auto bg-black/60 backdrop-blur-sm p-4 sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -79,27 +37,29 @@ export default function BaseModal({ isOpen, onClose, title, titleId, size = "md"
         <div
           ref={modalRef}
           tabIndex={-1}
-          className={`bg-[var(--bg-main)] rounded-xl shadow-xl border border-slate-200 dark:border-gray-700 p-6 w-full max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] overflow-y-auto transition-colors duration-300 ${SIZE_CLASSES[size] ?? SIZE_CLASSES.md}`}
+          data-size={SIZE_CLASSES[size] ? size : "md"}
+          className={`flex flex-col bg-page text-fg rounded-xl shadow-xl border border-line w-full min-w-0 max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)] transition-colors duration-300 ${SIZE_CLASSES[size] ?? SIZE_CLASSES.md}`}
         >
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex shrink-0 justify-between items-start gap-4 px-6 pt-6 pb-4">
             <h3
               id={titleId}
-              className="text-lg font-semibold text-slate-900 dark:text-white transition-colors"
+              className="min-w-0 break-words text-lg font-semibold text-fg transition-colors"
             >
               {title}
             </h3>
             <button
               type="button"
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-white text-2xl leading-none transition-colors"
+              className="shrink-0 rounded text-fg-muted hover:text-fg text-2xl leading-none transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               aria-label="Close"
             >
               &times;
             </button>
           </div>
-          {children}
+          <div className="min-h-0 overflow-y-auto px-6 pb-6">{children}</div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

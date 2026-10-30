@@ -85,7 +85,7 @@ export default function AdminLogin({ showToast }) {
       </Button>
 
       {error && (
-        <p className="mt-4 text-center text-sm text-red-400" role="alert">
+        <p className="mt-4 text-center text-sm text-red-700 dark:text-red-400" role="alert">
           {error}
         </p>
       )}

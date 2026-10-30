@@ -4,6 +4,7 @@
 
 @theme {
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-serif: Georgia, 'Times New Roman', serif;
   --color-brand-50: #e6f5f7;
   --color-brand-100: #c9e9ef;
   --color-brand-200: #98d4df;
@@ -22,31 +23,111 @@
   }
 }
 
+/* Semantic color utilities (bg-page, text-fg-muted, border-line, ...).
+   `inline` keeps the var() reference so the values follow the active theme. */
+@theme inline {
+  --color-page: var(--bg-main);
+  --color-surface: var(--bg-surface);
+  --color-card: var(--bg-card);
+  --color-fg: var(--text-main);
+  --color-fg-muted: var(--text-muted);
+  --color-line: var(--border-subtle);
+  --color-line-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-focus: var(--focus-ring);
+}
+
 @layer base {
   :root {
     color-scheme: light;
-    --bg-main: #ffffff;
-    --bg-surface: #f1f5f9; /* slate-100 */
-    --text-main: #0f172a; /* slate-900 */
-    --text-muted: #334155; /* slate-700 */
-    --border-subtle: rgba(0, 0, 0, 0.1);
+    --bg-main: #f7f7f0; /* page */
+    --bg-surface: #eaf0e8; /* tinted bands, chips */
+    --bg-card: #fffefa; /* cards and panels */
+    --bg-inverse: #0c222d; /* hero / contact bands, dark in both themes */
+    --bg-inverse-glow: #164348; /* radial glow on inverse heroes */
+    --border-inverse: rgb(255 255 255 / 0.15); /* dividers on inverse bands */
+    --text-main: #132f39;
+    --text-muted: #4d6266;
+    --text-inverse: #f6f7ef;
+    --text-inverse-muted: #b4c8c9;
+    --accent: #1d7360; /* accent text and icons on page/card */
+    --accent-soft: #dceee5;
+    --accent-inverse: #8ce2c6; /* accent text on inverse bands */
+    --border-subtle: #dce1d7;
+    --border-strong: #b9cfc2;
+    --focus-ring: #0b7285;
+    --cta-bg: #b4f0d2;
+    --cta-bg-hover: #d4ffe8;
+    --cta-text: #0c332e;
+    /* Light stickers and labels laid over dark bands or photos, same in both themes. */
+    --sticker-bg: #d6f5e4;
+    --sticker-text: #244d42;
+    --photo-label-bg: rgb(247 247 240 / 0.93);
+    --shadow-card: 0 14px 35px rgb(25 57 44 / 0.08);
     --glass-bg: rgba(255, 255, 255, 0.8);
     --glass-border: rgba(0, 0, 0, 0.05);
   }
 
   .dark {
     color-scheme: dark;
-    --bg-main: #020617;
-    --bg-surface: #0f172a; /* slate-900 */
-    --text-main: #f8fafc; /* slate-50 */
-    --text-muted: #cbd5e1; /* slate-300 */
-    --border-subtle: rgba(255, 255, 255, 0.05);
-    --glass-bg: rgba(15, 23, 42, 0.8);
+    --bg-main: #0a1920;
+    --bg-surface: #0f242b;
+    --bg-card: #12292f;
+    --bg-inverse: #0e2a33;
+    --text-main: #edf2ec;
+    --text-muted: #a9bdbd;
+    --text-inverse: #f6f7ef;
+    --text-inverse-muted: #b4c8c9;
+    --accent: #7fd3b6;
+    --accent-soft: #173b38;
+    --accent-inverse: #8ce2c6;
+    --border-subtle: rgba(255, 255, 255, 0.1);
+    --border-strong: rgba(255, 255, 255, 0.2);
+    --focus-ring: #63bdcc;
+    --cta-bg: #b4f0d2;
+    --cta-bg-hover: #d4ffe8;
+    --cta-text: #0c332e;
+    --shadow-card: 0 14px 35px rgb(0 0 0 / 0.3);
+    --glass-bg: rgba(15, 36, 43, 0.8);
     --glass-border: rgba(255, 255, 255, 0.1);
   }
 
+  /* Before ThemeContext adds a class, match its default (the system preference)
+     so dark-mode visitors don't get a light first paint. */
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light) { color-scheme: dark; --bg-main: #0a1920; --text-main: #edf2ec; }
+  }
+
   body {
-    @apply bg-[var(--bg-main)] text-[var(--text-main)] antialiased font-sans selection:bg-brand-500/30 transition-colors duration-300;
+    @apply bg-page text-fg antialiased font-sans selection:bg-brand-500/30 transition-colors duration-300;
+  }
+
+  /* Honor reduced motion everywhere: transitions and animations finish instantly, so
+     state changes (focus outlines, hover, menus) still show without movement.
+     Loading spinners keep turning as progress feedback. */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *:not(.animate-spin), *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Shared page container: navbar, footer and studio sections align to the same edges. */
+  .page-wrap {
+    width: min(1180px, calc(100% - 80px));
+    margin-inline: auto;
+  }
+  @media (max-width: 1000px) {
+    .page-wrap { width: calc(100% - 48px); }
+  }
+  @media (max-width: 480px) {
+    .page-wrap { width: calc(100% - 36px); }
   }
 }
 
@@ -65,6 +146,19 @@
 
   .text-gradient-brand {
     @apply bg-gradient-to-r from-brand-400 via-brand-500 to-brand-700 bg-clip-text text-transparent;
+  }
+
+  /* Edge shadows on a horizontal scroller placed on a card: the card-colored covers
+     scroll with the content and hide each shadow once that edge is reached, so the
+     cue only shows while there is more to scroll. Painted as background, so it sits
+     under the content and never covers it. */
+  .scroll-shade-x {
+    --shade: color-mix(in srgb, var(--text-main) 22%, transparent);
+    background:
+      linear-gradient(to right, var(--bg-card) 40%, transparent) left / 2.5rem 100% no-repeat local,
+      linear-gradient(to left, var(--bg-card) 40%, transparent) right / 2.5rem 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, var(--shade), transparent) left / 0.875rem 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, var(--shade), transparent) right / 0.875rem 100% no-repeat scroll;
   }
 
   .shadow-glow {

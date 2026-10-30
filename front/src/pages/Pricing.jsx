@@ -1,173 +1,294 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import Banner from "../components/Banner.jsx";
+import "../styles/studio.css";
+import "./Pricing.css";
 
-const plans = [
-  {
-    name: "Starter Hosting",
-    price: "$20 / mo",
-    includes: "Static landing page hosting, SSL, CDN, domain setup",
-    idealFor: "Portfolios, promo pages",
-  },
+const hostingPlans = [
   {
     name: "Basic Hosting",
-    price: "$40 / mo",
+    price: "$40",
     includes: "Hosting + uptime monitoring, minor edits, payment setup",
-    idealFor: "Small business sites",
-  },
-  {
-    name: "Standard Hosting",
-    price: "$75 / mo",
-    includes:
-      "Multi-page site hosting, domain management, and a small database included — you manage your own updates and changes",
-    idealFor: "Multi-page business sites with basic data needs",
+    idealFor: "Business websites and landing pages",
+    specs: [
+      ["Website & file storage", "5 GB"],
+      ["Monthly data transfer", "100 GB"],
+      ["Database storage", "Not included"],
+      ["Application backend", "Not included"],
+      ["Maintenance retainer", "Included"],
+      ["Support", "Standard"],
+    ],
   },
   {
     name: "Pro Hosting",
-    price: "$100 / mo",
+    price: "$100",
     includes:
-      "Everything in Standard plus maintenance, backups, backend API hosting, and expanded database — we keep it running so you don't have to",
-    idealFor: "Full-stack apps and client portals",
+      "Multi-page site hosting, domain management, maintenance, backups, backend API hosting, and database storage — we keep it running so you don't have to",
+    idealFor: "Custom applications and client portals",
+    specs: [
+      ["Website & file storage", "10 GB"],
+      ["Monthly data transfer", "500 GB"],
+      ["Database storage", "1 GB"],
+      ["Application backend", "Included"],
+      ["Maintenance retainer", "Included"],
+      ["Support", "Standard"],
+    ],
   },
   {
-    name: "High-Traffic Hosting",
-    price: "$200 / mo",
+    name: "Business Hosting",
+    price: "$200",
     includes:
-      "CDN caching tuned for volume, monthly performance review, priority queue if something breaks, and we proactively tell you when you're about to hit a wall",
-    idealFor: "High-traffic sites and scaling products",
-  },
-  {
-    name: "Dev Retainer",
-    price: "Custom",
-    includes: "Ongoing dev team, new features, priority support, and dedicated engineering hours",
-    idealFor: "Growing products that need a consistent team",
-    cta: true,
+      "Application hosting, maintenance, backups, monthly performance review, and priority support for businesses with more demanding storage and processing needs",
+    idealFor: "Businesses with larger applications and data needs",
+    specs: [
+      ["Website & file storage", "25 GB"],
+      ["Monthly data transfer", "1 TB"],
+      ["Database storage", "5 GB"],
+      ["Application backend", "Included"],
+      ["Maintenance retainer", "Included"],
+      ["Support", "Priority"],
+    ],
   },
 ];
 
+const retainer = {
+  name: "Dev Retainer",
+  price: "Custom",
+  includes: "Ongoing dev team, new features, priority support, and dedicated engineering hours",
+};
+
 export default function Pricing() {
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, []);
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-24 px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
-      <section className="mx-auto max-w-4xl text-center">
-        <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-800 dark:text-brand-300">
-          Hosting & Maintenance
-        </span>
-        <h1 className="text-4xl font-extrabold tracking-tight sm:text-6xl text-gradient">
-          Predictable pricing for platforms you can depend on
-        </h1>
-        <p className="mt-8 text-xl text-[var(--text-muted)] leading-relaxed transition-colors">
-          Every plan includes SSL, global CDN delivery, and DFWSC-managed updates so you can focus
-          on customers.
-        </p>
-      </section>
-
-      <Banner
-        className="mt-12 glass rounded-2xl p-4 text-center border-brand-500/20 shadow-sm"
-        message="🌐 From cloud migrations to compliance-ready hosting, our bench of engineers has your infrastructure on lock."
-      />
-
-      <section className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-        {plans.map((plan) => (
-          <article
-            key={plan.name}
-            className="group relative flex flex-col rounded-[2rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-8 transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] hover:border-brand-500/30 hover:-translate-y-1 hover:shadow-glow shadow-sm"
-          >
-            <div className="mb-6 transition-colors">
-              <h2 className="text-xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-200 transition-colors">
-                {plan.name}
-              </h2>
-              <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                {plan.cta ? (
-                  <span className="text-4xl font-black text-brand-500 transition-colors">
-                    Custom
-                  </span>
-                ) : (
-                  <>
-                    <span className="text-4xl font-black text-[var(--text-main)] transition-colors">
-                      {plan.price.split(" ")[0]}
-                    </span>
-                    <span className="text-sm font-medium text-[var(--text-muted)] transition-colors">
-                      / {plan.price.split(" ")[2]}
-                    </span>
-                  </>
-                )}
-              </div>
-              <div className="h-4" />
-            </div>
-
-            <div className="mt-auto pt-8 border-t border-slate-200 dark:border-white/5">
-              <p className="text-sm text-[var(--text-muted)] leading-relaxed min-h-[3rem] transition-colors">
-                {plan.includes}
-              </p>
-              <div className="mt-6 flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
-                  Ideal for:
-                </span>
-                <span className="text-[11px] font-semibold text-brand-600 dark:text-brand-300/90 transition-colors">
-                  {plan.idealFor}
-                </span>
-              </div>
-              {plan.cta && (
-                <Link
-                  to="/"
-                  state={{ scrollTo: "contact" }}
-                  className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-brand-500 px-6 py-3 text-sm font-bold text-white shadow-glow transition-all duration-300 hover:shadow-glow-strong hover:-translate-y-1 active:translate-y-0"
-                >
-                  Let&apos;s talk
-                </Link>
-              )}
-            </div>
-          </article>
-        ))}
-      </section>
-
-      <div className="rounded-[2rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)]/50 dark:bg-white/[0.01] p-6 text-center text-sm text-[var(--text-muted)] backdrop-blur-sm shadow-sm transition-colors">
-        All hosting plans include DFWSC-managed uptime, SSL, monitoring, and incident response.
-        Labor for devops and custom feature development is billed separately at $100–$150/hr.
-      </div>
-
-      <section className="grid gap-8 lg:grid-cols-2">
-        <div className="rounded-[2rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-10 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.04] shadow-sm">
-          <h2 className="text-3xl font-bold text-[var(--text-main)] transition-colors">
-            Project Kickoffs
-          </h2>
-          <p className="mt-6 text-lg text-[var(--text-muted)] leading-relaxed transition-colors">
-            Need a new build or major feature? We start with a short discovery workshop to define
-            scope, handoff plan, and success metrics.
+    <div className="studio studio-page">
+      <section className="studio-inverse studio-page-hero">
+        <div className="page-wrap">
+          <p className="studio-eyebrow">A GOOD FIT STARTS WITH A CLEAR PLAN</p>
+          <h1>
+            The right support.
+            <br />
+            <em>Room to grow.</em>
+          </h1>
+          <p>
+            From a single project to your ongoing development team, choose the kind of partnership
+            your business needs.
           </p>
-          <ul className="mt-10 space-y-5">
-            {[
-              "2–6 week MVP timelines with weekly previews and async updates.",
-              "Clear documentation so you can run in-house or keep us on retainer.",
-              "Integrations with Stripe and analytics platforms baked in.",
-            ].map((item) => (
-              <li key={item} className="flex items-start gap-4 group">
-                <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-500/10 border border-brand-500/20 group-hover:border-brand-500/40 transition-colors">
-                  <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
-                </div>
-                <span className="text-base text-[var(--text-muted)] transition-colors">{item}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="studio-actions">
+            <Link className="studio-button" to="/" state={{ scrollTo: "contact" }}>
+              Talk through your options <span aria-hidden="true">↗</span>
+            </Link>
+            <a className="studio-text-link" href="#hosting">
+              See hosting plans <span aria-hidden="true">↓</span>
+            </a>
+          </div>
         </div>
-
-        <div className="flex flex-col justify-between rounded-[2rem] border border-brand-500/10 bg-gradient-to-br from-brand-600/5 to-transparent dark:from-brand-600/10 dark:to-transparent p-10 transition-all duration-300 hover:from-brand-600/10 dark:hover:bg-white/[0.04] shadow-sm">
+      </section>
+      <section className="studio-section page-wrap">
+        <div className="studio-section-heading">
           <div>
-            <h2 className="text-3xl font-bold text-[var(--text-main)] transition-colors">
-              Let&apos;s pick the right plan
+            <p className="studio-eyebrow">TWO WAYS TO BUILD WITH US</p>
+            <h2>
+              A project today.
+              <br />
+              <em>A partner tomorrow.</em>
             </h2>
-            <p className="mt-6 text-lg text-[var(--text-muted)] leading-relaxed transition-colors">
-              Tell us about the app, traffic expectations, and compliance needs. We&apos;ll
-              recommend an environment and share a migration path if you&apos;re moving from an
-              existing host.
+          </div>
+          <p>
+            Start with a defined piece of work, or make us part of your team. We’ll discuss scope,
+            priorities, and costs before work begins.
+          </p>
+        </div>
+        <div className="studio-engagement-grid">
+          <article className="studio-engagement-card">
+            <p className="studio-mini-label">A DEFINED PROJECT</p>
+            <h3>
+              Let’s build
+              <br />
+              something useful.
+            </h3>
+            <p>A new website, custom application, or improvement to the tools you already use.</p>
+            <div className="studio-engagement-price">Quoted for your project</div>
+            <ul>
+              <li>Discovery to understand the problem</li>
+              <li>Agreed scope and delivery plan</li>
+              <li>Previews and clear communication</li>
+              <li>Documentation and a handoff plan</li>
+            </ul>
+            <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
+              Tell us what you have in mind <span aria-hidden="true">↗</span>
+            </Link>
+          </article>
+          <article className="studio-engagement-card studio-engagement-featured studio-inverse">
+            <p className="studio-mini-label">{retainer.name} · AN ONGOING PARTNERSHIP</p>
+            <h3>
+              Your development team.
+              <br />
+              <em>Without starting over.</em>
+            </h3>
+            <p>{retainer.includes}.</p>
+            <div className="studio-engagement-price">
+              {retainer.price} <small>based on your needs</small>
+            </div>
+            <p className="studio-engagement-detail">
+              For growing products that need a consistent team. We’ll work through priorities,
+              available hours, and the right scope together.
+            </p>
+            <Link className="studio-button" to="/" state={{ scrollTo: "contact" }}>
+              Let’s talk about your team <span aria-hidden="true">↗</span>
+            </Link>
+          </article>
+        </div>
+      </section>
+      <section id="hosting" className="studio-band">
+        <div className="page-wrap">
+          <div className="studio-section-heading">
+            <div>
+              <p className="studio-eyebrow">HOSTING & MAINTENANCE</p>
+              <h2>
+                A home for
+                <br />
+                <em>what you build.</em>
+              </h2>
+            </div>
+            <p>
+              Each monthly price includes hosting and a maintenance retainer for repairs and fixes
+              to your existing website or application. New builds and features are quoted
+              separately.
             </p>
           </div>
-          <Link
-            to="/"
-            state={{ scrollTo: "contact" }}
-            className="mt-12 inline-flex w-full sm:w-fit items-center justify-center gap-2 rounded-full bg-brand-500 px-10 py-4 text-base font-bold text-white shadow-glow transition-all duration-300 hover:shadow-glow-strong hover:-translate-y-1 active:translate-y-0"
-          >
-            Start the conversation
-          </Link>
+          <p className="studio-allowance-draft">
+            Proposed allowances for review. Final storage, data transfer, and processing limits will
+            be confirmed in your hosting proposal.
+          </p>
+          <div className="studio-plan-grid">
+            {hostingPlans.map((plan) => (
+              <article className="studio-plan-card" key={plan.name}>
+                <h3>{plan.name}</h3>
+                <p className="studio-plan-price">
+                  {plan.price} <span>/ month</span>
+                </p>
+                <p className="studio-mini-label">Hosting + maintenance retainer</p>
+                <p className="studio-plan-fit">{plan.idealFor}</p>
+                <dl className="studio-plan-specs">
+                  {plan.specs.map(([label, value]) => (
+                    <div key={label}>
+                      <dt>{label}</dt>
+                      <dd>{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="studio-plan-includes">{plan.includes}</p>
+                <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
+                  Discuss this plan <span aria-hidden="true">↗</span>
+                </Link>
+              </article>
+            ))}
+            <article className="studio-plan-help">
+              <span aria-hidden="true">↗</span>
+              <h3>
+                Not sure where
+                <br />
+                you fit?
+              </h3>
+              <p>
+                Tell us what you’re running and what you need. We’ll help you compare the options.
+              </p>
+              <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
+                Ask us about hosting <span aria-hidden="true">↗</span>
+              </Link>
+            </article>
+          </div>
+          <p className="studio-pricing-note">
+            All plans include hosting, SSL, monitoring, incident response, and a maintenance
+            retainer for repairs and fixes to existing functionality. Your proposal defines the
+            retainer coverage and included maintenance work. New features, redesigns, and work
+            outside that scope are quoted separately, with additional development billed at{" "}
+            <strong>$100–$150/hr</strong>.
+          </p>
+        </div>
+      </section>
+      <section className="studio-section page-wrap">
+        <div className="studio-section-heading">
+          <div>
+            <p className="studio-eyebrow">BEFORE WE GET STARTED</p>
+            <h2>
+              A little clarity
+              <br />
+              <em>goes a long way.</em>
+            </h2>
+          </div>
+        </div>
+        <div className="studio-faq">
+          <details>
+            <summary>What do storage and monthly data transfer mean?</summary>
+            <p>
+              Storage is the space used by your website and uploaded files. Database storage is
+              listed separately for application records. Monthly data transfer is the amount of data
+              delivered to visitors, including pages, images, and downloads. It resets each billing
+              month and is not a visitor limit.
+            </p>
+          </details>
+          <details>
+            <summary>What happens if my business needs more capacity?</summary>
+            <p>
+              Your hosting proposal will specify your included allowances and how additional usage
+              is billed. More storage, data transfer, or application processing may require
+              additional infrastructure charges or a different plan. Email, video delivery,
+              third-party services, and AI usage are scoped separately.
+            </p>
+          </details>
+          <details>
+            <summary>Does hosting include building my website?</summary>
+            <p>
+              A new website or application is quoted separately. The monthly hosting price includes
+              a maintenance retainer for repairs and fixes to existing functionality, within the
+              scope agreed in your proposal. New features and larger changes are estimated
+              separately.
+            </p>
+          </details>
+          <details>
+            <summary>How do we decide the project price?</summary>
+            <p>
+              We start with your goals, required features, and current tools. A discovery
+              conversation helps us define the scope, estimate the work, and explain the proposed
+              costs.
+            </p>
+          </details>
+          <details>
+            <summary>Can you work with a website or application we already have?</summary>
+            <p>
+              Tell us what you’re using and where you need help. We’ll review the setup with you
+              before recommending improvements or a migration path.
+            </p>
+          </details>
+          <details>
+            <summary>Can we keep working together after launch?</summary>
+            <p>
+              Yes. Every hosting plan includes a maintenance retainer for agreed repairs and fixes.
+              If you need ongoing new features or dedicated development hours, we can discuss a
+              separate development retainer.
+            </p>
+          </details>
+        </div>
+      </section>
+      <section className="studio-contact studio-inverse">
+        <div className="page-wrap">
+          <p className="studio-eyebrow">LET’S FIND THE RIGHT STARTING POINT</p>
+          <h2>
+            What do you need
+            <br />
+            <em>to move forward?</em>
+          </h2>
+          <p>
+            Bring the problem, the idea, or the process that isn’t working. We’ll help you explore
+            your options.
+          </p>
+          <div className="studio-actions">
+            <Link className="studio-button" to="/" state={{ scrollTo: "contact" }}>
+              Start the conversation <span aria-hidden="true">↗</span>
+            </Link>
+          </div>
         </div>
       </section>
     </div>

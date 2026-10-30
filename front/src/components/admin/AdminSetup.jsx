@@ -64,11 +64,11 @@ export default function AdminSetup({
 
   return (
     <div>
-      <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4 mb-4">
-        <h3 className="text-sm font-semibold text-yellow-400 mb-1">
+      <div className="bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-600 rounded-lg p-4 mb-4">
+        <h3 className="text-sm font-semibold text-yellow-800 dark:text-yellow-400 mb-1">
           {isBootstrapPending ? "Confirm Bootstrap Admin" : "First-Run Setup"}
         </h3>
-        <p className="text-xs text-gray-300">
+        <p className="text-xs text-fg">
           {isBootstrapPending
             ? "An admin account exists but requires confirmation. Set or confirm your admin credentials below."
             : "No admin account is configured yet."}
@@ -78,24 +78,24 @@ export default function AdminSetup({
       {!isBootstrapPending ? (
         // Static instructions — the initial admin is bootstrapped from
         // environment variables, not created through the API.
-        <div className="bg-gray-800 rounded-lg p-4 space-y-3">
-          <p className="text-sm text-gray-300">
+        <div className="bg-surface border border-line rounded-lg p-4 space-y-3">
+          <p className="text-sm text-fg">
             Set the following environment variables on the API server and restart it:
           </p>
-          <div className="font-mono text-sm bg-gray-900 rounded-md p-3 space-y-1">
+          <div className="font-mono text-sm bg-card border border-line rounded-md p-3 space-y-1">
             <div>
-              <span className="text-gray-400">ADMIN_USERNAME=</span>
-              <span className="text-green-400">your-admin-username</span>
+              <span className="text-fg-muted">ADMIN_USERNAME=</span>
+              <span className="text-green-700 dark:text-green-400">your-admin-username</span>
             </div>
             <div>
-              <span className="text-gray-400">ADMIN_PASSWORD=</span>
-              <span className="text-blue-400">a-strong-password</span>
+              <span className="text-fg-muted">ADMIN_PASSWORD=</span>
+              <span className="text-blue-700 dark:text-blue-400">a-strong-password</span>
             </div>
           </div>
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-fg-muted">
             The password must be at least {MIN_PASSWORD_LENGTH} characters long.
           </p>
-          <p className="text-sm text-gray-300">
+          <p className="text-sm text-fg">
             After restarting the API, log in with those credentials and confirm them to finish
             setup.
           </p>
@@ -143,13 +143,13 @@ export default function AdminSetup({
             type="submit"
             disabled={confirmMutation.isPending}
             isLoading={confirmMutation.isPending}
-            className="w-full shadow-lg focus:ring-2 focus:ring-blue-400"
+            className="w-full shadow-lg focus:ring-2 focus:ring-focus"
           >
             {confirmMutation.isPending ? "Confirming Admin..." : "Confirm Admin Account"}
           </Button>
 
           {error && (
-            <p className="mt-4 text-center text-sm text-red-400" role="alert">
+            <p className="mt-4 text-center text-sm text-red-700 dark:text-red-400" role="alert">
               {error}
             </p>
           )}
