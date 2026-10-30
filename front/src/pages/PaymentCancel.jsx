@@ -23,14 +23,12 @@ export default function PaymentCancel() {
             />
           </svg>
         </div>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">
-          Payment Canceled
-        </h1>
-        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+        <h1 className="text-3xl font-bold text-fg mb-4 transition-colors">Payment Canceled</h1>
+        <p className="text-fg-muted text-lg mb-6 transition-colors">
           Your payment was canceled. If this was a mistake, you can retry the payment or reach out
           for help.
         </p>
-        <p className="text-slate-500 dark:text-gray-400 transition-colors">
+        <p className="text-fg-muted transition-colors">
           Need assistance? Contact the DFWSC team and we&apos;ll get you squared away.
         </p>
       </div>
