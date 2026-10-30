@@ -103,7 +103,10 @@ describe("Cerebo API", () => {
   });
 
   it("requires an admin session", async () => {
-    const res = await app.inject({ method: "GET", url: `/api/v1/cerebo/clients/${clientA}/projects` });
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/cerebo/clients/${clientA}/projects`,
+    });
     expect(res.statusCode).toBe(401);
   });
 
@@ -257,7 +260,10 @@ describe("Cerebo API", () => {
         url: "http://insecure.example.com",
       });
       expect(http.statusCode).toBe(400);
-      const kind = await call("POST", `/clients/${clientA}/links`, { kind: "ftp", externalId: "x" });
+      const kind = await call("POST", `/clients/${clientA}/links`, {
+        kind: "ftp",
+        externalId: "x",
+      });
       expect(kind.statusCode).toBe(400);
     });
 
@@ -323,7 +329,9 @@ describe("Cerebo API", () => {
       const deck = res.json().deck[0];
       expect(deck).toMatchObject({ status: "ok", totalCards: 2, doneCards: 1, overdueCards: 1 });
       const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-      expect(url).toBe(`https://cloud.example.com/index.php/apps/deck/api/v1.0/boards/${boardId}/stacks`);
+      expect(url).toBe(
+        `https://cloud.example.com/index.php/apps/deck/api/v1.0/boards/${boardId}/stacks`
+      );
       expect((init.headers as Record<string, string>).authorization).toMatch(/^Basic /);
     });
 

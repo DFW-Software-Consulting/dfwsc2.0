@@ -26,7 +26,8 @@ export async function requireAdminIdentity(request: FastifyRequest, reply: Fasti
 export function getActor(request: FastifyRequest): ActorContext {
   const id = (request as CereboRequest).admin?.id;
   // Only reachable if a route forgot the requireAdminIdentity preHandler.
-  if (typeof id !== "string") throw new Error("Cerebo actor missing: requireAdminIdentity did not run");
+  if (typeof id !== "string")
+    throw new Error("Cerebo actor missing: requireAdminIdentity did not run");
   return { actorType: "admin", actorId: id, requestId: request.id };
 }
 
