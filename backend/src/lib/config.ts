@@ -1,4 +1,5 @@
 import type { FastifyRequest } from "fastify";
+import validator from "validator";
 import { AppError } from "./errors";
 
 export function resolveFrontendOrigin(): string {
@@ -55,6 +56,26 @@ export function resolveDefaultPaymentSuccessUrl(): string | undefined {
 
 export function resolveDefaultPaymentCancelUrl(): string | undefined {
   return resolveOptionalHttpUrl(process.env.DEFAULT_PAYMENT_CANCEL_URL);
+}
+
+/**
+ * Resolves the recipient address for public contact-form submissions.
+ * `CONTACT_INBOX` is preferred; falls back to `SMTP_FROM` (the only other
+ * configured mailbox address in this system) so the contact route doesn't
+ * require a dedicated env var in every environment. Throws if neither is
+ * configured, mirroring `resolveFrontendOrigin`'s fail-fast pattern.
+ */
+export function resolveContactInboxEmail(): string {
+  const contactInbox = process.env.CONTACT_INBOX?.trim();
+  const source = contactInbox ? "CONTACT_INBOX" : "SMTP_FROM";
+  const inbox = contactInbox || process.env.SMTP_FROM?.trim();
+  if (!inbox) {
+    throw new AppError("CONTACT_INBOX is not configured.", 500, "CONFIGURATION_ERROR");
+  }
+  if (!validator.isEmail(inbox)) {
+    throw new AppError(`${source} must be a valid email address.`, 500, "CONFIGURATION_ERROR");
+  }
+  return inbox;
 }
 
 /**

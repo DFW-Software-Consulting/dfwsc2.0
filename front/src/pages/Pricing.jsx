@@ -10,6 +10,7 @@ import {
 } from "../components/motion/ScrollFx.jsx";
 import "../styles/studio.css";
 import "./Pricing.css";
+import { usePageTitle } from "../hooks/usePageTitle.js";
 
 const hostingPlans = [
   {
@@ -65,6 +66,7 @@ const retainer = {
 };
 
 export default function Pricing() {
+  usePageTitle("Pricing");
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, []);

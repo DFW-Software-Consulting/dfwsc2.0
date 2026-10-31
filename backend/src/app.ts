@@ -10,6 +10,7 @@ import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
 import connectRoutes from "./routes/connect";
+import contactRoutes from "./routes/contact";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
 import metricsRoutes from "./routes/metrics";
@@ -206,6 +207,7 @@ export async function buildServer() {
   server.register(healthRoutes, { prefix: "/api/v1" });
   server.register(authRoutes, { prefix: "/api/v1" });
   server.register(connectRoutes, { prefix: "/api/v1" });
+  server.register(contactRoutes, { prefix: "/api/v1" });
   server.register(paymentsRoutes, { prefix: "/api/v1" });
   server.register(webhooksRoute, { prefix: "/api/v1" });
   server.register(clientRoutes, { prefix: "/api/v1" });

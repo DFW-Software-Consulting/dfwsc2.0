@@ -20,6 +20,21 @@ describe("Home", () => {
     }
   });
 
+  it("renders the contact form inside the contact band", () => {
+    renderWithProviders(<Home />);
+
+    const band = document.getElementById("contact");
+    const form = within(band).getByRole("button", { name: "Send message" }).closest("form");
+    expect(form).toBeInTheDocument();
+    expect(within(form).getByLabelText("Company or project")).toBeRequired();
+    expect(within(band).getByRole("link", { name: "(214) 326-0128" })).toBeInTheDocument();
+    expect(within(band).getByRole("link", { name: "mail@dfwsc.com" })).toHaveAttribute(
+      "href",
+      "mailto:mail@dfwsc.com"
+    );
+    expect(within(band).getAllByRole("button")).toHaveLength(1);
+  });
+
   it("switches the workflow preview when a tab is pressed", async () => {
     const user = userEvent.setup();
     renderWithProviders(<Home />);

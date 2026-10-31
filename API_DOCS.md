@@ -15,6 +15,7 @@ This is the internal API for the DFWSC payment portal. It handles client onboard
 5. [Error Format](#error-format)
 6. [Endpoints](#endpoints)
    - [Health](#health)
+   - [Contact](#contact)
    - [Admin Auth](#admin-auth)
    - [Client Onboarding](#client-onboarding)
    - [Stripe Connect](#stripe-connect)
@@ -108,6 +109,7 @@ Rate limiting is per-IP (IPv6 visitors are limited per /64 prefix) or per Stripe
 | `GET /connect/refresh` | 10 req / min |
 | `POST /payments/create` | Burst of 200, refilling at 120 / min (per Stripe account) |
 | `GET /payments/session/:sessionId` | 30 req / min per IP; 600 req / min per client when `X-Api-Key` is sent (and 30 distinct rejected keys / min per IP; the same bad key counts once) |
+| `POST /contact` | 10 req / min |
 
 `POST /payments/create` uses a token bucket: a burst of up to 200 requests is admitted by the limiter at once, then requests are admitted at 120 per minute (2 per second) as the bucket refills. Admitted requests then wait for one of 25 concurrent Stripe slots, for at most 10 seconds; when Stripe is slow, the tail of a burst can get `503` `STRIPE_BUSY` and should be retried. The other limits are sliding windows.
 
@@ -160,6 +162,33 @@ No auth required. Use this to check if the API is running.
 ```json
 { "status": "ok" }
 ```
+
+---
+
+### Contact
+
+#### `POST /api/v1/contact`
+
+Public, unauthenticated lead-capture endpoint. Valid submissions are emailed to `CONTACT_INBOX` (or `SMTP_FROM` when `CONTACT_INBOX` is unset) and, when sales automation is enabled and configured, also created as a lead in the Nextcloud sales pipeline. The two channels run in parallel (the lead channel is capped globally at 20 submissions per rolling hour; over the cap only the email is sent); `201` is returned if at least one enabled channel succeeded.
+
+**Request:**
+```json
+{
+  "name": "Jane Doe",
+  "email": "jane@example.com",
+  "company": "Acme Co",
+  "message": "I'd like to discuss a project."
+}
+```
+
+`name` is limited to 100 characters, `email` to 320, required `company` to 100 (non-blank), and `message` to 2000. The frontend also sends an internal `_hp` honeypot field; consumers should omit it.
+
+**Response `201`:**
+```json
+{ "ok": true }
+```
+
+Honeypot submissions are silently discarded and answered with the same `201 { "ok": true }` as a real success. Invalid bodies return `400`, rate-limited requests return `429`, and `502` (`EMAIL_DELIVERY_FAILED`) is returned only when every enabled channel failed.
 
 ---
 
@@ -1048,6 +1077,7 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | `API_BASE_URL` | auto-detected | Public API base URL |
 | `DEFAULT_PROCESS_FEE_CENTS` | `0` | Global default platform fee in cents |
 | `SMTP_FROM` | auto-generated | Sender email address |
+| `CONTACT_INBOX` | `SMTP_FROM` | Recipient for public contact-form submissions |
 | `ENABLE_SWAGGER` | `true` (non-prod) | Set to `false` to disable `/docs` |
 | `NODE_ENV` | — | `production`, `development`, or `test` |
 | `TRUST_PROXY` | `loopback,linklocal,uniquelocal` | Reverse proxies trusted for `X-Forwarded-For` (so `request.ip`, and per-IP rate limits, use the real client). Accepts `true`, `false`, or a comma-separated IP/CIDR list. Default trusts private-network proxies only. Numeric hop counts are no longer supported (Fastify 5.12+); a numeric value logs a warning and uses the default |

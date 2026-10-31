@@ -13,14 +13,15 @@ This document details the frontend implementation, state management, and UI patt
 - **3D**: `three`, used only by `components/HeroScene.jsx`. It is loaded with a dynamic `import()` from `HeroBackdrop`, so it lives in its own lazy chunk (~133 kB gzip) that the entry, Pricing and Team chunks never load, and only on wide, motion-allowed, WebGL-capable screens
 
 ## 2. Directory Structure (`front/src/`)
-- **`api/`**: API client wrappers per domain (`auth`, `clients`, `groups`, `onboarding`, `payments`, `settings`), built on the shared `client.js` base wrapper.
+- **`api/`**: API client wrappers per domain (`auth`, `clients`, `contact`, `groups`, `onboarding`, `payments`, `settings`), built on the shared `client.js` base wrapper.
 - **`components/`**: UI components organized by domain:
   - **`admin/`**: Dashboard components (ClientList, EditClientModal, GroupPanel, PaymentReports, SettingsPanel, etc.).
   - **`admin/shared/`**: Reusable admin primitives (AdminTable, BaseModal, Button, FormInput, StatusBadge, etc.).
   - **`motion/`**: `Reveal` helpers (`MotionRoot`, `Reveal`, `RevealGroup`, `RevealItem`, `Swap`), `SmoothScroll` (Lenis) and `ScrollFx` (scroll-linked helpers) for the marketing pages; `HeroBackdrop` (static fallback + gating) and `HeroScene` (three.js, lazy) serve the Home hero.
   - **App shell**: `Navbar`, `Footer`, `ErrorBoundary`. Marketing page sections live inside their page components (`Home`, `Pricing`, `Team`).
+  - **App utilities**: `Analytics` conditionally loads a Plausible-compatible script when `VITE_ANALYTICS_SRC` is configured; it is a no-op otherwise. `VITE_ANALYTICS_DOMAIN` optionally sets the tracked domain.
 - **`contexts/`**: `AuthContext` (admin JWT state), `ThemeContext` (light/dark toggle).
-- **`hooks/`**: TanStack Query hooks — `useClients`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus`.
+- **`hooks/`**: TanStack Query hooks — `useClients`, `useContact`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus` — plus UI hooks such as `usePageTitle`.
 - **`pages/`**: Route-level components. The marketing pages (`Home`, `Pricing`, `Team`) each import a co-located stylesheet (`Home.css`, `Pricing.css`, `Team.css`).
 - **`styles/`**: `studio.css`, shared primitives for the marketing pages (see [STYLES.md](./STYLES.md)).
 - **`utils/`**: `scrollToSection`, `validation`, `logger`, `lazyPage`, `preloadRecovery`.
@@ -44,6 +45,8 @@ This document details the frontend implementation, state management, and UI patt
 ## 4. Data Fetching
 TanStack Query manages all server state. API logic lives in `src/api/`; hooks in `src/hooks/` compose queries/mutations on top. Components never call `fetch` directly.
 
+The `components/Contact.jsx` form (rendered in the Home contact band, split layout, styled by the `.studio-contact-*` / `.studio-field` classes) submits through `api/contact.js` and `useContactForm`. Name, email, company, and message limits mirror the public backend endpoint; name, company and message are required, company is limited to 100 characters.
+
 ## 5. Theme System
 The app supports light and dark modes via `ThemeContext`. It defaults to the system preference, persists the choice in `localStorage`, and applies a `.light` or `.dark` class on `<html>`, which switches the CSS custom properties defined in `index.css`:
 - **Light**: warm off-white page (`#f7f7f0`), deep teal-ink text.
@@ -58,3 +61,6 @@ Hero and contact bands stay dark in both themes. Use the semantic tokens and uti
 - **PaymentReports**: Stripe PaymentIntent history per client or group.
 - **SettingsPanel**: system settings (company name, default payment terms).
 - **AddClientModal**: surfaced via an "Add Client" button; creates a new client account in the portal.
+
+## 7. Page Titles
+Route-level pages use `usePageTitle(title)`, which applies the shared `<page> - DFW Software Consulting` convention. Status pages pass their current state label to the hook rather than writing `document.title` directly.

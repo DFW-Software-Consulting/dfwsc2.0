@@ -67,3 +67,8 @@ export const SALES_LEAD_MAX_PER_CYCLE = 20;
 export const SALES_LEAD_MAX_DISCOVERY_PAGES = 20;
 // "Acme (2)" ... "Acme (50)": beyond this the folder step fails rather than guess.
 export const SALES_LEAD_MAX_FOLDER_SUFFIX = 50;
+
+// Global ceiling on website contacts turned into CRM leads (the email channel is not
+// capped): bounds what a spam run can push into the sales pipeline.
+export const WEBSITE_LEAD_CAP_MAX = 20;
+export const WEBSITE_LEAD_CAP_WINDOW_MS = 60 * 60 * 1000;

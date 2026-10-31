@@ -7,6 +7,7 @@ import { MotionRoot, Reveal, RevealGroup, RevealItem } from "../components/motio
 import { LEAVE, PAGE_HERO, ProcessGrid, RISE, ScrollFx } from "../components/motion/ScrollFx.jsx";
 import "../styles/studio.css";
 import "./Team.css";
+import { usePageTitle } from "../hooks/usePageTitle.js";
 
 // Add a member's personal profile as `linkedin` (https://www.linkedin.com/in/...) to link their photo.
 const teamMembers = [
@@ -103,6 +104,7 @@ export function MemberPhoto({ name, image, linkedin }) {
 }
 
 export default function Team() {
+  usePageTitle("Our Team");
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, []);

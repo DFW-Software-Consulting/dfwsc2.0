@@ -1,5 +1,10 @@
 import { encodePathSegments, type NextcloudConfig, nextcloudRequest } from "./nextcloud";
-import type { FormAnswer, FormQuestion, TableColumn } from "./sales-lead-mapping";
+import type {
+  FormAnswer,
+  FormQuestion,
+  FormSubmissionAnswers,
+  TableColumn,
+} from "./sales-lead-mapping";
 
 // Thin wrappers around the Nextcloud APIs the New Lead automation uses: Forms v3
 // (OCS), Tables v1, CardDAV and WebDAV. Each call has a fixed label; nothing here
@@ -85,12 +90,42 @@ export class SalesLeadNextcloud {
       label,
       path: `${FORMS_BASE}/${this.targets.formId}?format=json`,
     });
-    const data = ocsData(res.body, label) as { questions?: { id?: unknown; text?: unknown }[] };
+    const data = ocsData(res.body, label) as {
+      questions?: {
+        id?: unknown;
+        text?: unknown;
+        type?: unknown;
+        options?: { id?: unknown; text?: unknown }[];
+      }[];
+    };
     if (!Array.isArray(data.questions)) throw new NextcloudBadResponseError(label);
     return data.questions.map((q) => ({
       id: positiveInt(q.id, label),
       text: typeof q.text === "string" ? q.text : "",
+      type: typeof q.type === "string" ? q.type : undefined,
+      options: Array.isArray(q.options)
+        ? q.options.map((o) => ({
+            id: positiveInt(o.id, label),
+            text: typeof o.text === "string" ? o.text : "",
+          }))
+        : undefined,
     }));
+  }
+
+  /**
+   * Submits answers to the lead form as the service account (Forms API v3
+   * "Insert a Submission"). Answers are keyed by question id; every value is an
+   * array, and choice questions take option ids. Returns nothing: the poller finds
+   * the new submission on its next cycle.
+   */
+  async submitLead(answers: FormSubmissionAnswers): Promise<void> {
+    await nextcloudRequest(this.nc, {
+      method: "POST",
+      label: "forms.submit",
+      path: `${FORMS_BASE}/${this.targets.formId}/submissions`,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ answers }),
+    });
   }
 
   /** The submission, or null when it was deleted. */
