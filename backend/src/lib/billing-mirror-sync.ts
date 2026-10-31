@@ -25,7 +25,7 @@ import {
   staleMirrorRows,
   withMirrorLock,
 } from "./mirror-table";
-import { getNextcloudConfig, type NextcloudConfig } from "./nextcloud";
+import { billingMirrorRequest, getNextcloudConfig, type NextcloudConfig } from "./nextcloud";
 import { PortalMirrorNextcloud } from "./portal-mirror-nextcloud";
 import { contentHash, type RenderedValues } from "./portal-mirror-render";
 
@@ -182,20 +182,19 @@ function logProblemOnce(
 
 // ── Cycle ────────────────────────────────────────────────────────────────────
 
-/** Every row that should exist: one per client code that has a snapshot. */
+/** Every row that should exist: one per billing_customers client code, snapshot or not. */
 async function loadExpected(): Promise<Map<string, RenderedValues>> {
-  const customers = await db.select().from(billingCustomers);
-  const codesByCustomer = new Map<string, string[]>();
-  for (const c of customers) {
-    codesByCustomer.set(c.stripeCustomerId, [
-      ...(codesByCustomer.get(c.stripeCustomerId) ?? []),
-      c.clientCode,
-    ]);
-  }
   const rows = await db
     .select({ customer: billingCustomers, snapshot: billingSnapshots })
-    .from(billingSnapshots)
-    .innerJoin(billingCustomers, eq(billingCustomers.clientCode, billingSnapshots.clientCode));
+    .from(billingCustomers)
+    .leftJoin(billingSnapshots, eq(billingSnapshots.clientCode, billingCustomers.clientCode));
+  const codesByCustomer = new Map<string, string[]>();
+  for (const { customer } of rows) {
+    codesByCustomer.set(customer.stripeCustomerId, [
+      ...(codesByCustomer.get(customer.stripeCustomerId) ?? []),
+      customer.clientCode,
+    ]);
+  }
   return new Map(
     rows.map(({ customer, snapshot }) => [
       customer.clientCode,
@@ -206,8 +205,10 @@ async function loadExpected(): Promise<Map<string, RenderedValues>> {
         sharedWith: (codesByCustomer.get(customer.stripeCustomerId) ?? []).filter(
           (code) => code !== customer.clientCode
         ),
-        values: snapshot.rendered as BillingValues,
-        updatedAt: snapshot.updatedAt,
+        values: (snapshot?.rendered as BillingValues | null | undefined) ?? null,
+        failed: snapshot ? snapshot.attempts > 0 || snapshot.lastError !== null : false,
+        updatedAt: snapshot?.rendered ? snapshot.updatedAt : null,
+        refreshedAt: snapshot?.refreshedAt ?? null,
       }),
     ])
   );
@@ -218,7 +219,7 @@ async function syncOnce(
   logger: MirrorLogger,
   cycleStart: Date
 ): Promise<BillingMirrorResult> {
-  const nc = new PortalMirrorNextcloud(settings.nextcloud, settings.minGapMs);
+  const nc = new PortalMirrorNextcloud(settings.nextcloud, settings.minGapMs, billingMirrorRequest);
   const out = result("ok");
   const { value: prov, changed } = await provisionMirrorTable(
     nc,

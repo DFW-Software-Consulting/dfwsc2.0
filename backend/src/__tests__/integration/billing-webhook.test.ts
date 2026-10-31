@@ -174,7 +174,14 @@ describe("POST /api/v1/webhooks/stripe-billing", () => {
   });
 
   it.each(BILLING_WEBHOOK_EVENTS)("handles %s", async (type) => {
-    expect((await send(makeEvent(type, { customer: "cus_known" }))).statusCode).toBe(200);
+    expect(
+      (await send(makeEvent(type, { customer: "cus_known", id: "cus_known" }))).statusCode
+    ).toBe(200);
+    expect(await dirtyCount()).toBe(2);
+  });
+
+  it("customer.deleted marks the deleted Customer dirty (its id is the object id)", async () => {
+    await send(makeEvent("customer.deleted", { id: "cus_known" }));
     expect(await dirtyCount()).toBe(2);
   });
 

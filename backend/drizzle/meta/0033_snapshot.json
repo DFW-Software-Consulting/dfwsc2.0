@@ -1,5 +1,5 @@
 {
-  "id": "c51c9bc1-b11b-4e50-b262-bbadcb9c2a10",
+  "id": "70182cd0-6963-40dc-aa58-5e5a2e5472c6",
   "prevId": "bc30eea9-0f1f-41ad-8122-3fa57a7d8dac",
   "version": "7",
   "dialect": "postgresql",
@@ -297,13 +297,13 @@
           "name": "rendered",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "content_hash": {
           "name": "content_hash",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "dirty_at": {
           "name": "dirty_at",

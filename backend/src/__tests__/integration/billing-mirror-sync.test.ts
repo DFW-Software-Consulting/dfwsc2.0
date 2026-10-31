@@ -22,7 +22,10 @@ import {
 } from "../../lib/billing-mirror-sync";
 import { resetBillingSnapshotStateForTests, runBillingRefresh } from "../../lib/billing-snapshot";
 import { resetCircuitBreakersForTests } from "../../lib/circuit-breakers";
-import { resetNextcloudBreakerForTests } from "../../lib/nextcloud";
+import {
+  openPortalMirrorBreakerForTests,
+  resetNextcloudBreakerForTests,
+} from "../../lib/nextcloud";
 import { resetPortalMirrorStateForTests, runPortalMirrorCycle } from "../../lib/portal-mirror-sync";
 import { paidInvoice, sub } from "../helpers/billing-fixtures";
 import { FakeTablesNextcloud, mirrorEnv } from "../helpers/fake-nextcloud-tables";
@@ -134,6 +137,7 @@ describe("provisioning", () => {
       "Last Payment",
       "Stripe Customer",
       "Updated",
+      "Last Checked",
     ]);
     expect(fake.shares.map((s) => s.receiver).sort()).toEqual(["dfwsc-admins", "managers"]);
     for (const s of fake.shares) {
@@ -270,6 +274,62 @@ describe("rows", () => {
     fake.fail("GET", /\/tables$/, 401, 1);
     expect((await cycle()).status).toBe("nextcloud_unavailable");
     expect((await cycle()).status).toBe("backoff");
+  });
+});
+
+describe("staleness", () => {
+  it("gives a Customer without a snapshot a Pending row, then the real one", async () => {
+    await addCustomer("CP-001", "cus_1", "Acme Corp");
+    expect((await cycle()).created).toBe(1);
+    const pending = rowOf("CP-001");
+    expect(fake.cell(pending, "Status")).toBe("Pending");
+    expect(fake.cell(pending, "Up to date")).toBe("");
+    expect(fake.cell(pending, "Subscription")).toBe("");
+    expect(fake.cell(pending, "Last Checked")).toBeNull();
+
+    fakeStripe.set("cus_1", { subscriptions: [sub({ id: "sub_a" })] });
+    await refreshAll();
+    expect((await cycle()).updated).toBe(1);
+    expect(fake.cell(rowOf("CP-001"), "Status")).toBe("Active");
+    expect(fake.cell(rowOf("CP-001"), "Last Checked")).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+  });
+
+  it("shows Check failed when the first refresh fails", async () => {
+    await addCustomer("CP-001", "cus_1");
+    fakeStripe.beforeList = () => {
+      throw Object.assign(new Error("no such customer"), { statusCode: 404 });
+    };
+    await refreshAll();
+    await cycle();
+    expect(fake.cell(rowOf("CP-001"), "Status")).toBe("Check failed");
+    expect(fake.cell(rowOf("CP-001"), "Up to date")).toBe("");
+  });
+
+  it("updates the row to Check failed (was Active) when a later refresh fails, and back on success", async () => {
+    await seedOne();
+    await cycle();
+    expect(fake.cell(rowOf("CP-001"), "Status")).toBe("Active");
+
+    fakeStripe.beforeList = () => {
+      throw Object.assign(new Error("gone"), { statusCode: 404 });
+    };
+    await refreshAll();
+    expect((await cycle()).updated).toBe(1);
+    expect(fake.cell(rowOf("CP-001"), "Status")).toBe("Check failed (was Active)");
+    expect(fake.cell(rowOf("CP-001"), "Up to date")).toBe("");
+    expect(fake.cell(rowOf("CP-001"), "Subscription")).toBe("$1,500/week");
+
+    fakeStripe.beforeList = null;
+    resetBillingSnapshotStateForTests();
+    await refreshAll();
+    await cycle();
+    expect(fake.cell(rowOf("CP-001"), "Status")).toBe("Active");
+  });
+
+  it("uses its own Nextcloud breaker, separate from Portal Accounts", async () => {
+    await seedOne();
+    openPortalMirrorBreakerForTests();
+    expect((await cycle()).status).toBe("ok");
   });
 });
 

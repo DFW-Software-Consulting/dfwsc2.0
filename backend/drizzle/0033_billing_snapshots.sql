@@ -1,8 +1,8 @@
 CREATE TABLE "billing_snapshots" (
 	"client_code" text PRIMARY KEY NOT NULL,
 	"stripe_customer_id" text NOT NULL,
-	"rendered" jsonb NOT NULL,
-	"content_hash" text NOT NULL,
+	"rendered" jsonb,
+	"content_hash" text,
 	"dirty_at" timestamp with time zone,
 	"refreshed_at" timestamp with time zone,
 	"attempts" integer DEFAULT 0 NOT NULL,

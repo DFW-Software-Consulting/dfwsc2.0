@@ -25,6 +25,7 @@ export const BILLING_WEBHOOK_EVENTS = [
   "invoice.voided",
   "invoice.marked_uncollectible",
   "invoice.overdue",
+  "invoice.deleted",
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
@@ -33,11 +34,18 @@ export const BILLING_WEBHOOK_EVENTS = [
   "subscription_schedule.canceled",
   "subscription_schedule.completed",
   "subscription_schedule.released",
+  "subscription_schedule.aborted",
+  "customer.deleted",
 ] as const;
 
 const HANDLED = new Set<string>(BILLING_WEBHOOK_EVENTS);
 
 function customerIdOf(event: Stripe.Event): string | null {
+  // A deleted Customer is the event's object itself.
+  if (event.type === "customer.deleted") {
+    const id = (event.data.object as { id?: unknown }).id;
+    return typeof id === "string" ? id : null;
+  }
   const customer = (event.data.object as { customer?: string | { id?: string } | null }).customer;
   if (typeof customer === "string") return customer;
   return customer && typeof customer.id === "string" ? customer.id : null;

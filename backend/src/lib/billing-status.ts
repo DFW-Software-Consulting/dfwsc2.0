@@ -13,7 +13,7 @@ import { formatDateTime } from "./portal-mirror-render";
 //   Ended   a subscription or schedule was canceled or completed, or an invoice was paid, and
 //           nothing is live.
 //   None    nothing (draft, void and incomplete_expired are ignored everywhere).
-// "Up to date" is No exactly when the overdue amount is above zero.
+// "Up to date" is No exactly when the overdue amount is above zero (or overdue in another currency).
 
 export interface BillingPrice {
   unit_amount: number | null;
@@ -81,9 +81,13 @@ export type BillingValues = {
   paymentsMade: string;
   amountPaid: number;
   nextDue: string | null;
-  openBalance: number;
-  overdue: number;
+  /** Null when an open invoice is not in USD (the amount is then not summed). */
+  openBalance: number | null;
+  /** Null when an overdue invoice is not in USD. */
+  overdue: number | null;
   lastPayment: string | null;
+  /** An open or overdue invoice is in another currency: shown as "(non-USD)" next to Status. */
+  nonUsd: boolean;
 };
 
 const IGNORED_INVOICE = new Set(["draft", "void"]);
@@ -203,6 +207,8 @@ export function deriveBilling(input: BillingInput): BillingValues {
   const usd = <T extends { currency: string }>(items: T[]) =>
     items.filter((i) => isUsd(i.currency));
   const overdueCents = sum(usd(overdueInvoices), (i) => i.amount_remaining);
+  const nonUsdOverdue = overdueInvoices.some((i) => !isUsd(i.currency));
+  const nonUsdOpen = open.some((i) => !isUsd(i.currency));
   const lastPaid = Math.max(
     0,
     ...invoices.filter((i) => i.amount_paid > 0).map((i) => i.status_transitions?.paid_at ?? 0)
@@ -240,13 +246,14 @@ export function deriveBilling(input: BillingInput): BillingValues {
 
   return {
     status,
-    upToDate: overdueCents > 0 ? "No" : "Yes",
+    upToDate: overdueCents > 0 || nonUsdOverdue ? "No" : "Yes",
     subscription: [...described.map((d) => d.text), ...planned].join("; "),
     paymentsMade: [...described.map((d) => d.made), ...planned.map(() => "0")].join("; "),
     amountPaid: dollars(sum(usd(invoices), (i) => i.amount_paid)),
     nextDue: upcoming.length ? formatDateTime(new Date(Math.min(...upcoming))) : null,
-    openBalance: dollars(sum(usd(open), (i) => i.amount_remaining)),
-    overdue: dollars(overdueCents),
+    openBalance: nonUsdOpen ? null : dollars(sum(usd(open), (i) => i.amount_remaining)),
+    overdue: nonUsdOverdue ? null : dollars(overdueCents),
     lastPayment: lastPaid > 0 ? formatDateTime(new Date(lastPaid * 1000)) : null,
+    nonUsd: nonUsdOverdue || nonUsdOpen,
   };
 }

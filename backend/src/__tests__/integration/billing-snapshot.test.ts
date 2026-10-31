@@ -240,6 +240,58 @@ describe("billing snapshot refresh", () => {
     expect(fakeStripe.calls).toEqual([]);
   });
 
+  it("refreshes the stalest Customers first, never-refreshed before all", async () => {
+    for (const [code, cus] of [
+      ["CP-1", "cus_a"],
+      ["CP-2", "cus_b"],
+      ["CP-3", "cus_c"],
+    ]) {
+      await addCustomer(code, cus);
+      fakeStripe.set(cus, {});
+    }
+    await refresh(); // all three get a snapshot
+    await db.execute(
+      sql`UPDATE billing_snapshots SET refreshed_at = now() - interval '3 hours' WHERE client_code = 'CP-3'`
+    );
+    await db.execute(
+      sql`UPDATE billing_snapshots SET refreshed_at = now() - interval '1 hour' WHERE client_code = 'CP-1'`
+    );
+    await db.execute(
+      sql`UPDATE billing_snapshots SET refreshed_at = now() - interval '2 hours' WHERE client_code = 'CP-2'`
+    );
+    await addCustomer("CP-4", "cus_d");
+    fakeStripe.set("cus_d", {});
+    fakeStripe.calls = [];
+    await refresh(true);
+    expect(fakeStripe.callsTo("subscriptions.list").map((c) => c.params.customer)).toEqual([
+      "cus_d",
+      "cus_c",
+      "cus_b",
+      "cus_a",
+    ]);
+  });
+
+  it("stores a failed first refresh on a row with no snapshot yet", async () => {
+    await addCustomer("CP-001", "cus_1");
+    fakeStripe.set("cus_1", {});
+    fakeStripe.beforeList = () => {
+      throw Object.assign(new Error("x"), { statusCode: 404 });
+    };
+    await refresh();
+    const row = await snapshot("CP-001");
+    expect(row.rendered).toBeNull();
+    expect(row.attempts).toBe(1);
+    expect(row.lastError).toBe("Error");
+
+    fakeStripe.beforeList = null;
+    resetBillingSnapshotStateForTests();
+    await refresh(); // a row without a snapshot is refreshed again
+    const healed = await snapshot("CP-001");
+    expect(healed.rendered).toMatchObject({ status: "None" });
+    expect(healed.attempts).toBe(0);
+    expect(healed.lastError).toBeNull();
+  });
+
   it("answers busy while another process holds the refresh lock", async () => {
     await addCustomer("CP-001", "cus_1");
     fakeStripe.set("cus_1", {});

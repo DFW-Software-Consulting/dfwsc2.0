@@ -24,6 +24,7 @@ describe("deriveBilling status rules", () => {
       openBalance: 0,
       overdue: 0,
       lastPayment: null,
+      nonUsd: false,
     });
   });
 
@@ -263,6 +264,94 @@ describe("deriveBilling status rules", () => {
   });
 });
 
+describe("non-USD invoices", () => {
+  const eur = (id: string, overrides = {}) =>
+    invoice({ id, status: "open", currency: "eur", amount_remaining: 90000, ...overrides });
+
+  it("keeps Late, blanks Overdue Amount and flags non-USD instead of showing $0", () => {
+    const values = derive({ invoices: [eur("in_e", { due_date: days(-5) })] });
+    expect(values.status).toBe("Late");
+    expect(values.upToDate).toBe("No");
+    expect(values.overdue).toBeNull();
+    expect(values.openBalance).toBeNull();
+    expect(values.nonUsd).toBe(true);
+    const row = renderBillingRow({
+      company: "A",
+      clientCode: "A",
+      stripeCustomerId: "cus_1",
+      sharedWith: [],
+      values,
+      failed: false,
+      updatedAt: NOW,
+      refreshedAt: NOW,
+    });
+    expect(row.status).toBe("Late (non-USD)");
+    expect(row.overdue).toBeNull();
+    expect(row.openBalance).toBeNull();
+  });
+
+  it("blanks Open Balance only when the open invoice is not yet due", () => {
+    const values = derive({ invoices: [eur("in_e", { due_date: days(5) })] });
+    expect(values.status).toBe("Active");
+    expect(values.overdue).toBe(0);
+    expect(values.openBalance).toBeNull();
+  });
+});
+
+describe("staleness in the row", () => {
+  const base = { company: "Acme", clientCode: "CP-1", stripeCustomerId: "cus_1", sharedWith: [] };
+  const values = derive({ subscriptions: [sub({ id: "sub_a" })] });
+
+  it("Pending before the first refresh, Check failed when that first refresh failed", () => {
+    const pending = renderBillingRow({
+      ...base,
+      values: null,
+      failed: false,
+      updatedAt: null,
+      refreshedAt: null,
+    });
+    expect(pending).toMatchObject({
+      status: "Pending",
+      upToDate: "",
+      subscription: "",
+      amountPaid: null,
+      lastChecked: null,
+      updated: null,
+    });
+    const failed = renderBillingRow({
+      ...base,
+      values: null,
+      failed: true,
+      updatedAt: null,
+      refreshedAt: null,
+    });
+    expect(failed.status).toBe("Check failed");
+    expect(contentHash(pending)).not.toBe(contentHash(failed));
+  });
+
+  it("shows Check failed (was X) with Up to date blank after a later failure, and changes the hash", () => {
+    const ok = renderBillingRow({
+      ...base,
+      values,
+      failed: false,
+      updatedAt: NOW,
+      refreshedAt: NOW,
+    });
+    const stale = renderBillingRow({
+      ...base,
+      values,
+      failed: true,
+      updatedAt: NOW,
+      refreshedAt: NOW,
+    });
+    expect(ok.status).toBe("Active");
+    expect(stale.status).toBe("Check failed (was Active)");
+    expect(stale.upToDate).toBe("");
+    expect(stale.subscription).toBe(ok.subscription);
+    expect(contentHash(stale)).not.toBe(contentHash(ok));
+  });
+});
+
 describe("renderBillingRow", () => {
   const values = derive({ subscriptions: [sub({ id: "sub_a" })] });
 
@@ -274,11 +363,14 @@ describe("renderBillingRow", () => {
       sharedWith: ["CP-003", "CP-002"],
       values,
       updatedAt: new Date("2026-10-30T08:05:00Z"),
+      failed: false,
+      refreshedAt: new Date("2026-10-31T11:30:00Z"),
     });
     expect(Object.keys(row).sort()).toEqual([...BILLING_COLUMN_KEYS].sort());
     expect(row.client).toBe("Acme (shares a Stripe Customer with CP-002, CP-003)");
     expect(row.stripeCustomer).toBe("https://dashboard.stripe.com/customers/cus_123");
     expect(row.updated).toBe("2026-10-30 08:05");
+    expect(row.lastChecked).toBe("2026-10-31 11:30");
     expect(billingColumns().map((c) => c.key)).toEqual([...BILLING_COLUMN_KEYS]);
   });
 
@@ -322,6 +414,8 @@ describe("renderBillingRow", () => {
       sharedWith: [],
       values: { ...values, subscription: "x".repeat(600) },
       updatedAt: NOW,
+      failed: false,
+      refreshedAt: NOW,
     });
     expect(String(row.subscription).length).toBe(250);
   });

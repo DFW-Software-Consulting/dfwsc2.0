@@ -561,8 +561,9 @@ export const billingSnapshots = pgTable("billing_snapshots", {
     .primaryKey()
     .references(() => billingCustomers.clientCode, { onDelete: "cascade" }),
   stripeCustomerId: text("stripe_customer_id").notNull(),
-  rendered: jsonb("rendered").$type<Record<string, string | number | null>>().notNull(),
-  contentHash: text("content_hash").notNull(),
+  // NULL until the first successful refresh (a first refresh that failed has a row with the error).
+  rendered: jsonb("rendered").$type<Record<string, string | number | boolean | null>>(),
+  contentHash: text("content_hash"),
   dirtyAt: timestamp("dirty_at", { withTimezone: true }),
   refreshedAt: timestamp("refreshed_at", { withTimezone: true }),
   attempts: integer("attempts").notNull().default(0),

@@ -1,4 +1,4 @@
-import { asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import Stripe from "stripe";
 import { db } from "../db/client";
 import { billingCustomers, billingSnapshots } from "../db/schema";
@@ -92,7 +92,7 @@ async function refreshCustomer(customerId: string, startedAt: Date): Promise<num
   if (!codes.length) return 0;
 
   const values: BillingValues = deriveBilling(await fetchBillingInput(customerId, startedAt));
-  const hash = contentHash(values);
+  const hash = contentHash({ ...values, nonUsd: String(values.nonUsd) });
   const existing = new Map(
     (
       await db
@@ -144,20 +144,26 @@ async function refreshCustomer(customerId: string, startedAt: Date): Promise<num
   return changed;
 }
 
-/** Customers to refresh: all of them (sweep), or those with no snapshot yet or marked dirty. */
+/**
+ * Customers to refresh: all of them (sweep), or those with no snapshot yet, no successful refresh
+ * yet or marked dirty. Stalest first (never refreshed, then oldest refreshed_at), so a run cut
+ * short by a rate limit continues with the Customers it did not reach.
+ */
 async function customersToRefresh(all: boolean): Promise<string[]> {
+  const bc = billingCustomers;
+  const bs = billingSnapshots;
   const rows = await db
-    .selectDistinct({
-      id: billingCustomers.stripeCustomerId,
-      dirtyAt: billingSnapshots.dirtyAt,
-    })
-    .from(billingCustomers)
-    .leftJoin(billingSnapshots, eq(billingSnapshots.clientCode, billingCustomers.clientCode))
-    .where(
-      all ? undefined : or(isNull(billingSnapshots.clientCode), isNotNull(billingSnapshots.dirtyAt))
+    .select({ id: bc.stripeCustomerId })
+    .from(bc)
+    .leftJoin(bs, eq(bs.clientCode, bc.clientCode))
+    .groupBy(bc.stripeCustomerId)
+    .having(
+      all
+        ? undefined
+        : sql`bool_or(${bs.clientCode} IS NULL OR ${bs.rendered} IS NULL OR ${bs.dirtyAt} IS NOT NULL)`
     )
-    .orderBy(asc(billingCustomers.stripeCustomerId));
-  return [...new Set(rows.map((r) => r.id))];
+    .orderBy(sql`min(${bs.refreshedAt}) ASC NULLS FIRST`, sql`min(${bc.clientCode})`);
+  return rows.map((r) => r.id);
 }
 
 /** Sets dirty_at on the snapshots of a Customer; true when the Customer is known at all. */
@@ -192,11 +198,22 @@ async function recordFailure(customerId: string, error: unknown) {
     failures: previous + 1,
     notBefore: Date.now() + Math.min(RETRY_BASE_MS * 2 ** previous, RETRY_MAX_MS),
   });
-  const name = (error as Error)?.name ?? "Error";
-  await db
-    .update(billingSnapshots)
-    .set({ attempts: sql`${billingSnapshots.attempts} + 1`, lastError: name.slice(0, 200) })
-    .where(eq(billingSnapshots.stripeCustomerId, customerId));
+  const lastError = ((error as Error)?.name ?? "Error").slice(0, 200);
+  // A Customer whose first refresh fails gets a row too (rendered NULL), so the mirror can say
+  // "Check failed" instead of showing nothing.
+  const codes = await db
+    .select({ clientCode: billingCustomers.clientCode })
+    .from(billingCustomers)
+    .where(eq(billingCustomers.stripeCustomerId, customerId));
+  for (const { clientCode } of codes) {
+    await db
+      .insert(billingSnapshots)
+      .values({ clientCode, stripeCustomerId: customerId, attempts: 1, lastError })
+      .onConflictDoUpdate({
+        target: billingSnapshots.clientCode,
+        set: { attempts: sql`${billingSnapshots.attempts} + 1`, lastError },
+      });
+  }
 }
 
 export interface BillingRefreshResult {
