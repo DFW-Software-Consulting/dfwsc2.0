@@ -1,11 +1,13 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   check,
   index,
   integer,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -271,4 +273,53 @@ export const settings = pgTable("settings", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
+});
+
+// "DFWSC — New Lead" automation (lib/sales-lead-sync.ts). One row per Forms
+// submission processed into Nextcloud. Answers are never stored here; they are
+// re-read from Forms on each attempt. Each step's output column is written as
+// soon as that step succeeds, so a retry resumes at the first missing output.
+export const salesLeadSubmissions = pgTable(
+  "sales_lead_submissions",
+  {
+    formId: integer("form_id").notNull(),
+    submissionId: integer("submission_id").notNull(),
+    status: text("status", { enum: ["pending", "completed", "failed"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    // Lease: set when a cycle claims the row; a stale claim can be reclaimed.
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimToken: text("claim_token"),
+    // PII-free failure code such as "tables.create_row:503" or "missing_company".
+    lastErrorCode: text("last_error_code"),
+    tableRowId: integer("table_row_id"),
+    contactUid: text("contact_uid"),
+    folderName: text("folder_name"),
+    folderFileId: bigint("folder_file_id", { mode: "number" }),
+    linksBackfilledAt: timestamp("links_backfilled_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.formId, table.submissionId] }),
+    dueIdx: index("sales_lead_submissions_due_idx").on(table.status, table.nextAttemptAt),
+    statusCheck: check(
+      "sales_lead_submissions_status_check",
+      sql`${table.status} IN ('pending', 'completed', 'failed')`
+    ),
+  })
+);
+
+// Per-form baseline: submissions with an id at or below baseline_submission_id
+// existed before the automation first ran and are never processed.
+export const salesLeadSyncState = pgTable("sales_lead_sync_state", {
+  formId: integer("form_id").primaryKey(),
+  baselineSubmissionId: integer("baseline_submission_id").notNull(),
+  baselinedAt: timestamp("baselined_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -34,6 +34,15 @@ services:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
       API_BASE_URL: ${API_BASE_URL}
       ALLOW_ADMIN_SETUP: ${ALLOW_ADMIN_SETUP}
+      NEXTCLOUD_BASE_URL: ${NEXTCLOUD_BASE_URL}
+      NEXTCLOUD_USERNAME: ${NEXTCLOUD_USERNAME}
+      NEXTCLOUD_APP_PASSWORD: ${NEXTCLOUD_APP_PASSWORD}
+      SALES_AUTOMATION_ENABLED: ${SALES_AUTOMATION_ENABLED:-false}
+      SALES_LEAD_FORM_ID: ${SALES_LEAD_FORM_ID:-}
+      SALES_PIPELINE_TABLE_ID: ${SALES_PIPELINE_TABLE_ID:-}
+      SALES_ADDRESSBOOK_PATH: ${SALES_ADDRESSBOOK_PATH:-}
+      SALES_LEADS_FOLDER: ${SALES_LEADS_FOLDER:-}
+      SALES_POLL_INTERVAL_MS: ${SALES_POLL_INTERVAL_MS:-120000}
       # SETUP_FLAG_PATH is intentionally not wired here: it defaults to an
       # ephemeral container path with no persistent volume, so it resets on
       # every redeploy. The DB-level `setupConfirmed` guard is the

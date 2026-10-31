@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../hooks/usePageTitle.js";
+import { scrollToSection } from "../utils/scrollToSection.js";
 
 const sidebarSections = [
   { id: "what-you-have", label: "What You Have" },
@@ -321,8 +322,7 @@ export default function Docs() {
   const [activeLang, setActiveLang] = useState("node");
 
   const handleSidebarClick = (id) => {
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: "smooth" });
+    scrollToSection(id);
   };
 
   const activeLangTab = LANG_TABS.find((t) => t.id === activeLang);
@@ -332,7 +332,7 @@ export default function Docs() {
       {/* Page header */}
       <div className="mb-20">
         <SectionBadge>Developer Reference</SectionBadge>
-        <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white sm:text-6xl text-gradient transition-colors">
+        <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-fg sm:text-6xl text-gradient transition-colors">
           Connect Your App
         </h1>
         <p className="mt-8 max-w-2xl text-xl text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
@@ -394,9 +394,7 @@ export default function Docs() {
           <section>
             <SectionAnchor id="what-you-have" />
             <SectionBadge>Credentials</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
-              What You Have
-            </h2>
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">What You Have</h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 transition-colors">
               After onboarding you should have received:
             </p>
@@ -415,9 +413,7 @@ export default function Docs() {
                   key={item.label}
                   className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm"
                 >
-                  <h3 className="font-bold text-slate-900 dark:text-white text-lg transition-colors">
-                    {item.label}
-                  </h3>
+                  <h3 className="font-bold text-fg text-lg transition-colors">{item.label}</h3>
                   <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
                     {item.desc}
                   </p>
@@ -430,9 +426,7 @@ export default function Docs() {
           <section>
             <SectionAnchor id="how-it-works" />
             <SectionBadge>Overview</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
-              How It Works
-            </h2>
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">How It Works</h2>
             <div className="mt-8 space-y-6">
               {[
                 {
@@ -506,9 +500,7 @@ export default function Docs() {
           <section>
             <SectionAnchor id="quick-start" />
             <SectionBadge>Quick Start</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
-              Test Your API Key
-            </h2>
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">Test Your API Key</h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 transition-colors">
               Run this curl command to confirm your key works. A successful response includes a
               Stripe Checkout url and a sessionId.
@@ -524,12 +516,12 @@ export default function Docs() {
           <section>
             <SectionAnchor id="step-1" />
             <SectionBadge>Backend</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">
               Step 1 — Create a Payment
             </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
               Call this from your{" "}
-              <strong className="text-slate-900 dark:text-white underline decoration-brand-500/50 transition-colors">
+              <strong className="text-fg underline decoration-brand-500/50 transition-colors">
                 server
               </strong>
               , never from the browser.
@@ -546,10 +538,10 @@ export default function Docs() {
               <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Header
                     </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Value
                     </th>
                   </tr>
@@ -578,7 +570,7 @@ export default function Docs() {
             </div>
 
             <div className="mt-12 p-8 rounded-[2rem] border border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02] transition-colors">
-              <h3 className="text-xl font-bold text-slate-900 dark:text-white transition-colors">
+              <h3 className="text-xl font-bold text-fg transition-colors">
                 What is an Idempotency Key?
               </h3>
               <p className="mt-4 text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
@@ -631,13 +623,13 @@ export default function Docs() {
               <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Field
                     </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Required
                     </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Description
                     </th>
                   </tr>
@@ -711,9 +703,7 @@ export default function Docs() {
                   key={item.title}
                   className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm"
                 >
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base transition-colors">
-                    {item.title}
-                  </h3>
+                  <h3 className="font-bold text-fg text-base transition-colors">{item.title}</h3>
                   <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
                     {item.desc}
                   </p>
@@ -726,7 +716,7 @@ export default function Docs() {
           <section>
             <SectionAnchor id="step-2" />
             <SectionBadge>Frontend</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">
               Step 2 — Redirect to Checkout
             </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
@@ -763,7 +753,7 @@ window.location.href = url;`}</CodeBlock>
             </p>
 
             <div className="mt-8 p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] text-sm text-slate-700 dark:text-slate-300 transition-colors shadow-sm">
-              <span className="font-bold text-slate-900 dark:text-white uppercase text-[10px] tracking-widest block mb-2 transition-colors">
+              <span className="font-bold text-fg uppercase text-[10px] tracking-widest block mb-2 transition-colors">
                 Pro Tip:
               </span>
               Ask your DFWSC administrator to configure your{" "}
@@ -776,13 +766,13 @@ window.location.href = url;`}</CodeBlock>
           <section>
             <SectionAnchor id="step-3" />
             <SectionBadge>Backend</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">
               Step 3 — Confirm the Payment
             </h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
               Arriving on your success page does not prove the customer paid. Before you fulfil an
               order, check the payment from your{" "}
-              <strong className="text-slate-900 dark:text-white underline decoration-brand-500/50 transition-colors">
+              <strong className="text-fg underline decoration-brand-500/50 transition-colors">
                 server
               </strong>{" "}
               using the{" "}
@@ -841,10 +831,10 @@ window.location.href = url;`}</CodeBlock>
               <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Status
                     </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Meaning
                     </th>
                   </tr>
@@ -888,9 +878,7 @@ window.location.href = url;`}</CodeBlock>
                   key={item.title}
                   className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm"
                 >
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base transition-colors">
-                    {item.title}
-                  </h3>
+                  <h3 className="font-bold text-fg text-base transition-colors">{item.title}</h3>
                   <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
                     {item.desc}
                   </p>
@@ -903,9 +891,7 @@ window.location.href = url;`}</CodeBlock>
           <section>
             <SectionAnchor id="code-examples" />
             <SectionBadge>Examples</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
-              Code Examples
-            </h2>
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">Code Examples</h2>
 
             <div className="mt-8 flex flex-wrap gap-2">
               {LANG_TABS.map((tab) => (
@@ -933,9 +919,7 @@ window.location.href = url;`}</CodeBlock>
           <section>
             <SectionAnchor id="error-handling" />
             <SectionBadge>Errors</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
-              Error Handling
-            </h2>
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">Error Handling</h2>
             <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
               Errors return a JSON body with an{" "}
               <code className="text-brand-600 dark:text-brand-300 font-mono bg-slate-100 dark:bg-white/5 px-1.5 py-0.5 rounded transition-colors">
@@ -961,13 +945,13 @@ window.location.href = url;`}</CodeBlock>
               <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
                 <thead>
                   <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Status
                     </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Cause
                     </th>
-                    <th className="px-6 py-4 text-left font-bold text-slate-900 dark:text-white uppercase tracking-widest text-[10px] transition-colors">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
                       Retry?
                     </th>
                   </tr>
@@ -978,7 +962,7 @@ window.location.href = url;`}</CodeBlock>
                       key={row.cause}
                       className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]"
                     >
-                      <td className="px-6 py-4 font-black text-slate-900 dark:text-white transition-colors">
+                      <td className="px-6 py-4 font-black text-fg transition-colors">
                         {row.status}
                       </td>
                       <td className="px-6 py-4 text-slate-600 dark:text-slate-300 transition-colors">
@@ -1001,9 +985,7 @@ window.location.href = url;`}</CodeBlock>
           <section>
             <SectionAnchor id="rules" />
             <SectionBadge>Rules</SectionBadge>
-            <h2 className="mt-4 text-3xl font-bold text-slate-900 dark:text-white transition-colors">
-              Rules to Follow
-            </h2>
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">Rules to Follow</h2>
             <div className="mt-8 grid gap-4">
               {[
                 {
@@ -1028,9 +1010,7 @@ window.location.href = url;`}</CodeBlock>
                   key={rule.title}
                   className="p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] transition-all hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm"
                 >
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base transition-colors">
-                    {rule.title}
-                  </h3>
+                  <h3 className="font-bold text-fg text-base transition-colors">{rule.title}</h3>
                   <p className="mt-2 text-sm text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
                     {rule.desc}
                   </p>
@@ -1043,7 +1023,7 @@ window.location.href = url;`}</CodeBlock>
           <section className="pt-12 border-t border-slate-200 dark:border-white/5 transition-colors">
             <SectionAnchor id="need-help" />
             <div className="rounded-[2.5rem] bg-gradient-to-br from-brand-600/5 to-transparent dark:from-brand-600/20 dark:to-transparent border border-slate-200 dark:border-white/5 p-12 text-center shadow-sm">
-              <h2 className="text-3xl font-bold text-slate-900 dark:text-white transition-colors">
+              <h2 className="text-3xl font-bold text-fg transition-colors">
                 Need custom integration help?
               </h2>
               <p className="mt-6 text-lg text-slate-700 dark:text-slate-300 max-w-2xl mx-auto transition-colors">

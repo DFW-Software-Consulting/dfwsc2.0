@@ -76,16 +76,16 @@ export default function AdminLogin({ showToast }) {
 
       <Button
         type="submit"
-        variant="success"
+        variant="primary"
         disabled={loginMutation.isPending}
         isLoading={loginMutation.isPending}
-        className="w-full shadow-lg focus:ring-2 focus:ring-green-400"
+        className="w-full shadow-lg"
       >
         {loginMutation.isPending ? "Logging in..." : "Log In"}
       </Button>
 
       {error && (
-        <p className="mt-4 text-center text-sm text-red-400" role="alert">
+        <p className="mt-4 text-center text-sm text-red-700 dark:text-red-400" role="alert">
           {error}
         </p>
       )}

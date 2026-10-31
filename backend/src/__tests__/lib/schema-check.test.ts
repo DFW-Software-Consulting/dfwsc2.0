@@ -93,6 +93,23 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "currency" },
             { column_name: "metadata" },
             { column_name: "last_stripe_event_created_at" },
+            // sales_lead_submissions columns
+            { column_name: "form_id" },
+            { column_name: "submission_id" },
+            { column_name: "attempts" },
+            { column_name: "next_attempt_at" },
+            { column_name: "claimed_at" },
+            { column_name: "claim_token" },
+            { column_name: "last_error_code" },
+            { column_name: "table_row_id" },
+            { column_name: "contact_uid" },
+            { column_name: "folder_name" },
+            { column_name: "folder_file_id" },
+            { column_name: "links_backfilled_at" },
+            { column_name: "completed_at" },
+            // sales_lead_sync_state columns
+            { column_name: "baseline_submission_id" },
+            { column_name: "baselined_at" },
           ],
         };
       }
@@ -101,7 +118,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(8);
+    expect(mockDb.execute).toHaveBeenCalledTimes(10);
   });
 
   it("throws when a table is missing required columns", async () => {

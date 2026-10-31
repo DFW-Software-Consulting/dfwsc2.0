@@ -64,13 +64,9 @@ export default function OnboardingSuccess() {
               />
             </svg>
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">
-            {state.heading}
-          </h1>
-          <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
-            {state.body}
-          </p>
-          <p className="text-slate-500 dark:text-gray-400 transition-colors">
+          <h1 className="text-3xl font-bold text-fg mb-4 transition-colors">{state.heading}</h1>
+          <p className="text-fg-muted text-lg mb-6 transition-colors">{state.body}</p>
+          <p className="text-fg-muted transition-colors">
             If you have questions, reply to the onboarding email or contact our team.
           </p>
         </div>
@@ -96,13 +92,11 @@ export default function OnboardingSuccess() {
             />
           </svg>
         </div>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">
-          Onboarding Complete
-        </h1>
-        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+        <h1 className="text-3xl font-bold text-fg mb-4 transition-colors">Onboarding Complete</h1>
+        <p className="text-fg-muted text-lg mb-6 transition-colors">
           Your Stripe account setup is complete. DFWSC will follow up with next steps shortly.
         </p>
-        <p className="text-slate-500 dark:text-gray-400 transition-colors">
+        <p className="text-fg-muted transition-colors">
           If you have questions, reply to the onboarding email or contact our team.
         </p>
       </div>

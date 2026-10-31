@@ -22,10 +22,8 @@ export default function NotFound() {
             />
           </svg>
         </div>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">
-          Page Not Found
-        </h1>
-        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+        <h1 className="text-3xl font-bold text-fg mb-4 transition-colors">Page Not Found</h1>
+        <p className="text-fg-muted text-lg mb-6 transition-colors">
           The page you are looking for does not exist or has been moved.
         </p>
         <Link
