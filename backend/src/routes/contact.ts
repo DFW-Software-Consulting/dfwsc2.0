@@ -6,6 +6,7 @@ import { errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { parseBody } from "../lib/validation";
+import { formatVisitContext, visitContextSchema } from "../lib/visit-context";
 import {
   isWebsiteLeadEnabled,
   reserveWebsiteLeadSlot,
@@ -33,6 +34,8 @@ const contactBodySchema = z.object({
     .trim()
     .min(1, "company is required.")
     .max(100, "company must not exceed 100 characters."),
+  // Optional visit context: anything invalid is dropped, never a 400.
+  context: visitContextSchema.optional().catch(undefined),
 });
 
 export default async function contactRoutes(fastify: FastifyInstance) {
@@ -57,21 +60,27 @@ export default async function contactRoutes(fastify: FastifyInstance) {
 
       const body = parseBody(contactBodySchema, request.body, reply);
       if (!body) return;
-      const { name, email, message, company } = body;
+      const { name, email, message, company, context } = body;
+      if (rawBody.context != null && !context) {
+        // Never log the values: they are visitor-controlled.
+        request.log.info({ event: "contact.context_dropped" }, "contact.context_dropped");
+      }
+      const contextBlock = formatVisitContext(context);
 
       const submittedAt = new Date().toISOString();
 
-      const mailText = [
-        `New contact form submission from ${name}`,
-        "",
-        `Name: ${name}`,
-        `Email: ${email}`,
-        `Company: ${company}`,
-        `Submitted: ${submittedAt}`,
-        "",
-        "Message:",
-        message,
-      ].join("\n");
+      const mailText =
+        [
+          `New contact form submission from ${name}`,
+          "",
+          `Name: ${name}`,
+          `Email: ${email}`,
+          `Company: ${company}`,
+          `Submitted: ${submittedAt}`,
+          "",
+          "Message:",
+          message,
+        ].join("\n") + (contextBlock ? `\n\n${contextBlock}` : "");
 
       // Email and lead run in parallel; either one succeeding is enough, so a
       // Nextcloud outage never loses a message that reached the inbox and vice versa.
@@ -91,7 +100,7 @@ export default async function contactRoutes(fastify: FastifyInstance) {
         if (reserveWebsiteLeadSlot()) {
           channels.push({
             name: "lead",
-            run: submitWebsiteLead({ company, name, email, message }),
+            run: submitWebsiteLead({ company, name, email, message, context }),
           });
         } else {
           request.log.warn({ event: "contact.lead_cap_reached" }, "contact.lead_cap_reached");

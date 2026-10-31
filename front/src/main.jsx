@@ -7,6 +7,7 @@ import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import { AuthProvider, authLogoutRef } from "./contexts/AuthContext.jsx";
 import { ThemeProvider } from "./contexts/ThemeContext.jsx";
 import { handlePreloadError } from "./utils/preloadRecovery.js";
+import { initVisitContext } from "./utils/visitContext.js";
 import "@fontsource/inter/latin-400.css";
 import "@fontsource/inter/latin-500.css";
 import "@fontsource/inter/latin-600.css";
@@ -15,6 +16,7 @@ import "@fontsource/inter/latin-800.css";
 import "./index.css";
 
 window.addEventListener("vite:preloadError", handlePreloadError);
+initVisitContext();
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false } },

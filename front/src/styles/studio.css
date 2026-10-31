@@ -110,3 +110,12 @@
 }
 .studio-contact-links { gap: 4px 14px; }
 .studio-contact-links .studio-text-link { display: inline-flex; align-items: center; min-height: 44px; }
+
+/* Contact form privacy note and the privacy page */
+.studio-contact .studio-contact-form .studio-form-note { text-align: left; max-width: none; margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-inverse-muted); }
+.studio-form-note a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }
+.studio-prose { max-width: 720px; display: grid; gap: 14px; }
+.studio-prose h2 { font-size: 24px; letter-spacing: -.03em; margin-top: 28px; }
+.studio-prose p, .studio-prose li { font-size: 16px; line-height: 1.75; color: var(--text-muted); }
+.studio-prose ul { padding-left: 20px; list-style: disc; display: grid; gap: 6px; }
+.studio-prose a { color: var(--link); text-decoration: underline; text-underline-offset: 3px; }

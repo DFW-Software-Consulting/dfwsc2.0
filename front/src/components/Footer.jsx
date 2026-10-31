@@ -8,6 +8,7 @@ const exploreLinks = [
   { label: "Values", to: "/", state: { scrollTo: "values" } },
   { label: "Pricing", to: "/pricing" },
   { label: "Our team", to: "/team" },
+  { label: "Privacy", to: "/privacy" },
 ];
 
 function Icon({ d, evenOdd }) {

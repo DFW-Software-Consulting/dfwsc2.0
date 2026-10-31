@@ -6,6 +6,8 @@
 // that is missing is a configuration error that stops the automation loudly
 // rather than writing a lead into the wrong cells.
 
+import { formatVisitContext, type VisitContext } from "./visit-context";
+
 export const LEAD_QUESTION_TITLES = {
   company: "Company",
   contactName: "Contact name",
@@ -107,6 +109,7 @@ export interface WebsiteContact {
   name: string;
   email: string;
   message: string;
+  context?: VisitContext;
 }
 
 /** Forms v3 submission body: question id → array of text values or option ids. */
@@ -156,7 +159,9 @@ export function buildWebsiteLeadAnswers(
       sourceSet = true;
     }
   }
-  setText("notes", sourceSet ? contact.message : `${SOURCE_NOTE_PREFIX}${contact.message}`);
+  const contextBlock = formatVisitContext(contact.context);
+  const notes = sourceSet ? contact.message : `${SOURCE_NOTE_PREFIX}${contact.message}`;
+  setText("notes", contextBlock ? `${notes}\n\n${contextBlock}` : notes);
   return answers;
 }
 

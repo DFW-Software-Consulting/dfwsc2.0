@@ -47,6 +47,8 @@ TanStack Query manages all server state. API logic lives in `src/api/`; hooks in
 
 The `components/Contact.jsx` form (rendered in the Home contact band, split layout, styled by the `.studio-contact-*` / `.studio-field` classes) submits through `api/contact.js` and `useContactForm`. Name, email, company, and message limits mirror the public backend endpoint; name, company and message are required, company is limited to 100 characters.
 
+Visit context for that form lives in `front/src/utils/visitContext.js`, populated by `RouteTracker`. It is in-memory only and records just allowlisted public routes (`/`, `/pricing`, `/team`, `/privacy`) plus UTM values, the landing path and external referrer host; it writes no cookies or storage. It is sent as `context` on `POST /api/v1/contact`, and the `/privacy` page describes this to visitors.
+
 ## 5. Theme System
 The app supports light and dark modes via `ThemeContext`. It defaults to the system preference, persists the choice in `localStorage`, and applies a `.light` or `.dark` class on `<html>`, which switches the CSS custom properties defined in `index.css`:
 - **Light**: warm off-white page (`#f7f7f0`), deep teal-ink text.
