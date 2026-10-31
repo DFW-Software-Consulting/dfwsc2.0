@@ -23,7 +23,9 @@ import {
   parseLeadReference,
   parseProjectNumber,
   projectBriefContent,
+  projectHubContent,
   projectPageTitle,
+  projectTeamName,
   resolveIntakeQuestions,
   resolvePipelineColumns,
   resolveProjectColumns,
@@ -37,7 +39,9 @@ import {
 import {
   ClientOnboardingNextcloud,
   type ClientOnboardingTargets,
+  type CollectivePage,
   type TableRow,
+  TEAM_LEVEL_ADMIN,
 } from "./client-onboarding-nextcloud";
 import {
   CLIENT_ONBOARDING_CLAIM_LEASE_MS,
@@ -64,13 +68,23 @@ import {
   mergeContactVCard,
 } from "./nextcloud-contacts";
 import { linkCellUrl, linkValue, parseDate } from "./sales-lead-mapping";
-import { isBadResponseError, SUBMISSION_PAGE_SIZE } from "./sales-lead-nextcloud";
+import {
+  isBadResponseError,
+  NextcloudBadResponseError,
+  SUBMISSION_PAGE_SIZE,
+} from "./sales-lead-nextcloud";
 
 // "DFWSC — Convert Won Lead to Client" onboarding. For each submission of one
 // Nextcloud Form, exactly once: a client folder with Meetings/ Decisions/
 // Deliverables/, a contact card (created or updated), a Client Projects row with
 // the next CP-### code, a Collectives project page, the row's links, and the
 // matching Sales Pipeline row set to Won with a link to the project.
+//
+// With CLIENT_ONBOARDING_PROJECT_TEAMS=true each project also gets a Nextcloud Team
+// ("CP-### <Project name>", admins from CLIENT_ONBOARDING_TEAM_ADMINS, the submitter
+// as a member), a collective of the same name whose landing page is the Project Brief,
+// and the client folder shared with the team. The Client Projects page then becomes a
+// short hub that links to all of it. With the flag off none of this runs.
 //
 // Same model as the New Lead automation (lib/sales-lead-sync.ts): Forms is the
 // queue, progress per submission lives in client_onboarding_submissions, each
@@ -84,7 +98,14 @@ import { isBadResponseError, SUBMISSION_PAGE_SIZE } from "./sales-lead-nextcloud
 
 type Logger = Pick<FastifyBaseLogger, "info" | "warn" | "error">;
 
+/** Per-project Teams; null when CLIENT_ONBOARDING_PROJECT_TEAMS is off. */
+interface ProjectTeamsSettings {
+  /** Nextcloud user ids raised to team admin (level 8). */
+  admins: string[];
+}
+
 interface ClientOnboardingSettings extends ClientOnboardingTargets {
+  teams: ProjectTeamsSettings | null;
   pollIntervalMs: number;
   /** Shared secret for the webhook; null leaves the webhook off (poll only). */
   webhookSecret: string | null;
@@ -108,6 +129,15 @@ function parseFolderSegments(value: string | undefined): string[] | undefined {
     .filter(Boolean);
   if (!segments.length || segments.some((s) => s === "." || s === "..")) return undefined;
   return segments;
+}
+
+/** Comma-separated user ids. Ids may contain spaces, so only the ends are trimmed. */
+function parseTeamAdmins(value: string | undefined): string[] {
+  const ids = (value ?? "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  return [...new Set(ids)];
 }
 
 function loadClientOnboardingConfig(
@@ -164,6 +194,17 @@ function loadClientOnboardingConfig(
     );
   }
 
+  let teams: ProjectTeamsSettings | null = null;
+  if (env.CLIENT_ONBOARDING_PROJECT_TEAMS?.trim() === "true") {
+    const admins = parseTeamAdmins(env.CLIENT_ONBOARDING_TEAM_ADMINS);
+    if (!admins.length) {
+      problems.push(
+        "CLIENT_ONBOARDING_TEAM_ADMINS must list at least one user id when CLIENT_ONBOARDING_PROJECT_TEAMS=true"
+      );
+    }
+    teams = { admins };
+  }
+
   if (!nc.ok || problems.length || !clientsFolder) return { status: "invalid", problems };
   return {
     status: "ready",
@@ -175,6 +216,7 @@ function loadClientOnboardingConfig(
       collectiveId: ints.CLIENT_ONBOARDING_COLLECTIVE_ID as number,
       addressbookPath,
       clientsFolder,
+      teams,
       pollIntervalMs,
       webhookSecret,
     },
@@ -420,6 +462,8 @@ interface ProcessingContext {
   pipelineColumns: PipelineColumnMap;
   collectiveSlug: string;
   projectsPageId: number;
+  /** Per-project Teams settings; null when the flag is off (the team steps do not run). */
+  teams: ProjectTeamsSettings | null;
   /** Address books listed once per cycle; see ContactDirectory. */
   contacts: ContactDirectory;
   logger: Logger;
@@ -616,9 +660,103 @@ async function projectRowStep(
 }
 
 /** An untouched page: empty, or only the page's own title as a heading. */
-function isPageSeed(body: string, title: string): boolean {
+function isPageSeed(body: string, title: string, welcomeSeed = false): boolean {
   const text = body.trim();
-  return text === "" || text === `# ${title.trim()}`;
+  return text === "" || text === `# ${title.trim()}` || (welcomeSeed && isWelcomeText(text));
+}
+
+/**
+ * The text Collectives puts on a new collective's landing page ("# Welcome <emoji> <name>"
+ * followed by instructions to add pages and edit). Anything else is a human edit.
+ */
+function isWelcomeText(text: string): boolean {
+  return /^#\s*Welcome\b/.test(text) && text.includes("Add pages with the");
+}
+
+/** Names used in the log lines of writeIntoSeedPage. */
+interface SeedPageLabels {
+  /** "Client project page": the page the log lines talk about. */
+  page: string;
+  /** "brief" or "hub": what is written into it. */
+  content: string;
+  /** A new collective's landing page still holding Collectives' default welcome text is a seed. */
+  welcomeSeed?: boolean;
+}
+
+/**
+ * Writes `content` into a page file, but never over a human edit: only into a seed
+ * (empty, or just the page's own title heading) and only while it still has the ETag
+ * we read. Every outcome is final for the step; the caller records it as done.
+ */
+async function writeIntoSeedPage(
+  ctx: ProcessingContext,
+  ids: { formId: number; submissionId: number },
+  page: CollectivePage,
+  content: string,
+  labels: SeedPageLabels
+): Promise<void> {
+  const { api } = ctx;
+  if (page.collectivePath && page.fileName) {
+    const segments = [page.collectivePath, page.filePath, page.fileName]
+      .flatMap((p) => p.split("/"))
+      .filter(Boolean);
+    const current = await api.getFile(segments);
+    if (current === null) {
+      ctx.logger.warn(
+        { ...ids, pageId: page.id },
+        `${labels.page} file not found; ${labels.content} skipped.`
+      );
+    } else if (!isPageSeed(current.body, page.title, labels.welcomeSeed)) {
+      ctx.logger.info({ ...ids, pageId: page.id }, `${labels.page} already has content.`);
+    } else {
+      if (current.etag === null) {
+        ctx.logger.warn(
+          { ...ids, pageId: page.id },
+          `${labels.page} has no ETag; writing unguarded.`
+        );
+      }
+      const written = await api.putFile(segments, content, current.etag);
+      if (written) {
+        ctx.logger.info({ ...ids, pageId: page.id }, `Client project ${labels.content} written.`);
+      } else {
+        ctx.logger.warn(
+          { ...ids, pageId: page.id },
+          `${labels.page} changed meanwhile; ${labels.content} skipped.`
+        );
+      }
+    }
+  } else {
+    // The collective is not mounted in the service account's files: the page stays
+    // empty. Its row still links to it, so this is not worth failing the onboarding.
+    ctx.logger.warn({ ...ids, pageId: page.id }, `${labels.page} content skipped.`);
+  }
+}
+
+function briefFor(row: SubmissionRow, intake: Intake, ctx: ProcessingContext): string {
+  const { api } = ctx;
+  return projectBriefContent({
+    projectCode: row.projectCode as string,
+    summary: intake.summary,
+    targetDate: intake.targetDate ? parseDate(intake.targetDate) : undefined,
+    rowUrl: api.rowLink(api.targets.projectsTableId, row.tableRowId as number),
+    folderUrl: api.folderLink(row.folderFileId as number),
+    intakeTitle: `Intake submission #${row.submissionId}`,
+    intakeUrl: api.intakeResultsLink(ctx.formHash),
+  });
+}
+
+/** The manager hub: links to the team wiki, client folder, table row and team. */
+async function hubFor(row: SubmissionRow, ctx: ProcessingContext): Promise<string> {
+  const { api } = ctx;
+  const wiki = (await api.listCollectives()).find((c) => c.id === row.collectiveId);
+  if (!wiki) throw new NextcloudBadResponseError("collectives.list");
+  return projectHubContent({
+    projectCode: row.projectCode as string,
+    wikiUrl: api.collectiveLink(wiki.slug ?? slugify(wiki.name), wiki.id),
+    folderUrl: api.folderLink(row.folderFileId as number),
+    rowUrl: api.rowLink(api.targets.projectsTableId, row.tableRowId as number),
+    teamUrl: api.teamLink(row.teamId as string),
+  });
 }
 
 async function pageStep(row: SubmissionRow, intake: Intake, ctx: ProcessingContext) {
@@ -647,56 +785,212 @@ async function pageStep(row: SubmissionRow, intake: Intake, ctx: ProcessingConte
 
   if (row.pageContentAt === null) {
     const page = await api.getPage(row.pageId as number);
-    if (page.collectivePath && page.fileName) {
-      const segments = [page.collectivePath, page.filePath, page.fileName]
-        .flatMap((p) => p.split("/"))
-        .filter(Boolean);
-      // Never overwrite a human edit: write only into a seed (empty, or just the
-      // page's own title heading) and only while it still has the ETag we read.
-      const current = await api.getFile(segments);
-      if (current === null) {
-        ctx.logger.warn(
-          { ...ids, pageId: page.id },
-          "Client project page file not found; brief skipped."
-        );
-      } else if (!isPageSeed(current.body, page.title)) {
-        ctx.logger.info({ ...ids, pageId: page.id }, "Client project page already has content.");
-      } else {
-        if (current.etag === null) {
-          ctx.logger.warn(
-            { ...ids, pageId: page.id },
-            "Client project page has no ETag; writing unguarded."
-          );
-        }
-        const written = await api.putFile(
-          segments,
-          projectBriefContent({
-            projectCode: code,
-            summary: intake.summary,
-            targetDate: intake.targetDate ? parseDate(intake.targetDate) : undefined,
-            rowUrl: api.rowLink(api.targets.projectsTableId, row.tableRowId as number),
-            folderUrl: api.folderLink(row.folderFileId as number),
-            intakeTitle: `Intake submission #${row.submissionId}`,
-            intakeUrl: api.intakeResultsLink(ctx.formHash),
-          }),
-          current.etag
-        );
-        if (written) {
-          ctx.logger.info({ ...ids, pageId: page.id }, "Client project brief written.");
-        } else {
-          ctx.logger.warn(
-            { ...ids, pageId: page.id },
-            "Client project page changed meanwhile; brief skipped."
-          );
-        }
-      }
-    } else {
-      // The collective is not mounted in the service account's files: the page stays
-      // empty. Its row still links to it, so this is not worth failing the onboarding.
-      ctx.logger.warn({ ...ids, pageId: page.id }, "Client project page content skipped.");
-    }
+    // Per-project Teams: the brief lives in the team's own wiki, so this page is a hub.
+    const content = ctx.teams ? await hubFor(row, ctx) : briefFor(row, intake, ctx);
+    await writeIntoSeedPage(ctx, ids, page, content, {
+      page: "Client project page",
+      content: ctx.teams ? "hub" : "brief",
+    });
     await saveUnderClaim(row, { pageContentAt: new Date() });
   }
+}
+
+// ── Per-project Teams (CLIENT_ONBOARDING_PROJECT_TEAMS=true) ──────────────────
+
+/** Emoji of the project collectives (Collectives needs one only for the sidebar). */
+const PROJECT_WIKI_EMOJI = "📋";
+
+function isClientError(error: unknown): boolean {
+  return error instanceof NextcloudHttpError && error.status >= 400 && error.status < 500;
+}
+
+/** Nextcloud refused a team-related write; the operator has to change something. */
+function refused(
+  ctx: ProcessingContext,
+  ids: { formId: number; submissionId: number },
+  code: string,
+  hint: string
+): OnboardingInvalidError {
+  ctx.logger.error({ ...ids, errorCode: code }, hint);
+  return new OnboardingInvalidError(code);
+}
+
+/**
+ * The project's Team: found by its exact name when the service account is its admin or
+ * owner (a create whose response was lost), else created. Then the configured admins
+ * are added and raised to level 8, and the submitter is added as a plain member. Members
+ * already in the team are never added twice.
+ */
+async function teamStep(
+  row: SubmissionRow,
+  intake: Intake,
+  submitter: string | null,
+  ctx: ProcessingContext
+) {
+  const teams = ctx.teams;
+  if (row.teamMembersAt !== null || !teams) return;
+  const { api } = ctx;
+  const ids = { formId: ctx.formId, submissionId: row.submissionId };
+
+  if (row.teamId === null) {
+    const name = projectTeamName(row.projectCode as string, intake.projectName, row.submissionId);
+    const existing = (await api.listTeams()).find((t) => t.name === name);
+    let teamId: string;
+    if (existing) {
+      if (existing.initiatorLevel < TEAM_LEVEL_ADMIN) {
+        throw refused(
+          ctx,
+          ids,
+          "team_name_taken",
+          "A Team with this project's name exists but the service account is not its admin; fix or remove it."
+        );
+      }
+      teamId = existing.id;
+    } else {
+      try {
+        teamId = (await api.createTeam(name)).id;
+      } catch (error) {
+        if (error instanceof NextcloudHttpError && error.status === 403) {
+          throw refused(
+            ctx,
+            ids,
+            "circles.create_forbidden",
+            "Nextcloud refused to create a Team for the service account; allow it to create Teams (Teams app settings), then retry the submission."
+          );
+        }
+        throw error;
+      }
+    }
+    await saveUnderClaim(row, { teamId });
+    ctx.logger.info({ ...ids, adopted: Boolean(existing) }, "Client project team ready.");
+  }
+
+  const teamId = row.teamId as string;
+  const members = await api.listTeamMembers(teamId);
+  const byUser = new Map(members.filter((m) => m.userType === 1).map((m) => [m.userId, m]));
+  // The service account owns the team it created, so it is never added again.
+  const isOwner = (userId: string) => userId === api.serviceUsername;
+  for (const userId of teams.admins) {
+    if (isOwner(userId)) continue;
+    let member = byUser.get(userId);
+    if (!member) {
+      try {
+        member = await api.addTeamUser(teamId, userId);
+      } catch (error) {
+        if (isClientError(error)) {
+          throw refused(
+            ctx,
+            ids,
+            "team_admin_add_failed",
+            "Nextcloud would not add a user from CLIENT_ONBOARDING_TEAM_ADMINS to the Team; check that every id names an existing, enabled user, then retry the submission."
+          );
+        }
+        throw error;
+      }
+      byUser.set(userId, member);
+    }
+    if (member.level < TEAM_LEVEL_ADMIN) {
+      await api.setTeamMemberLevel(teamId, member.id, TEAM_LEVEL_ADMIN);
+    }
+  }
+  if (submitter && !isOwner(submitter) && !byUser.has(submitter)) {
+    try {
+      await api.addTeamUser(teamId, submitter);
+    } catch (error) {
+      // A deleted, disabled or unknown submitter must not block the onboarding.
+      if (!isClientError(error)) throw error;
+      ctx.logger.warn(
+        { ...ids, status: (error as NextcloudHttpError).status },
+        "Form submitter could not be added to the Team; continuing without."
+      );
+    }
+  }
+  await saveUnderClaim(row, { teamMembersAt: new Date() });
+  ctx.logger.info({ ...ids, admins: teams.admins.length }, "Client project team members set.");
+}
+
+/**
+ * The project's wiki: a collective with the team's name. Collectives builds it on the
+ * existing team (the service account is its admin) rather than creating a second one;
+ * the result is checked against the team id. The Project Brief goes on its landing page.
+ */
+async function projectWikiStep(row: SubmissionRow, intake: Intake, ctx: ProcessingContext) {
+  if (row.collectiveContentAt !== null || !ctx.teams) return;
+  const { api } = ctx;
+  const ids = { formId: ctx.formId, submissionId: row.submissionId };
+
+  if (row.collectiveId === null) {
+    const teamName = projectTeamName(
+      row.projectCode as string,
+      intake.projectName,
+      row.submissionId
+    );
+    // Reuse the collective already built on this team (a create whose response was lost).
+    const existing = (await api.listCollectives()).find((c) =>
+      c.circleId !== null ? c.circleId === row.teamId : c.name === teamName
+    );
+    const collective = existing ?? (await api.createCollective(teamName, PROJECT_WIKI_EMOJI));
+    if (!existing && collective.circleId !== null && collective.circleId !== row.teamId) {
+      // Record it first so a retry or an operator sees it instead of creating another.
+      await saveUnderClaim(row, { collectiveId: collective.id });
+      ctx.logger.error(
+        { ...ids, collectiveId: collective.id },
+        "Wiki collective is on another Team."
+      );
+      throw refused(
+        ctx,
+        ids,
+        "collective_team_mismatch",
+        "Collectives built the project wiki on another Team than the project's; fix it in Nextcloud."
+      );
+    }
+    await saveUnderClaim(row, { collectiveId: collective.id });
+    ctx.logger.info(
+      { ...ids, collectiveId: collective.id, adopted: Boolean(existing) },
+      "Client project wiki ready."
+    );
+  }
+
+  const collectiveId = row.collectiveId as number;
+  const landing = (await api.listPages(collectiveId)).find((p) => p.parentId === 0);
+  if (!landing) throw new NextcloudBadResponseError("collectives.pages");
+  await writeIntoSeedPage(ctx, ids, landing, briefFor(row, intake, ctx), {
+    page: "Client project wiki page",
+    content: "brief",
+    welcomeSeed: true,
+  });
+  await saveUnderClaim(row, { collectiveContentAt: new Date() });
+}
+
+/** Shares the client folder with the team (read, update, create, delete; no reshare). */
+async function folderShareStep(row: SubmissionRow, ctx: ProcessingContext) {
+  if (row.folderShareId !== null || !ctx.teams) return;
+  const { api } = ctx;
+  const ids = { formId: ctx.formId, submissionId: row.submissionId };
+  const teamId = row.teamId as string;
+  const path = api.clientFolderSharePath([row.folderName as string]);
+  const existing = (await api.listSharesOfPath(path)).find((s) => api.isTeamShare(s, teamId));
+  let share = existing;
+  if (!share) {
+    try {
+      share = await api.shareWithTeam(path, teamId);
+    } catch (error) {
+      if (error instanceof NextcloudHttpError && error.status === 403) {
+        throw refused(
+          ctx,
+          ids,
+          "files_sharing.create_forbidden",
+          "Nextcloud refused to share the client folder with the Team: sharing with Teams may be disabled, or dfwsc-admin may lack share rights on the client folder. Check the server's sharing settings and the /clients share, then retry the submission."
+        );
+      }
+      throw error;
+    }
+  }
+  await saveUnderClaim(row, { folderShareId: share.id });
+  ctx.logger.info(
+    { ...ids, shareId: share.id, adopted: Boolean(existing) },
+    "Client folder shared with the team."
+  );
 }
 
 async function projectLinksStep(row: SubmissionRow, ctx: ProcessingContext) {
@@ -796,7 +1090,10 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
   await folderStep(row, intake, ctx); // 1
   await contactStep(row, intake, ctx); // 2
   await projectRowStep(row, intake, owner, ctx); // 3
-  await pageStep(row, intake, ctx); // 4
+  await teamStep(row, intake, owner, ctx); // 3b, flag only
+  await projectWikiStep(row, intake, ctx); // 3c, flag only
+  await folderShareStep(row, ctx); // 3d, flag only
+  await pageStep(row, intake, ctx); // 4 (hub when the flag is on)
   await projectLinksStep(row, ctx); // 3, links (needs the page)
   await leadStep(row, intake, ctx); // 5
 
@@ -859,6 +1156,7 @@ async function processClaim(row: SubmissionRow, ctx: ProcessingContext): Promise
 async function buildContext(
   api: ClientOnboardingNextcloud,
   formId: number,
+  teams: ProjectTeamsSettings | null,
   logger: Logger
 ): Promise<ProcessingContext> {
   const form = await api.getForm();
@@ -879,6 +1177,7 @@ async function buildContext(
     pipelineColumns: resolvePipelineColumns(await api.getColumns(api.targets.pipelineTableId)),
     collectiveSlug: collective.slug ?? slugify(collective.name),
     projectsPageId: projects[0].id,
+    teams,
     contacts: api.contactDirectory((addressbook, status) =>
       logger.warn(
         { formId, addressbook, status },
@@ -924,7 +1223,7 @@ export async function runClientOnboardingCycle(options: {
       if (!row) break;
       if (!ctx) {
         try {
-          ctx = await buildContext(api, formId, logger);
+          ctx = await buildContext(api, formId, config.settings.teams, logger);
         } catch (error) {
           await saveUnderClaim(row, { claimedAt: null, claimToken: null }).catch(() => undefined);
           throw error;

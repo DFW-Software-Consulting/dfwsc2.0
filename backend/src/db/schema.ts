@@ -371,6 +371,15 @@ export const clientOnboardingSubmissions = pgTable(
     pageId: integer("page_id"),
     pageUrl: text("page_url"),
     pageContentAt: timestamp("page_content_at", { withTimezone: true }),
+    // Per-project Teams (CLIENT_ONBOARDING_PROJECT_TEAMS=true only; all stay NULL when off).
+    // 3b. Nextcloud Team (Circles) "CP-### <Project name>"; teamMembersAt = admins and submitter added.
+    teamId: text("team_id"),
+    teamMembersAt: timestamp("team_members_at", { withTimezone: true }),
+    // 3c. Collective of the same name (its landing page holds the Project Brief).
+    collectiveId: integer("collective_id"),
+    collectiveContentAt: timestamp("collective_content_at", { withTimezone: true }),
+    // 3d. files_sharing share of the client folder with the team.
+    folderShareId: integer("folder_share_id"),
     // Row links (folder, page, intake submission), verified on read-back.
     linksBackfilledAt: timestamp("links_backfilled_at", { withTimezone: true }),
     // 5. Sales Pipeline row. A non-"won" status is a flag for an operator, not a failure.

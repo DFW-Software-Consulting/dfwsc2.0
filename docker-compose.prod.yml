@@ -52,6 +52,8 @@ services:
       CLIENT_ONBOARDING_COLLECTIVE_ID: ${CLIENT_ONBOARDING_COLLECTIVE_ID:-}
       CLIENT_ONBOARDING_WEBHOOK_SECRET: ${CLIENT_ONBOARDING_WEBHOOK_SECRET:-}
       CLIENT_ONBOARDING_POLL_INTERVAL_MS: ${CLIENT_ONBOARDING_POLL_INTERVAL_MS:-300000}
+      CLIENT_ONBOARDING_PROJECT_TEAMS: ${CLIENT_ONBOARDING_PROJECT_TEAMS:-false}
+      CLIENT_ONBOARDING_TEAM_ADMINS: ${CLIENT_ONBOARDING_TEAM_ADMINS:-}
       # SETUP_FLAG_PATH is intentionally not wired here: it defaults to an
       # ephemeral container path with no persistent volume, so it resets on
       # every redeploy. The DB-level `setupConfirmed` guard is the

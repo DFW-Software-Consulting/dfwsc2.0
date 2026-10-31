@@ -308,6 +308,15 @@ export function projectPageTitle(code: string, projectName: string, submissionId
   return `${code} — ${sanitizeFolderName(projectName, submissionId, "Project")}`;
 }
 
+/**
+ * "CP-003 Warehouse Portal": the Nextcloud Team and the collective made for the project.
+ * The project name is made safe the way Collectives sanitises a collective name, so the
+ * collective reuses this exact team instead of creating a second one.
+ */
+export function projectTeamName(code: string, projectName: string, submissionId: number): string {
+  return `${code} ${sanitizeFolderName(projectName, submissionId, "Project")}`;
+}
+
 /** URL slug like Collectives': ASCII letters and digits, other runs become "-". */
 export function slugify(text: string): string {
   return text
@@ -356,6 +365,34 @@ export function projectBriefContent(input: {
     `| Project row | [Project row](${input.rowUrl}) |`,
     `| Client folder | [Client folder](${input.folderUrl}) |`,
     `| Intake results | [${markdownText(input.intakeTitle)}](${input.intakeUrl}) |`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Body of the manager-side page under Projects when per-project Teams are on: a short
+ * hub that points at the team's own wiki (which holds the Project Brief), the client
+ * folder, the table row and the team.
+ */
+export function projectHubContent(input: {
+  projectCode: string;
+  wikiUrl: string;
+  folderUrl: string;
+  rowUrl: string;
+  teamUrl: string;
+}): string {
+  return [
+    "# Project hub",
+    "",
+    "> Day-to-day work for this project lives in the team wiki. Add or remove people by editing the project's Team.",
+    "",
+    "| Field | Value |",
+    "|---|---|",
+    `| Project code | ${tableCell(input.projectCode)} |`,
+    `| Team wiki | [Team wiki](${input.wikiUrl}) |`,
+    `| Client folder | [Client folder](${input.folderUrl}) |`,
+    `| Project row | [Project row](${input.rowUrl}) |`,
+    `| Team | [Team](${input.teamUrl}) |`,
     "",
   ].join("\n");
 }

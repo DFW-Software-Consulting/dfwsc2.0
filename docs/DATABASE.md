@@ -77,7 +77,7 @@ Progress of the Nextcloud client onboarding (Convert Won Lead to Client form), o
 
 - **PK**: (`formId`, `submissionId`).
 - **Statuses**: `pending` → `completed`, or `failed` (permanent error, or 10 attempts used).
-- **Step outputs**: `folderName`, `folderFileId`, `contactStatus` (`created` / `updated` / `ambiguous` / `read_only`), `contactUid`, `projectNumber` + `projectCode` (CP-###), `tableRowId`, `pageId`, `pageUrl`, `pageContentAt`, `linksBackfilledAt`, `leadStatus` (`won` / `no_match` / `ambiguous` / `already_linked`), `leadRowId`. Each is saved as its step succeeds so retries resume.
+- **Step outputs**: `folderName`, `folderFileId`, `contactStatus` (`created` / `updated` / `ambiguous` / `read_only`), `contactUid`, `projectNumber` + `projectCode` (CP-###), `tableRowId`, `pageId`, `pageUrl`, `pageContentAt`, `teamId` + `teamMembersAt`, `collectiveId` + `collectiveContentAt`, `folderShareId` (the last five only with `CLIENT_ONBOARDING_PROJECT_TEAMS=true`, else NULL), `linksBackfilledAt`, `leadStatus` (`won` / `no_match` / `ambiguous` / `already_linked`), `leadRowId`. Each is saved as its step succeeds so retries resume.
 - **Project codes**: `projectNumber` and `projectCode` are unique. They are allocated under a transaction-scoped advisory lock and never reused, including for submissions that later fail.
 - **Retry/lease**: `attempts`, `nextAttemptAt`, `lastErrorCode` (PII-free), `claimedAt` + `claimToken`.
 - Stores no form answers.

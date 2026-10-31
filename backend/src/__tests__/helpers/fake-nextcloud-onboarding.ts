@@ -1,5 +1,5 @@
 // In-memory stand-in for the Nextcloud APIs the client onboarding calls: Forms v3,
-// Tables v1, CardDAV, WebDAV and Collectives. Column ids, option ids and the
+// Tables v1, CardDAV, WebDAV, Collectives, Circles (Teams) and files_sharing. Column ids, option ids and the
 // existing CP-001/CP-002 rows mirror the live instance (Tables 2.4, read
 // 2026-10-31). Install it with vi.stubGlobal("fetch", fake.fetch).
 
@@ -14,6 +14,11 @@ export const ONB_CLIENTS_FOLDER = "clients";
 export const ONB_COLLECTIVE_ID = 1;
 export const ONB_PROJECTS_PAGE_ID = 4562;
 export const ONB_WEBHOOK_SECRET = "s3cret-for-tests-0123456789abcdefghij";
+/** Team admins used by the per-project Teams tests; the second id has a space, like real ones can. */
+/** What Collectives writes to a new collective's landing page. */
+export const WELCOME_TEXT =
+  "# Welcome \u{1F4CB} CP-003 Warehouse Portal\n\nAdd pages with the \u2795 button.\n\nPress `\u270F\uFE0F Edit` to change this page.\n";
+export const ONB_TEAM_ADMINS = ["ops-lead", "Jane Doe"];
 
 export const onboardingEnv = (overrides: Record<string, string | undefined> = {}) =>
   ({
@@ -30,6 +35,14 @@ export const onboardingEnv = (overrides: Record<string, string | undefined> = {}
     CLIENT_ONBOARDING_WEBHOOK_SECRET: ONB_WEBHOOK_SECRET,
     ...overrides,
   }) as NodeJS.ProcessEnv;
+
+/** Env with CLIENT_ONBOARDING_PROJECT_TEAMS on. */
+export const onboardingTeamsEnv = (overrides: Record<string, string | undefined> = {}) =>
+  onboardingEnv({
+    CLIENT_ONBOARDING_PROJECT_TEAMS: "true",
+    CLIENT_ONBOARDING_TEAM_ADMINS: ONB_TEAM_ADMINS.join(", "),
+    ...overrides,
+  });
 
 export const INTAKE_QUESTIONS = {
   company: 201,
@@ -149,6 +162,30 @@ interface Page {
   filePath: string;
 }
 
+export interface FakeTeam {
+  id: string;
+  name: string;
+  /** The service account's level (9 owner, 8 admin, 1 member). */
+  initiatorLevel: number;
+  members: { id: string; userId: string; level: number; status?: string }[];
+}
+
+interface FakeWiki {
+  id: number;
+  name: string;
+  circleId: string;
+  path: string;
+  pages: Page[];
+}
+
+export interface FakeShare {
+  id: number;
+  path: string;
+  shareType: number;
+  shareWith: string;
+  permissions: number;
+}
+
 interface Submission {
   userId: string;
   answers: IntakeAnswers;
@@ -159,8 +196,10 @@ const TABLES = "/index.php/apps/tables/api/1";
 const BOOKS_HOME = `/remote.php/dav/addressbooks/users/${ONB_NC_USER}/`;
 const FILES = `/remote.php/dav/files/${ONB_NC_USER}/`;
 const COLLECTIVES = "/ocs/v2.php/apps/collectives/api/v1.0/collectives";
+const CIRCLES = "/ocs/v2.php/apps/circles/circles";
+const SHARES = "/ocs/v2.php/apps/files_sharing/api/v1/shares";
 /** Where the collective is mounted in the service account's files. */
-export const ONB_COLLECTIVE_PATH = "Collectives/Cerebo Pilot";
+export const ONB_COLLECTIVE_PATH = ".Collectives/Cerebo Pilot";
 
 function xmlEscape(value: string): string {
   return value
@@ -222,6 +261,17 @@ export class FakeOnboardingNextcloud {
       filePath: "Projects",
     },
   ];
+  /** Teams (Circles). Created ones are owned by the service account. */
+  teams: FakeTeam[] = [];
+  /** Collectives other than the Client Projects one. */
+  wikis: FakeWiki[] = [];
+  shares: FakeShare[] = [];
+  /** Content of a new collective's landing page (the real one may carry a welcome text). */
+  wikiLandingSeed = WELCOME_TEXT;
+  /** Collectives builds the collective on a brand-new team instead of reusing the existing one. */
+  wikiIgnoresTeam = false;
+  /** Answer share creation with 403 (no reshare rights on the path). */
+  shareForbidden = false;
   latencyMs = 0;
   /** Row updates still to answer 200 without storing anything. */
   droppedRowUpdates = 0;
@@ -229,6 +279,10 @@ export class FakeOnboardingNextcloud {
   private nextRowId = 1000;
   private nextFileId = 900;
   private nextPageId = 5000;
+  private nextTeamId = 1;
+  private nextMemberId = 1;
+  private nextShareId = 50;
+  private nextWikiId = 10;
   private nextEtag = 1;
   /** Runs once, right before a page-file PUT is evaluated (to simulate a race). */
   beforePut: ((rel: string) => void) | null = null;
@@ -377,12 +431,157 @@ export class FakeOnboardingNextcloud {
     return { id, formId: ONB_FORM_ID, userId: sub.userId, timestamp: id, answers };
   }
 
-  private pageJson(p: Page) {
+  private pageJson(p: Page, collectivePath = ONB_COLLECTIVE_PATH) {
     return {
       ...p,
       slug: p.title.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, ""),
-      collectivePath: this.collectiveMounted ? ONB_COLLECTIVE_PATH : null,
+      collectivePath: this.collectiveMounted ? collectivePath : null,
     };
+  }
+
+  team(name: string): FakeTeam | undefined {
+    return this.teams.find((t) => t.name === name);
+  }
+
+  /** A team already there (someone made it by hand), owned by the service account unless `level` says otherwise. */
+  addTeam(name: string, initiatorLevel = 9): FakeTeam {
+    const team: FakeTeam = {
+      id: `team${String(this.nextTeamId++).padStart(4, "0")}`,
+      name,
+      initiatorLevel,
+      members:
+        initiatorLevel >= 8
+          ? [{ id: `m${this.nextMemberId++}`, userId: ONB_NC_USER, level: 9 }]
+          : [],
+    };
+    this.teams.push(team);
+    return team;
+  }
+
+  wiki(name: string): FakeWiki | undefined {
+    return this.wikis.find((w) => w.name === name);
+  }
+
+  /** Path of a wiki's landing page file, as used in `files`. */
+  wikiLandingFile(name: string): string {
+    return `.Collectives/${name}/Readme.md`;
+  }
+
+  private teamJson(t: FakeTeam) {
+    return { id: t.id, name: t.name, initiator: { level: t.initiatorLevel } };
+  }
+
+  private memberJson(m: FakeTeam["members"][number]) {
+    return {
+      id: m.id,
+      userId: m.userId,
+      userType: 1,
+      level: m.level,
+      status: m.status ?? "Member",
+    };
+  }
+
+  private shareJson(sh: FakeShare) {
+    return {
+      id: String(sh.id),
+      share_type: sh.shareType,
+      share_with: sh.shareWith,
+      path: sh.path,
+      permissions: sh.permissions,
+    };
+  }
+
+  private handleTeams(req: RecordedRequest): Response | null {
+    const { method, path } = req;
+    if (path === CIRCLES && method === "GET") {
+      return this.ocs(this.teams.filter((t) => t.initiatorLevel > 0).map((t) => this.teamJson(t)));
+    }
+    if (path === CIRCLES && method === "POST") {
+      const { name } = JSON.parse(req.body) as { name: string };
+      if (this.teams.some((t) => t.name.toLowerCase() === name.toLowerCase())) {
+        return this.json({ ocs: { meta: { status: "failure" }, data: [] } }, 400);
+      }
+      return this.ocs(this.teamJson(this.addTeam(name)));
+    }
+    const members = new RegExp(`^${CIRCLES}/([^/]+)/members$`).exec(path);
+    if (members) {
+      const team = this.teams.find((t) => t.id === members[1]);
+      if (!team) return this.json({}, 404);
+      if (method === "GET") return this.ocs(team.members.map((m) => this.memberJson(m)));
+      if (method === "POST") {
+        const { userId } = JSON.parse(req.body) as { userId: string };
+        const added = { id: `m${this.nextMemberId++}`, userId, level: 1 };
+        team.members.push(added);
+        return this.ocs(this.memberJson(added));
+      }
+    }
+    const level = new RegExp(`^${CIRCLES}/([^/]+)/members/([^/]+)/level$`).exec(path);
+    if (level && method === "PUT") {
+      const member = this.teams
+        .find((t) => t.id === level[1])
+        ?.members.find((m) => m.id === level[2]);
+      if (!member) return this.json({}, 404);
+      member.level = (JSON.parse(req.body) as { level: number }).level;
+      return this.ocs(this.memberJson(member));
+    }
+    return null;
+  }
+
+  private handleShares(req: RecordedRequest, url: URL): Response | null {
+    if (req.path !== SHARES) return null;
+    if (req.method === "GET") {
+      const wanted = url.searchParams.get("path");
+      return this.ocs(this.shares.filter((s) => s.path === wanted).map((s) => this.shareJson(s)));
+    }
+    if (req.method === "POST") {
+      if (this.shareForbidden) return this.json({ ocs: { meta: {}, data: [] } }, 403);
+      const body = JSON.parse(req.body) as {
+        path: string;
+        shareType: number;
+        shareWith: string;
+        permissions: number;
+      };
+      if (!this.folders.has(body.path.replace(/^\//, ""))) {
+        return this.json({ ocs: { meta: {}, data: [] } }, 404);
+      }
+      const share: FakeShare = { id: this.nextShareId++, ...body };
+      this.shares.push(share);
+      return this.ocs(this.shareJson(share));
+    }
+    return null;
+  }
+
+  private createWiki(name: string): Response {
+    // Like Collectives: a team of that name is reused when the caller is its admin.
+    let team = this.wikiIgnoresTeam ? undefined : this.team(name);
+    if (team && team.initiatorLevel < 8) {
+      return this.json({ ocs: { meta: {}, data: [] } }, 400);
+    }
+    team ??= this.addTeam(this.wikiIgnoresTeam ? `${name} (new)` : name);
+    if (this.wikis.some((w) => w.circleId === team.id)) {
+      return this.json({ ocs: { meta: {}, data: [] } }, 400);
+    }
+    const id = this.nextWikiId++;
+    const landing: Page = {
+      id: this.nextPageId++,
+      parentId: 0,
+      title: name,
+      fileName: "Readme.md",
+      filePath: "",
+    };
+    const wiki: FakeWiki = {
+      id,
+      name,
+      circleId: team.id,
+      path: `.Collectives/${name}`,
+      pages: [landing],
+    };
+    this.wikis.push(wiki);
+    this.files.set(this.wikiLandingFile(name), this.wikiLandingSeed);
+    return this.ocs({
+      collective: { id, name, slug: name.replace(/[^A-Za-z0-9]+/g, "-"), circleId: team.id },
+      info: "",
+    });
   }
 
   private rowJson(r: Row) {
@@ -559,11 +758,35 @@ export class FakeOnboardingNextcloud {
       }
     }
 
+    // Teams and shares
+    const teamAnswer = this.handleTeams(req);
+    if (teamAnswer) return teamAnswer;
+    const shareAnswer = this.handleShares(req, url);
+    if (shareAnswer) return shareAnswer;
+
     // Collectives
     if (method === "GET" && path === COLLECTIVES) {
       return this.ocs({
-        collectives: [{ id: ONB_COLLECTIVE_ID, name: "Cerebo Pilot", slug: this.collectiveSlug }],
+        collectives: [
+          { id: ONB_COLLECTIVE_ID, name: "Cerebo Pilot", slug: this.collectiveSlug },
+          ...this.wikis.map((w) => ({
+            id: w.id,
+            name: w.name,
+            slug: w.name.replace(/[^A-Za-z0-9]+/g, "-"),
+            circleId: w.circleId,
+          })),
+        ],
       });
+    }
+    if (method === "POST" && path === COLLECTIVES) {
+      return this.createWiki((JSON.parse(req.body) as { name: string }).name);
+    }
+    const wikiPages = new RegExp(`^${COLLECTIVES}/(\\d+)/pages$`).exec(path);
+    if (method === "GET" && wikiPages && Number(wikiPages[1]) !== ONB_COLLECTIVE_ID) {
+      const wiki = this.wikis.find((w) => w.id === Number(wikiPages[1]));
+      return wiki
+        ? this.ocs({ pages: wiki.pages.map((p) => this.pageJson(p, wiki.path)) })
+        : this.json({}, 404);
     }
     if (method === "GET" && path === `${COLLECTIVES}/${ONB_COLLECTIVE_ID}/pages`) {
       return this.ocs({ pages: this.pages.map((p) => this.pageJson(p)) });
