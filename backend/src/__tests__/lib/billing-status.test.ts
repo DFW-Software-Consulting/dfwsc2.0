@@ -119,8 +119,8 @@ describe("deriveBilling status rules", () => {
     });
     expect(values.status).toBe("Ended");
     expect(values.upToDate).toBe("Yes");
-    expect(values.subscription).toBe("$1,500/week for 20 weeks");
-    expect(values.paymentsMade).toBe("20 of 20");
+    expect(values.subscription).toBe("$1,500/week for 20 weeks (done)");
+    expect(values.paymentsMade).toBe("20 of 20 (done)");
     expect(values.amountPaid).toBe(30000);
     expect(values.nextDue).toBeNull();
   });
@@ -256,6 +256,90 @@ describe("deriveBilling status rules", () => {
     expect(values.nextDue).toBe("2026-11-10 12:00");
     expect(values.subscription).toBe("Scheduled plan starting 2026-11-10");
     expect(values.paymentsMade).toBe("0");
+  });
+
+  it("Late: the overdue final invoice of a 5-of-6 plan is Next Due", () => {
+    const start = days(-35);
+    const dueAt = days(-3);
+    const values = derive({
+      subscriptions: [
+        sub({
+          id: "sub_f",
+          status: "past_due",
+          start_date: start,
+          cancel_at: start + 6 * 7 * 86400,
+        }),
+      ],
+      invoices: [
+        ...Array.from({ length: 5 }, (_, i) =>
+          paidInvoice(`in_${i}`, "sub_f", 150000, 7 * (5 - i))
+        ),
+        invoice({
+          id: "in_last",
+          status: "open",
+          amount_remaining: 150000,
+          due_date: dueAt,
+          parent: { subscription_details: { subscription: "sub_f" } },
+        }),
+      ],
+    });
+    expect(values.status).toBe("Late");
+    expect(values.paymentsMade).toBe("5 of 6");
+    expect(values.nextDue).toBe("2026-10-28 12:00");
+  });
+
+  it("uses the oldest overdue invoice when nothing is upcoming", () => {
+    const values = derive({
+      invoices: [
+        invoice({ id: "in_new", status: "open", amount_remaining: 100, due_date: days(-2) }),
+        invoice({ id: "in_old", status: "open", amount_remaining: 100, due_date: days(-9) }),
+      ],
+    });
+    expect(values.nextDue).toBe("2026-10-22 12:00");
+  });
+
+  it("an upcoming date wins over an overdue one", () => {
+    const values = derive({
+      invoices: [
+        invoice({ id: "in_old", status: "open", amount_remaining: 100, due_date: days(-9) }),
+        invoice({ id: "in_fut", status: "open", amount_remaining: 100, due_date: days(5) }),
+      ],
+    });
+    expect(values.nextDue).toBe("2026-11-05 12:00");
+  });
+
+  it("marks a finished finite plan (done) in both cells, after the live plan", () => {
+    const start = days(-133);
+    const values = derive({
+      subscriptions: [
+        sub({ id: "sub_old", start_date: start, cancel_at: start + 19 * 7 * 86400 }),
+        sub({ id: "sub_live" }),
+      ],
+      invoices: [
+        ...Array.from({ length: 19 }, (_, i) => paidInvoice(`in_${i}`, "sub_old", 150000, 7 * i)),
+        paidInvoice("in_l", "sub_live", 150000, 2),
+      ],
+    });
+    expect(values.subscription).toBe("$1,500/week; $1,500/week for 19 weeks (done)");
+    expect(values.paymentsMade).toBe("1; 19 of 19 (done)");
+    expect(values.amountPaid).toBe(30000);
+  });
+
+  it("marks a canceled finite plan (done) even when payments are missing", () => {
+    const start = days(-60);
+    const values = derive({
+      subscriptions: [
+        sub({
+          id: "sub_x",
+          status: "canceled",
+          start_date: start,
+          cancel_at: start + 10 * 7 * 86400,
+        }),
+      ],
+      invoices: [paidInvoice("in_1", "sub_x", 150000, 50)],
+    });
+    expect(values.subscription).toBe("$1,500/week for 10 weeks (done)");
+    expect(values.paymentsMade).toBe("1 of 10 (done)");
   });
 
   it("a subscription canceling at period end has no next renewal", () => {

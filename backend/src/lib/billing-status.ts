@@ -13,6 +13,8 @@ import { formatDateTime } from "./portal-mirror-render";
 //   Ended   a subscription or schedule was canceled or completed, or an invoice was paid, and
 //           nothing is live.
 //   None    nothing (draft, void and incomplete_expired are ignored everywhere).
+// Next Due: the earliest future date; failing that, the oldest overdue open invoice's due date.
+// Finished plans (all payments made, canceled, or schedule completed) get " (done)" and sort last.
 // "Up to date" is No exactly when the overdue amount is above zero (or overdue in another currency).
 
 export interface BillingPrice {
@@ -152,7 +154,7 @@ function totalPayments(
 function describeSubscription(
   sub: BillingSubscriptionInput,
   invoices: BillingInvoiceInput[]
-): { text: string; made: string } {
+): { text: string; made: string; done: boolean } {
   const items = sub.items.data;
   const recurring = items.find((i) => i.price?.recurring)?.price?.recurring;
   const currency = items[0]?.price?.currency ?? "usd";
@@ -167,7 +169,12 @@ function describeSubscription(
   const made = invoices.filter(
     (i) => i.status === "paid" && i.amount_paid > 0 && subscriptionIdOf(i) === sub.id
   ).length;
-  return { text, made: payments === null ? String(made) : `${made} of ${payments}` };
+  // Finished: every payment of a finite plan is paid, or the subscription/schedule has ended.
+  const done =
+    (payments !== null && made >= payments) ||
+    sub.status === "canceled" ||
+    scheduleOf(sub)?.status === "completed";
+  return { text, made: payments === null ? String(made) : `${made} of ${payments}`, done };
 }
 
 export function deriveBilling(input: BillingInput): BillingValues {
@@ -236,7 +243,16 @@ export function deriveBilling(input: BillingInput): BillingValues {
     if (start != null && start * 1000 > nowMs) upcoming.push(start * 1000);
   }
 
+  // Nothing in the future: the oldest overdue open invoice is the payment still waiting. This
+  // covers past_due/unpaid subscriptions too, whose unpaid invoice is one of the overdue ones.
+  if (!upcoming.length) {
+    const overdueDates = pastDue.map((i) => i.due_date).filter((d): d is number => d != null);
+    if (overdueDates.length) upcoming.push(Math.min(...overdueDates) * 1000);
+  }
+
   const described = subscriptions.map((s) => describeSubscription(s, invoices));
+  const livePlans = described.filter((d) => !d.done);
+  const finished = described.filter((d) => d.done);
   const planned = input.schedules.map((s) => {
     const start = s.phases?.[0]?.start_date;
     return start
@@ -247,8 +263,16 @@ export function deriveBilling(input: BillingInput): BillingValues {
   return {
     status,
     upToDate: overdueCents > 0 || nonUsdOverdue ? "No" : "Yes",
-    subscription: [...described.map((d) => d.text), ...planned].join("; "),
-    paymentsMade: [...described.map((d) => d.made), ...planned.map(() => "0")].join("; "),
+    subscription: [
+      ...livePlans.map((d) => d.text),
+      ...planned,
+      ...finished.map((d) => `${d.text} (done)`),
+    ].join("; "),
+    paymentsMade: [
+      ...livePlans.map((d) => d.made),
+      ...planned.map(() => "0"),
+      ...finished.map((d) => `${d.made} (done)`),
+    ].join("; "),
     amountPaid: dollars(sum(usd(invoices), (i) => i.amount_paid)),
     nextDue: upcoming.length ? formatDateTime(new Date(Math.min(...upcoming))) : null,
     openBalance: nonUsdOpen ? null : dollars(sum(usd(open), (i) => i.amount_remaining)),
