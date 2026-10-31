@@ -80,6 +80,12 @@ All resources can be deployed independently on Coolify while sharing the same mo
   CONTACT_STRIPE_SYNC_INTERVAL_MS=120000
   # Optional: read-only "Portal Accounts" Nextcloud Table with portal client status (docs/BACKEND.md section 12); off by default
   PORTAL_MIRROR=false
+  # Optional: read-only "Client Billing" Nextcloud Table with each billing client's Stripe status (docs/BACKEND.md section 13); off by default
+  BILLING_MIRROR=false
+  # BILLING_MIRROR_SHARE_GROUPS=dfwsc-admins,managers   (default; both read-only)
+  # BILLING_SWEEP_INTERVAL_MS=3600000
+  # Secret of the account-level Stripe webhook endpoint https://api.dfwsc.com/api/v1/webhooks/stripe-billing (docs/STRIPE.md); unset = endpoint answers 404
+  # STRIPE_BILLING_WEBHOOK_SECRET=whsec_...
   ```
 - **Admin login (Nextcloud)**: the admin panel signs users in against Nextcloud; there are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ALLOW_ADMIN_SETUP` are no longer read (remove them from Coolify). Before deploying this change:
   1. **Create the Nextcloud groups first and put members in them.** The defaults are `dfwsc-admins` and `managers` (override with `ADMIN_NEXTCLOUD_GROUPS`, comma-separated, exact ids). A user whose Nextcloud account is in none of them gets 403 "This Nextcloud account isn't authorized for the admin panel".

@@ -72,7 +72,8 @@ export class PortalMirrorNextcloud {
   /** `minGapMs` spaces calls out (5 per second at 200) so a backfill cannot hammer Nextcloud. */
   constructor(
     private readonly nc: NextcloudConfig,
-    private readonly minGapMs = 200
+    private readonly minGapMs = 200,
+    private readonly request: typeof portalMirrorRequest = portalMirrorRequest
   ) {}
 
   get serviceUsername(): string {
@@ -83,7 +84,7 @@ export class PortalMirrorNextcloud {
     const wait = this.lastCallAt + this.minGapMs - Date.now();
     if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     this.lastCallAt = Date.now();
-    return portalMirrorRequest(this.nc, request);
+    return this.request(this.nc, request);
   }
 
   async listTables(): Promise<MirrorTable[]> {

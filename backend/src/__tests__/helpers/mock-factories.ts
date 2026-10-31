@@ -526,9 +526,6 @@ export function createStripeMock() {
     prices: { create: vi.fn() },
     taxRates: { list: vi.fn(), retrieve: vi.fn() },
     charges: { retrieve: vi.fn() },
-    subscriptions: { retrieve: vi.fn(), update: vi.fn() },
-    subscriptionSchedules: { retrieve: vi.fn(), update: vi.fn() },
-    invoices: { list: vi.fn() },
     webhooks: webhookHelper.webhooks,
   };
 }

@@ -145,6 +145,13 @@ const mirrorBreaker = new CircuitBreaker(send, {
   ...breakerOptions,
 });
 
+// The billing mirror (lib/billing-mirror-sync.ts) has its own as well, so an outage seen by one
+// mirror does not pause the other.
+const billingMirrorBreaker = new CircuitBreaker(send, {
+  name: "nextcloud-billing-mirror",
+  ...breakerOptions,
+});
+
 export function nextcloudRequest(
   config: NextcloudConfig,
   request: NextcloudRequest
@@ -158,6 +165,14 @@ export function portalMirrorRequest(
   request: NextcloudRequest
 ): Promise<NextcloudResponse> {
   return fire(mirrorBreaker, config, request);
+}
+
+/** Same as nextcloudRequest, through the billing mirror's own breaker. */
+export function billingMirrorRequest(
+  config: NextcloudConfig,
+  request: NextcloudRequest
+): Promise<NextcloudResponse> {
+  return fire(billingMirrorBreaker, config, request);
 }
 
 async function fire(
@@ -196,6 +211,7 @@ export function getNextcloudBreakerState() {
 export function resetNextcloudBreakerForTests() {
   breaker.close();
   mirrorBreaker.close();
+  billingMirrorBreaker.close();
 }
 
 export function openPortalMirrorBreakerForTests() {

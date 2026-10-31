@@ -11,29 +11,29 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
-import type { FastifyBaseLogger } from "fastify";
-import { db, pool } from "../db/client";
+import { db } from "../db/client";
+import { clientGroups, clients, paymentLedger, portalMirrorRows } from "../db/schema";
 import {
-  clientGroups,
-  clients,
-  paymentLedger,
-  portalMirrorRows,
-  portalMirrorState,
-} from "../db/schema";
-import {
-  getNextcloudConfig,
-  NextcloudCircuitOpenError,
-  type NextcloudConfig,
-  NextcloudHttpError,
-  NextcloudRequestError,
-} from "./nextcloud";
+  AuthBackoff,
+  intVar,
+  isAuthError,
+  isOutage,
+  type MirrorLogger,
+  PortalMirrorConfigError,
+  type ProvisionCache,
+  type Provisioned,
+  parseShareGroups,
+  provisionMirrorTable,
+  pushMirrorRow,
+  reconcileMirrorRows,
+  recordMirrorFailure,
+  withMirrorLock,
+} from "./mirror-table";
+import { getNextcloudConfig, type NextcloudConfig } from "./nextcloud";
 import { PortalMirrorNextcloud } from "./portal-mirror-nextcloud";
 import {
   ACCOUNTS_TABLE_TITLE,
   accountColumns,
-  type ColumnSpec,
-  cellMatches,
-  contentHash,
   DEFAULT_MIRROR_OPTIONS,
   EMPTY_PAYMENT_SUMMARY,
   type FeeDefaults,
@@ -41,9 +41,7 @@ import {
   type PaymentSummary,
   type RenderedValues,
   renderAccount,
-  toRowData,
 } from "./portal-mirror-render";
-import type { TableColumn } from "./sales-lead-mapping";
 import { getSettings } from "./stripe-billing";
 
 // Read-only mirror of the Stripe Connect side of the portal (the `clients` table) into a
@@ -66,7 +64,7 @@ import { getSettings } from "./stripe-billing";
 //
 // Logs carry ids, counts, statuses and error names only.
 
-type Logger = Pick<FastifyBaseLogger, "info" | "warn" | "error">;
+type Logger = MirrorLogger;
 
 const KIND = "account" as const;
 const PORTAL_MIRROR_DEFAULT_INTERVAL_MS = 60_000;
@@ -75,8 +73,6 @@ const PORTAL_MIRROR_DEFAULT_BATCH = 25;
 const PORTAL_MIRROR_MAX_BATCH = 100;
 const OVERLAP_SECONDS = 5 * 60;
 const RECONCILE_EVERY_MS = 24 * 60 * 60 * 1000;
-const RETRY_BASE_SECONDS = 60;
-const RETRY_MAX_SECONDS = 60 * 60;
 const CYCLE_LOCK_NAME = "portal_mirror_cycle";
 const DEFAULT_SHARE_GROUPS = ["dfwsc-admins", "managers"];
 
@@ -96,24 +92,6 @@ type ConfigResult =
   | { status: "disabled" }
   | { status: "invalid"; problems: string[] }
   | { status: "ready"; settings: PortalMirrorSettings };
-
-function intVar(
-  raw: string | undefined,
-  name: string,
-  min: number,
-  max: number,
-  fallback: number,
-  problems: string[]
-): number {
-  const text = raw?.trim();
-  if (!text) return fallback;
-  const parsed = /^\d+$/.test(text) ? Number(text) : Number.NaN;
-  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
-    problems.push(`${name} must be a whole number from ${min} to ${max}`);
-    return fallback;
-  }
-  return parsed;
-}
 
 export function loadPortalMirrorConfig(env: NodeJS.ProcessEnv): ConfigResult {
   if (env.PORTAL_MIRROR?.trim() !== "true") return { status: "disabled" };
@@ -145,16 +123,12 @@ export function loadPortalMirrorConfig(env: NodeJS.ProcessEnv): ConfigResult {
   const accountsTableId = env.PORTAL_ACCOUNTS_TABLE_ID?.trim()
     ? intVar(env.PORTAL_ACCOUNTS_TABLE_ID, "PORTAL_ACCOUNTS_TABLE_ID", 1, 2 ** 31 - 1, 0, problems)
     : null;
-  const rawGroups = env.PORTAL_MIRROR_SHARE_GROUPS?.trim();
-  const shareGroups = rawGroups
-    ? rawGroups
-        .split(",")
-        .map((g) => g.trim())
-        .filter(Boolean)
-    : DEFAULT_SHARE_GROUPS;
-  if (!shareGroups.length || shareGroups.some((g) => g.length > 64)) {
-    problems.push("PORTAL_MIRROR_SHARE_GROUPS must list Nextcloud group names, comma separated");
-  }
+  const shareGroups = parseShareGroups(
+    env.PORTAL_MIRROR_SHARE_GROUPS,
+    "PORTAL_MIRROR_SHARE_GROUPS",
+    DEFAULT_SHARE_GROUPS,
+    problems
+  );
   if (!nc.ok || problems.length) return { status: "invalid", problems };
   return {
     status: "ready",
@@ -206,25 +180,16 @@ const result = (
   ...extra,
 });
 
-interface Provisioned {
-  tableId: number;
-  columnIds: Map<string, number>;
-  specs: ColumnSpec[];
-}
-
-let provisioned: { signature: string; value: Provisioned } | null = null;
+const provisionCache: ProvisionCache = { current: null };
 let lastReconcileAt = 0;
 let lastLoggedProblem: string | null = null;
-// A rejected app password (401/403) backs the mirror off, doubling from one interval to 30 min.
-const MAX_AUTH_BACKOFF_MS = 30 * 60 * 1000;
-const authBackoff = { failures: 0, until: 0 };
+const authBackoff = new AuthBackoff();
 
 export function resetPortalMirrorStateForTests() {
-  provisioned = null;
+  provisionCache.current = null;
   lastReconcileAt = 0;
   lastLoggedProblem = null;
-  authBackoff.failures = 0;
-  authBackoff.until = 0;
+  authBackoff.reset();
 }
 
 function logProblemOnce(logger: Logger, key: string, fields: Record<string, unknown>, msg: string) {
@@ -233,150 +198,30 @@ function logProblemOnce(logger: Logger, key: string, fields: Record<string, unkn
   logger.error(fields, msg);
 }
 
-/** Misconfigured table (a hand-made one is missing columns). `detail` holds titles only. */
-class PortalMirrorConfigError extends Error {
-  constructor(readonly detail: string) {
-    super(`Portal mirror misconfigured: ${detail}`);
-    this.name = "PortalMirrorConfigError";
-  }
-}
-
-/** Nextcloud as a whole is unusable right now: end the cycle instead of failing every row. */
-function isOutage(error: unknown): boolean {
-  return (
-    error instanceof NextcloudCircuitOpenError ||
-    error instanceof NextcloudRequestError ||
-    (error instanceof NextcloudHttpError &&
-      (error.status >= 500 || error.status === 429 || error.status === 401 || error.status === 403))
-  );
-}
-
-const isAuthError = (error: unknown) =>
-  error instanceof NextcloudHttpError && (error.status === 401 || error.status === 403);
-
 // ── Provisioning ─────────────────────────────────────────────────────────────
 
 const TABLE_ID_KEY = "accounts_table_id";
 
-async function storedTableId(): Promise<number | null> {
-  const [row] = await db
-    .select({ value: portalMirrorState.value })
-    .from(portalMirrorState)
-    .where(eq(portalMirrorState.key, TABLE_ID_KEY));
-  const id = row ? Number(row.value) : Number.NaN;
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
-}
-
-async function saveTableId(id: number | null): Promise<void> {
-  if (id === null) {
-    await db.delete(portalMirrorState).where(eq(portalMirrorState.key, TABLE_ID_KEY));
-    return;
-  }
-  await db
-    .insert(portalMirrorState)
-    .values({ key: TABLE_ID_KEY, value: String(id) })
-    .onConflictDoUpdate({
-      target: portalMirrorState.key,
-      set: { value: String(id), updatedAt: new Date() },
-    });
-}
-
-const isNotFound = (error: unknown) => error instanceof NextcloudHttpError && error.status === 404;
-
-/**
- * Finds or creates the table and its columns, and (API-created tables only) the read-only
- * shares. Runs every cycle with one GET of the columns, so a table or column deleted in
- * Nextcloud is noticed on the next cycle without a restart:
- *
- * - The table id is, in order: PORTAL_ACCOUNTS_TABLE_ID, the id stored in portal_mirror_state,
- *   a title lookup. A renamed table keeps being used through its stored id.
- * - A stored table that answers 404 is forgotten and found or created again by title.
- * - Missing columns are re-created by title.
- * - Anything re-created forces a reconcile in this cycle (rows or cells may be missing).
- */
 async function provision(
   nc: PortalMirrorNextcloud,
   settings: PortalMirrorSettings,
   logger: Logger
 ): Promise<Provisioned> {
-  const specs = accountColumns();
-  const signature = JSON.stringify([settings.nextcloud.baseUrl, settings.shareGroups]);
-  const cached = provisioned?.signature === signature ? provisioned.value : null;
-  const override = settings.accountsTableId;
-
-  let tableId = override ?? cached?.tableId ?? (await storedTableId());
-  let columns: TableColumn[] | null = null;
-  let changed = false;
-  let sharesChecked = cached !== null;
-
-  if (tableId !== null) {
-    try {
-      columns = await nc.getColumns(tableId);
-    } catch (error) {
-      if (!isNotFound(error)) throw error;
-      if (override !== null) throw new PortalMirrorConfigError(`table ${override} was not found`);
-      logger.warn({ tableId }, "Portal mirror: its table is gone; looking for or creating one.");
-      await saveTableId(null);
-      tableId = null;
-      sharesChecked = false;
-    }
-  }
-  if (tableId === null) {
-    const owned = (await nc.listTables())
-      .filter(
-        (t) =>
-          t.title === ACCOUNTS_TABLE_TITLE &&
-          (t.ownership === null || t.ownership === nc.serviceUsername)
-      )
-      .sort((a, b) => a.id - b.id);
-    if (owned.length > 1) {
-      logger.warn(
-        { tableIds: owned.map((t) => t.id), using: owned[0].id },
-        "Portal mirror: several tables have the mirror's title; using the lowest id."
-      );
-    }
-    tableId = owned.length ? owned[0].id : await nc.createTable(ACCOUNTS_TABLE_TITLE, "📊");
-    await saveTableId(tableId);
-    columns = await nc.getColumns(tableId);
-    changed = true;
-    sharesChecked = false;
-  } else if (override === null && cached === null && (await storedTableId()) !== tableId) {
-    await saveTableId(tableId);
-  }
-
-  const byTitle = new Map((columns ?? []).map((c) => [c.title.trim(), c.id]));
-  const missing = specs.filter((s) => !byTitle.has(s.title));
-  if (missing.length) {
-    if (override !== null) {
-      throw new PortalMirrorConfigError(
-        `table ${tableId} lacks columns: ${missing.map((m) => m.title).join(", ")}`
-      );
-    }
-    // Columns are created in order, so the table reads left to right as specified.
-    for (const spec of missing) byTitle.set(spec.title, await nc.createColumn(tableId, spec));
-    changed = true;
-  }
-
-  if (override === null && !sharesChecked) {
-    const shares = await nc.listShares(tableId);
-    for (const group of settings.shareGroups) {
-      const existing = shares.find((s) => s.receiver === group && s.receiverType === "group");
-      if (!existing) {
-        await nc.shareReadOnly(tableId, group);
-      } else if (existing.writable) {
-        // Not corrected here: only logged, because the share update call is unverified.
-        logger.warn({ group }, "Portal mirror: a share of its table grants more than read access.");
-      }
-    }
-  }
-
+  const { value, changed } = await provisionMirrorTable(
+    nc,
+    {
+      title: ACCOUNTS_TABLE_TITLE,
+      emoji: "📊",
+      stateKey: TABLE_ID_KEY,
+      specs: accountColumns(),
+      shareGroups: settings.shareGroups,
+      baseUrl: settings.nextcloud.baseUrl,
+      overrideTableId: settings.accountsTableId,
+    },
+    provisionCache,
+    logger
+  );
   if (changed) lastReconcileAt = 0; // rows or cells may be missing: reconcile this cycle
-  const value: Provisioned = {
-    tableId,
-    columnIds: new Map(specs.map((s) => [s.key, byTitle.get(s.title) as number])),
-    specs,
-  };
-  provisioned = { signature, value };
   return value;
 }
 
@@ -453,53 +298,8 @@ async function loadPaymentSummaries(
   return out;
 }
 
-const retrySeconds = (attempts: number) =>
-  Math.min(RETRY_BASE_SECONDS * 2 ** Math.min(attempts, 20), RETRY_MAX_SECONDS);
-
-async function saveMapping(
-  sourceId: string,
-  patch: {
-    ncRowId: number | null;
-    contentHash: string | null;
-    syncedAt: Date | null;
-  }
-) {
-  const set = {
-    ...patch,
-    attempts: 0,
-    nextAttemptAt: null,
-    lastError: null,
-    updatedAt: new Date(),
-  };
-  await db
-    .insert(m)
-    .values({ kind: KIND, sourceId, ...set })
-    .onConflictDoUpdate({ target: [m.kind, m.sourceId], set });
-}
-
-async function recordFailure(sourceId: string, attempts: number, error: unknown) {
-  const name = (error as Error)?.name ?? "Error";
-  const status = error instanceof NextcloudHttpError ? `:${error.status}` : "";
-  const next = new Date(Date.now() + retrySeconds(attempts) * 1000);
-  await db
-    .insert(m)
-    .values({
-      kind: KIND,
-      sourceId,
-      attempts: attempts + 1,
-      nextAttemptAt: next,
-      lastError: `${name}${status}`.slice(0, 200),
-    })
-    .onConflictDoUpdate({
-      target: [m.kind, m.sourceId],
-      set: {
-        attempts: attempts + 1,
-        nextAttemptAt: next,
-        lastError: `${name}${status}`.slice(0, 200),
-        updatedAt: new Date(),
-      },
-    });
-}
+const recordFailure = (sourceId: string, attempts: number, error: unknown) =>
+  recordMirrorFailure(KIND, sourceId, attempts, error);
 
 // ── Cycle ────────────────────────────────────────────────────────────────────
 
@@ -560,32 +360,9 @@ async function syncDirtyAccounts(
       defaults,
       summaries.get(row.client.id) ?? EMPTY_PAYMENT_SUMMARY
     );
-    const hash = contentHash(values);
     const sourceId = row.client.id;
-    const ncRowId = row.mirror?.ncRowId ?? null;
     try {
-      if (ncRowId !== null && row.mirror?.contentHash === hash) {
-        await saveMapping(sourceId, { ncRowId, contentHash: hash, syncedAt: cycleStart });
-        out.unchanged += 1;
-        continue;
-      }
-      const data = toRowData(prov.specs, prov.columnIds, values);
-      let savedId = ncRowId;
-      if (savedId !== null) {
-        try {
-          await nc.updateRow(savedId, data);
-          out.updated += 1;
-        } catch (error) {
-          // 404: the row was deleted in Nextcloud. Put it back.
-          if (!(error instanceof NextcloudHttpError && error.status === 404)) throw error;
-          savedId = null;
-        }
-      }
-      if (savedId === null) {
-        savedId = await nc.createRow(prov.tableId, data);
-        out.created += 1;
-      }
-      await saveMapping(sourceId, { ncRowId: savedId, contentHash: hash, syncedAt: cycleStart });
+      out[await pushMirrorRow(nc, prov, KIND, sourceId, values, row.mirror, cycleStart)] += 1;
     } catch (error) {
       if (isOutage(error)) throw error;
       out.failed += 1;
@@ -645,9 +422,6 @@ async function reconcileAccounts(
   // Every account is re-rendered: the 30 day window slides with no write at all, so only this
   // recompute notices a payment that aged out. The content hash keeps unchanged rows a no-op.
   const summaries = await loadPaymentSummaries(null, cycleStart, logger, ctx);
-  const keyColumn = prov.columnIds.get("id") as number;
-  const ncRows = await nc.listRows(prov.tableId);
-
   const sources = await db
     .select({ client: clients, group: clientGroups })
     .from(clients)
@@ -664,56 +438,7 @@ async function reconcileAccounts(
       ),
     ])
   );
-  const mapping = new Map(
-    (await db.select().from(m).where(eq(m.kind, KIND))).map((r) => [r.sourceId, r])
-  );
-
-  const byKey = new Map<string, typeof ncRows>();
-  for (const row of ncRows) {
-    const key = String(row.cells.get(keyColumn) ?? "");
-    byKey.set(key, [...(byKey.get(key) ?? []), row]);
-  }
-
-  for (const [key, rows] of byKey) {
-    if (!expected.has(key)) {
-      for (const row of rows) await nc.deleteRow(row.id);
-      continue;
-    }
-    const mapped = mapping.get(key)?.ncRowId;
-    const keeper =
-      rows.find((r) => r.id === mapped) ?? rows.reduce((a, b) => (a.id < b.id ? a : b));
-    for (const row of rows) if (row !== keeper) await nc.deleteRow(row.id);
-  }
-
-  for (const [key, values] of expected) {
-    const keeper =
-      (byKey.get(key) ?? []).find((r) => r.id === mapping.get(key)?.ncRowId) ??
-      (byKey.get(key) ?? []).reduce<(typeof ncRows)[number] | null>(
-        (a, b) => (a && a.id < b.id ? a : b),
-        null
-      );
-    if (!keeper) {
-      await saveMapping(key, { ncRowId: null, contentHash: null, syncedAt: null });
-      continue;
-    }
-    const drifted = prov.specs.some(
-      (spec) =>
-        !cellMatches(
-          spec,
-          keeper.cells.get(prov.columnIds.get(spec.key) as number),
-          values[spec.key]
-        )
-    );
-    if (drifted) {
-      await saveMapping(key, { ncRowId: keeper.id, contentHash: null, syncedAt: null });
-    } else if (mapping.get(key)?.ncRowId !== keeper.id || !mapping.get(key)?.contentHash) {
-      await saveMapping(key, {
-        ncRowId: keeper.id,
-        contentHash: contentHash(values),
-        syncedAt: cycleStart,
-      });
-    }
-  }
+  await reconcileMirrorRows(nc, prov, KIND, "id", expected, cycleStart);
 }
 
 async function syncOnce(
@@ -770,40 +495,12 @@ export async function runPortalMirrorCycle(options: {
   }
   if (Date.now() < authBackoff.until) return result("backoff");
   try {
-    const client = await pool.connect();
-    let outcome: PortalMirrorResult;
-    // A connection that may still hold the advisory lock is destroyed, never pooled.
-    let destroyClient = false;
-    try {
-      const lock = await client.query<{ ok: boolean }>(
-        "SELECT pg_try_advisory_lock(hashtext($1)) AS ok",
-        [CYCLE_LOCK_NAME]
-      );
-      if (!lock.rows[0]?.ok) return result("busy");
-      try {
-        // Database clock, taken before any read.
-        const started = await client.query<{ now: Date }>("SELECT now() AS now");
-        outcome = await syncOnce(config.settings, logger, started.rows[0].now);
-      } finally {
-        try {
-          const unlock = await client.query<{ ok: boolean }>(
-            "SELECT pg_advisory_unlock(hashtext($1)) AS ok",
-            [CYCLE_LOCK_NAME]
-          );
-          destroyClient = !unlock.rows[0]?.ok;
-        } catch {
-          destroyClient = true;
-        }
-        if (destroyClient) {
-          logger.error({}, "Portal mirror could not release its cycle lock; connection discarded.");
-        }
-      }
-    } finally {
-      client.release(destroyClient);
-    }
+    const outcome = await withMirrorLock(CYCLE_LOCK_NAME, logger, result("busy"), (started) =>
+      syncOnce(config.settings, logger, started)
+    );
     if (outcome.status === "ok") {
       lastLoggedProblem = null;
-      authBackoff.failures = 0;
+      authBackoff.succeeded();
     }
     return outcome;
   } catch (error) {
@@ -812,15 +509,7 @@ export async function runPortalMirrorCycle(options: {
       return result("invalid_config");
     }
     if (isOutage(error)) {
-      if (isAuthError(error)) {
-        authBackoff.failures += 1;
-        authBackoff.until =
-          Date.now() +
-          Math.min(
-            config.settings.intervalMs * 2 ** (authBackoff.failures - 1),
-            MAX_AUTH_BACKOFF_MS
-          );
-      }
+      if (isAuthError(error)) authBackoff.failed(config.settings.intervalMs);
       logger.warn({ errorName: (error as Error).name }, "Portal mirror: Nextcloud unavailable.");
       return result("nextcloud_unavailable");
     }
