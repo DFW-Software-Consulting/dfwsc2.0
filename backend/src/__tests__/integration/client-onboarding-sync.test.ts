@@ -12,6 +12,7 @@ import {
 } from "../../lib/client-onboarding-sync";
 import { CLIENT_ONBOARDING_MAX_ATTEMPTS } from "../../lib/constants";
 import { openNextcloudBreakerForTests, resetNextcloudBreakerForTests } from "../../lib/nextcloud";
+import { stripe } from "../../lib/stripe";
 import {
   FakeOnboardingNextcloud,
   type IntakeAnswers,
@@ -103,6 +104,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   resetNextcloudBreakerForTests();
   resetClientOnboardingStateForTests();
@@ -169,9 +171,13 @@ describe("client onboarding: baseline", () => {
 
 describe("client onboarding: steps", () => {
   it("runs every step for a full submission", async () => {
+    const stripeProvision = vi
+      .spyOn(stripe.accounts, "create")
+      .mockRejectedValue(new Error("Nextcloud onboarding must not provision Stripe accounts"));
     await baseline();
     fake.addSubmission(5, FULL);
     expect(await cycle()).toMatchObject({ status: "ok", discovered: 1, completed: 1 });
+    expect(stripeProvision).not.toHaveBeenCalled();
     const done = await sub(5);
 
     // 1. Client folder with the CP-001 layout.

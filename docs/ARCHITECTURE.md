@@ -47,10 +47,11 @@ sequenceDiagram
     participant C as Client
 
     Admin->>A: POST /api/v1/onboard-client/initiate
-    A->>DB: Create client + onboarding token (pending)
+    A->>S: Create Express Account (idempotency key acct-create-<clientId>)
+    A->>DB: Create client (stripeAccountId + readiness) + tokens in one transaction
     A->>C: Send email with /onboard#token=...
     C->>A: POST /api/v1/onboard-client { token }
-    A->>S: Create Express Account + Account Link
+    A->>S: Create Account Link for the stored account
     S-->>C: Redirect to Stripe Onboarding
     C->>S: Completes Onboarding
     S->>A: Redirect to /api/v1/connect/callback?client_id=...&state=...

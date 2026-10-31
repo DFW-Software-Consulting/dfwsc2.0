@@ -2,7 +2,7 @@ import { vi } from "vitest";
 
 vi.mock("../../lib/stripe", () => ({
   stripe: {
-    accounts: { create: vi.fn(), retrieve: vi.fn() },
+    accounts: { create: vi.fn(), retrieve: vi.fn(), del: vi.fn() },
     accountLinks: { create: vi.fn() },
     webhooks: { constructEvent: vi.fn() },
     paymentIntents: { create: vi.fn(), list: vi.fn() },
@@ -34,6 +34,7 @@ import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { apiKeyRegenerationTokens, clients, onboardingTokens } from "../../db/schema";
 import { sendMail } from "../../lib/mailer";
+import { stripe } from "../../lib/stripe";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
 
@@ -95,6 +96,10 @@ describe("Mailer failure handling across connect.ts routes", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (stripe.accounts.create as any).mockImplementation(async (params: any) => ({
+      id: `acct_${params.metadata.clientId.replace(/-/g, "").slice(0, 20)}`,
+    }));
+    (stripe.accounts.del as any).mockResolvedValue({ deleted: true });
   });
 
   afterEach(() => {
@@ -102,7 +107,7 @@ describe("Mailer failure handling across connect.ts routes", () => {
   });
 
   describe("POST /api/v1/onboard-client/initiate", () => {
-    it("returns 502 EMAIL_DELIVERY_FAILED and rolls back the newly created client when sendMail rejects", async () => {
+    it("returns 502, preserves the client, and revokes only the new credentials", async () => {
       const email = `mailer-fail-initiate-${randomUUID()}@example.com`;
       const token = makeAdminToken();
       (sendMail as any).mockRejectedValueOnce(new Error("smtp down"));
@@ -116,9 +121,9 @@ describe("Mailer failure handling across connect.ts routes", () => {
 
       expect(response.statusCode).toBe(502);
       expect(response.json()).toMatchObject({
-        error: "Failed to send onboarding email. Please try again.",
         code: "EMAIL_DELIVERY_FAILED",
       });
+      expect(response.json().error).toMatch(/use resend/);
       expect(sendMail).toHaveBeenCalledTimes(1);
 
       const [leftoverClient] = await db
@@ -126,20 +131,23 @@ describe("Mailer failure handling across connect.ts routes", () => {
         .from(clients)
         .where(eq(clients.email, email))
         .limit(1);
-      expect(leftoverClient).toBeUndefined();
+      expect(leftoverClient).toBeDefined();
+      cleanupClientIds.push(leftoverClient.id);
+      expect(leftoverClient.stripeAccountId).toMatch(/^acct_/);
 
-      // The regeneration token minted just before the failed send must not
-      // be left orphaned — it cascades away with the rolled-back client.
+      // The regeneration token minted just before the failed send is kept
+      // but revoked, so the undelivered link can never be redeemed.
       const leftoverTokens = await db
         .select()
         .from(apiKeyRegenerationTokens)
         .where(eq(apiKeyRegenerationTokens.email, email));
-      expect(leftoverTokens).toHaveLength(0);
+      expect(leftoverTokens).toHaveLength(1);
+      expect(leftoverTokens[0].status).toBe("revoked");
     });
   });
 
   describe("POST /api/v1/onboard-client/resend", () => {
-    it("still returns 200 and leaves the newly-issued token pending when sendMail rejects (fire-and-forget, unlike initiate)", async () => {
+    it("returns 502 and revokes the newly-issued token when sendMail rejects", async () => {
       const clientId = randomUUID();
       const email = `mailer-fail-resend-${clientId}@example.com`;
       await db.insert(clients).values({
@@ -147,6 +155,13 @@ describe("Mailer failure handling across connect.ts routes", () => {
         name: "Mailer Fail Resend Client",
         email,
         status: "active",
+      });
+      await db.insert(onboardingTokens).values({
+        id: randomUUID(),
+        clientId,
+        token: `old-${randomUUID()}`,
+        status: "pending",
+        email,
       });
       cleanupClientIds.push(clientId);
 
@@ -160,11 +175,8 @@ describe("Mailer failure handling across connect.ts routes", () => {
         payload: { clientId },
       });
 
-      // NOTE: unlike initiate and regenerate-request/admin, this admin route
-      // does not surface the mail failure at all — see the file-level
-      // comment above. This assertion documents that current behavior.
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toMatchObject({ clientId });
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toMatchObject({ code: "EMAIL_DELIVERY_FAILED" });
       expect(sendMail).toHaveBeenCalledTimes(1);
 
       const tokens = await db
@@ -172,7 +184,48 @@ describe("Mailer failure handling across connect.ts routes", () => {
         .from(onboardingTokens)
         .where(eq(onboardingTokens.clientId, clientId));
       const pending = tokens.find((t: any) => t.status === "pending");
-      expect(pending).toBeDefined();
+      expect(pending).toBeUndefined();
+      expect(tokens.filter((t: any) => t.status === "revoked")).toHaveLength(2);
+    });
+
+    it("returns the support error when the undelivered token cannot be revoked", async () => {
+      const clientId = randomUUID();
+      const email = `mailer-fail-resend-cleanup-${clientId}@example.com`;
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Mailer Fail Resend Cleanup Client",
+        email,
+        status: "active",
+      });
+      cleanupClientIds.push(clientId);
+
+      (sendMail as any).mockRejectedValueOnce(new Error("smtp down"));
+      const realUpdate = db.update.bind(db);
+      const updateSpy = vi.spyOn(db, "update").mockImplementation(((table: unknown) => {
+        if (table === onboardingTokens) throw new Error("db down during cleanup");
+        return realUpdate(table as any);
+      }) as any);
+
+      try {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/v1/onboard-client/resend",
+          headers: {
+            authorization: `Bearer ${makeAdminToken()}`,
+            "content-type": "application/json",
+          },
+          payload: { clientId },
+        });
+
+        expect(response.statusCode).toBe(502);
+        expect(response.json()).toMatchObject({
+          error:
+            "Failed to send onboarding email and revoke the undelivered link. Please contact support.",
+          code: "EMAIL_DELIVERY_FAILED",
+        });
+      } finally {
+        updateSpy.mockRestore();
+      }
     });
   });
 

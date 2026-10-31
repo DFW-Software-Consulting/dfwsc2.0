@@ -5,16 +5,18 @@ This document explains the Stripe integration, Connect onboarding, and payment p
 ## 1. Overview
 The platform uses **Stripe Connect** with **Express Accounts**.
 - **Platform Account**: DFWSC's main Stripe account.
-- **Express Accounts**: One per connected client. Created during onboarding.
+- **Express Accounts**: One per connected client. Created when the client is created (`/accounts` or `/onboard-client/initiate`).
 
 ## 2. Onboarding Flow
-1. **Initiate**: Admin calls `POST /api/v1/onboard-client/initiate` (or `POST /api/v1/accounts`). Creates a client record + `pending` onboarding token. `/accounts` returns the plaintext `apiKey` to the admin; `/onboard-client/initiate` does **not** — it delivers the API key via an emailed link instead.
+1. **Initiate**: Admin calls `POST /api/v1/onboard-client/initiate` (or `POST /api/v1/accounts`). The API prepares a stable client ID and credentials, creates the Stripe Express account with that client ID as metadata and the Stripe idempotency key, then atomically stores the client, Stripe account/readiness state, and tokens. No database transaction is held open during the Stripe call. `/accounts` returns the plaintext `apiKey` to the admin; `/onboard-client/initiate` does **not** — it delivers the API key via an emailed link instead.
 2. **Email**: Client receives an email containing two links: `/onboard#token=...` (Stripe onboarding) and `/regenerate-key#token=...` (reveals the API key once, expires in 15 minutes).
-3. **Account Link**: `POST /api/v1/onboard-client` with body `{ "token": "..." }` creates a Stripe Express Account (if not yet created) and returns an Account Link URL. Token moves to `in_progress`.
+3. **Account Link**: `POST /api/v1/onboard-client` with body `{ "token": "..." }` uses the persisted Stripe account and returns an Account Link URL. A race-safe, idempotent lazy account-creation fallback remains for legacy clients whose `stripeAccountId` is null; the API does not create an Account Link until an account ID is confirmed in Postgres. Token moves to `in_progress`.
 4. **Stripe Redirect**: Client completes onboarding on Stripe-hosted pages.
 5. **Callback**: Stripe redirects to the platform-registered return URL, `GET /api/v1/connect/callback?client_id=...&state=...` — Stripe does **not** append `account`. `state` is CSRF-validated (32-byte, 24-hour expiry) and is the actual security binding; the client's `stripeAccountId` is looked up from the DB (source of truth). An `account` query param is accepted only as an optional legacy/manual cross-check when present. Token is marked `completed`. Browser is redirected to `/onboarding-success`. An expired state redirects to `/onboarding-success?status=expired` instead of returning an error.
 6. **Refresh**: If the account link expires before the client completes it, `GET /api/v1/connect/refresh?client_id=...&state=...` generates a new link and redirects.
-7. **Resend**: `POST /api/v1/onboard-client/resend` revokes all active tokens for the client and issues a new one with a fresh email.
+7. **Resend**: `POST /api/v1/onboard-client/resend` revokes all active tokens for the client and issues a new one (in one transaction) with a fresh email.
+
+**Failure and recovery behavior.** A Stripe account-creation failure does not commit the client or expose credentials. If Stripe returned an account but the database write fails, the API attempts to delete that account; a failed deletion is logged with the client and Stripe account IDs for reconciliation. If the initiate email fails after persistence, the client and Stripe account remain, but exactly the new onboarding and API-key retrieval tokens are revoked; the admin receives `502 EMAIL_DELIVERY_FAILED` and recovers with the authenticated resend route (onboarding link) and admin API-key regeneration (API key) rather than retrying initiate. Resend returns 200 only after email delivery succeeds; a failed send revokes its newly issued token and returns the same 502 class. A token-cleanup failure returns a support-oriented error because an undelivered credential may still be active.
 
 ## 3. Payment Strategy (Stripe Checkout)
 All payments go through **Stripe Checkout** — the former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.

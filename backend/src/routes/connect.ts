@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { and, eq, inArray, isNull } from "drizzle-orm";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import { and, eq, inArray } from "drizzle-orm";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import he from "he";
 import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
@@ -15,7 +15,13 @@ import {
 } from "../lib/api-key-regeneration";
 import { requireAdminJwt } from "../lib/auth";
 import { withStripeCircuit } from "../lib/circuit-breakers";
-import { createClientWithOnboardingToken, hashOnboardingToken } from "../lib/client-factory";
+import {
+  assertClientEmailAvailable,
+  hashOnboardingToken,
+  type PreparedClientWithOnboardingToken,
+  persistPreparedClientWithOnboardingToken,
+  prepareClientWithOnboardingToken,
+} from "../lib/client-factory";
 import { resolveFrontendOrigin, resolveServerBaseUrl } from "../lib/config";
 import {
   AUTH_RATE_LIMIT_MAX,
@@ -27,6 +33,12 @@ import { AppError, errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { getSettings, stripe } from "../lib/stripe-billing";
+import {
+  createExpressAccountForClient,
+  deleteUnpersistedExpressAccount,
+  type ExpressAccountState,
+  ensureExpressAccountForClient,
+} from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
 import { parseBody } from "../lib/validation";
 import type { Workspace } from "../lib/workspace";
@@ -118,44 +130,7 @@ async function createAccountLinkForRecord(
     throw errors.notFound("Client record");
   }
 
-  let stripeAccountId = clientRecord.stripeAccountId;
-
-  if (!stripeAccountId) {
-    const account = await withStripeCircuit(() =>
-      stripe.accounts.create(
-        {
-          type: "express",
-          email: clientRecord.email,
-          metadata: { clientId: clientRecord.id },
-          capabilities: {
-            card_payments: { requested: true },
-            transfers: { requested: true },
-          },
-        },
-        { idempotencyKey: `acct-create-${clientRecord.id}` }
-      )
-    );
-
-    // Conditional claim: only persist if no other concurrent request already
-    // did so. `clients.stripeAccountId` is also uniquely indexed, so a
-    // conflicting write would fail at the DB level regardless.
-    const [claimed] = await db
-      .update(clients)
-      .set({ stripeAccountId: account.id })
-      .where(and(eq(clients.id, clientRecord.id), isNull(clients.stripeAccountId)))
-      .returning();
-
-    if (claimed) {
-      stripeAccountId = account.id;
-    } else {
-      // Another concurrent request already claimed a Stripe account for this
-      // client. Re-read and use the existing id; the account we just created
-      // is orphaned.
-      // TODO: reconcile orphaned account via metadata.clientId
-      const [refreshed] = await db.select().from(clients).where(eq(clients.id, clientRecord.id));
-      stripeAccountId = refreshed?.stripeAccountId ?? account.id;
-    }
-  }
+  const stripeAccountId = await ensureExpressAccountForClient(clientRecord, request.log);
 
   const state = crypto.randomBytes(32).toString("hex");
   const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
@@ -215,6 +190,68 @@ async function createAccountLinkForToken(
   return createAccountLinkForRecord(request, onboardingRecord);
 }
 
+/**
+ * Eager provisioning for the portal client-creation routes: creates the Express account for an
+ * already-prepared (not yet persisted) client and attaches the account fields to the client row
+ * that will be inserted. Returns null when a mapped Stripe error reply has already been sent.
+ * No DB transaction is open while Stripe is called, and nothing is persisted on failure.
+ */
+async function provisionExpressAccount(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  prepared: PreparedClientWithOnboardingToken
+): Promise<ExpressAccountState | null> {
+  let account: ExpressAccountState;
+  try {
+    account = await createExpressAccountForClient({
+      id: prepared.clientId,
+      email: prepared.client.email,
+    });
+  } catch (error) {
+    request.log.error(
+      { err: error, clientId: prepared.clientId },
+      "Stripe account creation failed"
+    );
+    if (mapStripeError(error, reply, { circuitOpen: STRIPE_ONBOARDING_CIRCUIT_OPEN_ERROR })) {
+      return null;
+    }
+    throw errors.stripeFailed(
+      "Failed to create the client's Stripe account. No client was created; please try again."
+    );
+  }
+
+  Object.assign(prepared.client, {
+    stripeAccountId: account.stripeAccountId,
+    chargesEnabled: account.chargesEnabled,
+    payoutsEnabled: account.payoutsEnabled,
+    detailsSubmitted: account.detailsSubmitted,
+  });
+  return account;
+}
+
+/**
+ * Runs the DB persistence for a client whose Stripe account already exists. If persistence
+ * fails, nothing references the account, so it is deleted (best effort) and the original
+ * error is rethrown.
+ */
+async function persistOrCompensate<T>(
+  request: FastifyRequest,
+  prepared: PreparedClientWithOnboardingToken,
+  account: ExpressAccountState,
+  persist: () => Promise<T>
+): Promise<T> {
+  try {
+    return await persist();
+  } catch (err) {
+    request.log.error(
+      { err, clientId: prepared.clientId, stripeAccountId: account.stripeAccountId },
+      "Failed to persist client after Stripe account creation"
+    );
+    await deleteUnpersistedExpressAccount(account.stripeAccountId, prepared.clientId, request.log);
+    throw err;
+  }
+}
+
 export default async function connectRoutes(fastify: FastifyInstance) {
   fastify.post(
     "/accounts",
@@ -259,14 +296,23 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         }
       }
 
-      const { clientId, apiKey, token } = await createClientWithOnboardingToken({
+      // Resolve config before any side effect so a misconfiguration cannot strand a Stripe
+      // account or client row.
+      const frontendOrigin = resolveFrontendOrigin();
+      await assertClientEmailAvailable(email, workspace);
+
+      const prepared = await prepareClientWithOnboardingToken({
         name,
         email,
         workspace,
         groupId,
       });
-
-      const frontendOrigin = resolveFrontendOrigin();
+      const account = await provisionExpressAccount(request, reply, prepared);
+      if (!account) return reply;
+      await persistOrCompensate(request, prepared, account, () =>
+        persistPreparedClientWithOnboardingToken(prepared)
+      );
+      const { clientId, apiKey, token } = prepared;
 
       const onboardingUrlHint = `${frontendOrigin}/onboard#token=${encodeURIComponent(token)}`;
 
@@ -326,30 +372,31 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         }
       }
 
+      // Resolve config before any side effect so a misconfiguration cannot strand a Stripe
+      // account or client row.
+      const frontendOrigin = resolveFrontendOrigin();
       const settings = await getSettings();
       const companyName = settings.company_name || "DFW Software Consulting";
+      await assertClientEmailAvailable(email, workspaceParam);
 
-      // Both writes must land atomically: if the regeneration-token insert
-      // fails after the client row is created, a bare retry would otherwise
-      // hit "client already exists" with no delivered key ever having gone
-      // out. Wrapping them in one transaction rolls back the client row too.
-      const { clientId, token, rawRegenToken } = await db.transaction(async (tx) => {
-        const created = await createClientWithOnboardingToken(
-          {
-            name,
-            email,
-            workspace: workspaceParam,
-            groupId,
-          },
-          tx
-        );
-
-        const regenToken = await createRegenerationToken({ clientId: created.clientId, email }, tx);
-
-        return { clientId: created.clientId, token: created.token, rawRegenToken: regenToken };
+      const prepared = await prepareClientWithOnboardingToken({
+        name,
+        email,
+        workspace: workspaceParam,
+        groupId,
       });
+      const account = await provisionExpressAccount(request, reply, prepared);
+      if (!account) return reply;
 
-      const frontendOrigin = resolveFrontendOrigin();
+      // Client row (with its Stripe account), onboarding token and regeneration token land in
+      // one transaction, opened only after the Stripe call has returned.
+      const rawRegenToken = await persistOrCompensate(request, prepared, account, () =>
+        db.transaction(async (tx) => {
+          await persistPreparedClientWithOnboardingToken(prepared, tx);
+          return createRegenerationToken({ clientId: prepared.clientId, email }, tx);
+        })
+      );
+      const { clientId, token, onboardingTokenId } = prepared;
 
       const onboardingUrl = `${frontendOrigin}/onboard#token=${encodeURIComponent(token)}`;
       const regenerateUrl = `${frontendOrigin}/regenerate-key#token=${encodeURIComponent(rawRegenToken)}`;
@@ -386,30 +433,43 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         request.log.error({ err, clientId }, "Failed to send onboarding email");
         try {
           await db.transaction(async (tx) => {
-            const result = await tx
-              .delete(clients)
+            const onboardingResult = await tx
+              .update(onboardingTokens)
+              .set({ status: "revoked", updatedAt: new Date() })
               .where(
                 and(
-                  eq(clients.id, clientId),
-                  eq(clients.email, email),
-                  eq(clients.workspace, workspaceParam)
+                  eq(onboardingTokens.id, onboardingTokenId),
+                  eq(onboardingTokens.clientId, clientId),
+                  eq(onboardingTokens.status, "pending")
+                )
+              );
+            const regenerationResult = await tx
+              .update(apiKeyRegenerationTokens)
+              .set({ status: "revoked", updatedAt: new Date() })
+              .where(
+                and(
+                  eq(apiKeyRegenerationTokens.clientId, clientId),
+                  eq(apiKeyRegenerationTokens.token, hashRegenerationToken(rawRegenToken)),
+                  eq(apiKeyRegenerationTokens.status, "pending")
                 )
               );
 
-            if (result.rowCount !== 1) {
-              throw new Error(`Expected to delete 1 client row, deleted ${result.rowCount ?? 0}`);
+            if (onboardingResult.rowCount !== 1 || regenerationResult.rowCount !== 1) {
+              throw new Error("Expected to revoke both newly-issued onboarding credentials");
             }
           });
         } catch (cleanupErr) {
           request.log.error(
             { err: cleanupErr, clientId },
-            "Failed to clean up client after email failure"
+            "Failed to revoke onboarding credentials after email failure"
           );
           throw errors.emailFailed(
-            "Failed to send onboarding email and clean up client. Please contact support."
+            "Failed to send onboarding email and revoke its credentials. Please contact support."
           );
         }
-        throw errors.emailFailed("Failed to send onboarding email. Please try again.");
+        throw errors.emailFailed(
+          "Failed to send onboarding email. The client and its Stripe account were created and the undelivered links were revoked; use resend to send a new onboarding link and admin API key regeneration to deliver an API key."
+        );
       }
 
       return reply.code(201).send({
@@ -468,38 +528,41 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         });
       }
 
-      const { rowCount } = await db
-        .update(onboardingTokens)
-        .set({ status: "revoked", updatedAt: new Date() })
-        .where(
-          and(
-            eq(onboardingTokens.clientId, clientRecord.id),
-            inArray(onboardingTokens.status, ["pending", "in_progress"])
-          )
-        );
+      const frontendOrigin = resolveFrontendOrigin();
+      const settings = await getSettings();
+      const companyName = settings.company_name || "DFW Software Consulting";
+
+      const newToken = crypto.randomBytes(32).toString("hex");
+      const newTokenLookup = hashOnboardingToken(newToken);
+      const newOnboardingTokenId = uuidv4();
+
+      // Revoking the old links and issuing the new one is atomic: a failed insert never leaves
+      // the client with every link revoked and none issued.
+      const rowCount = await db.transaction(async (tx) => {
+        const revoked = await tx
+          .update(onboardingTokens)
+          .set({ status: "revoked", updatedAt: new Date() })
+          .where(
+            and(
+              eq(onboardingTokens.clientId, clientRecord.id),
+              inArray(onboardingTokens.status, ["pending", "in_progress"])
+            )
+          );
+        await tx.insert(onboardingTokens).values({
+          id: newOnboardingTokenId,
+          clientId: clientRecord.id,
+          token: newTokenLookup,
+          status: "pending",
+          email: clientRecord.email,
+        });
+        return revoked.rowCount;
+      });
       if (rowCount && rowCount > 0) {
         request.log.info(
           { client_id: clientRecord.id, revoked: rowCount },
           "Revoked active onboarding tokens"
         );
       }
-
-      const newToken = crypto.randomBytes(32).toString("hex");
-      const newTokenLookup = hashOnboardingToken(newToken);
-      const newOnboardingTokenId = uuidv4();
-
-      await db.insert(onboardingTokens).values({
-        id: newOnboardingTokenId,
-        clientId: clientRecord.id,
-        token: newTokenLookup,
-        status: "pending",
-        email: clientRecord.email,
-      });
-
-      const settings = await getSettings();
-      const companyName = settings.company_name || "DFW Software Consulting";
-
-      const frontendOrigin = resolveFrontendOrigin();
 
       const onboardingUrl = `${frontendOrigin}/onboard#token=${encodeURIComponent(newToken)}`;
 
@@ -533,6 +596,34 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         });
       } catch (err) {
         request.log.error({ err, clientId: clientRecord.id }, "Failed to send onboarding email");
+        try {
+          const result = await db
+            .update(onboardingTokens)
+            .set({ status: "revoked", updatedAt: new Date() })
+            .where(
+              and(
+                eq(onboardingTokens.id, newOnboardingTokenId),
+                eq(onboardingTokens.clientId, clientRecord.id),
+                eq(onboardingTokens.status, "pending")
+              )
+            );
+          if (result.rowCount !== 1) {
+            throw new Error(
+              `Expected to revoke 1 onboarding token, revoked ${result.rowCount ?? 0}`
+            );
+          }
+        } catch (cleanupErr) {
+          request.log.error(
+            { err: cleanupErr, clientId: clientRecord.id, tokenId: newOnboardingTokenId },
+            "Failed to revoke undelivered onboarding token"
+          );
+          throw errors.emailFailed(
+            "Failed to send onboarding email and revoke the undelivered link. Please contact support."
+          );
+        }
+        throw errors.emailFailed(
+          "Failed to send onboarding email. The previous links remain revoked; request resend again to send a new link."
+        );
       }
 
       request.log.info(
