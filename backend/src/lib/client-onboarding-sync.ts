@@ -65,7 +65,7 @@ import { isBadResponseError, SUBMISSION_PAGE_SIZE } from "./sales-lead-nextcloud
 
 // "DFWSC — Convert Won Lead to Client" onboarding. For each submission of one
 // Nextcloud Form, exactly once: a client folder with Meetings/ Decisions/
-// Deliverables/, a contact card (created or updated), a Cerebo Projects row with
+// Deliverables/, a contact card (created or updated), a Client Projects row with
 // the next CP-### code, a Collectives project page, the row's links, and the
 // matching Sales Pipeline row set to Won with a link to the project.
 //
@@ -700,7 +700,7 @@ async function leadStep(row: SubmissionRow, intake: Intake, ctx: ProcessingConte
     return;
   }
   const projectUrl = api.rowLink(api.targets.projectsTableId, row.tableRowId as number);
-  const linked = linkCellUrl(lead.cells.get(cols.cereboProject.id));
+  const linked = linkCellUrl(lead.cells.get(cols.clientProject.id));
   if (linked !== null && linked.trim() !== "" && !linked.includes(projectUrl)) {
     await saveUnderClaim(row, { leadStatus: "already_linked", leadRowId: lead.id });
     ctx.logger.warn(
@@ -712,7 +712,7 @@ async function leadStep(row: SubmissionRow, intake: Intake, ctx: ProcessingConte
   await writeLinks(
     api,
     lead.id,
-    [[cols.cereboProject.id, row.projectCode as string, projectUrl]],
+    [[cols.clientProject.id, row.projectCode as string, projectUrl]],
     alreadyWon ? {} : { [cols.stage.id]: selectionValue(cols.stage, WON_STAGE) }
   );
   await saveUnderClaim(row, { leadStatus: "won", leadRowId: lead.id });

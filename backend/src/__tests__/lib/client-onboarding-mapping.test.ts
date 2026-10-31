@@ -126,7 +126,14 @@ describe("parseLeadReference", () => {
 describe("columns", () => {
   it("resolves the live table titles", () => {
     expect(resolveProjectColumns(projectColumns()).projectCode.id).toBe(26);
-    expect(resolvePipelineColumns(pipelineColumns()).cereboProject.id).toBe(57);
+    expect(resolvePipelineColumns(pipelineColumns()).clientProject.id).toBe(57);
+  });
+
+  it("finds the lead link column under the new and the legacy title", () => {
+    for (const title of ["Client Project", "Cerebo Project"]) {
+      const renamed = pipelineColumns().map((c) => (c.id === 57 ? { ...c, title } : c));
+      expect(resolvePipelineColumns(renamed).clientProject.id).toBe(57);
+    }
   });
 
   it("stops when a status or stage option is missing", () => {
@@ -138,7 +145,7 @@ describe("columns", () => {
       c.title === "Stage" ? { ...c, selectionOptions: [{ id: 0, label: "New Lead" }] } : c
     );
     expect(() => resolvePipelineColumns(noWon)).toThrow(/stage_option_missing/);
-    expect(() => resolvePipelineColumns([])).toThrow(/Cerebo Project/);
+    expect(() => resolvePipelineColumns([])).toThrow(/Client Project/);
   });
 
   it("builds the row with Intake, an owner and only valid dates", () => {
