@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import Contact from "../components/Contact.jsx";
 import HeroBackdrop from "../components/HeroBackdrop.jsx";
 import { MotionRoot, Reveal, RevealGroup, RevealItem, Swap } from "../components/motion/Reveal.jsx";
 import {
@@ -369,23 +370,29 @@ export default function Home() {
         </section>
         <section id="contact" className="studio-contact studio-inverse">
           <ScrollFx className="page-wrap" offset={CONTACT_OFFSET} fx={CONTACT_IN}>
-            <p className="studio-eyebrow">LET’S MAKE SOMETHING REAL</p>
-            <h2>
-              Your idea.
-              <br />
-              <em>Fully built.</em>
-            </h2>
-            <p>
-              Web apps, portals, and the systems behind them, planned, built, and launched end to
-              end.
-            </p>
-            <div className="studio-actions">
-              <a className="studio-button" href="mailto:mail@dfwsc.com">
-                Let’s talk about it <span aria-hidden="true">↗</span>
-              </a>
-              <a className="studio-text-link" href="tel:+12143260128">
-                (214) 326-0128
-              </a>
+            <div className="studio-contact-grid">
+              <div className="studio-contact-copy">
+                <p className="studio-eyebrow">LET’S MAKE SOMETHING REAL</p>
+                <h2>
+                  Your idea.
+                  <br />
+                  <em>Fully built.</em>
+                </h2>
+                <p>
+                  Web apps, portals, and the systems behind them, planned, built, and launched end
+                  to end.
+                </p>
+                <div className="studio-actions studio-contact-links">
+                  <a className="studio-text-link" href="mailto:mail@dfwsc.com">
+                    mail@dfwsc.com
+                  </a>
+                  <span aria-hidden="true">·</span>
+                  <a className="studio-text-link" href="tel:+12143260128">
+                    (214) 326-0128
+                  </a>
+                </div>
+              </div>
+              <Contact />
             </div>
           </ScrollFx>
         </section>

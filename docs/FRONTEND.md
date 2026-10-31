@@ -45,7 +45,7 @@ This document details the frontend implementation, state management, and UI patt
 ## 4. Data Fetching
 TanStack Query manages all server state. API logic lives in `src/api/`; hooks in `src/hooks/` compose queries/mutations on top. Components never call `fetch` directly.
 
-The `Contact` form submits through `api/contact.js` and `useContactForm`. Name, email, company, and message limits mirror the public backend endpoint; company is optional and limited to 100 characters.
+The `components/Contact.jsx` form (rendered in the Home contact band, split layout, styled by the `.studio-contact-*` / `.studio-field` classes) submits through `api/contact.js` and `useContactForm`. Name, email, company, and message limits mirror the public backend endpoint; name, company and message are required, company is limited to 100 characters.
 
 ## 5. Theme System
 The app supports light and dark modes via `ThemeContext`. It defaults to the system preference, persists the choice in `localStorage`, and applies a `.light` or `.dark` class on `<html>`, which switches the CSS custom properties defined in `index.css`:
