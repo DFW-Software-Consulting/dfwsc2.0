@@ -10,6 +10,7 @@ export default defineConfig({
   build: {
     outDir: 'build-dist',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 560, // sized just above the lazy three.js HeroScene chunk (~535 kB); other chunks still warn
   },
   server: {
     host: '0.0.0.0',
