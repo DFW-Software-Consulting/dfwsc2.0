@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext.jsx";
 import { scrollToSection } from "../utils/scrollToSection.js";
+import Logo from "./Logo.jsx";
 
 const navItems = [
   { type: "scroll", id: "services", label: "Solutions" },
@@ -129,11 +130,7 @@ export default function Navbar() {
           className="group relative inline-flex items-center gap-3 cursor-pointer transition-all duration-300 hover:brightness-110"
         >
           <div className="absolute -inset-2 rounded-xl bg-brand-500/10 blur-xl transition-opacity opacity-0 group-hover:opacity-100" />
-          <img
-            src="/DFWSC-Logo-HorizWordmarkPNG.png"
-            alt="DFW Software Consulting"
-            className={`h-8 w-auto relative z-10 transition-all duration-300 ${theme === "dark" ? "invert hue-rotate-180 brightness-125" : ""}`}
-          />
+          <Logo />
         </Link>
 
         <nav aria-label="Main" className="hidden items-center gap-3 text-sm font-medium lg:flex">
@@ -171,7 +168,7 @@ export default function Navbar() {
           <Link
             to="/"
             state={{ scrollTo: "contact" }}
-            className="cursor-pointer items-center justify-center gap-2 rounded-full bg-brand-500 px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition-all duration-300 hover:bg-brand-600 hover:shadow-glow-strong hover:-translate-y-0.5 active:translate-y-0 active:scale-95 inline-flex focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            className="cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-500 px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition-all duration-300 hover:bg-brand-600 hover:shadow-glow-strong hover:-translate-y-0.5 active:translate-y-0 active:scale-95 inline-flex focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             Start a project
           </Link>
@@ -249,7 +246,7 @@ export default function Navbar() {
               to="/"
               state={{ scrollTo: "contact" }}
               onClick={() => setMenuOpen(false)}
-              className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-glow transition duration-200 hover:-translate-y-0.5 hover:bg-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-glow transition duration-200 hover:-translate-y-0.5 hover:bg-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               Start a project
             </Link>

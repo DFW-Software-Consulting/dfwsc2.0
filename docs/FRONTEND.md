@@ -8,12 +8,16 @@ This document details the frontend implementation, state management, and UI patt
 - **Routing**: React Router 6
 - **State & Data Fetching**: TanStack Query v5
 - **Styling**: TailwindCSS v4
+- **Motion**: `motion` (Framer Motion, `LazyMotion` + `m.*`), marketing pages only, via `components/motion/Reveal.jsx`
+- **Smooth scroll**: `lenis`, marketing pages only (mounted by `MotionRoot`; see STYLES.md), registered in `utils/smoothScroll.js` for `scrollToSection`
+- **3D**: `three`, used only by `components/HeroScene.jsx`. It is loaded with a dynamic `import()` from `HeroBackdrop`, so it lives in its own lazy chunk (~133 kB gzip) that the entry, Pricing and Team chunks never load, and only on wide, motion-allowed, WebGL-capable screens
 
 ## 2. Directory Structure (`front/src/`)
 - **`api/`**: API client wrappers per domain (`auth`, `clients`, `groups`, `onboarding`, `payments`, `settings`), built on the shared `client.js` base wrapper.
 - **`components/`**: UI components organized by domain:
   - **`admin/`**: Dashboard components (ClientList, EditClientModal, GroupPanel, PaymentReports, SettingsPanel, etc.).
   - **`admin/shared/`**: Reusable admin primitives (AdminTable, BaseModal, Button, FormInput, StatusBadge, etc.).
+  - **`motion/`**: `Reveal` helpers (`MotionRoot`, `Reveal`, `RevealGroup`, `RevealItem`, `Swap`), `SmoothScroll` (Lenis) and `ScrollFx` (scroll-linked helpers) for the marketing pages; `HeroBackdrop` (static fallback + gating) and `HeroScene` (three.js, lazy) serve the Home hero.
   - **App shell**: `Navbar`, `Footer`, `ErrorBoundary`. Marketing page sections live inside their page components (`Home`, `Pricing`, `Team`).
 - **`contexts/`**: `AuthContext` (admin JWT state), `ThemeContext` (light/dark toggle).
 - **`hooks/`**: TanStack Query hooks — `useClients`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus`.

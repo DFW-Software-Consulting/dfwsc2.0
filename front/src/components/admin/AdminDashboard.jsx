@@ -102,13 +102,9 @@ export default function AdminDashboard() {
     <div>
       <div className="flex justify-between items-center mb-6">
         <h3 className="text-lg font-semibold text-fg">Welcome, Admin!</h3>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="text-sm bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded-md transition-colors"
-        >
+        <Button variant="secondary" onClick={handleLogout}>
           Logout
-        </button>
+        </Button>
       </div>
 
       {/* Scrolls sideways on narrow screens instead of widening the page; scroll-shade-x
@@ -124,9 +120,9 @@ export default function AdminDashboard() {
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px focus-visible:outline-3 focus-visible:-outline-offset-3 focus-visible:outline-focus ${
+              className={`inline-flex shrink-0 items-center whitespace-nowrap px-4 py-2 max-md:min-h-11 pointer-coarse:min-h-11 text-sm font-medium transition-colors border-b-2 -mb-px focus-visible:outline-3 focus-visible:-outline-offset-3 focus-visible:outline-focus ${
                 activeTab === tab.id
-                  ? "border-blue-500 text-blue-700 dark:text-blue-400"
+                  ? "border-brand-500 text-brand-700 dark:text-brand-300"
                   : "border-transparent text-fg-muted hover:text-fg"
               }`}
             >

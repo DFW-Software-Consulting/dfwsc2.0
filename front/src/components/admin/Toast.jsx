@@ -7,7 +7,7 @@ const TOAST_STYLES = {
   success: "bg-green-700",
   error: "bg-red-700",
   warning: "bg-amber-700",
-  info: "bg-blue-700",
+  info: "bg-brand-700",
 };
 
 export default function Toast({ show, message, type = "info", onClose }) {
@@ -35,7 +35,7 @@ export default function Toast({ show, message, type = "info", onClose }) {
           <button
             type="button"
             onClick={onClose}
-            className="ml-2 rounded text-white/80 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
+            className="-my-2 -mr-4 ml-2 inline-flex size-11 shrink-0 items-center justify-center rounded text-white/80 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white"
             aria-label="Close notification"
           >
             <svg

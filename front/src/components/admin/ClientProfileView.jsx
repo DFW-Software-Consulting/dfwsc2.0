@@ -242,7 +242,7 @@ export default function ClientProfileView({
                         </div>
                         <div className="flex items-center gap-1.5 text-xs">
                           <span className="text-fg-muted">Stripe ID:</span>
-                          <code className="text-blue-700 bg-blue-50 dark:text-blue-400 dark:bg-blue-400/10 px-1 rounded break-all">
+                          <code className="text-brand-700 bg-brand-50 dark:text-brand-300 dark:bg-brand-400/10 px-1 rounded break-all">
                             {client.stripeAccountId || "Not Connected"}
                           </code>
                         </div>
@@ -332,6 +332,12 @@ export default function ClientProfileView({
           workspace={workspace}
         />
       )}
+
+      <div className="mt-6 flex justify-end">
+        <Button variant="secondary" onClick={onClose}>
+          Done
+        </Button>
+      </div>
     </BaseModal>
   );
 }

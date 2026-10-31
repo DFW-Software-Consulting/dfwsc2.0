@@ -89,7 +89,7 @@ export default function AdminSetup({
             </div>
             <div>
               <span className="text-fg-muted">ADMIN_PASSWORD=</span>
-              <span className="text-blue-700 dark:text-blue-400">a-strong-password</span>
+              <span className="text-brand-700 dark:text-brand-300">a-strong-password</span>
             </div>
           </div>
           <p className="text-xs text-fg-muted">
