@@ -64,7 +64,7 @@ export async function updateProject(actor: ActorContext, id: string, patch: Part
   });
 }
 
-export async function getProject(id: string): Promise<Project> {
+async function getProject(id: string): Promise<Project> {
   const [project] = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
   if (!project) throw errors.notFound("Project");
   return project;

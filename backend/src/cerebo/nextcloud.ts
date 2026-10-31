@@ -31,7 +31,7 @@ function getConfig(): NextcloudConfig | Unavailable | null {
   return { baseUrl: baseUrl.replace(/\/+$/, ""), username, appPassword };
 }
 
-export class NextcloudHttpError extends Error {
+class NextcloudHttpError extends Error {
   constructor(
     readonly status: number,
     path: string
