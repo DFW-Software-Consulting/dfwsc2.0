@@ -9,9 +9,9 @@
 .studio-engagement-card li::before { content: '✓'; position: absolute; left: 0; color: var(--accent); }
 .studio-engagement-card > a:last-child { margin-top: auto; }
 .studio-engagement-card .studio-engagement-detail { margin-bottom: 32px; }
-.studio-engagement-featured.studio-inverse { border-color: var(--bg-inverse); background: radial-gradient(ellipse at 100% 0, var(--bg-inverse-glow) 0, transparent 60%), var(--bg-inverse); }
+.studio-engagement-featured.studio-inverse { border-color: var(--border-inverse); background: radial-gradient(ellipse at 100% 0, var(--bg-inverse-glow) 0, transparent 60%), var(--bg-inverse); }
 /* In dark mode the inverse band sits close to the page color; an accent edge keeps it featured. */
-.dark .studio-engagement-featured.studio-inverse { border-color: color-mix(in srgb, var(--accent-inverse) 45%, transparent); box-shadow: var(--shadow-card); }
+.dark .studio-engagement-featured.studio-inverse { border-color: var(--border-inverse); box-shadow: var(--shadow-card); }
 .studio-engagement-featured .studio-mini-label { color: var(--accent-inverse); }
 .studio-engagement-featured > p:not(.studio-mini-label) { color: var(--text-inverse-muted); }
 .studio-engagement-featured .studio-engagement-price { border-color: var(--border-inverse); }
