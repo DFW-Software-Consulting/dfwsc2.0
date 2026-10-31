@@ -324,7 +324,7 @@ export function buildClientVCard(
     intake.email !== undefined &&
     accountEmail.trim().toLowerCase() === intake.email.trim().toLowerCase();
   if (intake.email && !sameEmail) lines.push(`EMAIL;TYPE=WORK:${escapeVCardText(intake.email)}`);
-  if (accountEmail) lines.push(...accountEmailLines(accountEmail, "item1"));
+  if (accountEmail) lines.push(...accountEmailLines(accountEmail, "NEXTCLOUD1"));
   if (intake.phone) lines.push(`TEL;TYPE=WORK:${escapeVCardText(intake.phone)}`);
   lines.push("CATEGORIES:Client", `REV:${revStamp(now)}`, "END:VCARD");
   return serialize(lines);

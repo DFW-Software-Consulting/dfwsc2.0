@@ -173,6 +173,9 @@ function mapAddress(value: string, notes: FieldNote[]): StripeAddress | undefine
   const [pobox, ext, street, locality, region, code, country] = adrComponents(value).map((p) =>
     clean(p.replace(/\s*\n\s*/g, ", "))
   );
+  // Only non-blank sub-fields are ever set. Stripe merges a customer's nested `address` hash by
+  // key on update (omitted keys keep their value; only an explicitly empty value unsets one), so
+  // a blank component or an omitted unmappable country cannot wipe the existing Stripe value.
   const address: StripeAddress = {};
   if (street) address.line1 = street;
   const line2 = [ext, pobox].filter(Boolean).join(", ");

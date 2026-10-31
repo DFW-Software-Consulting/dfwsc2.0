@@ -490,7 +490,7 @@ export const contactStripeSyncCards = pgTable(
     fieldHashes: jsonb("field_hashes").$type<Record<string, string | null>>(),
     baselineAt: timestamp("baseline_at", { withTimezone: true }),
     lastPushedAt: timestamp("last_pushed_at", { withTimezone: true }),
-    // PII-free failure code such as "stripe.customer:400"; a non-retryable one is only retried
+    // PII-free failure code such as "stripe.customer_update:400"; a non-retryable one is only retried
     // after the card changes (last_error_hash differs from the card's current hash).
     lastError: text("last_error"),
     lastErrorHash: text("last_error_hash"),

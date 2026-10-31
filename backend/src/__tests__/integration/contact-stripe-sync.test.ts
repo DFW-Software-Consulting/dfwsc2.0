@@ -515,7 +515,8 @@ describe("errors", () => {
     const failed = await stateOf(UID_A);
     expect(failed.lastError).toMatch(/^stripe\.customer_update:/);
     expect(failed.lastErrorHash).toBeNull();
-    // Same delta again, the push now succeeds.
+    // Same delta again (after any auth back-off), the push now succeeds.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10 * 60_000);
     expect(await cycle()).toMatchObject({ pushed: 1, failed: 0 });
     expect(update).toHaveBeenCalledTimes(2);
     expect(update.mock.calls[1][1]).toEqual({ email: "new@zephyrine.example" });
@@ -617,6 +618,36 @@ describe("label rules (mapCardToStripe)", () => {
       "item2.X-ABLabel:_$!<Account email>!$_",
     ]);
     expect(apple.fields.email).toBe("ap@x.example");
+  });
+
+  it("reads the exact format Nextcloud Contacts stores for custom labels (live fixture)", () => {
+    const live = map([
+      "EMAIL;TYPE=WORK:contact@x.example",
+      "NEXTCLOUD2.EMAIL;TYPE=HOME:zz-label-test@example.com",
+      "NEXTCLOUD2.X-ABLABEL:Account email",
+      "TEL;TYPE=WORK:+1 555 0000",
+      "NEXTCLOUD1.TEL;TYPE=HOME,VOICE:+1 555 0100",
+      "NEXTCLOUD1.X-ABLABEL:Account phone",
+      "ADR;TYPE=WORK:;;9 Other St;Plano;TX;75074;US",
+      "NEXTCLOUD3.ADR;TYPE=HOME:;;1 Test St;Dallas;TX;75201;United States",
+      "NEXTCLOUD3.X-ABLABEL:Billing address",
+    ]);
+    expect(live.fields.email).toBe("zz-label-test@example.com");
+    expect(live.fields.phone).toBe("+1 555 0100");
+    expect(live.fields.address).toEqual({
+      line1: "1 Test St",
+      city: "Dallas",
+      state: "TX",
+      postal_code: "75201",
+      country: "US",
+    });
+    // Lower-case group and property names work the same.
+    const lower = map([
+      "EMAIL:a@x.example",
+      "nextcloud1.email:b@x.example",
+      "nextcloud1.x-ablabel:account EMAIL",
+    ]);
+    expect(lower.fields.email).toBe("b@x.example");
   });
 
   it("email: the only entry is used, several unlabelled ones leave it unchanged", () => {
@@ -745,7 +776,8 @@ describe("onboarding contact step writes the Account email", () => {
     });
     const card =
       [...fake.cards.values()].find((c) => c.data.includes("UID:dfwsc-client-"))?.data ?? "";
-    expect(card).toContain("item1.X-ABLabel:Account email");
+    expect(card).toContain("NEXTCLOUD1.X-ABLABEL:Account email");
+    expect(card).toContain("NEXTCLOUD1.EMAIL;TYPE=WORK:AP@Zephyrine.example");
     const mapped = mapCardToStripe(card);
     expect(mapped.fields.email).toBe("AP@Zephyrine.example");
     expect(card).toContain("EMAIL;TYPE=WORK:Ophelia@Zephyrine.example");
@@ -758,7 +790,7 @@ describe("onboarding contact step writes the Account email", () => {
     expect(await onboard({ billing_email: "not an email" })).toMatchObject({ completed: 1 });
     const card =
       [...fake.cards.values()].find((c) => c.data.includes("UID:dfwsc-client-"))?.data ?? "";
-    expect(card).not.toContain("X-ABLabel");
+    expect(card).not.toMatch(/X-ABLABEL/i);
   });
 
   it("keeps one entry when the billing email is the contact email", async () => {
@@ -804,7 +836,143 @@ describe("onboarding contact step writes the Account email", () => {
     fake.addSubmission(8, { ...FULL, billing_email: "other@zephyrine.example" });
     await runClientOnboardingCycle({ logger: logger(), env: ONBOARDING });
     const kept = fake.cards.get("keeper.vcf")?.data ?? "";
-    expect(kept.match(/X-ABLabel/g)).toHaveLength(1);
+    expect(kept.match(/X-ABLabel/gi)).toHaveLength(1);
     expect(mapCardToStripe(kept).fields.email).toBe("mine@zephyrine.example");
+  });
+});
+
+describe("cycle claim across instances", () => {
+  it("lets only one of two concurrent cycles run", async () => {
+    await baselined();
+    putCard(UID_A, withBase(["TEL", "TEL:+1 111 555 0000"]));
+    fake.latencyMs = 40;
+    const results = await Promise.all([cycle(), cycle()]);
+    expect(results.map((r) => r.status).sort()).toEqual(["busy", "ok"]);
+    expect(update).toHaveBeenCalledTimes(1);
+    // The lock is released afterwards.
+    fake.latencyMs = 0;
+    expect(await cycle()).toMatchObject({ status: "ok" });
+  });
+
+  it("releases the claim when a cycle fails", async () => {
+    await baselined();
+    fake.fail({ match: () => true, status: 503, times: 1 });
+    expect(await cycle()).toMatchObject({ status: "nextcloud_unavailable" });
+    expect(await cycle()).toMatchObject({ status: "ok" });
+  });
+
+  it("a restarted runner over existing state neither re-baselines nor re-pushes", async () => {
+    await baselined();
+    putCard(UID_A, withBase(["TEL", "TEL:+1 111 555 0000"]));
+    await cycle();
+    expect(update).toHaveBeenCalledTimes(1);
+    const before = await stateOf(UID_A);
+    resetContactStripeSyncStateForTests(); // a fresh process: no in-memory state
+    const runner = startContactStripeSync(logger(), on);
+    await runner?.stop();
+    expect(await cycle()).toMatchObject({ status: "ok", baselined: 0, pushed: 0 });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect((await stateOf(UID_A)).baselineAt).toEqual(before.baselineAt);
+  });
+
+  it("replays the same idempotency key when the state write fails after a successful push", async () => {
+    await baselined();
+    putCard(UID_A, withBase(["TEL", "TEL:+1 111 555 0000"]));
+    const realInsert = db.insert.bind(db);
+    let armed = true;
+    vi.spyOn(db, "insert").mockImplementation(((table: never) => {
+      if (armed && update.mock.calls.length > 0) {
+        armed = false;
+        throw new Error("state write failed");
+      }
+      return realInsert(table);
+    }) as never);
+    expect(await cycle()).toMatchObject({ status: "error" });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(await tokenOf()).not.toBeNull();
+    expect(await cycle()).toMatchObject({ status: "ok", pushed: 1 });
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(update.mock.calls[1][1]).toEqual(update.mock.calls[0][1]);
+    expect(update.mock.calls[1][2]).toEqual(update.mock.calls[0][2]);
+  });
+});
+
+describe("the automation's own card writes", () => {
+  it("does not push when the onboarding step appends to an already-baselined, linked card", async () => {
+    await link(5, "CP-009", "cus_dash");
+    putCard(UID_A, BASE);
+    expect(await cycle()).toMatchObject({ baselined: 1 });
+    const before = (await stateOf(UID_A)).lastHash;
+
+    vi.spyOn(stripe.customers, "list").mockResolvedValue({ data: [] } as never);
+    vi.spyOn(stripe.customers, "create").mockResolvedValue({ id: "cus_second" } as never);
+    fake.addLead(301, "Zephyrine Widgets LLC");
+    fake.questions.push({ ...BILLING_EMAIL_QUESTION });
+    const env = onboardingEnv({ CONTACT_STRIPE_SYNC: "true" });
+    const run = () => runClientOnboardingCycle({ logger: logger(), env });
+    expect((await run()).status).toBe("ok");
+    fake.addSubmission(8, {
+      company: "Zephyrine Widgets LLC",
+      contact_name: "Ophelia Quartermaine",
+      email: "ap@zephyrine.example", // matches the existing card
+      project_name: "Second Project",
+      summary: "More work",
+      billing_email: "second-project@zephyrine.example",
+    });
+    expect(await run()).toMatchObject({ completed: 1 });
+    const edited = fake.cards.get(`${UID_A}.vcf`)?.data ?? "";
+    expect(edited).toMatch(/X-ABLABEL:Account email/);
+
+    // The append is ours: a baseline, not an edit.
+    expect(await cycle()).toMatchObject({ status: "ok", baselined: 1, pushed: 0 });
+    expect(update).not.toHaveBeenCalled();
+    expect((await stateOf(UID_A)).lastHash).not.toBe(before);
+    // A person's later edit pushes again.
+    putCard(
+      UID_A,
+      [...BASE, "NOTE:x"].map((l) => (l.startsWith("TEL") ? "TEL:+1 111 555 0000" : l))
+    );
+    expect(await cycle()).toMatchObject({ pushed: 1 });
+  });
+});
+
+describe("partial addresses", () => {
+  it("sends only the non-blank address parts, never empty strings or an unmappable country", async () => {
+    await baselined();
+    putCard(UID_A, withBase(["ADR", "ADR:;;5 New St;;;75001;Narnia"]));
+    await cycle();
+    expect(update.mock.calls[0][1]).toEqual({
+      address: { line1: "5 New St", postal_code: "75001" },
+    });
+  });
+});
+
+describe("persistent Stripe auth failures", () => {
+  it("backs off exponentially instead of hitting Stripe every interval, and resets on success", async () => {
+    await baselined();
+    const now = vi.spyOn(Date, "now");
+    const t0 = Date.now();
+    now.mockReturnValue(t0);
+    putCard(UID_A, withBase(["TEL", "TEL:+1 111 555 0000"]));
+    update.mockRejectedValue(
+      new Stripe.errors.StripeAuthenticationError({ message: "k", statusCode: 401 } as never)
+    );
+
+    expect(await cycle()).toMatchObject({ failed: 1 });
+    const reports = fake.requests.length;
+    // Within the first back-off (one interval, 120s): the cycle does not even call Nextcloud.
+    now.mockReturnValue(t0 + 60_000);
+    expect(await cycle()).toMatchObject({ status: "backoff" });
+    expect(fake.requests.length).toBe(reports);
+    // After it: another failure doubles the wait.
+    now.mockReturnValue(t0 + 121_000);
+    expect(await cycle()).toMatchObject({ failed: 1 });
+    now.mockReturnValue(t0 + 121_000 + 200_000);
+    expect(await cycle()).toMatchObject({ status: "backoff" });
+    // Capped at 30 minutes, and a success clears it.
+    update.mockResolvedValue({ id: "cus_x" } as never);
+    now.mockReturnValue(t0 + 121_000 + 241_000);
+    expect(await cycle()).toMatchObject({ pushed: 1 });
+    expect(await cycle()).toMatchObject({ status: "ok" });
   });
 });

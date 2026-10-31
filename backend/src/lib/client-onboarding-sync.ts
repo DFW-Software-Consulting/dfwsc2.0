@@ -59,6 +59,7 @@ import {
   CLIENT_ONBOARDING_RETRY_BASE_MS,
   CLIENT_ONBOARDING_RETRY_MAX_MS,
 } from "./constants";
+import { resetCardBaseline } from "./contact-stripe-sync";
 import {
   getNextcloudConfig,
   NextcloudCircuitOpenError,
@@ -596,6 +597,9 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
       if (merged !== null) {
         await api.updateCard(card, merged);
         ctx.contacts.invalidate(card.addressbook);
+        // Our own write, not a person's edit: if this card is synced to a billing Customer,
+        // its next sighting must be a baseline so the change is not pushed.
+        if (contactUid?.startsWith("dfwsc-client-")) await resetCardBaseline(contactUid);
       }
     } catch (error) {
       // A read-only shared book refuses the write. Creating a card elsewhere would

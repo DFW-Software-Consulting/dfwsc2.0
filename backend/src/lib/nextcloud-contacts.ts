@@ -402,10 +402,12 @@ export function createContactDirectory(
 
 // ── Labelled entries ─────────────────────────────────────────────────────────
 // The billing sync reads these labels from a client's card; users add them in Nextcloud
-// Contacts with "Add label > Custom". Contacts stores a custom label as an Apple-style group:
-//   item1.EMAIL:billing@example.com
-//   item1.X-ABLabel:Account email
-// A TYPE parameter holding the same text is read too.
+// Contacts by choosing a custom label. As verified on the live instance, Contacts stores a
+// custom label as a group (NEXTCLOUD<n>.) with TYPE kept alongside:
+//   NEXTCLOUD2.EMAIL;TYPE=HOME:billing@example.com
+//   NEXTCLOUD2.X-ABLABEL:Account email
+// Any group name and any case of X-ABLabel is read (the label belongs to the entry in the same
+// group); a TYPE parameter holding the same text is read too.
 export const ACCOUNT_EMAIL_LABEL = "Account email";
 export const ACCOUNT_PHONE_LABEL = "Account phone";
 export const BILLING_ADDRESS_LABEL = "Billing address";
@@ -417,7 +419,7 @@ const normalizeLabel = (value: string) =>
     .trim()
     .toLocaleLowerCase("en-US");
 
-/** The "group" of a line: the prefix before the dot in "item1.EMAIL", or null. */
+/** The "group" of a line: the prefix before the dot in "NEXTCLOUD2.EMAIL", or null. */
 function lineGroup(raw: string): string | null {
   const colon = raw.indexOf(":");
   const head = (colon === -1 ? raw : raw.slice(0, colon)).split(";")[0];
@@ -454,17 +456,20 @@ export function hasLabel(lines: VCardLine[], line: VCardLine, label: string): bo
   );
 }
 
-/** The next unused item group ("item1", "item2", ...) on a card. */
+/** The next group Nextcloud Contacts would use ("NEXTCLOUD1", ...) that the card has not used. */
 function nextGroup(lines: VCardLine[]): string {
   const used = new Set(lines.map((l) => lineGroup(l.raw)).filter((g): g is string => g !== null));
   let n = 1;
-  while (used.has(`item${n}`)) n++;
-  return `item${n}`;
+  while (used.has(`nextcloud${n}`)) n++;
+  return `NEXTCLOUD${n}`;
 }
 
 /** The two lines of an EMAIL entry labelled "Account email". */
 export function accountEmailLines(email: string, group: string): string[] {
-  return [`${group}.EMAIL:${escapeVCardText(email)}`, `${group}.X-ABLabel:${ACCOUNT_EMAIL_LABEL}`];
+  return [
+    `${group}.EMAIL;TYPE=WORK:${escapeVCardText(email)}`,
+    `${group}.X-ABLABEL:${ACCOUNT_EMAIL_LABEL}`,
+  ];
 }
 
 /** Case-insensitive, whitespace-collapsed, NFC form used for "exact" name matches. */

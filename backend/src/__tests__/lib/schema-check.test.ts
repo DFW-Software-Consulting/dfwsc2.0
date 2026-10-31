@@ -20,7 +20,7 @@ vi.mock("drizzle-orm", async (importOriginal) => {
 });
 
 import { db } from "../../db/client";
-import { verifyDatabaseSchema } from "../../lib/schema-check";
+import { REQUIRED_TABLES, verifyDatabaseSchema } from "../../lib/schema-check";
 
 const mockDb = db as { execute: ReturnType<typeof vi.fn> };
 
@@ -423,5 +423,25 @@ describe("verifyDatabaseSchema", () => {
         await verifyDatabaseSchema();
       })()
     ).rejects.toThrow(/Missing columns: token, status/);
+  });
+
+  it("checks every table's own columns, in order, and names the table and column that is missing", async () => {
+    for (let target = 0; target < REQUIRED_TABLES.length; target++) {
+      const { table, columns } = REQUIRED_TABLES[target];
+      const dropped = columns[columns.length - 1];
+      let call = 0;
+      mockDb.execute.mockReset();
+      mockDb.execute.mockImplementation(async () => {
+        const wanted = REQUIRED_TABLES[call++];
+        const cols = wanted.table === table ? wanted.columns.slice(0, -1) : wanted.columns;
+        return { rows: cols.map((column_name) => ({ column_name })) };
+      });
+      await expect(verifyDatabaseSchema()).rejects.toThrow(
+        new RegExp(`table "${table}"\\. Missing columns: ${dropped}`)
+      );
+    }
+    expect(REQUIRED_TABLES.map((t) => t.table)).toEqual(
+      expect.arrayContaining(["contact_stripe_sync_books", "contact_stripe_sync_cards"])
+    );
   });
 });

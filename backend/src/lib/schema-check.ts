@@ -6,7 +6,7 @@ type TableColumns = {
   columns: string[];
 };
 
-const REQUIRED_TABLES: TableColumns[] = [
+export const REQUIRED_TABLES: TableColumns[] = [
   {
     table: "clients",
     columns: [

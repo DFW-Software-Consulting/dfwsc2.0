@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { and, eq, inArray, isNotNull, like } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import Stripe from "stripe";
-import { db } from "../db/client";
+import { db, pool } from "../db/client";
 import {
   billingCustomers,
   clientOnboardingSubmissions,
@@ -153,7 +153,7 @@ async function loadLinks(): Promise<Map<string, Link>> {
 
 // ── Stripe ───────────────────────────────────────────────────────────────────
 
-function classifyStripeError(error: unknown): { code: string; retryable: boolean } {
+function classifyStripeError(error: unknown): { code: string; retryable: boolean; auth: boolean } {
   if (error instanceof Stripe.errors.StripeError) {
     const status = error.statusCode;
     const retryable =
@@ -162,9 +162,13 @@ function classifyStripeError(error: unknown): { code: string; retryable: boolean
       error instanceof Stripe.errors.StripeAPIError ||
       (typeof status === "number" &&
         (status >= 500 || status === 429 || status === 409 || status === 401 || status === 403));
-    return { code: `stripe.customer_update:${status ?? error.type ?? "error"}`, retryable };
+    return {
+      code: `stripe.customer_update:${status ?? error.type ?? "error"}`,
+      retryable,
+      auth: status === 401 || status === 403,
+    };
   }
-  return { code: "stripe.customer_update:internal_error", retryable: true };
+  return { code: "stripe.customer_update:internal_error", retryable: true, auth: false };
 }
 
 const sha256 = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
@@ -182,7 +186,15 @@ function idempotencyKey(customerId: string, etag: string | null, changed: Mapped
 // ── Cycle ────────────────────────────────────────────────────────────────────
 
 export interface ContactStripeSyncResult {
-  status: "disabled" | "invalid_config" | "nextcloud_unavailable" | "read_only" | "error" | "ok";
+  status:
+    | "disabled"
+    | "invalid_config"
+    | "nextcloud_unavailable"
+    | "read_only"
+    | "busy"
+    | "backoff"
+    | "error"
+    | "ok";
   fullScan: boolean;
   baselined: number;
   pushed: number;
@@ -203,6 +215,16 @@ const result = (
 
 let lastLoggedProblem: string | null = null;
 
+// A persistent 401/403 (rotated or restricted key) backs the whole sync off exponentially, from
+// one interval up to 30 minutes, until a push succeeds. In memory: a restart starts over.
+const MAX_AUTH_BACKOFF_MS = 30 * 60 * 1000;
+const authBackoff = { failures: 0, until: 0 };
+
+// One cycle at a time across API instances (deploy overlap, restarts): a session-level
+// advisory lock held on a dedicated pooled connection for the whole cycle. It is released when
+// the cycle ends or, if the process dies, when its connection closes.
+const CYCLE_LOCK_NAME = "contact_stripe_sync_cycle";
+
 function logProblemOnce(logger: Logger, key: string, fields: Record<string, unknown>, msg: string) {
   if (lastLoggedProblem === key) return;
   lastLoggedProblem = key;
@@ -211,6 +233,20 @@ function logProblemOnce(logger: Logger, key: string, fields: Record<string, unkn
 
 export function resetContactStripeSyncStateForTests() {
   lastLoggedProblem = null;
+  authBackoff.failures = 0;
+  authBackoff.until = 0;
+}
+
+/**
+ * Forgets a card's recorded state so its next sighting is a baseline, not an edit. For writes
+ * the automation makes itself (the onboarding contact step adding to a card): they are not a
+ * person's edit and must not be pushed to the Customer.
+ */
+export async function resetCardBaseline(contactUid: string): Promise<void> {
+  await db
+    .update(contactStripeSyncCards)
+    .set({ baselineAt: null, etag: null, lastHash: null, fieldHashes: null })
+    .where(eq(contactStripeSyncCards.contactUid, contactUid));
 }
 
 type CardState = typeof contactStripeSyncCards.$inferSelect;
@@ -242,8 +278,26 @@ export async function runContactStripeSyncCycle(options: {
     );
     return result("invalid_config");
   }
+  if (Date.now() < authBackoff.until) return result("backoff");
   try {
-    const outcome = await syncOnce(config.settings, logger);
+    const client = await pool.connect();
+    let outcome: ContactStripeSyncResult;
+    try {
+      const lock = await client.query<{ ok: boolean }>(
+        "SELECT pg_try_advisory_lock(hashtext($1)) AS ok",
+        [CYCLE_LOCK_NAME]
+      );
+      if (!lock.rows[0]?.ok) return result("busy");
+      try {
+        outcome = await syncOnce(config.settings, logger);
+      } finally {
+        await client
+          .query("SELECT pg_advisory_unlock(hashtext($1))", [CYCLE_LOCK_NAME])
+          .catch(() => {});
+      }
+    } finally {
+      client.release();
+    }
     if (outcome.status === "ok") lastLoggedProblem = null;
     return outcome;
   } catch (error) {
@@ -414,7 +468,7 @@ async function syncOnce(
       .where(inArray(contactStripeSyncCards.href, delta.removed));
   }
 
-  const retryNeeded = await pushCandidates(candidates, logger, outcome);
+  const retryNeeded = await pushCandidates(candidates, logger, outcome, settings.intervalMs);
 
   // A retryable failure keeps the old token, so the same delta comes back next cycle; the
   // cards that were handled are skipped by their recorded ETag.
@@ -468,7 +522,8 @@ async function saveState(
 async function pushCandidates(
   candidates: Candidate[],
   logger: Logger,
-  outcome: ContactStripeSyncResult
+  outcome: ContactStripeSyncResult,
+  intervalMs: number
 ): Promise<boolean> {
   const byCustomer = new Map<string, Candidate[]>();
   for (const c of candidates) {
@@ -491,7 +546,7 @@ async function pushCandidates(
           idempotencyKey: idempotencyKey(customerId, c.card.etag, c.changed),
         });
       } catch (error) {
-        const { code, retryable } = classifyStripeError(error);
+        const { code, retryable, auth } = classifyStripeError(error);
         outcome.failed++;
         logger.warn(
           {
@@ -503,6 +558,12 @@ async function pushCandidates(
           },
           "Could not push the contact card to the Stripe Customer."
         );
+        if (auth) {
+          authBackoff.failures++;
+          authBackoff.until =
+            Date.now() +
+            Math.min(MAX_AUTH_BACKOFF_MS, intervalMs * 2 ** (authBackoff.failures - 1));
+        }
         if (retryable) {
           await saveErrorOnly(c, code);
           retryNeeded = true;
@@ -511,6 +572,8 @@ async function pushCandidates(
         await saveState(c.link, c.card, { lastError: code, lastErrorHash: c.hash });
         continue;
       }
+      authBackoff.failures = 0;
+      authBackoff.until = 0;
       await saveState(c.link, c.card, {
         lastHash: c.hash,
         fieldHashes: c.hashes,
