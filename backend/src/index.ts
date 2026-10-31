@@ -14,9 +14,11 @@ async function start() {
   const { verifyDatabaseSchema } = await import("./lib/schema-check");
   const { pruneProcessedWebhookEvents } = await import("./lib/webhook-retention");
   const { WEBHOOK_PRUNE_INTERVAL_MS } = await import("./lib/constants");
+  const { startSalesLeadPoller } = await import("./lib/sales-lead-sync");
   const { pool } = await import("./db/client");
 
   const server = await buildServer();
+  let salesLeadPoller: { stop(): Promise<void> } | null = null;
 
   try {
     if (process.env.NODE_ENV !== "production") {
@@ -45,6 +47,10 @@ async function start() {
       port: Number(process.env.PORT) || 4242,
       host: process.env.HOST || "0.0.0.0",
     });
+
+    // New Lead automation: off unless SALES_AUTOMATION_ENABLED=true. A bad config is
+    // logged and the poller stays off; it never stops the payment API from serving.
+    salesLeadPoller = startSalesLeadPoller(server.log);
   } catch (err) {
     server.log.error(err);
     process.exit(1);
@@ -53,6 +59,7 @@ async function start() {
   const shutdown = async (signal: string) => {
     server.log.info({ signal }, "Received signal, shutting down gracefully");
     try {
+      await salesLeadPoller?.stop();
       await server.close();
       await pool.end();
       server.log.info("Server closed successfully");
