@@ -151,7 +151,6 @@ jobs:
       JWT_EXPIRY: 1h
       FRONTEND_ORIGIN: http://localhost:5173
       API_BASE_URL: http://localhost:4242
-      ALLOW_ADMIN_SETUP: "false"
       USE_CHECKOUT: "true"
       DEFAULT_PROCESS_FEE_CENTS: "100"
       SMTP_HOST: localhost

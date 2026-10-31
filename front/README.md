@@ -52,7 +52,7 @@ Tests use Vitest with core flow coverage in `src/__tests__/coreFlows.test.jsx`
 Access the admin interface at `/onboard`:
 
 1. Click "Admin Login" 
-2. Use credentials from backend `.env` (`ADMIN_USERNAME`/`ADMIN_PASSWORD`)
+2. Sign in with your Nextcloud account (it must be in one of the `ADMIN_NEXTCLOUD_GROUPS`; accounts with two-factor login need a Nextcloud app password)
 3. Manage clients, create accounts, and initiate onboarding
 4. View payment reports and client status
 

@@ -49,10 +49,9 @@ Idempotency table to de-duplicate Stripe webhook notifications.
 - **Fields**: `id`, `stripeEventId` (unique), `type`, `payload` (JSONB), `processedAt`, `createdAt`.
 
 ### `admins`
-Admin accounts for the dashboard.
+**Legacy: no longer read or written.** Admin login is checked against Nextcloud, and a later migration drops this table. It used to hold the dashboard's own admin accounts.
 
 - **Fields**: `id`, `username` (unique), `passwordHash`, `role` (default `"admin"`), `active`, `setupConfirmed`, `lastLoginAt`, `createdAt`, `updatedAt`.
-- Created via the bootstrap flow: seed `ADMIN_USERNAME`/`ADMIN_PASSWORD` env vars (with `ALLOW_ADMIN_SETUP=true`), log in, then `POST /auth/confirm-bootstrap`.
 
 ### `settings`
 Key-value store for system-wide configuration.

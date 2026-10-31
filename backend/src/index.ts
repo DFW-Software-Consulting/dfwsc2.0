@@ -10,7 +10,6 @@ if (process.env.NODE_ENV !== "production") {
 async function start() {
   const { buildServer } = await import("./app");
   const { runMigrations } = await import("./lib/migrate");
-  const { bootstrapAdminIfNeeded } = await import("./lib/bootstrap");
   const { verifyDatabaseSchema } = await import("./lib/schema-check");
   const { pruneProcessedWebhookEvents } = await import("./lib/webhook-retention");
   const { WEBHOOK_PRUNE_INTERVAL_MS } = await import("./lib/constants");
@@ -27,7 +26,6 @@ async function start() {
       await runMigrations(server);
     }
     await verifyDatabaseSchema();
-    await bootstrapAdminIfNeeded(server);
 
     // Prune processed webhook_events past their retention window: once at
     // boot, then on a recurring sweep. Failures here are logged, not fatal —

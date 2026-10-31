@@ -39,54 +39,33 @@ describe("validateEnv", () => {
     Object.assign(process.env, savedEnv);
   });
 
-  it("does not throw when admin credentials are missing (always optional now)", () => {
+  it("does not need any admin settings", () => {
     // Set all required vars
     for (const [k, v] of Object.entries(BASE_ENV)) {
       process.env[k] = v;
     }
 
-    // Should not throw — admin creds are optional
     expect(() => validateEnv()).not.toThrow();
   });
 
-  it("throws in production when ADMIN_PASSWORD is too short", () => {
-    for (const [k, v] of Object.entries(BASE_ENV)) {
-      process.env[k] = v;
-    }
-    process.env.NODE_ENV = "production";
-    process.env.ADMIN_PASSWORD = "short1";
-
-    expect(() => validateEnv()).toThrow("ADMIN_PASSWORD is too weak");
-  });
-
-  it("throws in production when ADMIN_PASSWORD is a known-dev value", () => {
+  it("ignores a leftover ADMIN_PASSWORD, even a weak one in production", () => {
     for (const [k, v] of Object.entries(BASE_ENV)) {
       process.env[k] = v;
     }
     process.env.NODE_ENV = "production";
     process.env.ADMIN_PASSWORD = "changeme";
 
-    expect(() => validateEnv()).toThrow("ADMIN_PASSWORD is too weak");
+    const env = validateEnv();
+    expect(env.ADMIN_PASSWORD).toBeUndefined();
   });
 
-  it("allows a strong ADMIN_PASSWORD in production", () => {
+  it("passes ADMIN_NEXTCLOUD_GROUPS through when set", () => {
     for (const [k, v] of Object.entries(BASE_ENV)) {
       process.env[k] = v;
     }
-    process.env.NODE_ENV = "production";
-    process.env.ADMIN_PASSWORD = "Str0ng-Adm1n-Passw0rd!";
+    process.env.ADMIN_NEXTCLOUD_GROUPS = "dfwsc-admins,managers";
 
-    expect(() => validateEnv()).not.toThrow();
-  });
-
-  it("allows a weak ADMIN_PASSWORD outside production", () => {
-    for (const [k, v] of Object.entries(BASE_ENV)) {
-      process.env[k] = v;
-    }
-    process.env.NODE_ENV = "development";
-    process.env.ADMIN_PASSWORD = "changeme";
-
-    expect(() => validateEnv()).not.toThrow();
+    expect(validateEnv().ADMIN_NEXTCLOUD_GROUPS).toBe("dfwsc-admins,managers");
   });
 });
 

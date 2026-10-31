@@ -10,7 +10,6 @@ type ResetSummary = {
     webhookEventsDeleted: number;
     clientsDeleted: number;
     groupsDeleted: number;
-    adminsPreserved: number;
   };
   stripe: {
     subscriptionsCanceled: number;
@@ -23,11 +22,6 @@ function printHelp(): void {
   console.log(`\nReset local DB + Stripe test data (admin preserved)\n\nUsage:\n  npm run reset:test-data -- [options]\n\nOptions:\n  --dry-run      Show what would happen without mutating data\n  --skip-db      Skip local DB reset\n  --skip-stripe  Skip Stripe test-mode cleanup\n  --help         Show this help\n`);
 }
 
-async function countAdmins(): Promise<number> {
-  const rows = await db.execute<{ count: string }>(`SELECT COUNT(*)::text as count FROM admins`);
-  return Number(rows.rows[0]?.count ?? "0");
-}
-
 async function resetDb(dryRun: boolean): Promise<ResetSummary["db"]> {
   const [onboardingRows, webhookRows, clientRows, groupRows] = await Promise.all([
     db.select({ id: onboardingTokens.id }).from(onboardingTokens),
@@ -35,8 +29,6 @@ async function resetDb(dryRun: boolean): Promise<ResetSummary["db"]> {
     db.select({ id: clients.id }).from(clients),
     db.select({ id: clientGroups.id }).from(clientGroups),
   ]);
-
-  const adminsPreserved = await countAdmins();
 
   if (!dryRun) {
     await db.transaction(async (tx) => {
@@ -52,7 +44,6 @@ async function resetDb(dryRun: boolean): Promise<ResetSummary["db"]> {
     webhookEventsDeleted: webhookRows.length,
     clientsDeleted: clientRows.length,
     groupsDeleted: groupRows.length,
-    adminsPreserved,
   };
 }
 
@@ -144,7 +135,6 @@ async function main(): Promise<void> {
       webhookEventsDeleted: 0,
       clientsDeleted: 0,
       groupsDeleted: 0,
-      adminsPreserved: 0,
     },
     stripe: {
       subscriptionsCanceled: 0,

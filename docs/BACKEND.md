@@ -13,9 +13,24 @@ Two distinct schemes are implemented:
   - `apiKeyLookup` (SHA256) for O(1) DB lookup + `apiKeyHash` (bcrypt) for secure verification.
 - **Admin Routes**:
   - JWT Bearer token from `POST /api/v1/auth/login`.
-  - Claims must include `role: "admin"`.
+  - Claims must include `role: "admin"`. `requireAdminJwt` checks the signature (HS256), expiry and role only; it does not read the database.
 
 The payment route also accepts Admin JWT as a fallback (for admin-initiated payments).
+
+### Admin login (Nextcloud)
+`POST /auth/login` (`{ username, password }`, unchanged) is checked against Nextcloud (`lib/admin-login.ts`); the portal has no admin accounts of its own (the `admins` table is legacy and unused).
+1. The user's own credentials go in an HTTP Basic header to `GET {NEXTCLOUD_BASE_URL}/ocs/v2.php/cloud/user?format=json` (with `OCS-APIRequest: true`). A 200 means the password is valid, and `ocs.data.id` is the canonical user id (a user who typed an email alias is signed in as their id). 401 or 403 means bad credentials.
+2. The service account (`NEXTCLOUD_USERNAME` / `NEXTCLOUD_APP_PASSWORD`, a Nextcloud admin) reads `GET /ocs/v2.php/cloud/users/{id}/groups?format=json` (id URL-encoded; response `ocs.data.groups`). Both calls follow the OCS provisioning API (`instruction_set_for_users`).
+3. The user must be in at least one of `ADMIN_NEXTCLOUD_GROUPS` (comma-separated, exact ids, default `dfwsc-admins,managers`).
+
+| Outcome | Response |
+|---|---|
+| Allowed | `200 { token, expiresIn }`. JWT `sub` = Nextcloud user id, `role` = `admin`, expiry `JWT_EXPIRY` (default 1h) |
+| Bad credentials (including a username containing `:` or control characters, which is refused without calling Nextcloud) | `401 Invalid credentials` |
+| Valid credentials, no allowed group | `403 This Nextcloud account isn't authorized for the admin panel` |
+| Nextcloud unreachable, timing out, 5xx, 429, unexpected answer, breaker open, or `NEXTCLOUD_*` not configured | `503 Admin login is unavailable` (never 500) |
+
+The password is sent only to `NEXTCLOUD_BASE_URL`, only on step 1, and is never logged or stored. Calls use `nextcloudRequest` (shared breaker and 8 s timeout); a user's 401/403 is listed in `okStatuses`, so wrong passwords never count as breaker failures, while 5xx, timeouts and a rejected service account do. Limits: 5 requests / 15 min per client IP and 10 / 15 min per username (trimmed, case-insensitive, hashed in the bucket key), because Nextcloud throttles failures by source IP and that is always this API, so guessing here would also slow the service account's automation. Accounts with two-factor login must use a Nextcloud app password. There is no local fallback: with Nextcloud down nobody can log in to the admin panel, while payments (API key routes, webhooks) are unaffected; tokens already issued stay valid until they expire.
 
 ## 3. Core Flows
 
@@ -52,6 +67,7 @@ If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environm
 - **Implementation**: Sliding-window limiter (`rateLimit` in `lib/rate-limit.ts`) — Redis-backed (shared across replicas) when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets and logs a one-time startup warning, since limits are then effectively multiplied by replica count under horizontal scaling.
 - **Bucket isolation**: Each limiter keeps its own bucket, namespaced by an optional `name` or, by default, the request's method and route pattern (`ratelimit:<METHOD>:<route>:<key>`), so hits on one route never count against or prune another's.
 - **Redis outage**: If Redis is unreachable or any pipeline command fails, the request is limited by the per-process in-memory buckets instead (fail-soft, not 503) and the error is logged at most once every 30 seconds. With a single API instance the in-memory limiter is as accurate as Redis, and failing closed would reject payments whenever Redis restarts.
+- **Admin login** (`POST /auth/login`): 5 req / 15 min per IP, plus 10 req / 15 min per submitted username (own bucket, `ratelimit:POST:/auth/login:username:<sha256>`).
 - **Admin/Onboard Routes**: 10 req/min per IP.
 - **Resend Route**: 5 req/min per IP.
 - **Checkout creation** (`POST /payments/create`): a token bucket (`tokenBucketRateLimit`, same file) per Stripe Account ID (fallback to IP): capacity 200, refilling at 120 per minute (`PAYMENT_CREATE_BUCKET_CAPACITY` and `PAYMENT_CREATE_REFILL_PER_MINUTE` in `lib/constants.ts`). In Redis it is one Lua script per request (atomic, so concurrent requests cannot both take the last token, with the refill computed from Redis's clock); it has the same per-route namespacing and the same in-memory fallback on Redis errors as the sliding window. Bucket keys are `ratelimit:bucket:<METHOD>:<route>:<key>`. A request that takes a token but is then refused before any Stripe call is made (`503 STRIPE_BUSY`, or `503 STRIPE_CIRCUIT_OPEN` from a breaker that was already open) gives that token back (`refund` on the limiter, with its own Lua script on Redis; it returns one token to the same store and bucket the take came from, never above capacity, and at most once per request), so the retry the caller is told to make is not charged twice. A request whose Stripe call went out keeps its token, including a Stripe `429` and a call that timed out, as do requests that fail validation. If the refund itself fails the token stays spent.
@@ -81,14 +97,11 @@ All routes are prefixed with `/api/v1`.
 |--------|------|-------------|
 | GET | `/health` | Health check |
 | GET | `/app-config.js` | Public runtime config script (sets window API base URL from API_BASE_URL) |
-| GET | `/auth/setup/status` | Check if admin setup is needed |
 
 ### Authentication
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| POST | `/auth/login` | Admin login (returns JWT) | Public |
-| POST | `/auth/setup` | Deprecated — always returns 410 Gone | Public |
-| POST | `/auth/confirm-bootstrap` | Finalize admin setup (bootstrapped from `ADMIN_USERNAME`/`ADMIN_PASSWORD`) | Admin JWT |
+| POST | `/auth/login` | Admin login: credentials checked against Nextcloud, returns a JWT (see "Admin login (Nextcloud)" in §2) | Public (5/15 min per IP, 10/15 min per username) |
 
 ### Clients
 | Method | Path | Description | Auth |

@@ -21,7 +21,7 @@ This document details the frontend implementation, state management, and UI patt
   - **App shell**: `Navbar`, `Footer`, `ErrorBoundary`. Marketing page sections live inside their page components (`Home`, `Pricing`, `Team`).
   - **App utilities**: `Analytics` conditionally loads a Plausible-compatible script when `VITE_ANALYTICS_SRC` is configured; it is a no-op otherwise. `VITE_ANALYTICS_DOMAIN` optionally sets the tracked domain.
 - **`contexts/`**: `AuthContext` (admin JWT state), `ThemeContext` (light/dark toggle).
-- **`hooks/`**: TanStack Query hooks — `useClients`, `useContact`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings`, `useSetupStatus` — plus UI hooks such as `usePageTitle`.
+- **`hooks/`**: TanStack Query hooks — `useClients`, `useContact`, `useGroups`, `useOnboarding`, `usePaymentReports`, `useSettings` — plus UI hooks such as `usePageTitle`.
 - **`pages/`**: Route-level components. The marketing pages (`Home`, `Pricing`, `Team`) each import a co-located stylesheet (`Home.css`, `Pricing.css`, `Team.css`).
 - **`styles/`**: `studio.css`, shared primitives for the marketing pages (see [STYLES.md](./STYLES.md)).
 - **`utils/`**: `scrollToSection`, `validation`, `logger`, `lazyPage`, `preloadRecovery`.
@@ -55,7 +55,7 @@ The app supports light and dark modes via `ThemeContext`. It defaults to the sys
 Hero and contact bands stay dark in both themes. Use the semantic tokens and utilities documented in [STYLES.md](./STYLES.md) rather than raw Tailwind grays.
 
 ## 6. Admin Dashboard
-`AdminPage` is self-contained and login-gated via `AuthContext`. It renders `AdminDashboard` on successful login, which includes:
+`AdminPage` is self-contained and login-gated via `AuthContext`. Unauthenticated visitors see `AdminLogin` ("Sign in with your Nextcloud account", with a note that accounts with two-factor login need a Nextcloud app password); it posts to `POST /auth/login` and shows the API's message for 401 (wrong credentials), 403 (account not in an allowed Nextcloud group) and 503 (Nextcloud unavailable). The JWT is kept in memory only (no storage). There is no first-run setup or bootstrap screen. On successful login it renders `AdminDashboard`, which includes:
 - **ClientList**: tabular client management with edit, onboard, and filter actions.
 - **GroupPanel**: group creation and management.
 - **PaymentReports**: Stripe PaymentIntent history per client or group.

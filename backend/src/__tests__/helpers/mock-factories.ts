@@ -140,7 +140,6 @@ export interface AppDataStore {
   onboardingTokens: Map<string, any>;
   webhookEvents: Map<string, any>;
   clientGroups: Map<string, any>;
-  admins: Map<string, any>;
   paymentLedger: Map<string, any>;
   apiKeyRegenerationTokens: Map<string, any>;
 }
@@ -183,7 +182,6 @@ export function createAppDbMock(dataStore: AppDataStore) {
               const rows = Array.from(dataStore.clientGroups.values());
               return selection?.total ? [{ total: rows.length }] : rows;
             }
-            if (isTable(table, "admins")) return Array.from(dataStore.admins.values());
             if (isTable(table, "payment_ledger"))
               return Array.from(dataStore.paymentLedger?.values() ?? []);
             if (isTable(table, "api_key_regeneration_tokens"))
@@ -246,16 +244,6 @@ export function createAppDbMock(dataStore: AppDataStore) {
                 );
               }
               const row = dataStore.clientGroups.get(expr?.value);
-              return row ? [row] : [];
-            }
-            if (isTable(table, "admins")) {
-              if (isColumn(expr?.field, "username")) {
-                const row = Array.from(dataStore.admins.values()).find(
-                  (a) => a.username === expr?.value
-                );
-                return row ? [row] : [];
-              }
-              const row = dataStore.admins.get(expr?.value);
               return row ? [row] : [];
             }
             if (isTable(table, "onboarding_tokens")) {
@@ -405,19 +393,6 @@ export function createAppDbMock(dataStore: AppDataStore) {
           };
           dataStore.clientGroups.set(payload.id, next);
         }
-        if (isTable(table, "admins")) {
-          const next = {
-            id: payload.id,
-            username: payload.username,
-            passwordHash: payload.passwordHash,
-            role: payload.role ?? "admin",
-            active: payload.active ?? true,
-            setupConfirmed: payload.setupConfirmed ?? false,
-            createdAt: payload.createdAt ?? new Date(),
-            updatedAt: payload.updatedAt ?? new Date(),
-          };
-          dataStore.admins.set(payload.id, next);
-        }
         if (isTable(table, "payment_ledger")) {
           const existing = dataStore.paymentLedger?.get(payload.idempotencyKey);
           if (existing) {
@@ -500,12 +475,6 @@ export function createAppDbMock(dataStore: AppDataStore) {
             }
             if (isTable(table, "api_key_regeneration_tokens")) {
               const rows = Array.from(dataStore.apiKeyRegenerationTokens?.values() ?? []);
-              const targets = filterByExpr(rows, expr);
-              for (const row of targets) Object.assign(row, values);
-              return targets;
-            }
-            if (isTable(table, "admins")) {
-              const rows = Array.from(dataStore.admins.values());
               const targets = filterByExpr(rows, expr);
               for (const row of targets) Object.assign(row, values);
               return targets;
