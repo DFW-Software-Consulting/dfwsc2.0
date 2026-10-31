@@ -128,21 +128,45 @@ async function send(
   return { status: res.status, body, etag: res.headers.get("etag") };
 }
 
-const breaker = new CircuitBreaker(send, {
-  name: "nextcloud",
+const breakerOptions = {
   timeout: NEXTCLOUD_REQUEST_TIMEOUT_MS + 2_000,
   resetTimeout: 30_000,
   volumeThreshold: 5,
   errorThresholdPercentage: 50,
   errorFilter: isCallerError,
+};
+
+const breaker = new CircuitBreaker(send, { name: "nextcloud", ...breakerOptions });
+
+// The portal mirror (lib/portal-mirror-sync.ts) has a breaker of its own: a Tables outage or a
+// backfill that trips it never blocks the lead, onboarding or contact syncs.
+const mirrorBreaker = new CircuitBreaker(send, {
+  name: "nextcloud-portal-mirror",
+  ...breakerOptions,
 });
 
-export async function nextcloudRequest(
+export function nextcloudRequest(
+  config: NextcloudConfig,
+  request: NextcloudRequest
+): Promise<NextcloudResponse> {
+  return fire(breaker, config, request);
+}
+
+/** Same as nextcloudRequest, through the portal mirror's own breaker. */
+export function portalMirrorRequest(
+  config: NextcloudConfig,
+  request: NextcloudRequest
+): Promise<NextcloudResponse> {
+  return fire(mirrorBreaker, config, request);
+}
+
+async function fire(
+  via: CircuitBreaker<[NextcloudConfig, NextcloudRequest], NextcloudResponse>,
   config: NextcloudConfig,
   request: NextcloudRequest
 ): Promise<NextcloudResponse> {
   try {
-    return await breaker.fire(config, request);
+    return await via.fire(config, request);
   } catch (error) {
     if (CircuitBreaker.isOurError(error as Error)) {
       // opossum's own timeout is reported like a request timeout; an open breaker fails fast.
@@ -171,6 +195,11 @@ export function getNextcloudBreakerState() {
 
 export function resetNextcloudBreakerForTests() {
   breaker.close();
+  mirrorBreaker.close();
+}
+
+export function openPortalMirrorBreakerForTests() {
+  mirrorBreaker.open();
 }
 
 export function openNextcloudBreakerForTests() {

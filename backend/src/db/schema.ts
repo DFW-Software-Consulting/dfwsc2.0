@@ -244,6 +244,11 @@ export const paymentLedger = pgTable(
   },
   (table) => ({
     clientIdIdx: index("payment_ledger_client_id_idx").on(table.clientId),
+    // Portal mirror: "did any payment of this client change since X" is an index range probe.
+    clientUpdatedIdx: index("payment_ledger_client_updated_idx").on(
+      table.clientId,
+      table.updatedAt
+    ),
     // A Stripe session maps to exactly one ledger row.
     sessionIdUniq: uniqueIndex("payment_ledger_session_id_uniq")
       .on(table.stripeSessionId)
@@ -507,3 +512,40 @@ export const contactStripeSyncCards = pgTable(
     customerIdx: index("contact_stripe_sync_cards_customer_idx").on(table.stripeCustomerId),
   })
 );
+
+// Portal Accounts mirror into a Nextcloud Table (PORTAL_MIRROR=true only).
+// One row per mirrored source row (kind = "account"). The source tables are never
+// touched: a source row is dirty when it has no row here or its updated_at is newer than
+// synced_at. nc_row_id is the Nextcloud Tables row; null means "create it on the next cycle".
+export const portalMirrorRows = pgTable(
+  "portal_mirror_rows",
+  {
+    kind: text("kind", { enum: ["account"] }).notNull(),
+    sourceId: text("source_id").notNull(),
+    ncRowId: integer("nc_row_id"),
+    contentHash: text("content_hash"),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.kind, table.sourceId] }),
+    kindCheck: check("portal_mirror_rows_kind_check", sql`${table.kind} IN ('account')`),
+  })
+);
+
+// Portal mirror bookkeeping that is not per source row; today only `accounts_table_id`, the
+// Nextcloud Table the mirror provisioned (kept so a renamed table is not duplicated).
+export const portalMirrorState = pgTable("portal_mirror_state", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});

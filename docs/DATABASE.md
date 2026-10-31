@@ -97,6 +97,12 @@ CardDAV sync-token per address book for the contact card to billing Customer syn
 ### `contact_stripe_sync_cards`
 Per onboarding contact card (`dfwsc-client-*`) linked to a billing Customer. **PK** `contactUid`; `clientCode`, `stripeCustomerId` (plain index), `href`, `etag`, `lastHash` and `fieldHashes` (jsonb: sha256 per mapped Stripe field name/email/phone/address, never the values), `baselineAt` (NULL = card not seen yet, deleted, or reset), `baselineResetAt` (set when the automation rewrote the card; a cycle that started earlier must not overwrite the row), `lastPushedAt`, `lastError` (PII-free code) and `lastErrorHash` (a non-retryable error is retried only when the card hash differs), `createdAt`, `updatedAt`. Nothing on `clients` or `payment_ledger`.
 
+### `portal_mirror_rows`
+Mapping for the Portal Accounts Nextcloud Table mirror (`PORTAL_MIRROR=true`, docs/BACKEND.md section 12). **PK** (`kind`, `sourceId`); `kind` is `account` today (CHECK), so another table could be added later. `ncRowId` (the Nextcloud Tables row; NULL = create it on the next cycle), `contentHash` (sha256 of the rendered cells; an unchanged hash means no Nextcloud write), `syncedAt` (database clock at the start of the cycle that wrote it; NULL = needs a write), `attempts`, `nextAttemptAt` and `lastError` (error class and HTTP status only) for per-row backoff, `updatedAt`. Nothing on `clients` or `client_groups`: a client is dirty when `greatest(clients.updated_at, client_groups.updated_at)` or any of its `payment_ledger.updated_at` is newer than `syncedAt` minus 5 minutes (index `payment_ledger_client_updated_idx` on (`client_id`, `updated_at`), added by migration 0032).
+
+### `portal_mirror_state`
+Key/value bookkeeping for the portal mirror. Today one key, `accounts_table_id`: the Nextcloud Table it provisioned, so a renamed table keeps being used. **PK** `key`; `value`, `updatedAt`.
+
 ## 3. Tooling & Migrations
 - **Schema Changes**: Edit `backend/src/db/schema.ts`.
 - **Generate**: `npm run db:generate` — creates SQL migration files in `backend/drizzle/`.

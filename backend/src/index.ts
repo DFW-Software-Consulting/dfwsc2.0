@@ -16,12 +16,14 @@ async function start() {
   const { startSalesLeadPoller } = await import("./lib/sales-lead-sync");
   const { startClientOnboarding } = await import("./lib/client-onboarding-sync");
   const { startContactStripeSync } = await import("./lib/contact-stripe-sync");
+  const { startPortalMirror } = await import("./lib/portal-mirror-sync");
   const { pool } = await import("./db/client");
 
   const server = await buildServer();
   let salesLeadPoller: { stop(): Promise<void> } | null = null;
   let clientOnboarding: { stop(): Promise<void> } | null = null;
   let contactStripeSync: { stop(): Promise<void> } | null = null;
+  let portalMirror: { stop(): Promise<void> } | null = null;
 
   try {
     if (process.env.NODE_ENV !== "production") {
@@ -57,6 +59,8 @@ async function start() {
     clientOnboarding = startClientOnboarding(server.log);
     // Contact card -> billing Stripe Customer: off unless CONTACT_STRIPE_SYNC=true. Same guarantees.
     contactStripeSync = startContactStripeSync(server.log);
+    // Portal Accounts -> Nextcloud Table (read-only mirror): off unless PORTAL_MIRROR=true. Same guarantees.
+    portalMirror = startPortalMirror(server.log);
   } catch (err) {
     server.log.error(err);
     process.exit(1);
@@ -68,6 +72,7 @@ async function start() {
       await salesLeadPoller?.stop();
       await clientOnboarding?.stop();
       await contactStripeSync?.stop();
+      await portalMirror?.stop();
       await server.close();
       await pool.end();
       server.log.info("Server closed successfully");
