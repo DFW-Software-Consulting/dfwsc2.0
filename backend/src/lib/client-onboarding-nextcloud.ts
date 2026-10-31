@@ -94,7 +94,7 @@ const SHARES_BASE = "/ocs/v2.php/apps/files_sharing/api/v1/shares";
 /** files_sharing shareType for a Team (Circle). */
 const SHARE_TYPE_TEAM = 7;
 /** Read, update, create, delete; no reshare (16). */
-export const TEAM_SHARE_PERMISSIONS = 15;
+const TEAM_SHARE_PERMISSIONS = 15;
 /** Circles member levels. */
 export const TEAM_LEVEL_ADMIN = 8;
 /** Circles member type for a local user. */
