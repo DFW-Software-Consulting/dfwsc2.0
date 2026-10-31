@@ -30,6 +30,7 @@ import {
   folderNameCandidate,
   hasPerson,
   leadRef,
+  linkCellUrl,
   linkValue,
   type QuestionMap,
   resolveColumns,
@@ -175,6 +176,15 @@ class ClaimLostError extends Error {
   }
 }
 
+/** Tables accepted a row update but the read-back does not show it; retried. */
+class LinksNotPersistedError extends Error {
+  readonly code = "tables.link_not_persisted";
+  constructor() {
+    super("Tables did not store the sales lead row links");
+    this.name = "LinksNotPersistedError";
+  }
+}
+
 /** Records the baseline on first sight of a form; returns it. */
 async function ensureBaseline(
   api: SalesLeadNextcloud,
@@ -292,6 +302,7 @@ const RETRYABLE_HTTP_STATUSES = new Set([401, 408, 423, 425, 429]);
 
 function classify(error: unknown): { code: string; retryable: boolean } {
   if (error instanceof SalesLeadInvalidError) return { code: error.code, retryable: false };
+  if (error instanceof LinksNotPersistedError) return { code: error.code, retryable: true };
   if (error instanceof NextcloudHttpError) {
     return {
       code: `${error.label}:${error.status}`,
@@ -379,14 +390,21 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
     logger.info(ids, "Sales lead folder created.");
   }
 
-  // 4. Links on the row.
+  // 4. Links on the row. Tables can answer 200 without storing a cell, so the row
+  // is read back and the links only count as filled once their URLs are there.
   if (row.linksBackfilledAt === null) {
-    const data: Record<string, unknown> = {
-      [columns.notesFiles.id]: linkValue("Lead folder", api.folderLink(fileId)),
-    };
-    if (uid !== null)
-      data[columns.contactCard.id] = linkValue("Contact card", api.contactLink(uid));
+    const links: [number, string, string][] = [
+      [columns.notesFiles.id, "Lead folder", api.folderLink(fileId)],
+    ];
+    if (uid !== null) links.push([columns.contactCard.id, "Contact card", api.contactLink(uid)]);
+    const data: Record<string, unknown> = {};
+    for (const [columnId, title, url] of links) data[columnId] = linkValue(title, url);
     await api.updateRow(rowId, data);
+    const stored = await api.getRowCells(rowId);
+    for (const [columnId, , url] of links) {
+      const storedUrl = linkCellUrl(stored.get(columnId));
+      if (storedUrl === null || !storedUrl.includes(url)) throw new LinksNotPersistedError();
+    }
   }
 
   const now = new Date();

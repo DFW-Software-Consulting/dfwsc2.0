@@ -143,6 +143,8 @@ export class FakeNextcloud {
   ]);
   /** Milliseconds every request waits, so concurrent cycles interleave. */
   latencyMs = 0;
+  /** Row updates still to answer 200 without storing anything. */
+  droppedRowUpdates = 0;
   private faults: Fault[] = [];
   private nextRowId = 1000;
   private nextFileId = 900;
@@ -218,6 +220,21 @@ export class FakeNextcloud {
     return this.json({ ocs: { meta: { status: "ok" }, data } });
   }
 
+  private isJsonLink(columnId: string, value: unknown): boolean {
+    const column = this.columns.find((c) => c.id === Number(columnId));
+    return column?.subtype === "link" && typeof value === "string" && value.trim().startsWith("{");
+  }
+
+  private storedValue(columnId: string, value: unknown): unknown {
+    const column = this.columns.find((c) => c.id === Number(columnId));
+    const link = typeof value === "string" ? /^(.*) \((\S+)\)$/.exec(value) : null;
+    if (column?.subtype !== "link" || !link) return value;
+    return JSON.stringify({ title: link[1], value: link[2], providerId: "url" }).replace(
+      /\//g,
+      "\\/"
+    );
+  }
+
   private submissionData(id: number) {
     const answers = Object.entries(this.submissions.get(id) ?? {}).map(([title, text], i) => ({
       id: id * 100 + i,
@@ -272,11 +289,33 @@ export class FakeNextcloud {
       return this.json({ id: row.id, tableId: FAKE_TABLE_ID });
     }
     const rowUpdate = new RegExp(`^${TABLES}/rows/(\\d+)$`).exec(path);
+    if (method === "GET" && rowUpdate) {
+      const row = this.rows.find((r) => r.id === Number(rowUpdate[1]));
+      if (!row) return this.json({ message: "not found" }, 404);
+      return this.json({
+        id: row.id,
+        tableId: FAKE_TABLE_ID,
+        // Like Tables, empty cells may be left out.
+        data: [...row.data]
+          .filter(([, value]) => value !== null && value !== undefined && value !== "")
+          .map(([columnId, value]) => ({ columnId, value })),
+      });
+    }
     if (method === "PUT" && rowUpdate) {
       const row = this.rows.find((r) => r.id === Number(rowUpdate[1]));
       if (!row) return this.json({ message: "not found" }, 404);
       const { data } = JSON.parse(req.body) as { data: Record<string, unknown> };
-      for (const [k, v] of Object.entries(data)) row.data.set(Number(k), v);
+      // Like Tables 2.4: a JSON {title,value,providerId} link value gets a 200 and
+      // nothing in the update is stored. "Title (url)" is stored converted to that
+      // JSON form, with slashes escaped as PHP's json_encode does.
+      if (
+        this.droppedRowUpdates > 0 ||
+        Object.entries(data).some(([k, v]) => this.isJsonLink(k, v))
+      ) {
+        this.droppedRowUpdates = Math.max(this.droppedRowUpdates - 1, 0);
+        return this.json({ id: row.id });
+      }
+      for (const [k, v] of Object.entries(data)) row.data.set(Number(k), this.storedValue(k, v));
       return this.json({ id: row.id });
     }
 
