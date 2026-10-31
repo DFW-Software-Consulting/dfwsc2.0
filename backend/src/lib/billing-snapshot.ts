@@ -78,6 +78,8 @@ async function fetchBillingInput(customerId: string, now: Date): Promise<Billing
   };
 }
 
+// startedAt reached us as a JS Date (millisecond precision) while dirty_at has microseconds, hence
+// the extra millisecond: a mark set during that millisecond still predates every Stripe read.
 /**
  * Re-derives the snapshot of every client code on this Customer. `updated_at` moves only when the
  * content hash does, so the mirror sees real changes. `dirty_at` is cleared only if no webhook
@@ -114,7 +116,7 @@ async function refreshCustomer(customerId: string, startedAt: Date): Promise<num
       refreshedAt: new Date(),
       attempts: 0,
       lastError: null,
-      dirtyAt: sql`CASE WHEN ${billingSnapshots.dirtyAt} <= ${startedAt}::timestamptz THEN NULL ELSE ${billingSnapshots.dirtyAt} END`,
+      dirtyAt: sql`CASE WHEN ${billingSnapshots.dirtyAt} < ${startedAt}::timestamptz + interval '1 millisecond' THEN NULL ELSE ${billingSnapshots.dirtyAt} END`,
     };
     if (!existing.has(clientCode)) {
       await db
