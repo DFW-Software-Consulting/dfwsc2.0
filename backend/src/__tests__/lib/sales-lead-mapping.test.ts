@@ -182,11 +182,7 @@ describe("refs and links", () => {
   it("builds the lead ref, contact uid and link cell value", () => {
     expect(leadRef(12, 5)).toBe("12:5");
     expect(contactUid(12, 5)).toBe("dfwsc-lead-12-5");
-    expect(JSON.parse(linkValue("Lead folder", "https://c.test/f/1"))).toEqual({
-      title: "Lead folder",
-      value: "https://c.test/f/1",
-      providerId: "url",
-    });
+    expect(linkValue("Lead folder", "https://c.test/f/1")).toBe("Lead folder (https://c.test/f/1)");
   });
 });
 

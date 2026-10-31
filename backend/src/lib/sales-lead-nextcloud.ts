@@ -177,6 +177,25 @@ export class SalesLeadNextcloud {
     });
   }
 
+  /** The row's stored cells, keyed by column id. */
+  async getRowCells(rowId: number): Promise<Map<number, unknown>> {
+    const label = "tables.get_row";
+    const res = await nextcloudRequest(this.nc, {
+      method: "GET",
+      label,
+      path: `${TABLES_BASE}/rows/${rowId}`,
+    });
+    const row = parseJson(res.body, label) as {
+      data?: { columnId?: unknown; value?: unknown }[];
+    } | null;
+    if (!Array.isArray(row?.data)) throw new NextcloudBadResponseError(label);
+    return new Map(
+      row.data
+        .filter((c) => typeof c.columnId === "number")
+        .map((c) => [c.columnId as number, c.value])
+    );
+  }
+
   // ── CardDAV ────────────────────────────────────────────────────────────────
 
   /** Creates the contact once: an existing card with the same UID is left untouched. */

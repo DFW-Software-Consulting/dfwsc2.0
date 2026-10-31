@@ -238,9 +238,12 @@ export function buildRowData(lead: Lead, columns: ColumnMap, ref: string): RowDa
   return { data, dropped };
 }
 
-/** Value for a Tables text-link cell. */
+/**
+ * Value for a Tables text-link cell. Tables 2.4 persists "Title (url)"; the JSON
+ * {title, value, providerId} form is answered with 200 but not stored.
+ */
 export function linkValue(title: string, url: string): string {
-  return JSON.stringify({ title, value: url, providerId: "url" });
+  return `${title} (${url})`;
 }
 
 // ── vCard ────────────────────────────────────────────────────────────────────

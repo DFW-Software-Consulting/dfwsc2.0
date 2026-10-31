@@ -219,16 +219,14 @@ describe("sales lead automation: processing", () => {
 
     const fileId = fake.folders.get("DFWSC Sales/Leads/Zephyrine Widgets LLC");
     expect(fileId).toBeDefined();
-    expect(JSON.parse(cell("Notes / Files") as string)).toEqual({
-      title: "Lead folder",
-      value: `https://cloud.test/index.php/f/${fileId}`,
-      providerId: "url",
-    });
-    expect(JSON.parse(cell("Contact Card") as string).value).toBe(
-      "https://cloud.test/index.php/apps/contacts/direct/contact/dfwsc-lead-12-5~dfwsc-sales"
+    expect(cell("Notes / Files")).toBe(`Lead folder (https://cloud.test/index.php/f/${fileId})`);
+    expect(cell("Contact Card")).toBe(
+      "Contact card (https://cloud.test/index.php/apps/contacts/direct/contact/dfwsc-lead-12-5~dfwsc-sales)"
     );
 
-    expect(await submissionRow(5)).toMatchObject({
+    const done = await submissionRow(5);
+    expect(done.linksBackfilledAt).toBeInstanceOf(Date);
+    expect(done).toMatchObject({
       status: "completed",
       tableRowId: rowId,
       contactUid: "dfwsc-lead-12-5",
@@ -360,6 +358,34 @@ describe("sales lead automation: partial failure", () => {
     expect(fake.mkcols).toHaveLength(2);
     expect(fake.folders.has("DFWSC Sales/Leads/Acme (2)")).toBe(false);
     expect((await submissionRow(5)).folderName).toBe("Acme");
+  });
+
+  it("retries the links when Tables answers 200 but does not store them", async () => {
+    await baseline();
+    fake.addSubmission(5, FULL_LEAD);
+    fake.droppedRowUpdates = 1;
+
+    expect(await cycle()).toMatchObject({ retried: 1, completed: 0 });
+    const afterFailure = await submissionRow(5);
+    expect(afterFailure).toMatchObject({
+      status: "pending",
+      attempts: 1,
+      lastErrorCode: "tables.link_not_persisted",
+      linksBackfilledAt: null,
+      claimToken: null,
+    });
+    expect(fake.rowCell(fake.rows[0].id, COLUMN_IDS["Notes / Files"])).toBeUndefined();
+
+    await makeDue(5);
+    expect(await cycle()).toMatchObject({ completed: 1 });
+    expect(fake.rowUpdates).toHaveLength(2);
+    expect(fake.rowCreates).toHaveLength(1);
+    expect(fake.rowCell(fake.rows[0].id, COLUMN_IDS["Notes / Files"])).toContain(
+      "https://cloud.test/index.php/f/"
+    );
+    const done = await submissionRow(5);
+    expect(done.status).toBe("completed");
+    expect(done.linksBackfilledAt).toBeInstanceOf(Date);
   });
 
   it("fails permanently, with no writes, when the company is missing", async () => {
