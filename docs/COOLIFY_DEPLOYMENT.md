@@ -78,6 +78,8 @@ All resources can be deployed independently on Coolify while sharing the same mo
   # Optional: push edits of a client's Nextcloud contact card to its billing Stripe Customer (docs/BACKEND.md section 11); off by default
   CONTACT_STRIPE_SYNC=false
   CONTACT_STRIPE_SYNC_INTERVAL_MS=120000
+  # Optional: read-only "Portal Accounts" Nextcloud Table with portal client status (docs/BACKEND.md section 12); off by default
+  PORTAL_MIRROR=false
   ```
 - **Admin login (Nextcloud)**: the admin panel signs users in against Nextcloud; there are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ALLOW_ADMIN_SETUP` are no longer read (remove them from Coolify). Before deploying this change:
   1. **Create the Nextcloud groups first and put members in them.** The defaults are `dfwsc-admins` and `managers` (override with `ADMIN_NEXTCLOUD_GROUPS`, comma-separated, exact ids). A user whose Nextcloud account is in none of them gets 403 "This Nextcloud account isn't authorized for the admin panel".
