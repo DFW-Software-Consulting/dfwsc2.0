@@ -65,7 +65,7 @@ Progress of the Nextcloud New Lead automation, one row per Forms submission (see
 
 - **PK**: (`formId`, `submissionId`).
 - **Statuses**: `pending` → `completed`, or `failed` (permanent error, or 10 attempts used).
-- **Step outputs**: `tableRowId`, `contactUid`, `contactStatus` (`created` / `updated` / `ambiguous` / `read_only`), `contactAddressbook` (the book the linked card lives in), `folderName`, `folderFileId`, `linksBackfilledAt`, each saved as its step succeeds so retries resume.
+- **Step outputs**: `tableRowId`, `contactUid`, `contactStatus` (`created` / `updated` / `ambiguous` / `read_only` / `failed`; `failed` means the contact step could not complete and the lead was kept anyway), `contactAddressbook` (the book the linked card lives in), `folderName`, `folderFileId`, `linksBackfilledAt`, each saved as its step succeeds so retries resume.
 - **Retry/lease**: `attempts`, `nextAttemptAt`, `lastErrorCode` (PII-free), `claimedAt` + `claimToken`.
 - Stores no form answers.
 

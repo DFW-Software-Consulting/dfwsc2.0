@@ -14,7 +14,6 @@ import {
   type Intake,
   type IntakeQuestionMap,
   isNextcloudUser,
-  mergeClientVCard,
   normalizeName,
   OnboardingConfigError,
   OnboardingInvalidError,
@@ -58,7 +57,12 @@ import {
   NextcloudHttpError,
   NextcloudRequestError,
 } from "./nextcloud";
-import { AddressbookDiscoveryError, ContactChangedError } from "./nextcloud-contacts";
+import {
+  AddressbookDiscoveryError,
+  ContactChangedError,
+  type ContactDirectory,
+  mergeContactVCard,
+} from "./nextcloud-contacts";
 import { linkCellUrl, linkValue, parseDate } from "./sales-lead-mapping";
 import { isBadResponseError, SUBMISSION_PAGE_SIZE } from "./sales-lead-nextcloud";
 
@@ -416,6 +420,8 @@ interface ProcessingContext {
   pipelineColumns: PipelineColumnMap;
   collectiveSlug: string;
   projectsPageId: number;
+  /** Address books listed once per cycle; see ContactDirectory. */
+  contacts: ContactDirectory;
   logger: Logger;
 }
 
@@ -491,7 +497,7 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
   const { api } = ctx;
   const ids = { formId: ctx.formId, submissionId: row.submissionId };
   const uid = clientContactUid(ctx.formId, row.submissionId);
-  const { own, matches } = await api.findContactCards(intake, uid);
+  const { own, matches } = await ctx.contacts.find(intake, uid);
   if (own) {
     // Created by an earlier attempt of this submission whose result was not saved.
     await saveUnderClaim(row, { contactStatus: "created", contactUid: uid });
@@ -515,10 +521,18 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
   }
   if (matches.length === 1) {
     const [card] = matches;
-    const merged = mergeClientVCard(card.data, intake);
+    // Not our card: only add what is missing, never overwrite its name or company.
+    const merged = mergeContactVCard(card.data, intake, new Date(), {
+      additive: true,
+      category: "Client",
+    });
     const contactUid = vCardUid(card.data);
     try {
-      if (merged !== null) await api.updateCard(card, merged);
+      if (card.readOnly) throw new NextcloudHttpError(403, "carddav.update_contact");
+      if (merged !== null) {
+        await api.updateCard(card, merged);
+        ctx.contacts.invalidate(card.addressbook);
+      }
     } catch (error) {
       // A read-only shared book refuses the write. Creating a card elsewhere would
       // duplicate the client, so leave it for an operator and carry on.
@@ -540,6 +554,7 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
     return;
   }
   await api.createCard(uid, buildClientVCard(intake, uid));
+  ctx.contacts.invalidate(api.targets.addressbookPath);
   await saveUnderClaim(row, { contactStatus: "created", contactUid: uid });
   ctx.logger.info(
     { ...ids, addressbook: api.targets.addressbookPath },
@@ -864,6 +879,12 @@ async function buildContext(
     pipelineColumns: resolvePipelineColumns(await api.getColumns(api.targets.pipelineTableId)),
     collectiveSlug: collective.slug ?? slugify(collective.name),
     projectsPageId: projects[0].id,
+    contacts: api.contactDirectory((addressbook, status) =>
+      logger.warn(
+        { formId, addressbook, status },
+        "Address book could not be read; skipped when looking for an existing contact."
+      )
+    ),
   };
 }
 

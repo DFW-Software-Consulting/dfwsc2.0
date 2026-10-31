@@ -1,5 +1,5 @@
 {
-  "id": "30ed127d-1fd8-476d-985f-6b65f4a5ef7a",
+  "id": "d016badc-f0a5-43c5-9e9a-b7d0e136a96f",
   "prevId": "d39b4f3d-d804-43dc-9adb-eed38274b09e",
   "version": "7",
   "dialect": "postgresql",
@@ -1351,7 +1351,7 @@
         },
         "sales_lead_submissions_contact_status_check": {
           "name": "sales_lead_submissions_contact_status_check",
-          "value": "\"sales_lead_submissions\".\"contact_status\" IS NULL OR \"sales_lead_submissions\".\"contact_status\" IN ('created', 'updated', 'ambiguous', 'read_only')"
+          "value": "\"sales_lead_submissions\".\"contact_status\" IS NULL OR \"sales_lead_submissions\".\"contact_status\" IN ('created', 'updated', 'ambiguous', 'read_only', 'failed')"
         }
       },
       "isRLSEnabled": false

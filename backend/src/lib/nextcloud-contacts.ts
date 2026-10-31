@@ -1,4 +1,10 @@
-import { encodePathSegments, type NextcloudConfig, nextcloudRequest } from "./nextcloud";
+import {
+  encodePathSegments,
+  NextcloudCircuitOpenError,
+  type NextcloudConfig,
+  NextcloudHttpError,
+  nextcloudRequest,
+} from "./nextcloud";
 import { escapeVCardText, foldLine } from "./sales-lead-mapping";
 
 // Contact lookup shared by the Nextcloud automations that write contact cards
@@ -21,6 +27,8 @@ export interface StoredCard {
   href: string;
   etag: string | null;
   data: string;
+  /** The account has no write privilege on this book; a write would be refused. */
+  readOnly: boolean;
 }
 
 /** A card changed between our read and our write (If-Match failed); retried. */
@@ -31,11 +39,31 @@ export class ContactChangedError extends Error {
   }
 }
 
-/** Looking for an existing contact across address books failed; retried, never skipped. */
+// Statuses that are worth another attempt, as elsewhere in the Nextcloud syncs.
+const RETRYABLE_HTTP_STATUSES = new Set([401, 408, 423, 425, 429]);
+// A shared book that cannot be read (revoked share, gone) is skipped, not fatal.
+const UNREADABLE_BOOK_STATUSES = new Set([403, 404, 410]);
+
+/**
+ * Looking for an existing contact across address books failed, and the book was not
+ * one that can simply be skipped. Never ignored: creating a card anyway could
+ * duplicate one in the book that could not be read. `retryable` is false only for a
+ * non-transient HTTP refusal; `status` and `addressbook` say where it happened.
+ */
 export class AddressbookDiscoveryError extends Error {
-  constructor() {
+  readonly retryable: boolean;
+  readonly status: number | null;
+  constructor(
+    readonly cause?: unknown,
+    readonly addressbook: string | null = null
+  ) {
     super("The address books could not be searched for an existing contact");
     this.name = "AddressbookDiscoveryError";
+    this.status = cause instanceof NextcloudHttpError ? cause.status : null;
+    this.retryable =
+      !(cause instanceof NextcloudHttpError) ||
+      cause.status >= 500 ||
+      RETRYABLE_HTTP_STATUSES.has(cause.status);
   }
 }
 
@@ -43,7 +71,7 @@ export class AddressbookDiscoveryError extends Error {
 const SYSTEM_ADDRESSBOOK = /^z-server-generated/i;
 
 const ADDRESSBOOK_HOME_PROPFIND =
-  '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>';
+  '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:current-user-privilege-set/></d:prop></d:propfind>';
 // Every card has an FN, so this lists the whole address book with its data.
 const ADDRESSBOOK_QUERY =
   '<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"><d:prop><d:getetag/><c:address-data/></d:prop><c:filter><c:prop-filter name="FN"/></c:filter></c:addressbook-query>';
@@ -79,15 +107,21 @@ export function addressbookCollection(nc: NextcloudConfig, addressbook: string):
   return `${addressbookHome(nc)}${encodePathSegments([addressbook])}/`;
 }
 
+interface AddressbookInfo {
+  name: string;
+  readOnly: boolean;
+}
+
 /**
  * Every address book the service account can see: its own and those shared with it
  * (PROPFIND Depth:1 on the home). Server-generated system books are left out. The
  * configured book is always included, so a listing that omits it still searches it.
+ * A book whose privilege set lacks write access is marked read-only.
  */
 async function listAddressbooks(
   nc: NextcloudConfig,
   configuredAddressbook: string
-): Promise<string[]> {
+): Promise<AddressbookInfo[]> {
   const home = addressbookHome(nc);
   const res = await nextcloudRequest(nc, {
     method: "PROPFIND",
@@ -96,7 +130,9 @@ async function listAddressbooks(
     headers: { depth: "1", "content-type": "application/xml; charset=utf-8" },
     body: ADDRESSBOOK_HOME_PROPFIND,
   });
-  const names = new Set<string>([configuredAddressbook]);
+  const books = new Map<string, AddressbookInfo>([
+    [configuredAddressbook, { name: configuredAddressbook, readOnly: false }],
+  ]);
   const responses = res.body.match(
     /<(?:[\w-]+:)?response\b[^>]*>[\s\S]*?<\/(?:[\w-]+:)?response>/g
   );
@@ -117,12 +153,21 @@ async function listAddressbooks(
     } catch {
       throw new AddressbookDiscoveryError();
     }
-    if (!SYSTEM_ADDRESSBOOK.test(name)) names.add(name);
+    if (SYSTEM_ADDRESSBOOK.test(name)) continue;
+    // No privilege information at all means unknown: try the write and handle a 403.
+    const privileges = xmlElement(block, "current-user-privilege-set");
+    const readOnly =
+      privileges !== null && !/<(?:[\w-]+:)?(?:write|write-content|all)\s*\/>/.test(privileges);
+    books.set(name, { name, readOnly });
   }
-  return [...names];
+  return [...books.values()];
 }
 
-async function listCards(nc: NextcloudConfig, addressbook: string): Promise<StoredCard[]> {
+async function listCards(
+  nc: NextcloudConfig,
+  addressbook: string,
+  readOnly: boolean
+): Promise<StoredCard[]> {
   const collection = addressbookCollection(nc, addressbook);
   const res = await nextcloudRequest(nc, {
     method: "REPORT",
@@ -143,7 +188,13 @@ async function listCards(nc: NextcloudConfig, addressbook: string): Promise<Stor
     if (!href.startsWith(collection) || href.includes("/../")) {
       throw new AddressbookDiscoveryError();
     }
-    cards.push({ addressbook, href, etag: xmlElement(block, "getetag")?.trim() || null, data });
+    cards.push({
+      addressbook,
+      href,
+      etag: xmlElement(block, "getetag")?.trim() || null,
+      data,
+      readOnly,
+    });
   }
   return cards;
 }
@@ -167,31 +218,84 @@ export async function updateCard(
   if (res.status === 412) throw new ContactChangedError();
 }
 
+export interface ContactDirectory {
+  /** Forget a book's cached cards; call after writing to it. */
+  invalidate(addressbook: string): void;
+  /**
+   * The card(s) that could be this person, from every address book the account can
+   * see. A card carrying `ownUid` (the one this very submission created on an earlier
+   * attempt) is returned alone as `own`, so a retry never goes ambiguous against its
+   * own card. A book that answers 403/404/410 is skipped (and reported through
+   * `onSkippedBook`); any other failure becomes AddressbookDiscoveryError, because
+   * skipping a book would let the caller duplicate a card that lives there. An open
+   * circuit breaker passes through unchanged so the cycle is skipped, not an attempt used.
+   */
+  find(
+    person: ContactPerson,
+    ownUid: string
+  ): Promise<{ own: StoredCard | null; matches: StoredCard[] }>;
+}
+
 /**
- * The card(s) that could be this person, from every address book the account can see.
- * A card carrying `ownUid` (the one this very submission created on an earlier
- * attempt) is returned alone as `own`, so a retry never goes ambiguous against its
- * own card. Any failure to list a book becomes AddressbookDiscoveryError: skipping a
- * book would let the caller create a duplicate of a card that lives there.
+ * Per-cycle view of the address books, so a cycle with many submissions lists each
+ * book once instead of once per submission. Call `invalidate` for a book after
+ * writing to it so the next lookup sees the new or changed card (and its new ETag).
+ * Failures are never cached.
  */
-export async function findContactCards(
+export function createContactDirectory(
   nc: NextcloudConfig,
   configuredAddressbook: string,
-  person: ContactPerson,
-  ownUid: string
-): Promise<{ own: StoredCard | null; matches: StoredCard[] }> {
-  const matches: StoredCard[] = [];
-  try {
-    for (const addressbook of await listAddressbooks(nc, configuredAddressbook)) {
-      for (const card of await listCards(nc, addressbook)) {
-        if (vCardUid(card.data) === ownUid) return { own: card, matches: [] };
-        if (vCardMatches(card.data, person)) matches.push(card);
+  onSkippedBook: (addressbook: string, status: number) => void = () => {}
+): ContactDirectory {
+  let books: AddressbookInfo[] | null = null;
+  const cards = new Map<string, StoredCard[]>();
+
+  async function cardsOf(book: AddressbookInfo): Promise<StoredCard[]> {
+    const cached = cards.get(book.name);
+    if (cached) return cached;
+    let listed: StoredCard[];
+    try {
+      listed = await listCards(nc, book.name, book.readOnly);
+    } catch (error) {
+      if (
+        error instanceof NextcloudHttpError &&
+        UNREADABLE_BOOK_STATUSES.has(error.status) &&
+        book.name !== configuredAddressbook
+      ) {
+        onSkippedBook(book.name, error.status);
+        listed = [];
+      } else {
+        throw error;
       }
     }
-  } catch {
-    throw new AddressbookDiscoveryError();
+    cards.set(book.name, listed);
+    return listed;
   }
-  return { own: null, matches };
+
+  return {
+    invalidate(addressbook) {
+      cards.delete(addressbook);
+    },
+    async find(person, ownUid) {
+      const matches: StoredCard[] = [];
+      let current: string | null = null;
+      try {
+        books ??= await listAddressbooks(nc, configuredAddressbook);
+        for (const book of books) {
+          current = book.name;
+          for (const card of await cardsOf(book)) {
+            if (vCardUid(card.data) === ownUid) return { own: card, matches: [] };
+            if (vCardMatches(card.data, person)) matches.push(card);
+          }
+        }
+      } catch (error) {
+        if (error instanceof NextcloudCircuitOpenError) throw error;
+        if (error instanceof AddressbookDiscoveryError) throw error;
+        throw new AddressbookDiscoveryError(error, current);
+      }
+      return { own: null, matches };
+    },
+  };
 }
 
 // ── vCard ────────────────────────────────────────────────────────────────────
@@ -281,11 +385,16 @@ export function vCardMatches(card: string, person: ContactPerson): boolean {
  * The card with ORG set to the company and the given name, email and phone added
  * where missing. Nothing is removed. Null when nothing would change, so a retry
  * makes no write.
+ *
+ * With `additive` (a card that is not ours) nothing existing is replaced: ORG and
+ * FN/N are only set when the card has none, new email/phone values are appended, and
+ * `category` is added to CATEGORIES.
  */
 export function mergeContactVCard(
   card: string,
   person: ContactPerson,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: { additive?: boolean; category?: string } = {}
 ): string | null {
   let lines = parseLines(card).filter((l) => l.name !== "END");
   let changed = false;
@@ -294,11 +403,17 @@ export function mergeContactVCard(
     changed = true;
   };
 
-  if (orgName(lines) !== person.company) {
+  const additive = options.additive === true;
+  if (additive ? orgName(lines) === undefined : orgName(lines) !== person.company) {
     lines = lines.filter((l) => l.name !== "ORG");
     insert(`ORG:${escapeVCardText(person.company)}`);
   }
-  if (person.contactName && textValues(lines, "FN")[0] !== person.contactName) {
+  if (
+    person.contactName &&
+    (additive
+      ? textValues(lines, "FN")[0] === undefined
+      : textValues(lines, "FN")[0] !== person.contactName)
+  ) {
     const { family, given } = nameParts(person.contactName);
     lines = lines.filter((l) => l.name !== "FN" && l.name !== "N");
     insert(`FN:${escapeVCardText(person.contactName)}`);
@@ -313,6 +428,19 @@ export function mergeContactVCard(
   if (person.phone && digits(person.phone)) {
     if (!textValues(lines, "TEL").some((t) => digits(t) === digits(person.phone as string))) {
       insert(`TEL;TYPE=WORK:${escapeVCardText(person.phone)}`);
+    }
+  }
+  if (additive && options.category) {
+    const wanted = options.category;
+    const existing = lines.find((l) => l.name === "CATEGORIES");
+    if (!existing) {
+      insert(`CATEGORIES:${escapeVCardText(wanted)}`);
+    } else if (
+      !existing.value.split(",").some((c) => c.trim().toLowerCase() === wanted.toLowerCase())
+    ) {
+      existing.raw = `${existing.raw},${escapeVCardText(wanted)}`;
+      existing.value = `${existing.value},${escapeVCardText(wanted)}`;
+      changed = true;
     }
   }
   if (!changed) return null;

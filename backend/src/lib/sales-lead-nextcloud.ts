@@ -1,10 +1,5 @@
 import { encodePathSegments, type NextcloudConfig, nextcloudRequest } from "./nextcloud";
-import {
-  type ContactPerson,
-  findContactCards,
-  type StoredCard,
-  updateCard,
-} from "./nextcloud-contacts";
+import { createContactDirectory, type StoredCard, updateCard } from "./nextcloud-contacts";
 import type {
   FormAnswer,
   FormQuestion,
@@ -309,8 +304,9 @@ export class SalesLeadNextcloud {
   }
 
   /** Existing cards for this lead across every visible address book. */
-  findContactCards(person: ContactPerson, ownUid: string) {
-    return findContactCards(this.nc, this.targets.addressbookPath, person, ownUid);
+  /** A per-cycle view of every visible address book; see ContactDirectory. */
+  contactDirectory(onSkippedBook?: (addressbook: string, status: number) => void) {
+    return createContactDirectory(this.nc, this.targets.addressbookPath, onSkippedBook);
   }
 
   updateCard(card: StoredCard, vcard: string): Promise<void> {

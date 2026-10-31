@@ -297,10 +297,11 @@ export const salesLeadSubmissions = pgTable(
     tableRowId: integer("table_row_id"),
     contactUid: text("contact_uid"),
     // Existing-card handling: created, updated in place, left alone (several matches),
-    // or matched in a read-only address book. contactAddressbook is the book the
+    // or matched in a read-only address book; "failed" when the contact step could not
+    // complete (the lead is kept regardless). contactAddressbook is the book the
     // linked card lives in.
     contactStatus: text("contact_status", {
-      enum: ["created", "updated", "ambiguous", "read_only"],
+      enum: ["created", "updated", "ambiguous", "read_only", "failed"],
     }),
     contactAddressbook: text("contact_addressbook"),
     folderName: text("folder_name"),
@@ -322,7 +323,7 @@ export const salesLeadSubmissions = pgTable(
     ),
     contactStatusCheck: check(
       "sales_lead_submissions_contact_status_check",
-      sql`${table.contactStatus} IS NULL OR ${table.contactStatus} IN ('created', 'updated', 'ambiguous', 'read_only')`
+      sql`${table.contactStatus} IS NULL OR ${table.contactStatus} IN ('created', 'updated', 'ambiguous', 'read_only', 'failed')`
     ),
   })
 );

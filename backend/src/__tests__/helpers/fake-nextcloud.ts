@@ -139,7 +139,10 @@ export class FakeNextcloud {
   rows: Row[] = [];
   cards = new Map<string, string>();
   /** Address books besides the configured one; a read-only one answers writes with 403. */
-  otherBooks = new Map<string, { cards: Map<string, string>; readOnly: boolean }>();
+  otherBooks = new Map<
+    string,
+    { cards: Map<string, string>; readOnly: boolean; advertise: boolean }
+  >();
   folders = new Map<string, number>([
     ["DFWSC Sales", 500],
     ["DFWSC Sales/Leads", 501],
@@ -156,8 +159,9 @@ export class FakeNextcloud {
     this.submissions.set(id, answers);
   }
 
-  addBook(name: string, readOnly = false) {
-    this.otherBooks.set(name, { cards: new Map(), readOnly });
+  /** `advertise: false` hides the privilege set, so a read-only book only shows as a 403. */
+  addBook(name: string, readOnly = false, advertise = true) {
+    this.otherBooks.set(name, { cards: new Map(), readOnly, advertise });
   }
 
   fail(fault: Omit<Fault, "times"> & { times?: number }) {
@@ -327,8 +331,14 @@ export class FakeNextcloud {
     }
 
     if (method === "PROPFIND" && path === BOOKS_HOME) {
-      const book = (name: string) =>
-        `<d:response><d:href>${BOOKS_HOME}${encodeURIComponent(name)}/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype></d:prop></d:propstat></d:response>`;
+      const book = (name: string) => {
+        const other = this.otherBooks.get(name);
+        const privileges =
+          other && !other.advertise
+            ? ""
+            : `<d:current-user-privilege-set><d:privilege><d:read/></d:privilege>${other?.readOnly ? "" : "<d:privilege><d:write-content/></d:privilege>"}</d:current-user-privilege-set>`;
+        return `<d:response><d:href>${BOOKS_HOME}${encodeURIComponent(name)}/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype>${privileges}</d:prop></d:propstat></d:response>`;
+      };
       return new Response(
         `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:response><d:href>${BOOKS_HOME}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>${[FAKE_ADDRESSBOOK, ...this.otherBooks.keys(), "z-server-generated--system"].map(book).join("")}</d:multistatus>`,
         { status: 207 }
@@ -338,9 +348,9 @@ export class FakeNextcloud {
       const bookName = path.slice(BOOKS_HOME.length).split("/")[0];
       const book =
         bookName === FAKE_ADDRESSBOOK
-          ? { cards: this.cards, readOnly: false }
+          ? { cards: this.cards, readOnly: false, advertise: true }
           : bookName === "z-server-generated--system"
-            ? { cards: new Map<string, string>(), readOnly: true }
+            ? { cards: new Map<string, string>(), readOnly: true, advertise: true }
             : this.otherBooks.get(bookName);
       if (!book) return new Response("", { status: 404 });
       const prefix = `${BOOKS_HOME}${bookName}/`;

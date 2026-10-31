@@ -202,7 +202,10 @@ export class FakeOnboardingNextcloud {
   ];
   cards = new Map<string, Card>();
   /** Address books besides the configured one (own or shared with the account). */
-  otherBooks = new Map<string, { cards: Map<string, Card>; readOnly: boolean }>();
+  otherBooks = new Map<
+    string,
+    { cards: Map<string, Card>; readOnly: boolean; advertise: boolean }
+  >();
   folders = new Map<string, number>([[ONB_CLIENTS_FOLDER, 700]]);
   files = new Map<string, string>();
   collectiveSlug: string | null = "Cerebo-Pilot";
@@ -272,8 +275,9 @@ export class FakeOnboardingNextcloud {
   }
 
   /** Another address book the account can see; a read-only one refuses writes with 403. */
-  addBook(name: string, readOnly = false) {
-    this.otherBooks.set(name, { cards: new Map(), readOnly });
+  /** `advertise: false` hides the privilege set, so a read-only book only shows as a 403. */
+  addBook(name: string, readOnly = false, advertise = true) {
+    this.otherBooks.set(name, { cards: new Map(), readOnly, advertise });
   }
 
   addCardTo(book: string, name: string, data: string) {
@@ -466,8 +470,14 @@ export class FakeOnboardingNextcloud {
 
     // CardDAV
     if (method === "PROPFIND" && path === BOOKS_HOME) {
-      const book = (name: string) =>
-        `<d:response><d:href>${BOOKS_HOME}${encodeURIComponent(name)}/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype></d:prop></d:propstat></d:response>`;
+      const book = (name: string) => {
+        const other = this.otherBooks.get(name);
+        const privileges =
+          other && !other.advertise
+            ? ""
+            : `<d:current-user-privilege-set><d:privilege><d:read/></d:privilege>${other?.readOnly ? "" : "<d:privilege><d:write-content/></d:privilege>"}</d:current-user-privilege-set>`;
+        return `<d:response><d:href>${BOOKS_HOME}${encodeURIComponent(name)}/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype>${privileges}</d:prop></d:propstat></d:response>`;
+      };
       return new Response(
         `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:response><d:href>${BOOKS_HOME}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>${[ONB_ADDRESSBOOK, ...this.otherBooks.keys(), "z-server-generated--system"].map(book).join("")}</d:multistatus>`,
         { status: 207 }
@@ -478,9 +488,9 @@ export class FakeOnboardingNextcloud {
       const other = this.otherBooks.get(bookName);
       const book =
         bookName === ONB_ADDRESSBOOK
-          ? { cards: this.cards, readOnly: false }
+          ? { cards: this.cards, readOnly: false, advertise: true }
           : bookName === "z-server-generated--system"
-            ? { cards: new Map<string, Card>(), readOnly: true }
+            ? { cards: new Map<string, Card>(), readOnly: true, advertise: true }
             : other;
       if (!book) return new Response("", { status: 404 });
       const collection = `${BOOKS_HOME}${encodeURIComponent(bookName)}/`;

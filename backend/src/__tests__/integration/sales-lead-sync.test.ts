@@ -636,19 +636,118 @@ describe("sales lead automation: contact matching across address books", () => {
     );
   });
 
-  it("retries and creates nothing when the address books cannot be listed", async () => {
+  it("retries a transient listing failure without creating anything", async () => {
+    await baseline();
+    fake.addSubmission(5, FULL_LEAD);
+    fake.fail({
+      match: (r) => r.method === "PROPFIND" && r.path.endsWith("/addressbooks/users/dfwsc-admin/"),
+      status: 503,
+    });
+    expect(await cycle()).toMatchObject({ retried: 1 });
+    expect(fake.cardPuts).toHaveLength(0);
+    expect(await submissionRow(5)).toMatchObject({
+      status: "pending",
+      lastErrorCode: "carddav.discovery_failed:503",
+      contactStatus: null,
+    });
+  });
+
+  it("keeps the lead when the contact step fails for good", async () => {
     await baseline();
     fake.addSubmission(5, FULL_LEAD);
     fake.fail({
       match: (r) => r.method === "PROPFIND" && r.path.endsWith("/addressbooks/users/dfwsc-admin/"),
       status: 403,
     });
-    expect(await cycle()).toMatchObject({ retried: 1 });
+    expect(await cycle()).toMatchObject({ completed: 1 });
     expect(fake.cardPuts).toHaveLength(0);
+    expect(fake.rowCreates).toHaveLength(1);
+    expect(fake.mkcols).toHaveLength(1);
+    expect(fake.rowCell(fake.rows[0].id, COLUMN_IDS["Contact Card"])).toBeUndefined();
     expect(await submissionRow(5)).toMatchObject({
-      status: "pending",
-      lastErrorCode: "carddav.discovery_failed",
-      contactStatus: null,
+      status: "completed",
+      contactStatus: "failed",
+      contactUid: null,
+    });
+    expect(
+      log.lines.some((l) => l.level === "error" && l.text.includes("continuing without"))
+    ).toBe(true);
+  });
+
+  it("keeps the lead when a transient contact failure outlasts every attempt", async () => {
+    await baseline();
+    fake.addSubmission(5, FULL_LEAD);
+    fake.fail({
+      match: (r) => r.method === "PROPFIND" && r.path.endsWith("/addressbooks/users/dfwsc-admin/"),
+      status: 503,
+      times: SALES_LEAD_MAX_ATTEMPTS,
+    });
+    for (let i = 1; i < SALES_LEAD_MAX_ATTEMPTS; i++) {
+      expect(await cycle()).toMatchObject({ retried: 1 });
+      expect(fake.rowCreates).toHaveLength(1);
+      await makeDue(5);
+    }
+    expect(await cycle()).toMatchObject({ completed: 1 });
+    expect(fake.mkcols).toHaveLength(1);
+    expect(await submissionRow(5)).toMatchObject({ status: "completed", contactStatus: "failed" });
+  });
+
+  it("skips an address book it cannot read and still creates in the configured one", async () => {
+    await baseline();
+    fake.addBook("revoked");
+    fake.fail({
+      match: (r) => r.method === "REPORT" && r.path.includes("/revoked/"),
+      status: 404,
+    });
+    fake.addSubmission(5, FULL_LEAD);
+    expect(await cycle()).toMatchObject({ completed: 1 });
+    expect(fake.cards.has("dfwsc-lead-12-5.vcf")).toBe(true);
+    expect(
+      log.lines.some((l) => l.level === "warn" && l.text.includes('"addressbook":"revoked"'))
+    ).toBe(true);
+  });
+
+  it("falls back to the 403 when a read-only book does not advertise its privileges", async () => {
+    await baseline();
+    fake.addBook("contacts", true, false);
+    fake.otherBooks.get("contacts")?.cards.set("stripe-cus_X.vcf", STRIPE_CARD);
+    fake.addSubmission(5, FULL_LEAD);
+    expect(await cycle()).toMatchObject({ completed: 1 });
+    expect(fake.cards.size).toBe(0);
+    expect(fake.count("PUT", "/remote.php/dav/addressbooks/users/dfwsc-admin/contacts/")).toBe(1);
+    expect(await submissionRow(5)).toMatchObject({ contactStatus: "read_only" });
+  });
+
+  it("never overwrites the name or company of a card matched only by email", async () => {
+    await baseline();
+    fake.addBook("contacts");
+    fake.otherBooks
+      .get("contacts")
+      ?.cards.set(
+        "shared.vcf",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:shared\r\nFN:Front Desk\r\nN:Desk;Front;;;\r\nORG:Another Company\r\nEMAIL:ophelia@zephyrine.example\r\nEND:VCARD\r\n"
+      );
+    fake.addSubmission(5, FULL_LEAD);
+    await cycle();
+    const card = fake.otherBooks.get("contacts")?.cards.get("shared.vcf") ?? "";
+    expect(card).toContain("FN:Front Desk");
+    expect(card).toContain("ORG:Another Company");
+    expect(card).toContain("TEL;TYPE=WORK:+1 214 555 0199");
+    expect(card).toContain("CATEGORIES:Lead");
+  });
+
+  it("lists the address books once per cycle and sees cards created earlier in it", async () => {
+    await baseline();
+    fake.addSubmission(5, FULL_LEAD);
+    fake.addSubmission(6, { ...FULL_LEAD, Company: "Other Co" });
+    expect(await cycle()).toMatchObject({ completed: 2 });
+    // Same email twice: the second lead merges into the first one's card.
+    expect(fake.cards.size).toBe(1);
+    expect(fake.count("PROPFIND", "/remote.php/dav/addressbooks/")).toBe(1);
+    expect(await submissionRow(5)).toMatchObject({ contactStatus: "created" });
+    expect(await submissionRow(6)).toMatchObject({
+      contactStatus: "updated",
+      contactUid: "dfwsc-lead-12-5",
     });
   });
 

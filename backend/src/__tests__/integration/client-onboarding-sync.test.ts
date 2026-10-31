@@ -283,9 +283,11 @@ describe("client onboarding: steps", () => {
     await cycle();
     expect(fake.cards.size).toBe(1);
     const card = fake.cards.get("dfwsc-lead-4-9.vcf")?.data ?? "";
-    expect(card).toContain("ORG:Zephyrine Widgets LLC");
+    // Someone else's card: its company is kept, only missing details are added.
+    expect(card).toContain("ORG:Zephyrine\r\n");
+    expect(card).not.toContain("Zephyrine Widgets LLC");
     expect(card).toContain("TEL;TYPE=WORK:+1 214 555 0199");
-    expect(card).toContain("CATEGORIES:Lead");
+    expect(card).toContain("CATEGORIES:Lead,Client");
     expect(card.match(/EMAIL/g)).toHaveLength(1);
     expect(
       fake.requests.find((r) => r.method === "PUT" && r.path.includes("dfwsc-lead-4-9"))?.headers[
@@ -355,7 +357,8 @@ describe("client onboarding: steps", () => {
       fake.addSubmission(5, FULL);
       expect(await cycle()).toMatchObject({ completed: 1 });
       expect(fake.cards.size).toBe(0);
-      expect(fake.count("PUT", "/addressbooks/")).toBe(1);
+      // Known read-only from the privilege set, so no write is even attempted.
+      expect(fake.count("PUT", "/addressbooks/")).toBe(0);
       expect(await sub(5)).toMatchObject({
         status: "completed",
         contactStatus: "read_only",
@@ -406,6 +409,65 @@ describe("client onboarding: steps", () => {
       expect(fake.count("PUT", "/addressbooks/")).toBe(0);
       expect(await sub(5)).toMatchObject({
         contactStatus: "created",
+        contactUid: "dfwsc-client-2-5",
+      });
+    });
+
+    it("falls back to the 403 when a read-only book does not advertise its privileges", async () => {
+      await baseline();
+      fake.addBook("contacts", true, false);
+      fake.addCardTo("contacts", "stripe-cus_X.vcf", STRIPE_CARD);
+      fake.addSubmission(5, FULL);
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(fake.cards.size).toBe(0);
+      expect(fake.count("PUT", "/addressbooks/")).toBe(1);
+      expect(await sub(5)).toMatchObject({ contactStatus: "read_only" });
+    });
+
+    it("skips an address book it cannot read and still creates in the configured one", async () => {
+      await baseline();
+      fake.addBook("revoked");
+      fake.fail({
+        match: (r) => r.method === "REPORT" && r.path.includes("/revoked/"),
+        status: 403,
+      });
+      fake.addSubmission(5, FULL);
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(fake.cards.has("dfwsc-client-2-5.vcf")).toBe(true);
+      expect(
+        log.lines.some((l) => l.level === "warn" && l.text.includes('"addressbook":"revoked"'))
+      ).toBe(true);
+    });
+
+    it("never overwrites the name or company of a card matched only by email", async () => {
+      await baseline();
+      fake.addBook("contacts");
+      fake.addCardTo(
+        "contacts",
+        "shared.vcf",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:shared\r\nFN:Front Desk\r\nN:Desk;Front;;;\r\nORG:Another Company\r\nEMAIL:ophelia@zephyrine.example\r\nEND:VCARD\r\n"
+      );
+      fake.addSubmission(5, FULL);
+      await cycle();
+      const card = fake.otherBooks.get("contacts")?.cards.get("shared.vcf")?.data ?? "";
+      expect(card).toContain("FN:Front Desk");
+      expect(card).toContain("ORG:Another Company");
+      expect(card).toContain("TEL;TYPE=WORK:+1 214 555 0199");
+      expect(fake.cards.size).toBe(0);
+    });
+
+    it("lists the address books once per cycle and sees cards created earlier in it", async () => {
+      await baseline();
+      for (const id of [5, 6]) {
+        fake.addSubmission(id, { ...FULL, project_name: `P${id}`, lead_link: undefined });
+      }
+      expect(await cycle()).toMatchObject({ completed: 2 });
+      // Same email twice: the second submission merges into the first one's card.
+      expect(fake.cards.size).toBe(1);
+      expect(fake.count("PROPFIND", "/addressbooks/")).toBe(1);
+      expect(await sub(5)).toMatchObject({ contactStatus: "created" });
+      expect(await sub(6)).toMatchObject({
+        contactStatus: "updated",
         contactUid: "dfwsc-client-2-5",
       });
     });

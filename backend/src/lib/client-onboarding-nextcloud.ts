@@ -2,8 +2,7 @@ import type { IntakeAnswer, IntakeQuestion } from "./client-onboarding-mapping";
 import { encodePathSegments, type NextcloudConfig, nextcloudRequest } from "./nextcloud";
 import {
   addressbookCollection,
-  type ContactPerson,
-  findContactCards,
+  createContactDirectory,
   type StoredCard,
   updateCard,
 } from "./nextcloud-contacts";
@@ -244,8 +243,9 @@ export class ClientOnboardingNextcloud {
   }
 
   /** Existing cards for this person across every visible address book. */
-  findContactCards(person: ContactPerson, ownUid: string) {
-    return findContactCards(this.nc, this.targets.addressbookPath, person, ownUid);
+  /** A per-cycle view of every visible address book; see ContactDirectory. */
+  contactDirectory(onSkippedBook?: (addressbook: string, status: number) => void) {
+    return createContactDirectory(this.nc, this.targets.addressbookPath, onSkippedBook);
   }
 
   updateCard(card: StoredCard, vcard: string): Promise<void> {
