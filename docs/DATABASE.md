@@ -72,6 +72,19 @@ Progress of the Nextcloud New Lead automation, one row per Forms submission (see
 ### `sales_lead_sync_state`
 Per-form baseline: `baselineSubmissionId` is the highest submission id when the automation first ran; earlier submissions are never processed.
 
+### `client_onboarding_submissions`
+Progress of the Nextcloud client onboarding (Convert Won Lead to Client form), one row per Forms submission (see [BACKEND.md](./BACKEND.md), "Client Onboarding Automation").
+
+- **PK**: (`formId`, `submissionId`).
+- **Statuses**: `pending` → `completed`, or `failed` (permanent error, or 10 attempts used).
+- **Step outputs**: `folderName`, `folderFileId`, `contactStatus` (`created` / `updated` / `ambiguous`), `contactUid`, `projectNumber` + `projectCode` (CP-###), `tableRowId`, `pageId`, `pageUrl`, `pageContentAt`, `linksBackfilledAt`, `leadStatus` (`won` / `no_match` / `ambiguous` / `already_linked`), `leadRowId`. Each is saved as its step succeeds so retries resume.
+- **Project codes**: `projectNumber` and `projectCode` are unique. They are allocated under a transaction-scoped advisory lock and never reused, including for submissions that later fail.
+- **Retry/lease**: `attempts`, `nextAttemptAt`, `lastErrorCode` (PII-free), `claimedAt` + `claimToken`.
+- Stores no form answers.
+
+### `client_onboarding_sync_state`
+Per-form baseline for the client onboarding, as for `sales_lead_sync_state`.
+
 ## 3. Tooling & Migrations
 - **Schema Changes**: Edit `backend/src/db/schema.ts`.
 - **Generate**: `npm run db:generate` — creates SQL migration files in `backend/drizzle/`.

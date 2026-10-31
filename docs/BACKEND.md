@@ -142,6 +142,11 @@ All routes are prefixed with `/api/v1`.
 |--------|------|-------------|------|
 | POST | `/contact` | Contact form submission (`company` required): emailed to `CONTACT_INBOX` and, when sales automation is ready, submitted as a lead to the New Lead form (honeypot hits get the same 201 and are dropped). 201 if at least one enabled channel succeeded, else 502 `EMAIL_DELIVERY_FAILED` | Public (rate-limited) |
 
+### Nextcloud webhooks
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/webhooks/nextcloud/client-onboarding` | Trigger for the client onboarding (§10): starts a cycle, answers 202. The body is ignored. 404 when the onboarding or its webhook secret is not configured | `Authorization: Bearer <CLIENT_ONBOARDING_WEBHOOK_SECRET>` (rate-limited) |
+
 ## 8. Swagger
 Swagger UI is available at `/docs` when the backend is started with `ENABLE_SWAGGER=true`. It is disabled by default in production to keep the build lean.
 
@@ -193,3 +198,71 @@ When an operator submits the Nextcloud Form **DFWSC — New Lead**, the API crea
 - *Skip a submission for good*: leave it `failed`. To redo it from scratch, delete the Nextcloud row, contact and folder, then delete its `sales_lead_submissions` row. It is rediscovered only if its id is above every other known id, so normally re-insert it with `INSERT INTO sales_lead_submissions (form_id, submission_id) VALUES (<form>, <id>);`.
 - *Empty links on early leads*: leads processed before the link-format fix have empty Contact Card and Notes / Files cells even though they are `completed`. Fill them by hand in Tables (folder: `<base>/index.php/f/<folder_file_id>`; contact: open it from the Contacts app).
 - *Disable*: set `SALES_AUTOMATION_ENABLED=false` and redeploy or restart the `api` service. Nothing is lost: submissions made meanwhile are picked up when it is re-enabled (the baseline is kept).
+
+## 10. Client Onboarding Automation (Nextcloud)
+When an operator submits the Nextcloud Form **DFWSC — Convert Won Lead to Client** (form 2), the API does, exactly once per submission:
+1. **Client folder**: `<CLIENT_ONBOARDING_CLIENTS_FOLDER>/<Company>/` with `Meetings/`, `Decisions/` and `Deliverables/` (the Cerebo project-folder layout). A returning client's existing folder is reused.
+2. **Contact card** in the `dfwsc-sales` address book, ORG = company. It updates the existing card that has the submitted email, or, without an email, the company and contact name. If no card matches it creates one with UID `dfwsc-client-<formId>-<submissionId>`. Only answered fields are written, and nothing on an existing card is removed. If several cards match, none is changed (`contactStatus = ambiguous`).
+3. **Cerebo Projects row** (Tables "Cerebo Pilot — Projects"): the next `CP-###` code, Project Name, Status *Intake*, Owner = the submitter (left empty for an anonymous submission), Start/Target Date, and Summary.
+4. **Collectives page** `CP-### — <Project Name>` under **Projects** in the Cerebo Pilot collective, with links to the row, the client folder and the intake results. The row then gets its **Project Folder**, **Project Page** and **Intake Submission** links.
+5. **Sales Pipeline lead**: the row named by `lead_link` (a Tables row link `…/#/table/8/row/<id>` or `…/#/view/<v>/row/<id>`). Otherwise it is the row whose **Company** exactly equals `lead_link` (or, if that is empty, the company), compared case-insensitively with whitespace collapsed. That row gets Stage *Won* and a **Cerebo Project** link to the new Projects row. With no match, several matches, or a lead whose Cerebo Project already links another project, nothing is changed. The submission still completes, with `leadStatus` `no_match`, `ambiguous` or `already_linked` for an operator.
+
+Contact details go only on the vCard, never on the Projects row or the page. The page holds links only, because status and dates live in Tables.
+
+**How it runs.** The code is `lib/client-onboarding-sync.ts`, started from `index.ts` and stopped before the DB pool closes. Nextcloud's `webhook_listeners` app calls `POST /api/v1/webhooks/nextcloud/client-onboarding` on each form submission. The route checks the shared secret in constant time, starts a cycle and answers `202` straight away. It never reads the payload: the body is accepted with any or no `Content-Type` (`webhook_listeners` sends JSON without one, which Fastify would otherwise reject with 415) and dropped. Each cycle re-reads submissions from the Forms API. A poll runs the same cycle every `CLIENT_ONBOARDING_POLL_INTERVAL_MS` (default 5 min) as the safety net, so a lost webhook only delays a submission. One cycle runs at a time per process: triggers that arrive during a cycle are merged into one more cycle right after it. Everything else matches §9: the per-form baseline (`client_onboarding_sync_state`; submissions that exist when the automation first runs are skipped), per-step outputs in `client_onboarding_submissions` so a retry resumes at the first missing step, the 10-minute claim lease (`FOR UPDATE SKIP LOCKED`), the retry policy, the shared Nextcloud breaker, and PII-free logs.
+
+**Form questions and columns.** Questions are matched by Forms *technical name*: `company`, `contact_name`, `email`, `phone`, `project_name`, `start_date`, `target_date`, `summary`, `lead_link`. `company`, `project_name` and `summary` are required, and a submission without one fails with `missing_<name>`. Columns are matched by exact title. In Projects: `Project Code`, `Project Name`, `Status` (needs an *Intake* option), `Owner`, `Start Date`, `Target Date`, `Project Folder`, `Project Page`, `Intake Submission`, `Summary`. In Sales Pipeline: `Company`, `Stage` (needs a *Won* option), `Cerebo Project`. Any missing name, title or option stops the cycle with one error log.
+
+**Exactly-once per step.**
+- *Folder*: the name is saved before `MKCOL`, and an existing folder (405) is accepted.
+- *Contact*: the update uses `If-Match` with the card's ETag, so a card edited in between gives `carddav.contact_changed`, which is retried. A merge that changes nothing is not written. A create uses a fixed UID with `If-None-Match: *`.
+- *Project code*: allocated once per submission inside a transaction holding `pg_advisory_xact_lock`. It is max(highest code ever allocated here, highest `CP-###` in the Projects table) + 1, written to the submission row in the same transaction. Codes are unique in Postgres and never reused, even when a submission later fails, so gaps are possible. A code typed into Tables by hand while an onboarding is in flight can still collide. The adoption check below catches that.
+- *Row*: before creating, the table is searched for the allocated code. A row with that code and the same Project Name is adopted (a create whose response was lost). A row with that code and a different name fails with `project_code_taken`, so it is never overwritten.
+- *Page*: before creating, a page with the same title under Projects is adopted. The content is written once over WebDAV at `<collectivePath>/<filePath>/<fileName>` as reported by Collectives. If the collective is not mounted in the service account's files (no `collectivePath`), the page is left empty and a warning is logged.
+- *Links* (Projects row and the lead's Cerebo Project): written as `Title (https://…)` and read back, as in §9. Tables 2.4 stores and returns link cells as the JSON `{"title","value","providerId":"url"}`, but answers a write in that JSON form with 200 and stores nothing. A link that does not read back fails the attempt with `tables.link_not_persisted`, which is retried.
+
+**Failures.** These are the same as §9. In addition, `missing_company`, `missing_project_name`, `missing_summary`, `submission_not_found` and `project_code_taken` fail at once. `carddav.contact_changed` and `tables.link_not_persisted` are retried.
+
+**Environment variables** (all optional; nothing runs unless `CLIENT_ONBOARDING_ENABLED=true`, and then all but the secret and interval are required. An invalid config is logged once at startup and nothing starts; payments are never affected. Uses the `NEXTCLOUD_*` service account from §9):
+
+| Variable | Example | Notes |
+|---|---|---|
+| `CLIENT_ONBOARDING_ENABLED` | `true` | Default `false` |
+| `CLIENT_ONBOARDING_FORM_ID` | `2` | Convert Won Lead to Client form |
+| `CLIENT_ONBOARDING_PROJECTS_TABLE_ID` | `6` | Cerebo Pilot — Projects |
+| `CLIENT_ONBOARDING_PIPELINE_TABLE_ID` | `8` | DFWSC — Sales Pipeline |
+| `CLIENT_ONBOARDING_ADDRESSBOOK_PATH` | `dfwsc-sales_shared_by_messyginger0804` | Address book collection as the service account sees it |
+| `CLIENT_ONBOARDING_CLIENTS_FOLDER` | `clients` | Parent of client folders, relative to the service account's files root (a share may appear as e.g. `Shared/clients`) |
+| `CLIENT_ONBOARDING_COLLECTIVE_ID` | `1` | Cerebo Pilot |
+| `CLIENT_ONBOARDING_WEBHOOK_SECRET` | `openssl rand -hex 32` | At least 32 characters. Unset: the webhook answers 404 and only the poll runs |
+| `CLIENT_ONBOARDING_POLL_INTERVAL_MS` | `300000` | Default 300000, minimum 30000 |
+
+**Nextcloud admin setup.** Run these as the owner or an admin; the service account is `dfwsc-admin`.
+1. **Form 2**: share it with `dfwsc-admin` with *View responses* (`results`). Already done.
+2. **Table 6, Cerebo Pilot — Projects**: share it with `dfwsc-admin` with read, create and update. It must keep the column titles and the *Intake* status option above.
+3. **Table 8, DFWSC — Sales Pipeline**: the existing share from §9 (manage) is enough. It must have the *Won* stage option and the *Cerebo Project* link column.
+4. **`clients/`**: share the folder read-write (create + edit) with `dfwsc-admin` and accept the share if needed. Set `CLIENT_ONBOARDING_CLIENTS_FOLDER` to the path `dfwsc-admin` sees: `PROPFIND /remote.php/dav/files/dfwsc-admin/`.
+5. **`dfwsc-sales` address book**: the existing read-write share from §9.
+6. **Cerebo Pilot collective**: add `dfwsc-admin` to the collective's team as a member who can edit pages. Check that `GET /ocs/v2.php/apps/collectives/api/v1.0/collectives` as `dfwsc-admin` lists it (id 1) and that the page list shows a `collectivePath` such as `Collectives/Cerebo Pilot` (otherwise pages are created empty).
+7. **Webhook**: the `webhook_listeners` app must be enabled (it ships with Nextcloud 30+). Register the listener as an admin:
+   ```sh
+   curl -u <admin>:<app-password> -H 'OCS-APIRequest: true' -H 'Content-Type: application/json' \
+     -X POST 'https://cloud.dfwsc.com/ocs/v2.php/apps/webhook_listeners/api/v1/webhooks' \
+     -d '{"httpMethod":"POST",
+          "uri":"https://<api-host>/api/v1/webhooks/nextcloud/client-onboarding",
+          "event":"OCA\\Forms\\Events\\FormSubmittedEvent",
+          "eventFilter":{"event.form.id":2},
+          "authMethod":"header",
+          "authData":{"Authorization":"Bearer <CLIENT_ONBOARDING_WEBHOOK_SECRET>"}}'
+   ```
+   Check it with `occ webhook_listeners:list`. Nextcloud sends webhooks from background jobs, so with cron every 5 minutes a call can be up to 5 minutes late. For faster delivery, run dedicated workers as described in the admin manual ("Speeding up webhook dispatch"): `occ background-job:worker -t 60 'OCA\WebhookListeners\BackgroundJobs\WebhookCall'`. Either way the poll covers a call that is late or never arrives.
+8. Enable the flag after the shares exist (`CLIENT_ONBOARDING_ENABLED=true` plus the variables above) and redeploy. The first cycle records the baseline, so submissions made before that are not processed. Re-insert one with SQL (below) if needed.
+
+**Ops runbook.**
+- *Watch*: `GET /api/v1/metrics` exposes `dfwsc_client_onboarding_submissions{status=...}`, `dfwsc_client_onboarding_flagged` (completed, but the lead or contact needs a person), `dfwsc_client_onboarding_last_cycle_ok` and `dfwsc_client_onboarding_last_cycle_timestamp_seconds`.
+- *Flagged*: `SELECT submission_id, project_code, lead_status, contact_status FROM client_onboarding_submissions WHERE lead_status <> 'won' OR contact_status = 'ambiguous';` Fix the pipeline row or the card by hand. The submission stays `completed`.
+- *Failures*: `SELECT submission_id, project_code, attempts, last_error_code FROM client_onboarding_submissions WHERE status = 'failed';`
+- *Retry* once the cause is fixed (completed steps and the allocated code are kept):
+  `UPDATE client_onboarding_submissions SET status = 'pending', attempts = 0, next_attempt_at = now(), claimed_at = NULL, claim_token = NULL WHERE form_id = <form> AND submission_id = <id>;`
+- *Process an older submission*: `INSERT INTO client_onboarding_submissions (form_id, submission_id) VALUES (<form>, <id>);`
+- *Disable*: set `CLIENT_ONBOARDING_ENABLED=false` and redeploy. The webhook then answers 404. Nothing is lost: the baseline is kept and the first cycle after re-enabling picks up submissions made meanwhile.
