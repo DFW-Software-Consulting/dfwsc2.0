@@ -95,6 +95,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
   # BILLING_REQUESTS_POLL_INTERVAL_MS=300000
   # BILLING_REQUESTS_ALLOWED_GROUPS=dfwsc-admins,managers   (who may submit; default shown)
   # BILLING_REQUESTS_SHARE_GROUPS=dfwsc-admins,managers   (read-only "Billing Requests" table; default shown)
+  # BILLING_REQUESTS_MAX_AGE_HOURS=72   (older submissions are marked Expired, not billed, when the flag is switched on again)
   # BILLING_MAX_AMOUNT_CENTS=2500000   (per invoice or per plan payment)
   # BILLING_AUTO_SEND=true   (false = leave one-off invoices as drafts)
   # BILLING_DEFAULT_DAYS_UNTIL_DUE=7

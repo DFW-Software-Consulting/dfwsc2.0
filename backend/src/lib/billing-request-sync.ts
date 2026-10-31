@@ -27,6 +27,7 @@ import {
   BILLING_DEFAULT_DAYS_UNTIL_DUE,
   BILLING_DEFAULT_MAX_AMOUNT_CENTS,
   BILLING_REQUESTS_CLAIM_LEASE_MS,
+  BILLING_REQUESTS_DEFAULT_MAX_AGE_HOURS,
   BILLING_REQUESTS_DEFAULT_POLL_INTERVAL_MS,
   BILLING_REQUESTS_MAX_ATTEMPTS,
   BILLING_REQUESTS_MAX_DISCOVERY_PAGES,
@@ -92,6 +93,8 @@ interface BillingRequestSettings {
   maxAmountCents: number;
   autoSend: boolean;
   daysUntilDue: number;
+  /** A submission older than this is not billed unless Stripe was already called for it. */
+  maxAgeHours: number;
   minGapMs: number;
 }
 
@@ -160,6 +163,14 @@ export function loadBillingRequestsConfig(env: NodeJS.ProcessEnv = process.env):
     BILLING_DEFAULT_DAYS_UNTIL_DUE,
     problems
   );
+  const maxAgeHours = intVar(
+    env.BILLING_REQUESTS_MAX_AGE_HOURS,
+    "BILLING_REQUESTS_MAX_AGE_HOURS",
+    1,
+    24 * 365,
+    BILLING_REQUESTS_DEFAULT_MAX_AGE_HOURS,
+    problems
+  );
   let autoSend = true;
   const autoSendText = env.BILLING_AUTO_SEND?.trim().toLowerCase();
   if (autoSendText) {
@@ -180,6 +191,7 @@ export function loadBillingRequestsConfig(env: NodeJS.ProcessEnv = process.env):
       maxAmountCents,
       autoSend,
       daysUntilDue,
+      maxAgeHours,
       minGapMs: 200,
     },
   };
@@ -460,12 +472,17 @@ async function authorize(userId: string | null, ctx: ProcessingContext): Promise
 }
 
 async function lookupCustomer(request: BillingRequest) {
-  const [customer] = await db
+  // Trimmed and upper-cased on both sides; codes that differ only in case are ambiguous, not guessed.
+  const matches = await db
     .select()
     .from(billingCustomers)
-    .where(sql`upper(${billingCustomers.clientCode}) = ${request.clientCode.toUpperCase()}`)
-    .limit(1);
-  if (!customer) throw new BillingRequestInvalidError("unknown_client_code");
+    .where(
+      sql`upper(btrim(${billingCustomers.clientCode})) = ${request.clientCode.trim().toUpperCase()}`
+    )
+    .limit(2);
+  if (!matches.length) throw new BillingRequestInvalidError("unknown_client_code");
+  if (matches.length > 1) throw new BillingRequestInvalidError("ambiguous_client_code");
+  const [customer] = matches;
   if (normalizeCompany(customer.company) !== normalizeCompany(request.company)) {
     throw new BillingRequestInvalidError("company_mismatch");
   }
@@ -490,12 +507,30 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
     });
   }
 
+  // An earlier attempt may have sent a Stripe create (even if its answer or id was lost). Such a
+  // request is resumed whatever its age or start date; the Stripe lookups come before any refusal
+  // that depends on time.
+  const priorAttempt =
+    row.stripeStartedAt !== null ||
+    row.stripeInvoiceId !== null ||
+    row.stripeProductId !== null ||
+    row.stripeScheduleId !== null;
+
+  if (
+    !priorAttempt &&
+    row.submittedAt &&
+    Date.now() - row.submittedAt.getTime() > ctx.settings.maxAgeHours * 3_600_000
+  ) {
+    throw new BillingRequestInvalidError("request_expired");
+  }
+
   // Once Stripe has been called for this request it was authorized; a retry does not re-ask.
-  if (row.stripeStartedAt === null) await authorize(submission.userId, ctx);
+  if (!priorAttempt) await authorize(submission.userId, ctx);
 
   const requestedAt = row.submittedAt ?? new Date();
   const request = parseBillingRequest(submission.answers, ctx.questions, {
-    maxAmountCents: ctx.settings.maxAmountCents,
+    // The cap was applied when the request was first accepted; lowering it does not strand a resume.
+    maxAmountCents: priorAttempt ? Number.MAX_SAFE_INTEGER : ctx.settings.maxAmountCents,
     now: requestedAt,
   });
   const customer = await lookupCustomer(request);
@@ -509,12 +544,12 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
   });
 
   let startUnix: number | null = null;
+  let startPassed = false;
   if (request.kind === "recurring") {
     startUnix = chicagoUnix(request.startDate);
-    // Judged against the clock only while the schedule does not exist yet.
-    if (!row.stripeScheduleId && startUnix * 1000 <= Date.now() + 60_000) {
-      throw new BillingRequestInvalidError("start_date_passed");
-    }
+    startPassed = !row.stripeScheduleId && startUnix * 1000 <= Date.now() + 60_000;
+    // Nothing was ever sent: refuse now. Otherwise runStripeSteps refuses after it looked for the schedule.
+    if (startPassed && !priorAttempt) throw new BillingRequestInvalidError("start_date_passed");
   }
 
   const outcome = await runStripeSteps(
@@ -527,6 +562,7 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
       autoSend: ctx.settings.autoSend,
       daysUntilDue: ctx.settings.daysUntilDue,
       startUnix,
+      startPassed,
     },
     (patch) => saveUnderClaim(row, patch)
   );

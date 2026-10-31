@@ -42,8 +42,18 @@ export function stripeScheduleUrl(scheduleId: string): string {
   return `${dashboardBase()}/subscription_schedules/${scheduleId}`;
 }
 
-export function billingRequestStatus(row: Pick<RequestRow, "status" | "outcome">): string {
-  if (row.status === "failed") return "Failed";
+export function billingRequestStatus(
+  row: Pick<
+    RequestRow,
+    "status" | "outcome" | "lastErrorCode" | "invoiceFinalizedAt" | "invoiceSentAt"
+  >
+): string {
+  if (row.status === "failed") {
+    if (row.lastErrorCode === "request_expired") return "Expired";
+    // A live, collectible invoice the customer was not told about: finish it in Stripe, never resubmit.
+    if (row.invoiceFinalizedAt && !row.invoiceSentAt) return "Finalized, not sent";
+    return "Failed";
+  }
   if (row.status === "completed" && row.outcome) return OUTCOME_LABELS[row.outcome];
   return "Processing";
 }

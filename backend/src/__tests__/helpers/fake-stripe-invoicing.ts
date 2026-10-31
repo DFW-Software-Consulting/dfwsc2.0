@@ -23,7 +23,8 @@ export const ALLOWED_CALLS = new Set([
   "invoices.finalizeInvoice",
   "invoices.sendInvoice",
   "invoices.retrieve",
-  "invoices.search",
+  "invoices.list",
+  "customers.retrieve",
   "invoiceItems.create",
   "invoiceItems.list",
   "products.create",
@@ -60,8 +61,14 @@ export const connectionError = () =>
 
 export class FakeInvoicingStripe {
   calls: FakeCall[] = [];
-  /** Existing objects returned by search and list (set by a test). */
+  /** Extra existing objects returned by list and search (set by a test), per `resource.method`. */
   searchResults: Record<string, any[]> = {};
+  /** What the created objects look like to the list and search calls. */
+  private objects: Record<string, any[]> = {};
+  /** The Customer every retrieve answers with; a test changes it (no email, deleted). */
+  customer: Record<string, any> = { email: "ap@emmut.example" };
+  /** Page size for list calls, so pagination can be tested. */
+  pageSize = 100;
   invoiceStatus = new Map<string, string>();
   private failures: Failure[] = [];
   private byKey = new Map<string, { params: string; result: unknown }>();
@@ -70,6 +77,9 @@ export class FakeInvoicingStripe {
   reset() {
     this.calls = [];
     this.searchResults = {};
+    this.objects = {};
+    this.customer = { email: "ap@emmut.example" };
+    this.pageSize = 100;
     this.invoiceStatus.clear();
     this.failures = [];
     this.byKey.clear();
@@ -78,6 +88,11 @@ export class FakeInvoicingStripe {
 
   fail(call: string, error: Error, times = 1, afterApply = false) {
     this.failures.push({ call, error, times, afterApply });
+  }
+
+  /** Every call except the read-only Customer check that opens a first attempt. */
+  writes() {
+    return this.calls.filter((c) => c.call !== "customers.retrieve");
   }
 
   callsTo(call: string) {
@@ -115,11 +130,53 @@ export class FakeInvoicingStripe {
     }
   }
 
+  /** What a create makes visible to the matching list or search. */
+  private remember(call: string, params: Record<string, any> | undefined, result: any) {
+    const listOf: Record<string, string> = {
+      "invoices.create": "invoices.list",
+      "invoiceItems.create": "invoiceItems.list",
+      "subscriptionSchedules.create": "subscriptionSchedules.list",
+      "products.create": "products.search",
+    };
+    const list = listOf[call];
+    if (!list) return;
+    const bucket = this.objects[list] ?? [];
+    this.objects[list] = bucket;
+    bucket.push({
+      ...result,
+      customer: params?.customer,
+      invoice: params?.invoice,
+    });
+  }
+
+  private listPage(call: string, params: Record<string, any> | undefined) {
+    let all = [...(this.searchResults[call] ?? []), ...(this.objects[call] ?? [])];
+    if (params?.customer) all = all.filter((o) => !o.customer || o.customer === params.customer);
+    if (params?.invoice) all = all.filter((o) => !o.invoice || o.invoice === params.invoice);
+    if (typeof params?.query === "string") {
+      all = all.filter(
+        (o) =>
+          !o.metadata || params.query.includes(`['nc_submission']:'${o.metadata.nc_submission}'`)
+      );
+    }
+    const limit = Math.min(params?.limit ?? this.pageSize, this.pageSize);
+    const cursor = params?.starting_after ?? params?.page;
+    const start = cursor ? all.findIndex((o) => o.id === cursor) + 1 : 0;
+    const data = all.slice(start, start + limit);
+    const hasMore = start + limit < all.length;
+    return {
+      data,
+      has_more: hasMore,
+      next_page: hasMore ? data[data.length - 1].id : null,
+    };
+  }
+
   invoke(call: string, args: unknown[]): Promise<unknown> {
     const hasId = [
       "invoices.finalizeInvoice",
       "invoices.sendInvoice",
       "invoices.retrieve",
+      "customers.retrieve",
     ].includes(call);
     const id = hasId ? (args[0] as string) : undefined;
     const params = (hasId ? args[1] : args[0]) as Record<string, any> | undefined;
@@ -156,17 +213,21 @@ export class FakeInvoicingStripe {
     let result: any;
     if (call === "invoices.retrieve") {
       result = { id, status: this.invoiceStatus.get(id as string) ?? "draft" };
-    } else if (call === "invoices.search" || call === "products.search") {
-      result = { data: this.searchResults[call] ?? [] };
-    } else if (call === "invoiceItems.list") {
-      result = { data: this.searchResults[call] ?? [] };
-    } else if (call === "subscriptionSchedules.list") {
-      result = { data: this.searchResults[call] ?? [] };
+    } else if (call === "customers.retrieve") {
+      result = { id, ...this.customer };
+    } else if (
+      call === "invoices.list" ||
+      call === "invoiceItems.list" ||
+      call === "subscriptionSchedules.list" ||
+      call === "products.search"
+    ) {
+      result = this.listPage(call, params);
     } else {
       result = this.answer(call, hasId ? { ...(params ?? {}), __id: id } : params);
       if (call === "invoices.finalizeInvoice") this.invoiceStatus.set(id as string, "open");
       result = { ...result };
       delete result.__id;
+      this.remember(call, params, result);
     }
     if (key) this.byKey.set(key, { params: JSON.stringify(sentParams), result });
     if (failure?.afterApply) {

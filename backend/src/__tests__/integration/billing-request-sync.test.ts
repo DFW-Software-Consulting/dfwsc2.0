@@ -150,13 +150,13 @@ describe("one-off invoice", () => {
     expect(result).toMatchObject({ status: "ok", discovered: 1, completed: 1, failed: 0 });
 
     const meta = { nc_form: String(BR_FORM_ID), nc_submission: "11", client_code: "CP-004" };
-    expect(stripe.calls.map((c) => c.call)).toEqual([
+    expect(stripe.writes().map((c) => c.call)).toEqual([
       "invoices.create",
       "invoiceItems.create",
       "invoices.finalizeInvoice",
       "invoices.sendInvoice",
     ]);
-    expect(stripe.calls[0]).toMatchObject({
+    expect(stripe.writes()[0]).toMatchObject({
       params: {
         customer: CUSTOMER,
         currency: "usd",
@@ -170,7 +170,7 @@ describe("one-off invoice", () => {
       options: KEY(11, "invoice"),
     });
     const invoiceId = (await sub(11)).stripeInvoiceId as string;
-    expect(stripe.calls[1]).toMatchObject({
+    expect(stripe.writes()[1]).toMatchObject({
       params: {
         invoice: invoiceId,
         customer: CUSTOMER,
@@ -181,11 +181,14 @@ describe("one-off invoice", () => {
       },
       options: KEY(11, "item"),
     });
-    expect(stripe.calls[2]).toMatchObject({
+    expect(stripe.writes()[2]).toMatchObject({
       params: { id: invoiceId },
       options: KEY(11, "finalize"),
     });
-    expect(stripe.calls[3]).toMatchObject({ params: { id: invoiceId }, options: KEY(11, "send") });
+    expect(stripe.writes()[3]).toMatchObject({
+      params: { id: invoiceId },
+      options: KEY(11, "send"),
+    });
 
     expect(await sub(11)).toMatchObject({
       status: "completed",
@@ -201,7 +204,7 @@ describe("one-off invoice", () => {
 
   it("omits the invoice description when there is no memo", async () => {
     await submit(12, ONE_OFF);
-    expect(stripe.calls[0].params).not.toHaveProperty("description");
+    expect(stripe.writes()[0].params).not.toHaveProperty("description");
   });
 
   it("only creates a draft when BILLING_AUTO_SEND is off", async () => {
@@ -210,7 +213,7 @@ describe("one-off invoice", () => {
     const off = billingRequestEnv({ BILLING_AUTO_SEND: "false" });
     fake.addSubmission(14, ONE_OFF);
     expect(await cycle(off)).toMatchObject({ completed: 1 });
-    expect(stripe.calls.map((c) => c.call)).toEqual(["invoices.create", "invoiceItems.create"]);
+    expect(stripe.writes().map((c) => c.call)).toEqual(["invoices.create", "invoiceItems.create"]);
     expect(await sub(14)).toMatchObject({
       status: "completed",
       outcome: "draft",
@@ -223,7 +226,7 @@ describe("one-off invoice", () => {
   it("honours BILLING_DEFAULT_DAYS_UNTIL_DUE", async () => {
     fake.addSubmission(15, ONE_OFF);
     await cycle(billingRequestEnv({ BILLING_DEFAULT_DAYS_UNTIL_DUE: "30" }));
-    expect(stripe.calls[0].params).toMatchObject({ days_until_due: 30 });
+    expect(stripe.writes()[0].params).toMatchObject({ days_until_due: 30 });
   });
 
   it("accepts a company that differs only in case, spacing or trailing punctuation, and a lower-case code", async () => {
@@ -280,16 +283,16 @@ describe("recurring plan", () => {
     expect(result).toMatchObject({ completed: 1 });
 
     const meta = { nc_form: String(BR_FORM_ID), nc_submission: "21", client_code: "CP-004" };
-    expect(stripe.calls.map((c) => c.call)).toEqual([
+    expect(stripe.writes().map((c) => c.call)).toEqual([
       "products.create",
       "subscriptionSchedules.create",
     ]);
-    expect(stripe.calls[0]).toMatchObject({
+    expect(stripe.writes()[0]).toMatchObject({
       params: { name: "October retainer", metadata: meta },
       options: KEY(21, "product"),
     });
     const productId = (await sub(21)).stripeProductId as string;
-    expect(stripe.calls[1].params).toEqual({
+    expect(stripe.writes()[1].params).toEqual({
       customer: CUSTOMER,
       start_date: chicagoUnix(date),
       end_behavior: "cancel",
@@ -317,8 +320,8 @@ describe("recurring plan", () => {
       ],
       metadata: meta,
     });
-    expect(stripe.calls[1].params?.phases[0]).not.toHaveProperty("iterations");
-    expect(stripe.calls[1].options).toEqual(KEY(21, "schedule"));
+    expect(stripe.writes()[1].params?.phases[0]).not.toHaveProperty("iterations");
+    expect(stripe.writes()[1].options).toEqual(KEY(21, "schedule"));
 
     const scheduleId = (await sub(21)).stripeScheduleId as string;
     expect(await sub(21)).toMatchObject({
@@ -449,9 +452,10 @@ describe("idempotency keys and resuming", () => {
     await cycle();
     expect(await sub(43)).toMatchObject({ status: "completed", outcome: "sent" });
     const items = stripe.callsTo("invoiceItems.create");
-    expect(items).toHaveLength(2);
-    expect(items[1].replayed).toBe(true);
-    expect(items[0].options?.idempotencyKey).toBe(items[1].options?.idempotencyKey);
+    // The retry found the item by its metadata and adopted it: nothing was created a second time.
+    expect(items).toHaveLength(1);
+    expect(stripe.callsTo("invoiceItems.list")).toHaveLength(1);
+    expect((await sub(43)).stripeInvoiceItemId).toMatch(/^ii_/);
   });
 
   it("resumes a plan after the schedule failed: one product only", async () => {
@@ -496,7 +500,13 @@ describe("idempotency keys and resuming", () => {
       // Pretend the invoice id was never saved and the key has expired.
       await old(51, { stripeInvoiceId: null, stripeInvoiceItemId: null });
       stripe.reset();
-      stripe.searchResults["invoices.search"] = [{ id: first.stripeInvoiceId }];
+      stripe.searchResults["invoices.list"] = [
+        {
+          id: first.stripeInvoiceId,
+          metadata: { nc_form: String(BR_FORM_ID), nc_submission: "51" },
+        },
+        { id: "in_foreign", metadata: { nc_form: String(BR_FORM_ID), nc_submission: "999" } },
+      ];
       await makeDue(51);
       await cycle();
       expect(await sub(51)).toMatchObject({
@@ -504,10 +514,9 @@ describe("idempotency keys and resuming", () => {
         stripeInvoiceId: first.stripeInvoiceId,
       });
       expect(stripe.callsTo("invoices.create")).toHaveLength(0);
-      const search = stripe.callsTo("invoices.search")[0];
-      expect(search.params?.query).toBe(
-        `metadata['nc_form']:'${BR_FORM_ID}' AND metadata['nc_submission']:'51'`
-      );
+      const list = stripe.callsTo("invoices.list")[0];
+      expect(list.params).toMatchObject({ customer: CUSTOMER, limit: 100 });
+      expect(list.params?.created.gte).toBeGreaterThan(0);
     });
 
     it("adopts an invoice item and skips a finalize that already happened", async () => {
@@ -532,12 +541,11 @@ describe("idempotency keys and resuming", () => {
       expect(stripe.callsTo("invoices.sendInvoice")).toHaveLength(1);
     });
 
-    it("adopts a product and a schedule found by metadata", async () => {
+    it("adopts a schedule found by metadata, without making a product", async () => {
       stripe.fail("subscriptionSchedules.create", apiError(502));
       await submit(53, recurring());
       await old(53, { stripeProductId: null, stripeScheduleId: null });
       stripe.reset();
-      stripe.searchResults["products.search"] = [{ id: "prod_existing" }];
       stripe.searchResults["subscriptionSchedules.list"] = [
         { id: "sub_sched_other", metadata: { nc_form: String(BR_FORM_ID), nc_submission: "999" } },
         {
@@ -549,10 +557,28 @@ describe("idempotency keys and resuming", () => {
       await cycle();
       expect(await sub(53)).toMatchObject({
         status: "completed",
-        stripeProductId: "prod_existing",
+        outcome: "scheduled",
         stripeScheduleId: "sub_sched_existing",
       });
       expect(stripe.calls.filter((c) => c.call.endsWith(".create"))).toHaveLength(0);
+    });
+
+    it("adopts a product found by metadata when there is no schedule yet", async () => {
+      stripe.fail("subscriptionSchedules.create", apiError(502));
+      await submit(55, recurring());
+      await old(55, { stripeProductId: null, stripeScheduleId: null });
+      stripe.reset();
+      stripe.searchResults["products.search"] = [
+        { id: "prod_existing", metadata: { nc_form: String(BR_FORM_ID), nc_submission: "55" } },
+      ];
+      await makeDue(55);
+      await cycle();
+      expect(await sub(55)).toMatchObject({
+        status: "completed",
+        stripeProductId: "prod_existing",
+        stripeScheduleId: expect.stringMatching(/^sub_sched_/),
+      });
+      expect(stripe.callsTo("products.create")).toHaveLength(0);
     });
 
     it("creates normally when nothing is found", async () => {
@@ -562,7 +588,7 @@ describe("idempotency keys and resuming", () => {
       await makeDue(54);
       await cycle();
       expect(await sub(54)).toMatchObject({ status: "completed" });
-      expect(stripe.callsTo("invoices.search")).toHaveLength(1);
+      expect(stripe.callsTo("invoices.list")).toHaveLength(1);
       expect(stripe.created("invoices.create")).toHaveLength(1);
     });
   });
@@ -1019,6 +1045,7 @@ describe("configuration", () => {
       maxAmountCents: 2_500_000,
       autoSend: true,
       daysUntilDue: 7,
+      maxAgeHours: 72,
     });
   });
 
@@ -1051,6 +1078,8 @@ describe("configuration", () => {
     [{ BILLING_MAX_AMOUNT_CENTS: "0" }, "BILLING_MAX_AMOUNT_CENTS"],
     [{ BILLING_MAX_AMOUNT_CENTS: "lots" }, "BILLING_MAX_AMOUNT_CENTS"],
     [{ BILLING_AUTO_SEND: "maybe" }, "BILLING_AUTO_SEND"],
+    [{ BILLING_REQUESTS_MAX_AGE_HOURS: "0" }, "BILLING_REQUESTS_MAX_AGE_HOURS"],
+    [{ BILLING_REQUESTS_MAX_AGE_HOURS: "soon" }, "BILLING_REQUESTS_MAX_AGE_HOURS"],
     [{ BILLING_DEFAULT_DAYS_UNTIL_DUE: "0" }, "BILLING_DEFAULT_DAYS_UNTIL_DUE"],
     [{ NEXTCLOUD_BASE_URL: undefined }, "NEXTCLOUD_BASE_URL"],
   ])("reports %j as invalid", (override, mentioned) => {
@@ -1073,5 +1102,329 @@ describe("configuration", () => {
     const result = await cycle({ ...base, BILLING_REQUESTS_FORM_ID: "x" } as NodeJS.ProcessEnv);
     expect(result.status).toBe("invalid_config");
     expect(fake.calls.length + fake.formCalls.length).toBe(before);
+  });
+});
+
+describe("resuming never depends on the clock", () => {
+  const DAY = 24 * 3600 * 1000;
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const jumpDays = (days: number) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + days * DAY);
+  };
+
+  it("adopts a plan's schedule whose create answer was lost, even after its start date passed", async () => {
+    stripe.fail("subscriptionSchedules.create", connectionError(), 1, true);
+    await submit(131, recurring({ start_date: startDate(1) }));
+    expect(await sub(131)).toMatchObject({
+      status: "pending",
+      stripeScheduleId: null,
+      stripeProductId: expect.stringMatching(/^prod_/),
+    });
+    await makeDue(131);
+    jumpDays(2); // the start (tomorrow 09:00 Chicago) is now in the past
+    expect(await cycle()).toMatchObject({ completed: 1, failed: 0 });
+    expect(await sub(131)).toMatchObject({
+      status: "completed",
+      outcome: "scheduled",
+      lastErrorCode: null,
+      stripeScheduleId: expect.stringMatching(/^sub_sched_/),
+    });
+    expect(stripe.created("subscriptionSchedules.create")).toHaveLength(1);
+    expect(stripe.callsTo("subscriptionSchedules.create")).toHaveLength(1);
+    expect(stripe.created("products.create")).toHaveLength(1);
+    expect(cell(resultRows()[0], "Status")).toBe("Scheduled");
+    expect(cell(resultRows()[0], "Stripe")).toBe(
+      stripeScheduleUrl((await sub(131)).stripeScheduleId as string)
+    );
+  });
+
+  it("refuses a passed start date only after looking, when something may have been sent", async () => {
+    stripe.fail("subscriptionSchedules.create", apiError(502));
+    await submit(132, recurring({ start_date: startDate(1) }));
+    await makeDue(132);
+    jumpDays(2);
+    await cycle();
+    expect(await sub(132)).toMatchObject({ status: "failed", lastErrorCode: "start_date_passed" });
+    expect(stripe.callsTo("subscriptionSchedules.list").length).toBeGreaterThan(0);
+    expect(stripe.callsTo("subscriptionSchedules.create")).toHaveLength(1); // the failed first one only
+    expect(stripe.callsTo("products.create")).toHaveLength(1);
+  });
+
+  it("refuses a passed start date with no Stripe call at all when nothing was ever sent", async () => {
+    fake.addSubmission(133, recurring({ start_date: startDate(1) }));
+    jumpDays(2);
+    expect(await cycle()).toMatchObject({ failed: 1 });
+    expect(await sub(133)).toMatchObject({ status: "failed", lastErrorCode: "start_date_passed" });
+    expect(stripe.calls).toHaveLength(0);
+  });
+
+  it("adopts a one-off invoice whose create answer was lost, however old the request is now", async () => {
+    stripe.fail("invoices.create", connectionError(), 1, true);
+    await submit(134, ONE_OFF);
+    expect((await sub(134)).stripeInvoiceId).toBeNull();
+    await makeDue(134);
+    await db
+      .update(billingRequestSubmissions)
+      .set({ submittedAt: new Date(Date.now() - 10 * DAY) }) // far beyond the 72 h age limit
+      .where(eq(billingRequestSubmissions.submissionId, 134));
+    expect(await cycle()).toMatchObject({ completed: 1, failed: 0 });
+    expect(await sub(134)).toMatchObject({
+      status: "completed",
+      outcome: "sent",
+      stripeInvoiceId: expect.stringMatching(/^in_/),
+    });
+    expect(stripe.callsTo("invoices.create")).toHaveLength(1);
+    expect(stripe.created("invoiceItems.create")).toHaveLength(1);
+    expect(stripe.created("invoices.sendInvoice")).toHaveLength(1);
+    // Resumed without asking again: no second Customer check.
+    expect(stripe.callsTo("customers.retrieve")).toHaveLength(1);
+  });
+
+  it("looks through every page of a busy Customer's invoices", async () => {
+    stripe.fail("invoices.create", connectionError(), 1, true);
+    await submit(135, ONE_OFF);
+    stripe.pageSize = 2;
+    stripe.searchResults["invoices.list"] = ["a", "b", "c", "d", "e"].map((x) => ({
+      id: `in_foreign_${x}`,
+      metadata: { nc_form: String(BR_FORM_ID), nc_submission: `9${x.charCodeAt(0)}` },
+    }));
+    await makeDue(135);
+    await cycle();
+    expect(await sub(135)).toMatchObject({ status: "completed", outcome: "sent" });
+    expect(stripe.callsTo("invoices.create")).toHaveLength(1);
+    const lists = stripe.callsTo("invoices.list");
+    expect(lists).toHaveLength(3); // 5 foreign + ours = 6 objects, 2 per page, ours on page 3
+    expect(lists.slice(1).every((c) => typeof c.params?.starting_after === "string")).toBe(true);
+  });
+
+  it("looks through every page of a busy Customer's schedules", async () => {
+    stripe.fail("subscriptionSchedules.create", connectionError(), 1, true);
+    await submit(136, recurring());
+    stripe.pageSize = 2;
+    stripe.searchResults["subscriptionSchedules.list"] = ["a", "b", "c"].map((x) => ({
+      id: `sub_sched_foreign_${x}`,
+      metadata: { nc_form: String(BR_FORM_ID), nc_submission: `8${x.charCodeAt(0)}` },
+    }));
+    await makeDue(136);
+    await cycle();
+    expect(await sub(136)).toMatchObject({ status: "completed", outcome: "scheduled" });
+    expect(stripe.callsTo("subscriptionSchedules.create")).toHaveLength(1);
+    expect(stripe.callsTo("subscriptionSchedules.list")).toHaveLength(2);
+  });
+
+  it("looks through every page of invoice items", async () => {
+    stripe.fail("invoiceItems.create", connectionError(), 1, true);
+    await submit(137, ONE_OFF);
+    stripe.pageSize = 1;
+    stripe.searchResults["invoiceItems.list"] = [
+      { id: "ii_foreign", metadata: { nc_form: String(BR_FORM_ID), nc_submission: "1" } },
+    ];
+    await makeDue(137);
+    await cycle();
+    expect(await sub(137)).toMatchObject({ status: "completed" });
+    expect(stripe.callsTo("invoiceItems.create")).toHaveLength(1);
+    expect(stripe.callsTo("invoiceItems.list")).toHaveLength(2);
+  });
+});
+
+describe("the Customer is checked before anything is created", () => {
+  it("makes no write for a Customer without an email", async () => {
+    stripe.customer = { email: null };
+    await submit(141, ONE_OFF);
+    expect(await sub(141)).toMatchObject({ status: "failed", lastErrorCode: "customer_no_email" });
+    expect(stripe.calls.map((c) => c.call)).toEqual(["customers.retrieve"]);
+    expect(stripe.calls[0].options ?? {}).not.toHaveProperty("stripeAccount");
+    expect(stripe.calls[0].params).toMatchObject({ id: CUSTOMER });
+    expect(cell(resultRows()[0], "Status")).toBe("Failed");
+    expect(cell(resultRows()[0], "Error")).toBe("customer_no_email");
+  });
+
+  it("treats a blank email like none, and checks plans too", async () => {
+    stripe.customer = { email: "  " };
+    await submit(142, recurring());
+    expect(await sub(142)).toMatchObject({ status: "failed", lastErrorCode: "customer_no_email" });
+    expect(stripe.writes().length).toBe(0);
+  });
+
+  it.each([
+    ["a deleted Customer", () => (stripe.customer = { deleted: true })],
+    [
+      "a Customer Stripe does not have (404)",
+      () => stripe.fail("customers.retrieve", apiError(404)),
+    ],
+  ])("makes no write for %s", async (_name, arrange) => {
+    arrange();
+    await submit(143, ONE_OFF);
+    expect(await sub(143)).toMatchObject({ status: "failed", lastErrorCode: "customer_missing" });
+    expect(stripe.calls.map((c) => c.call)).toEqual(["customers.retrieve"]);
+  });
+
+  it("retries when the check itself cannot be made", async () => {
+    stripe.fail("customers.retrieve", apiError(503));
+    await submit(144, ONE_OFF);
+    expect(await sub(144)).toMatchObject({
+      status: "pending",
+      lastErrorCode: "stripe.customer:503",
+    });
+    expect(stripe.writes().length).toBe(0);
+    await makeDue(144);
+    await cycle();
+    expect((await sub(144)).status).toBe("completed");
+  });
+
+  it("checks once, not again when resuming", async () => {
+    stripe.fail("invoiceItems.create", apiError(503));
+    await submit(145, ONE_OFF);
+    await makeDue(145);
+    await cycle();
+    expect(stripe.callsTo("customers.retrieve")).toHaveLength(1);
+  });
+});
+
+describe("a finalized invoice that was not sent", () => {
+  it("is shown as Finalized, not sent, with the link and code, and not retried on a permanent error", async () => {
+    stripe.fail("invoices.sendInvoice", apiError(400));
+    await submit(151, ONE_OFF);
+    const row = await sub(151);
+    expect(row).toMatchObject({ status: "failed", lastErrorCode: "stripe.send:400" });
+    expect(row.invoiceFinalizedAt).not.toBeNull();
+    expect(row.invoiceSentAt).toBeNull();
+    const [shown] = resultRows();
+    expect(cell(shown, "Status")).toBe("Finalized, not sent");
+    expect(cell(shown, "Error")).toBe("stripe.send:400");
+    expect(cell(shown, "Stripe")).toBe(stripeInvoiceUrl(row.stripeInvoiceId as string));
+    await makeDue(151);
+    await cycle();
+    expect(stripe.callsTo("invoices.sendInvoice")).toHaveLength(1);
+  });
+
+  it("retries only the send on retryable errors, then reads Sent", async () => {
+    stripe.fail("invoices.sendInvoice", apiError(503), 2);
+    await submit(152, ONE_OFF);
+    expect(cell(resultRows()[0], "Status")).toBe("Processing");
+    await makeDue(152);
+    await cycle();
+    await makeDue(152);
+    await cycle();
+    expect(await sub(152)).toMatchObject({ status: "completed", outcome: "sent" });
+    expect(stripe.callsTo("invoices.sendInvoice")).toHaveLength(3);
+    expect(stripe.callsTo("invoices.finalizeInvoice")).toHaveLength(1);
+    expect(stripe.callsTo("invoices.create")).toHaveLength(1);
+    expect(cell(resultRows()[0], "Status")).toBe("Sent");
+  });
+
+  it("is Finalized, not sent once the send's retries are used up", async () => {
+    stripe.fail("invoices.sendInvoice", apiError(503), 999);
+    await submit(153, ONE_OFF);
+    for (let i = 1; i < BILLING_REQUESTS_MAX_ATTEMPTS; i++) {
+      resetCircuitBreakersForTests();
+      await makeDue(153);
+      await cycle();
+    }
+    expect(await sub(153)).toMatchObject({ status: "failed", lastErrorCode: "stripe.send:503" });
+    expect(cell(resultRows()[0], "Status")).toBe("Finalized, not sent");
+    expect(stripe.callsTo("invoices.finalizeInvoice")).toHaveLength(1);
+  });
+});
+
+describe("requests that are too old", () => {
+  const DAY = 24 * 3600 * 1000;
+  const old = (id: number, answers: BillingAnswers, ageMs: number, env = on) => {
+    fake.addSubmission(id, answers, { timestamp: Math.floor((Date.now() - ageMs) / 1000) });
+    return cycle(env);
+  };
+
+  it("marks a submission made while the flag was off, found 4 days later, Expired with no Stripe call", async () => {
+    // Baseline was recorded earlier; the submission came in afterwards, while the feature was off.
+    const result = await old(161, ONE_OFF, 4 * DAY);
+    expect(result).toMatchObject({ failed: 1, completed: 0 });
+    expect(stripe.calls).toHaveLength(0);
+    expect(await sub(161)).toMatchObject({
+      status: "failed",
+      lastErrorCode: "request_expired",
+      attempts: 1,
+    });
+    const [row] = resultRows();
+    expect(cell(row, "Status")).toBe("Expired");
+    expect(cell(row, "Error")).toBe("request_expired");
+    expect(cell(row, "Stripe")).toBe("");
+    await makeDue(161);
+    await cycle();
+    expect(stripe.calls).toHaveLength(0);
+  });
+
+  it("expires plans too", async () => {
+    await old(162, recurring(), 5 * DAY);
+    expect(await sub(162)).toMatchObject({ status: "failed", lastErrorCode: "request_expired" });
+    expect(stripe.calls).toHaveLength(0);
+  });
+
+  it("still bills a request just inside the limit", async () => {
+    await old(163, ONE_OFF, 71 * 3600 * 1000);
+    expect(await sub(163)).toMatchObject({ status: "completed", outcome: "sent" });
+  });
+
+  it("uses BILLING_REQUESTS_MAX_AGE_HOURS", async () => {
+    await old(
+      164,
+      ONE_OFF,
+      2 * 3600 * 1000,
+      billingRequestEnv({ BILLING_REQUESTS_MAX_AGE_HOURS: "1" })
+    );
+    expect(await sub(164)).toMatchObject({ status: "failed", lastErrorCode: "request_expired" });
+    await old(
+      165,
+      ONE_OFF,
+      2 * 3600 * 1000,
+      billingRequestEnv({ BILLING_REQUESTS_MAX_AGE_HOURS: "3" })
+    );
+    expect((await sub(165)).status).toBe("completed");
+  });
+
+  it("does not expire a request Stripe was already called for", async () => {
+    stripe.fail("invoiceItems.create", apiError(503));
+    await submit(166, ONE_OFF);
+    await db
+      .update(billingRequestSubmissions)
+      .set({ submittedAt: new Date(Date.now() - 30 * DAY) })
+      .where(eq(billingRequestSubmissions.submissionId, 166));
+    await makeDue(166);
+    await cycle();
+    expect(await sub(166)).toMatchObject({ status: "completed", outcome: "sent" });
+    expect(stripe.callsTo("invoices.create")).toHaveLength(1);
+  });
+});
+
+describe("client codes", () => {
+  it("match without regard to case or surrounding spaces on either side", async () => {
+    await db.insert(billingCustomers).values({
+      clientCode: " cp-006 ",
+      company: "Lower Case Co",
+      email: "ap@lower.example",
+      stripeCustomerId: "cus_lower",
+      source: "created",
+    });
+    await submit(171, { ...ONE_OFF, client_code: "  CP-006  ", company: "Lower Case Co" });
+    expect(await sub(171)).toMatchObject({ status: "completed", clientCode: " cp-006 " });
+    expect(stripe.callsTo("invoices.create")[0].params?.customer).toBe("cus_lower");
+  });
+
+  it("refuses a code that two clients differ in only by case, instead of guessing", async () => {
+    await db.insert(billingCustomers).values({
+      clientCode: "cp-004",
+      company: "Emmut Properties Corp.",
+      email: "other@emmut.example",
+      stripeCustomerId: "cus_dupe",
+      source: "created",
+    });
+    await submit(172, ONE_OFF);
+    expect(await sub(172)).toMatchObject({
+      status: "failed",
+      lastErrorCode: "ambiguous_client_code",
+    });
+    expect(stripe.calls).toHaveLength(0);
   });
 });

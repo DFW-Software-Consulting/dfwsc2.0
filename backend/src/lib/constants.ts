@@ -107,9 +107,9 @@ export const BILLING_REQUESTS_MAX_PER_CYCLE = 20;
 export const BILLING_REQUESTS_MAX_DISCOVERY_PAGES = 20;
 export const BILLING_REQUESTS_MIN_WEBHOOK_SECRET_LENGTH = 32;
 export const BILLING_REQUESTS_WEBHOOK_RATE_LIMIT_MAX = 60;
-// Stripe keeps an idempotency key for 24 hours. Past this age (a margin below that) a retry looks
-// for the objects by metadata before creating anything again.
-export const BILLING_REQUESTS_KEY_WINDOW_MS = 20 * 60 * 60 * 1000;
+// A submission older than this (by its Forms timestamp) is not billed if Stripe was never called
+// for it; one that was is resumed whatever its age.
+export const BILLING_REQUESTS_DEFAULT_MAX_AGE_HOURS = 72;
 // Per invoice, or per payment of a recurring plan: $25,000.
 export const BILLING_DEFAULT_MAX_AMOUNT_CENTS = 2_500_000;
 export const BILLING_DEFAULT_DAYS_UNTIL_DUE = 7;

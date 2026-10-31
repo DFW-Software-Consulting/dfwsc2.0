@@ -411,6 +411,19 @@ describe("renderBillingRequest", () => {
     expect(billingRequestStatus(baseRow({ status: "completed", outcome: "scheduled" }))).toBe(
       "Scheduled"
     );
+    expect(
+      billingRequestStatus(baseRow({ status: "failed", lastErrorCode: "request_expired" }))
+    ).toBe("Expired");
+    const finalized = { invoiceFinalizedAt: new Date(), stripeInvoiceId: "in_1" };
+    expect(billingRequestStatus(baseRow({ status: "failed", ...finalized }))).toBe(
+      "Finalized, not sent"
+    );
+    // Still being retried: not final yet.
+    expect(billingRequestStatus(baseRow({ status: "pending", ...finalized }))).toBe("Processing");
+    // Sent but the table write is what failed: not the "not sent" state.
+    expect(
+      billingRequestStatus(baseRow({ status: "failed", ...finalized, invoiceSentAt: new Date() }))
+    ).toBe("Failed");
   });
 
   it("renders a sent invoice with its dashboard link and no PII", () => {

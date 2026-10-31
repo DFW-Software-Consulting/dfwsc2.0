@@ -139,6 +139,26 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "folder_share_id" },
             { column_name: "lead_status" },
             { column_name: "lead_row_id" },
+            // billing_request_submissions columns (others are listed above)
+            ...[
+              "requested_by",
+              "submitted_at",
+              "kind",
+              "amount_cents",
+              "plan_interval",
+              "plan_payments",
+              "plan_start_date",
+              "stripe_started_at",
+              "stripe_product_id",
+              "stripe_invoice_id",
+              "stripe_invoice_item_id",
+              "stripe_schedule_id",
+              "invoice_finalized_at",
+              "invoice_sent_at",
+              "outcome",
+              "nc_row_id",
+              "nc_row_hash",
+            ].map((column_name) => ({ column_name })),
           ],
         };
       }
@@ -147,7 +167,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(14);
+    expect(mockDb.execute).toHaveBeenCalledTimes(16);
   });
 
   it("throws when a table is missing required columns", async () => {
