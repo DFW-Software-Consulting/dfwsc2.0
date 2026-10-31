@@ -219,10 +219,19 @@ describe("sales lead automation: processing", () => {
 
     const fileId = fake.folders.get("DFWSC Sales/Leads/Zephyrine Widgets LLC");
     expect(fileId).toBeDefined();
-    expect(cell("Notes / Files")).toBe(`Lead folder (https://cloud.test/index.php/f/${fileId})`);
-    expect(cell("Contact Card")).toBe(
-      "Contact card (https://cloud.test/index.php/apps/contacts/direct/contact/dfwsc-lead-12-5~dfwsc-sales)"
+    // Sent as "Title (url)"; stored by Tables as an escaped JSON string.
+    expect(fake.rowUpdates[0].body).toContain(
+      `Lead folder (https://cloud.test/index.php/f/${fileId})`
     );
+    expect(cell("Notes / Files")).toBe(
+      `{"title":"Lead folder","value":"https:\\/\\/cloud.test\\/index.php\\/f\\/${fileId}","providerId":"url"}`
+    );
+    expect(JSON.parse(cell("Contact Card") as string)).toEqual({
+      title: "Contact card",
+      value:
+        "https://cloud.test/index.php/apps/contacts/direct/contact/dfwsc-lead-12-5~dfwsc-sales",
+      providerId: "url",
+    });
 
     const done = await submissionRow(5);
     expect(done.linksBackfilledAt).toBeInstanceOf(Date);
@@ -380,9 +389,9 @@ describe("sales lead automation: partial failure", () => {
     expect(await cycle()).toMatchObject({ completed: 1 });
     expect(fake.rowUpdates).toHaveLength(2);
     expect(fake.rowCreates).toHaveLength(1);
-    expect(fake.rowCell(fake.rows[0].id, COLUMN_IDS["Notes / Files"])).toContain(
-      "https://cloud.test/index.php/f/"
-    );
+    expect(
+      JSON.parse(fake.rowCell(fake.rows[0].id, COLUMN_IDS["Notes / Files"]) as string).value
+    ).toContain("https://cloud.test/index.php/f/");
     const done = await submissionRow(5);
     expect(done.status).toBe("completed");
     expect(done.linksBackfilledAt).toBeInstanceOf(Date);

@@ -30,6 +30,7 @@ import {
   folderNameCandidate,
   hasPerson,
   leadRef,
+  linkCellUrl,
   linkValue,
   type QuestionMap,
   resolveColumns,
@@ -401,7 +402,8 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
     await api.updateRow(rowId, data);
     const stored = await api.getRowCells(rowId);
     for (const [columnId, , url] of links) {
-      if (!String(stored.get(columnId) ?? "").includes(url)) throw new LinksNotPersistedError();
+      const storedUrl = linkCellUrl(stored.get(columnId));
+      if (storedUrl === null || !storedUrl.includes(url)) throw new LinksNotPersistedError();
     }
   }
 

@@ -8,6 +8,7 @@ import {
   hasPerson,
   LEAD_QUESTION_TITLES,
   leadRef,
+  linkCellUrl,
   linkValue,
   parseDate,
   parseEstimatedValue,
@@ -183,6 +184,35 @@ describe("refs and links", () => {
     expect(leadRef(12, 5)).toBe("12:5");
     expect(contactUid(12, 5)).toBe("dfwsc-lead-12-5");
     expect(linkValue("Lead folder", "https://c.test/f/1")).toBe("Lead folder (https://c.test/f/1)");
+  });
+});
+
+describe("linkCellUrl", () => {
+  it("reads the URL from the JSON string Tables stores, escaped slashes included", () => {
+    expect(
+      linkCellUrl(
+        '{"title":"Lead folder","value":"https:\\/\\/cloud.dfwsc.com\\/index.php\\/f\\/4624","providerId":"url"}'
+      )
+    ).toBe("https://cloud.dfwsc.com/index.php/f/4624");
+  });
+
+  it("keeps %-encoding and base64 padding as written", () => {
+    const url = "https://c.test/apps/contacts/direct/contact/a%7Eb%3D~ZGZ3c2M=";
+    expect(linkCellUrl(JSON.stringify({ title: "Contact card", value: url }))).toBe(url);
+  });
+
+  it.each([
+    [undefined, null],
+    [null, null],
+    ["", null],
+    [42, null],
+    ["Lead folder (https://c.test/f/1)", "Lead folder (https://c.test/f/1)"],
+    ["https://c.test/f/1", "https://c.test/f/1"],
+    ['{"title":"no value"}', '{"title":"no value"}'],
+    ['{"value":7}', '{"value":7}'],
+    ['"https://c.test/f/1"', '"https://c.test/f/1"'],
+  ])("linkCellUrl(%j)", (input, expected) => {
+    expect(linkCellUrl(input)).toBe(expected);
   });
 });
 

@@ -246,6 +246,28 @@ export function linkValue(title: string, url: string): string {
   return `${title} (${url})`;
 }
 
+/**
+ * URL held by a stored Tables link cell, or null when the cell is empty. Tables
+ * stores "Title (url)" as a JSON string {title, value, providerId} (slashes
+ * escaped); any other string is returned as is.
+ */
+export function linkCellUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as { value?: unknown }).value === "string"
+    ) {
+      return (parsed as { value: string }).value;
+    }
+  } catch {
+    // Not JSON: fall back to the raw string.
+  }
+  return value;
+}
+
 // ── vCard ────────────────────────────────────────────────────────────────────
 
 export function contactUid(formId: number, submissionId: number): string {
