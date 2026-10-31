@@ -6,6 +6,7 @@ vi.mock("../../lib/mailer", () => ({
 
 vi.mock("../../lib/website-lead", () => ({
   isWebsiteLeadEnabled: vi.fn().mockReturnValue(false),
+  reserveWebsiteLeadSlot: vi.fn().mockReturnValue(true),
   submitWebsiteLead: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -13,7 +14,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../../app";
 import { sendMail } from "../../lib/mailer";
 import { hitBuckets } from "../../lib/rate-limit";
-import { isWebsiteLeadEnabled, submitWebsiteLead } from "../../lib/website-lead";
+import {
+  isWebsiteLeadEnabled,
+  reserveWebsiteLeadSlot,
+  submitWebsiteLead,
+} from "../../lib/website-lead";
 import { ensureBaseEnv } from "../helpers/env";
 
 describe("POST /api/v1/contact", () => {
@@ -33,6 +38,7 @@ describe("POST /api/v1/contact", () => {
     vi.clearAllMocks();
     (sendMail as any).mockResolvedValue(undefined);
     (isWebsiteLeadEnabled as any).mockReturnValue(false);
+    (reserveWebsiteLeadSlot as any).mockReturnValue(true);
     (submitWebsiteLead as any).mockResolvedValue(undefined);
     app = await buildServer();
   });
@@ -62,7 +68,7 @@ describe("POST /api/v1/contact", () => {
     expect(call.text).toContain("Hello, I would like a quote.");
   });
 
-  it("returns 200 and does not send email when the honeypot field is filled", async () => {
+  it("returns 201 and does not send email when the honeypot field is filled", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/contact",
@@ -70,12 +76,12 @@ describe("POST /api/v1/contact", () => {
       headers: { "content-type": "application/json" },
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(201);
     expect(response.json()).toEqual({ ok: true });
     expect(sendMail).not.toHaveBeenCalled();
   });
 
-  it("returns 200 and drops the submission even when other fields are invalid, as long as the honeypot is filled", async () => {
+  it("returns 201 and drops the submission even when other fields are invalid, as long as the honeypot is filled", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/contact",
@@ -83,7 +89,7 @@ describe("POST /api/v1/contact", () => {
       headers: { "content-type": "application/json" },
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(201);
     expect(response.json()).toEqual({ ok: true });
     expect(sendMail).not.toHaveBeenCalled();
   });
@@ -196,6 +202,39 @@ describe("POST /api/v1/contact", () => {
       expect(response.json()).toMatchObject({ code: "EMAIL_DELIVERY_FAILED" });
     });
 
+    it("keeps the lead channel alive when no inbox is configured", async () => {
+      delete process.env.CONTACT_INBOX;
+      delete process.env.SMTP_FROM;
+      const response = await post();
+      expect(response.statusCode).toBe(201);
+      expect(sendMail).not.toHaveBeenCalled();
+      expect(submitWebsiteLead).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns 502 when no inbox is configured and the lead channel is off", async () => {
+      delete process.env.CONTACT_INBOX;
+      delete process.env.SMTP_FROM;
+      (isWebsiteLeadEnabled as any).mockReturnValue(false);
+      const response = await post();
+      expect(response.statusCode).toBe(502);
+      expect(response.json()).toMatchObject({ code: "EMAIL_DELIVERY_FAILED" });
+    });
+
+    it("skips the lead but still emails when the global lead cap is reached", async () => {
+      (reserveWebsiteLeadSlot as any).mockReturnValue(false);
+      const response = await post();
+      expect(response.statusCode).toBe(201);
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      expect(submitWebsiteLead).not.toHaveBeenCalled();
+    });
+
+    it("returns 502 when the lead cap is reached and the email fails", async () => {
+      (reserveWebsiteLeadSlot as any).mockReturnValue(false);
+      (sendMail as any).mockRejectedValueOnce(new Error("smtp down"));
+      const response = await post();
+      expect(response.statusCode).toBe(502);
+    });
+
     it("runs neither channel for a honeypot hit", async () => {
       const response = await app.inject({
         method: "POST",
@@ -203,7 +242,7 @@ describe("POST /api/v1/contact", () => {
         payload: { ...validPayload(), _hp: "bot" },
         headers: { "content-type": "application/json" },
       });
-      expect(response.statusCode).toBe(200);
+      expect(response.statusCode).toBe(201);
       expect(sendMail).not.toHaveBeenCalled();
       expect(submitWebsiteLead).not.toHaveBeenCalled();
     });

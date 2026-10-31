@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WEBSITE_LEAD_CAP_MAX, WEBSITE_LEAD_CAP_WINDOW_MS } from "../../lib/constants";
 import { resetNextcloudBreakerForTests } from "../../lib/nextcloud";
 import {
   buildWebsiteLeadAnswers,
   type FormQuestion,
   SalesLeadConfigError,
 } from "../../lib/sales-lead-mapping";
-import { isWebsiteLeadEnabled, submitWebsiteLead } from "../../lib/website-lead";
+import {
+  isWebsiteLeadEnabled,
+  reserveWebsiteLeadSlot,
+  resetWebsiteLeadCapForTests,
+  submitWebsiteLead,
+} from "../../lib/website-lead";
 import { QUESTION_IDS, salesLeadEnv } from "../helpers/fake-nextcloud";
 
 const contact = {
@@ -139,5 +145,33 @@ describe("website lead submission", () => {
       submitWebsiteLead(contact, salesLeadEnv({ SALES_AUTOMATION_ENABLED: "false" }))
     ).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("reserveWebsiteLeadSlot", () => {
+  beforeEach(() => {
+    resetWebsiteLeadCapForTests();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    resetWebsiteLeadCapForTests();
+  });
+
+  it("allows the cap, refuses the next, and resumes once the window rolls over", () => {
+    for (let i = 0; i < WEBSITE_LEAD_CAP_MAX; i++) expect(reserveWebsiteLeadSlot()).toBe(true);
+    expect(reserveWebsiteLeadSlot()).toBe(false);
+    vi.advanceTimersByTime(WEBSITE_LEAD_CAP_WINDOW_MS - 1);
+    expect(reserveWebsiteLeadSlot()).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(reserveWebsiteLeadSlot()).toBe(true);
+  });
+
+  it("does not count refused attempts against the window", () => {
+    for (let i = 0; i < WEBSITE_LEAD_CAP_MAX; i++) reserveWebsiteLeadSlot();
+    vi.advanceTimersByTime(WEBSITE_LEAD_CAP_WINDOW_MS / 2);
+    for (let i = 0; i < 5; i++) expect(reserveWebsiteLeadSlot()).toBe(false);
+    vi.advanceTimersByTime(WEBSITE_LEAD_CAP_WINDOW_MS / 2);
+    expect(reserveWebsiteLeadSlot()).toBe(true);
   });
 });

@@ -6,7 +6,11 @@ import { errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { parseBody } from "../lib/validation";
-import { isWebsiteLeadEnabled, submitWebsiteLead } from "../lib/website-lead";
+import {
+  isWebsiteLeadEnabled,
+  reserveWebsiteLeadSlot,
+  submitWebsiteLead,
+} from "../lib/website-lead";
 
 const contactBodySchema = z.object({
   name: z
@@ -37,8 +41,8 @@ export default async function contactRoutes(fastify: FastifyInstance) {
   // used by other public/token-based routes (STRICT_RATE_LIMIT_MAX per IP).
   // `_hp` is a honeypot field: real users never see or fill it (hidden via
   // CSS on the frontend), so a non-empty value is treated as a bot and
-  // silently dropped — no email is sent, and the response is indistinguishable
-  // from a real success, to avoid tipping off the bot.
+  // silently dropped — no email is sent, and the response (201 {ok:true}) is
+  // identical to a real success, to avoid tipping off the bot.
   fastify.post(
     "/contact",
     {
@@ -48,14 +52,13 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       const rawBody = (request.body ?? {}) as Record<string, unknown>;
       const honeypot = typeof rawBody._hp === "string" ? rawBody._hp : undefined;
       if (honeypot && honeypot.length > 0) {
-        return reply.code(200).send({ ok: true });
+        return reply.code(201).send({ ok: true });
       }
 
       const body = parseBody(contactBodySchema, request.body, reply);
       if (!body) return;
       const { name, email, message, company } = body;
 
-      const inbox = resolveContactInboxEmail();
       const submittedAt = new Date().toISOString();
 
       const mailText = [
@@ -75,15 +78,24 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       const channels: { name: "email" | "lead"; run: Promise<unknown> }[] = [
         {
           name: "email",
-          run: sendMail({
-            to: inbox,
-            subject: `New contact form submission from ${name}`,
-            text: mailText,
-          }),
+          // Resolved inside the channel: a missing or invalid inbox fails email only.
+          run: (async () =>
+            sendMail({
+              to: resolveContactInboxEmail(),
+              subject: `New contact form submission from ${name}`,
+              text: mailText,
+            }))(),
         },
       ];
       if (isWebsiteLeadEnabled()) {
-        channels.push({ name: "lead", run: submitWebsiteLead({ company, name, email, message }) });
+        if (reserveWebsiteLeadSlot()) {
+          channels.push({
+            name: "lead",
+            run: submitWebsiteLead({ company, name, email, message }),
+          });
+        } else {
+          request.log.warn({ event: "contact.lead_cap_reached" }, "contact.lead_cap_reached");
+        }
       }
       const results = await Promise.allSettled(channels.map((c) => c.run));
       let delivered = false;
