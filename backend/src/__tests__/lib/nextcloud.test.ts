@@ -72,7 +72,7 @@ describe("nextcloudRequest", () => {
       label: "webdav.mkcol",
       headers: { depth: "0" },
     });
-    expect(res).toEqual({ status: 201, body: "hello" });
+    expect(res).toEqual({ status: 201, body: "hello", etag: null });
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://cloud.test/remote.php/dav/files/svc/x");
     expect(init.method).toBe("MKCOL");

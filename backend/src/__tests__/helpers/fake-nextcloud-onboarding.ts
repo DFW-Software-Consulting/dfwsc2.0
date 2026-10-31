@@ -225,6 +225,29 @@ export class FakeOnboardingNextcloud {
   private nextFileId = 900;
   private nextPageId = 5000;
   private nextEtag = 1;
+  /** Runs once, right before a page-file PUT is evaluated (to simulate a race). */
+  beforePut: ((rel: string) => void) | null = null;
+  /** Content of a newly created page file; null creates no file (GET answers 404). */
+  seedPageFile: string | null = "";
+  /** How GETs of page files present their ETag. */
+  etagMode: "strong" | "weak" | "none" = "strong";
+  private fileVersions = new Map<string, number>();
+
+  private etagHeaders(rel: string): Record<string, string> {
+    if (this.etagMode === "none") return {};
+    const tag = `"f${this.fileVersion(rel)}"`;
+    return { etag: this.etagMode === "weak" ? `W/${tag}` : tag };
+  }
+
+  private fileVersion(rel: string): number {
+    return this.fileVersions.get(rel) ?? 0;
+  }
+
+  /** A person edits a page file: new content and a new ETag. */
+  editFile(rel: string, content: string) {
+    this.files.set(rel, content);
+    this.fileVersions.set(rel, this.fileVersion(rel) + 1);
+  }
 
   addSubmission(id: number, answers: IntakeAnswers, userId = "messyginger0804") {
     this.submissions.set(id, { userId, answers });
@@ -472,8 +495,24 @@ export class FakeOnboardingNextcloud {
         this.folders.set(rel, this.nextFileId++);
         return new Response("", { status: 201 });
       }
+      if (method === "GET") {
+        const body = this.files.get(rel);
+        if (body === undefined) return new Response("", { status: 404 });
+        return new Response(body, {
+          status: 200,
+          headers: this.etagHeaders(rel),
+        });
+      }
       if (method === "PUT") {
+        const hook = this.beforePut;
+        this.beforePut = null;
+        hook?.(rel);
+        const ifMatch = req.headers["if-match"];
+        if (ifMatch && ifMatch !== `"f${this.fileVersion(rel)}"`) {
+          return new Response("", { status: 412 });
+        }
         this.files.set(rel, req.body);
+        this.fileVersions.set(rel, this.fileVersion(rel) + 1);
         return new Response(null, { status: 204 });
       }
     }
@@ -504,7 +543,12 @@ export class FakeOnboardingNextcloud {
         filePath: parent.filePath,
       };
       this.pages.push(created);
-      this.files.set(`${ONB_COLLECTIVE_PATH}/${created.filePath}/${created.fileName}`, "");
+      if (this.seedPageFile !== null) {
+        this.files.set(
+          `${ONB_COLLECTIVE_PATH}/${created.filePath}/${created.fileName}`,
+          this.seedPageFile
+        );
+      }
       return this.ocs({ page: this.pageJson(created) });
     }
 

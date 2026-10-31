@@ -79,6 +79,8 @@ export interface NextcloudRequest {
 export interface NextcloudResponse {
   status: number;
   body: string;
+  /** The ETag response header, when the server sent one. */
+  etag: string | null;
 }
 
 // A 4xx other than 401 means Nextcloud answered and the request was the problem
@@ -123,7 +125,7 @@ async function send(
   if (!res.ok && !request.okStatuses?.includes(res.status)) {
     throw new NextcloudHttpError(res.status, request.label);
   }
-  return { status: res.status, body };
+  return { status: res.status, body, etag: res.headers.get("etag") };
 }
 
 const breaker = new CircuitBreaker(send, {

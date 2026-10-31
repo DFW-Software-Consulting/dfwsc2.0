@@ -23,7 +23,7 @@ import {
   type ProjectColumnMap,
   parseLeadReference,
   parseProjectNumber,
-  projectPageContent,
+  projectBriefContent,
   projectPageTitle,
   resolveIntakeQuestions,
   resolvePipelineColumns,
@@ -60,7 +60,7 @@ import {
   NextcloudHttpError,
   NextcloudRequestError,
 } from "./nextcloud";
-import { linkCellUrl, linkValue } from "./sales-lead-mapping";
+import { linkCellUrl, linkValue, parseDate } from "./sales-lead-mapping";
 import { isBadResponseError, SUBMISSION_PAGE_SIZE } from "./sales-lead-nextcloud";
 
 // "DFWSC — Convert Won Lead to Client" onboarding. For each submission of one
@@ -548,6 +548,12 @@ async function projectRowStep(
   await saveUnderClaim(row, { tableRowId: rowId });
 }
 
+/** An untouched page: empty, or only the page's own title as a heading. */
+function isPageSeed(body: string, title: string): boolean {
+  const text = body.trim();
+  return text === "" || text === `# ${title.trim()}`;
+}
+
 async function pageStep(row: SubmissionRow, intake: Intake, ctx: ProcessingContext) {
   const { api } = ctx;
   const ids = { formId: ctx.formId, submissionId: row.submissionId };
@@ -578,16 +584,45 @@ async function pageStep(row: SubmissionRow, intake: Intake, ctx: ProcessingConte
       const segments = [page.collectivePath, page.filePath, page.fileName]
         .flatMap((p) => p.split("/"))
         .filter(Boolean);
-      await api.putFile(
-        segments,
-        projectPageContent({
-          title,
-          rowUrl: api.rowLink(api.targets.projectsTableId, row.tableRowId as number),
-          folderUrl: api.folderLink(row.folderFileId as number),
-          intakeTitle: `Intake submission #${row.submissionId}`,
-          intakeUrl: api.intakeResultsLink(ctx.formHash),
-        })
-      );
+      // Never overwrite a human edit: write only into a seed (empty, or just the
+      // page's own title heading) and only while it still has the ETag we read.
+      const current = await api.getFile(segments);
+      if (current === null) {
+        ctx.logger.warn(
+          { ...ids, pageId: page.id },
+          "Client project page file not found; brief skipped."
+        );
+      } else if (!isPageSeed(current.body, page.title)) {
+        ctx.logger.info({ ...ids, pageId: page.id }, "Client project page already has content.");
+      } else {
+        if (current.etag === null) {
+          ctx.logger.warn(
+            { ...ids, pageId: page.id },
+            "Client project page has no ETag; writing unguarded."
+          );
+        }
+        const written = await api.putFile(
+          segments,
+          projectBriefContent({
+            projectCode: code,
+            summary: intake.summary,
+            targetDate: intake.targetDate ? parseDate(intake.targetDate) : undefined,
+            rowUrl: api.rowLink(api.targets.projectsTableId, row.tableRowId as number),
+            folderUrl: api.folderLink(row.folderFileId as number),
+            intakeTitle: `Intake submission #${row.submissionId}`,
+            intakeUrl: api.intakeResultsLink(ctx.formHash),
+          }),
+          current.etag
+        );
+        if (written) {
+          ctx.logger.info({ ...ids, pageId: page.id }, "Client project brief written.");
+        } else {
+          ctx.logger.warn(
+            { ...ids, pageId: page.id },
+            "Client project page changed meanwhile; brief skipped."
+          );
+        }
+      }
     } else {
       // The collective is not mounted in the service account's files: the page stays
       // empty. Its row still links to it, so this is not worth failing the onboarding.

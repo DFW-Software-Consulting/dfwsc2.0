@@ -327,6 +327,151 @@ describe("client onboarding: steps", () => {
     expect(fake.count("PUT", "/files/")).toBe(0);
     expect(log.lines.some((l) => l.text.includes("page content skipped"))).toBe(true);
   });
+
+  describe("project brief", () => {
+    const PAGE_FILE = `${ONB_COLLECTIVE_PATH}/Projects/CP-003 — Warehouse Portal.md`;
+    const pageWrites = () =>
+      fake.requests.filter((r) => r.method === "PUT" && r.path.endsWith(".md"));
+
+    it("writes the Project Brief with the submitted values", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      await cycle();
+      const content = fake.files.get(PAGE_FILE) ?? "";
+      expect(content.startsWith("# Project Brief\n")).toBe(true);
+      expect(content).toContain("| Project code | CP-003 |");
+      expect(content).toContain("| Purpose | Build the warehouse portal MVP |");
+      expect(content).toContain("| Target date | 2027-01-29 |");
+      expect(content).toContain("| Owner | |");
+      expect(content).toContain("| Intake results | [Intake submission \\#5]");
+      expect(content).not.toContain("ophelia");
+      expect(pageWrites()[0].headers["if-match"]).toBeTruthy();
+    });
+
+    it("does not overwrite an existing body", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.fail({
+        match: (r) => r.method === "POST" && r.path.includes("/collectives/"),
+        timeout: true,
+        afterApply: true,
+      });
+      await cycle();
+      fake.editFile(PAGE_FILE, "Human notes");
+      await makeDue(5);
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(fake.files.get(PAGE_FILE)).toBe("Human notes");
+      expect(pageWrites()).toHaveLength(0);
+      expect((await sub(5)).pageContentAt).toBeInstanceOf(Date);
+    });
+
+    const warned = (text: string) =>
+      log.lines.some((l) => l.level === "warn" && l.text.includes(text));
+
+    it("treats a real If-Match race (file changed between GET and PUT) as skip and done", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.beforePut = (rel) => fake.editFile(rel, "Edited just now");
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(fake.files.get(PAGE_FILE)).toBe("Edited just now");
+      expect((await sub(5)).pageContentAt).toBeInstanceOf(Date);
+      expect(warned("brief skipped")).toBe(true);
+    });
+
+    it("writes into a whitespace-only body", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.seedPageFile = "  \n\n ";
+      await cycle();
+      expect(fake.files.get(PAGE_FILE)).toContain("# Project Brief");
+    });
+
+    it("writes over a title-only seed", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.seedPageFile = "# CP-003 — Warehouse Portal\n";
+      await cycle();
+      expect(fake.files.get(PAGE_FILE)).toContain("# Project Brief");
+    });
+
+    it("skips a human-edited body", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.seedPageFile = "# CP-003 — Warehouse Portal\n\nOur notes";
+      await cycle();
+      expect(fake.files.get(PAGE_FILE)).toBe("# CP-003 — Warehouse Portal\n\nOur notes");
+      expect(pageWrites()).toHaveLength(0);
+    });
+
+    it("skips with a warning when the page file is missing (404)", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.seedPageFile = null;
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(pageWrites()).toHaveLength(0);
+      expect(warned("file not found")).toBe(true);
+      expect((await sub(5)).pageContentAt).toBeInstanceOf(Date);
+    });
+
+    it("strips W/ from a weak ETag before If-Match and the write succeeds", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.etagMode = "weak";
+      await cycle();
+      expect(pageWrites()[0].headers["if-match"]).toBe('"f0"');
+      expect(fake.files.get(PAGE_FILE)).toContain("# Project Brief");
+    });
+
+    it("writes without If-Match and warns when there is no ETag", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.etagMode = "none";
+      await cycle();
+      expect(pageWrites()[0].headers["if-match"]).toBeUndefined();
+      expect(fake.files.get(PAGE_FILE)).toContain("# Project Brief");
+      expect(warned("no ETag")).toBe(true);
+    });
+
+    it("resumes after a failed write without redoing earlier steps", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.fail({ match: (r) => r.method === "PUT" && r.path.endsWith(".md"), status: 503 });
+      expect(await cycle()).toMatchObject({ retried: 1 });
+      const failed = await sub(5);
+      expect(failed).toMatchObject({ lastErrorCode: "webdav.put_page:503", pageContentAt: null });
+      expect(failed.pageId).not.toBeNull();
+      await makeDue(5);
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(fake.files.get(PAGE_FILE)).toContain("# Project Brief");
+      expect(fake.count("POST", "/collectives/")).toBe(1);
+    });
+
+    it("re-checks after a lost write response and does not write twice", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.fail({
+        match: (r) => r.method === "PUT" && r.path.endsWith(".md"),
+        timeout: true,
+        afterApply: true,
+      });
+      expect(await cycle()).toMatchObject({ retried: 1 });
+      await makeDue(5);
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(pageWrites()).toHaveLength(1);
+      expect(fake.files.get(PAGE_FILE)).toContain("# Project Brief");
+    });
+
+    it("a second cycle makes no further page requests", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      await cycle();
+      const before = fake.files.get(PAGE_FILE);
+      const requests = fake.requests.length;
+      await cycle();
+      expect(fake.files.get(PAGE_FILE)).toBe(before);
+      expect(fake.requests.slice(requests).filter((r) => r.path.endsWith(".md"))).toHaveLength(0);
+    });
+  });
 });
 
 describe("client onboarding: Sales Pipeline lead", () => {
@@ -754,6 +899,9 @@ describe("client onboarding: CP code allocation", () => {
       fake.addSubmission(id, {
         ...FULL,
         company: `Co ${id}`,
+        // Own contact per submission: a shared email makes overlapping cycles race on
+        // one address-book card (carddav.contact_changed), leaving one for the next cycle.
+        email: `contact${id}@example.test`,
         project_name: `P${id}`,
         lead_link: undefined,
       });
