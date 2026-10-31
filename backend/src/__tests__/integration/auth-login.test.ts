@@ -9,7 +9,7 @@ import {
   openNextcloudBreakerForTests,
   resetNextcloudBreakerForTests,
 } from "../../lib/nextcloud";
-import { hitBuckets } from "../../lib/rate-limit";
+import { failureSets, hitBuckets } from "../../lib/rate-limit";
 import authRoutes from "../../routes/auth";
 import { TEST_JWT_SECRET } from "../helpers/constants";
 import { ensureBaseEnv } from "../helpers/env";
@@ -57,6 +57,7 @@ describe("POST /auth/login (Nextcloud)", () => {
     ensureBaseEnv();
     setEnv({ ...loginEnv(), ADMIN_NEXTCLOUD_GROUPS: undefined });
     hitBuckets.clear();
+    failureSets.clear();
     resetNextcloudBreakerForTests();
     fake = new FakeLoginNextcloud();
     fake.addUser("jane", PASSWORD, ["staff", "dfwsc-admins"], ["jane@example.com"]);
@@ -74,6 +75,7 @@ describe("POST /auth/login (Nextcloud)", () => {
       else process.env[key] = value;
     }
     hitBuckets.clear();
+    failureSets.clear();
   });
 
   describe("success", () => {
@@ -324,29 +326,42 @@ describe("POST /auth/login (Nextcloud)", () => {
       expect(otherIp.statusCode).toBe(401);
     });
 
-    it("limits per username across IPs, ignoring case and surrounding spaces", async () => {
+    it("limits failed authentication per username without blocking a valid login", async () => {
       const spellings = ["Jane", "jane", " JANE ", "jane"];
       for (let i = 0; i < AUTH_USER_RATE_LIMIT_MAX; i++) {
         const res = await login({ username: spellings[i % spellings.length], password: "x" });
         expect(res.statusCode).toBe(401);
       }
 
-      const blocked = await login({ username: "jane", password: PASSWORD });
+      expect((await login({ username: "jane", password: PASSWORD })).statusCode).toBe(200);
+
+      const blocked = await login({ username: "jane", password: "x" });
       expect(blocked.statusCode).toBe(429);
       expect(blocked.json()).toEqual({ error: "Too Many Requests", code: "RATE_LIMITED" });
-      // The refused request never reached Nextcloud.
-      expect(fake.userChecks).toHaveLength(AUTH_USER_RATE_LIMIT_MAX);
+      expect(fake.userChecks).toHaveLength(AUTH_USER_RATE_LIMIT_MAX + 2);
 
       expect((await login({ username: "mgr", password: PASSWORD })).statusCode).toBe(200);
+    });
+
+    it("does not spend the per-username failure budget on successful logins", async () => {
+      for (let i = 0; i < AUTH_USER_RATE_LIMIT_MAX + 1; i++) {
+        expect((await login({ username: "jane", password: PASSWORD })).statusCode).toBe(200);
+      }
+
+      expect((await login({ username: "jane", password: "x" })).statusCode).toBe(401);
     });
 
     it("keeps the per-username bucket under its own key, with a hashed username", async () => {
       await login({ username: "jane", password: "x" });
 
-      const keys = [...hitBuckets.keys()];
-      expect(keys.some((k) => k.startsWith("ratelimit:POST:/api/v1/auth/login:"))).toBe(true);
-      expect(keys.some((k) => k.startsWith("ratelimit:POST:/auth/login:username:"))).toBe(true);
-      expect(keys.some((k) => k.includes("jane"))).toBe(false);
+      expect(
+        [...hitBuckets.keys()].some((k) => k.startsWith("ratelimit:POST:/api/v1/auth/login:"))
+      ).toBe(true);
+      const failureKeys = [...failureSets.keys()];
+      expect(failureKeys.some((k) => k.startsWith("ratelimit:POST:/auth/login:username:"))).toBe(
+        true
+      );
+      expect(failureKeys.some((k) => k.includes("jane"))).toBe(false);
     });
   });
 

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { checkAdminLogin } from "../lib/admin-login";
@@ -9,7 +9,7 @@ import {
   AUTH_USER_RATE_LIMIT_MAX,
 } from "../lib/constants";
 import { errors } from "../lib/errors";
-import { rateLimit } from "../lib/rate-limit";
+import { failureRateLimit, rateLimit, sendRateLimited } from "../lib/rate-limit";
 import { parseBody } from "../lib/validation";
 
 interface LoginRequest {
@@ -36,22 +36,23 @@ function usernameBucket(request: FastifyRequest): string {
 }
 
 export default async function authRoutes(fastify: FastifyInstance) {
+  const usernameFailureLimit = failureRateLimit({
+    max: AUTH_USER_RATE_LIMIT_MAX,
+    windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
+    name: "POST:/auth/login:username",
+    keyGenerator: usernameBucket,
+  });
+
   // POST /auth/login - Admin login. Credentials are checked against Nextcloud and the account
   // must belong to one of ADMIN_NEXTCLOUD_GROUPS (see lib/admin-login.ts).
   fastify.post(
     "/auth/login",
     {
       preHandler: [
-        // Per client IP, and per username across all IPs. Nextcloud throttles failed logins by
-        // source IP, which for these checks is this API, so unthrottled guessing here would
-        // also slow the service account's automation calls.
+        // Per client IP before calling Nextcloud. Nextcloud sees this API as the source IP, so
+        // unthrottled guessing here would also slow the service account's automation calls.
+        // Failed authentication is limited per username in the handler below.
         rateLimit({ max: AUTH_RATE_LIMIT_MAX, windowMs: AUTH_RATE_LIMIT_WINDOW_MS }),
-        rateLimit({
-          max: AUTH_USER_RATE_LIMIT_MAX,
-          windowMs: AUTH_RATE_LIMIT_WINDOW_MS,
-          name: "POST:/auth/login:username",
-          keyGenerator: usernameBucket,
-        }),
       ],
     },
     async (request, reply) => {
@@ -71,6 +72,9 @@ export default async function authRoutes(fastify: FastifyInstance) {
           throw errors.forbidden("This Nextcloud account isn't authorized for the admin panel");
         }
         fastify.log.warn({ username }, "Failed login attempt");
+        const charge = await usernameFailureLimit.charge(request, randomUUID());
+        if (charge.blocked) return sendRateLimited(reply, charge.retryAfterMs);
+        charge.keep();
         throw errors.unauthorized("Invalid credentials");
       }
 
