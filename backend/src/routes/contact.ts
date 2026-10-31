@@ -6,6 +6,7 @@ import { errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { parseBody } from "../lib/validation";
+import { isWebsiteLeadEnabled, submitWebsiteLead } from "../lib/website-lead";
 
 const contactBodySchema = z.object({
   name: z
@@ -23,7 +24,11 @@ const contactBodySchema = z.object({
     .trim()
     .min(1, "message is required.")
     .max(2000, "message must not exceed 2000 characters."),
-  company: z.string().trim().max(100, "company must not exceed 100 characters.").optional(),
+  company: z
+    .string({ error: "company is required." })
+    .trim()
+    .min(1, "company is required.")
+    .max(100, "company must not exceed 100 characters."),
 });
 
 export default async function contactRoutes(fastify: FastifyInstance) {
@@ -58,21 +63,42 @@ export default async function contactRoutes(fastify: FastifyInstance) {
         "",
         `Name: ${name}`,
         `Email: ${email}`,
-        `Company: ${company ?? "(none)"}`,
+        `Company: ${company}`,
         `Submitted: ${submittedAt}`,
         "",
         "Message:",
         message,
       ].join("\n");
 
-      try {
-        await sendMail({
-          to: inbox,
-          subject: `New contact form submission from ${name}`,
-          text: mailText,
-        });
-      } catch (err) {
-        request.log.error({ err }, "Failed to send contact form email");
+      // Email and lead run in parallel; either one succeeding is enough, so a
+      // Nextcloud outage never loses a message that reached the inbox and vice versa.
+      const channels: { name: "email" | "lead"; run: Promise<unknown> }[] = [
+        {
+          name: "email",
+          run: sendMail({
+            to: inbox,
+            subject: `New contact form submission from ${name}`,
+            text: mailText,
+          }),
+        },
+      ];
+      if (isWebsiteLeadEnabled()) {
+        channels.push({ name: "lead", run: submitWebsiteLead({ company, name, email, message }) });
+      }
+      const results = await Promise.allSettled(channels.map((c) => c.run));
+      let delivered = false;
+      results.forEach((result, i) => {
+        if (result.status === "fulfilled") {
+          delivered = true;
+          return;
+        }
+        // Never log the message body or the submitter's details.
+        request.log.error(
+          { err: result.reason, channel: channels[i].name },
+          "Contact form channel failed"
+        );
+      });
+      if (!delivered) {
         throw errors.emailFailed("Failed to send your message. Please email us directly instead.");
       }
 

@@ -63,6 +63,9 @@ export class SalesLeadInvalidError extends Error {
 export interface FormQuestion {
   id: number;
   text: string;
+  /** Forms question type ("short", "long", "dropdown", ...); absent when not requested. */
+  type?: string;
+  options?: { id: number; text: string }[];
 }
 
 export interface FormAnswer {
@@ -95,6 +98,66 @@ export function resolveQuestions(questions: FormQuestion[]): QuestionMap {
   }
   if (missing.length) throw new SalesLeadConfigError("form_questions_missing", missing);
   return map;
+}
+
+// ── Website contact form → Forms submission ──────────────────────────────────
+
+export interface WebsiteContact {
+  company: string;
+  name: string;
+  email: string;
+  message: string;
+}
+
+/** Forms v3 submission body: question id → array of text values or option ids. */
+export type FormSubmissionAnswers = Record<string, (string | number)[]>;
+
+const CHOICE_TYPES = new Set(["dropdown", "multiple", "multiple_unique"]);
+const WEBSITE_SOURCE_TEXT = "Website";
+const SOURCE_NOTE_PREFIX = "Source: website contact form\n\n";
+
+/**
+ * Answers for the New Lead form from a website contact, resolved by question title
+ * (LEAD_QUESTION_TITLES). Only Company is required; any other missing question is
+ * simply left out. Source is a choice question in practice: the option matching
+ * /website/i is picked, and when there is none (or no Source question) the origin
+ * goes into the Notes instead so it is not lost.
+ */
+export function buildWebsiteLeadAnswers(
+  questions: FormQuestion[],
+  contact: WebsiteContact
+): FormSubmissionAnswers {
+  const byTitle = new Map(questions.map((q) => [q.text.trim(), q]));
+  const find = (field: LeadField) => byTitle.get(LEAD_QUESTION_TITLES[field]);
+
+  const companyQuestion = find("company");
+  if (!companyQuestion) {
+    throw new SalesLeadConfigError("form_questions_missing", [LEAD_QUESTION_TITLES.company]);
+  }
+  const answers: FormSubmissionAnswers = { [companyQuestion.id]: [contact.company] };
+  const setText = (field: LeadField, value: string) => {
+    const q = find(field);
+    if (q) answers[q.id] = [value];
+  };
+  setText("contactName", contact.name);
+  setText("email", contact.email);
+
+  let sourceSet = false;
+  const source = find("source");
+  if (source) {
+    if (source.type && CHOICE_TYPES.has(source.type)) {
+      const option = source.options?.find((o) => /website/i.test(o.text));
+      if (option) {
+        answers[source.id] = [option.id];
+        sourceSet = true;
+      }
+    } else {
+      answers[source.id] = [WEBSITE_SOURCE_TEXT];
+      sourceSet = true;
+    }
+  }
+  setText("notes", sourceSet ? contact.message : `${SOURCE_NOTE_PREFIX}${contact.message}`);
+  return answers;
 }
 
 export function extractLead(answers: FormAnswer[], questions: QuestionMap): Lead {

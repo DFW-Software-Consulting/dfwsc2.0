@@ -169,7 +169,7 @@ No auth required. Use this to check if the API is running.
 
 #### `POST /api/v1/contact`
 
-Public, unauthenticated lead-capture endpoint. Valid submissions are emailed to `CONTACT_INBOX` (or `SMTP_FROM` when `CONTACT_INBOX` is unset).
+Public, unauthenticated lead-capture endpoint. Valid submissions are emailed to `CONTACT_INBOX` (or `SMTP_FROM` when `CONTACT_INBOX` is unset) and, when sales automation is enabled and configured, also created as a lead in the Nextcloud sales pipeline. The two channels run in parallel; `201` is returned if at least one enabled channel succeeded.
 
 **Request:**
 ```json
@@ -181,14 +181,14 @@ Public, unauthenticated lead-capture endpoint. Valid submissions are emailed to 
 }
 ```
 
-`name` is limited to 100 characters, `email` to 320, optional `company` to 100, and `message` to 2000. The frontend also sends an internal `_hp` honeypot field; consumers should omit it.
+`name` is limited to 100 characters, `email` to 320, required `company` to 100 (non-blank), and `message` to 2000. The frontend also sends an internal `_hp` honeypot field; consumers should omit it.
 
 **Response `201`:**
 ```json
 { "ok": true }
 ```
 
-Honeypot submissions are silently discarded with `200`. Invalid bodies return `400`, rate-limited requests return `429`, and email delivery failures return `502`.
+Honeypot submissions are silently discarded with `200`. Invalid bodies return `400`, rate-limited requests return `429`, and `502` (`EMAIL_DELIVERY_FAILED`) is returned only when every enabled channel failed.
 
 ---
 
