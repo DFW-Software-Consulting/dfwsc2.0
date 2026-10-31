@@ -520,7 +520,7 @@ export const contactStripeSyncCards = pgTable(
 export const portalMirrorRows = pgTable(
   "portal_mirror_rows",
   {
-    kind: text("kind", { enum: ["account"] }).notNull(),
+    kind: text("kind", { enum: ["account", "billing"] }).notNull(),
     sourceId: text("source_id").notNull(),
     ncRowId: integer("nc_row_id"),
     contentHash: text("content_hash"),
@@ -535,12 +535,13 @@ export const portalMirrorRows = pgTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.kind, table.sourceId] }),
-    kindCheck: check("portal_mirror_rows_kind_check", sql`${table.kind} IN ('account')`),
+    kindCheck: check("portal_mirror_rows_kind_check", sql`${table.kind} IN ('account', 'billing')`),
   })
 );
 
-// Portal mirror bookkeeping that is not per source row; today only `accounts_table_id`, the
-// Nextcloud Table the mirror provisioned (kept so a renamed table is not duplicated).
+// Portal mirror bookkeeping that is not per source row: `accounts_table_id` and
+// `billing_table_id`, the Nextcloud Tables the mirror provisioned (kept so a renamed table is
+// not duplicated).
 export const portalMirrorState = pgTable("portal_mirror_state", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
@@ -548,4 +549,24 @@ export const portalMirrorState = pgTable("portal_mirror_state", {
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
+});
+
+// Read-only snapshot of one billing Customer's state, derived from Stripe LISTS (never from
+// webhook payloads) by lib/billing-snapshot.ts; the "Client Billing" mirror renders from it.
+// One row per client code. dirty_at is set by the account-level billing webhook and cleared by a
+// refresh. updated_at is bumped ONLY when content_hash changes (no $onUpdate), so the mirror loop
+// sees real changes, not refreshes that found nothing new.
+export const billingSnapshots = pgTable("billing_snapshots", {
+  clientCode: text("client_code")
+    .primaryKey()
+    .references(() => billingCustomers.clientCode, { onDelete: "cascade" }),
+  stripeCustomerId: text("stripe_customer_id").notNull(),
+  rendered: jsonb("rendered").$type<Record<string, string | number | null>>().notNull(),
+  contentHash: text("content_hash").notNull(),
+  dirtyAt: timestamp("dirty_at", { withTimezone: true }),
+  refreshedAt: timestamp("refreshed_at", { withTimezone: true }),
+  attempts: integer("attempts").notNull().default(0),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

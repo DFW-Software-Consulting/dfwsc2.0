@@ -54,6 +54,10 @@ const OPTIONAL_ENV_VARS = [
   "PORTAL_MIRROR_SHARE_GROUPS",
   "PORTAL_MIRROR_INCLUDE_ARCHIVED",
   "PORTAL_ACCOUNTS_TABLE_ID",
+  "BILLING_MIRROR",
+  "BILLING_MIRROR_SHARE_GROUPS",
+  "BILLING_SWEEP_INTERVAL_MS",
+  "STRIPE_BILLING_WEBHOOK_SECRET",
 ];
 
 // Vars whose values must never appear in logs, even partially — presence only.

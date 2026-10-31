@@ -19,6 +19,7 @@ import paymentsRoutes from "./routes/payments";
 import productRoutes from "./routes/products";
 import settingsRoutes from "./routes/settings";
 import webhooksRoute from "./routes/webhooks";
+import billingWebhookRoute from "./routes/webhooks-billing";
 
 // Resolve trustProxy from TRUST_PROXY env. Fastify 5.12 no longer supports
 // numeric hop counts (a hop count can't validate the immediate peer, so it fails
@@ -211,6 +212,7 @@ export async function buildServer() {
   server.register(contactRoutes, { prefix: "/api/v1" });
   server.register(paymentsRoutes, { prefix: "/api/v1" });
   server.register(webhooksRoute, { prefix: "/api/v1" });
+  server.register(billingWebhookRoute, { prefix: "/api/v1" });
   server.register(nextcloudWebhookRoutes, { prefix: "/api/v1" });
   server.register(clientRoutes, { prefix: "/api/v1" });
   server.register(groupRoutes, { prefix: "/api/v1" });

@@ -67,6 +67,18 @@ Pass `waiveFee: true` in the payment request body to skip the platform fee for a
 - **account.updated ordering protection**: Retrieves current account state from Stripe rather than trusting the event payload, handling out-of-order delivery.
 - Ledger updates use `last_stripe_event_created_at` to ignore stale events.
 
+The Connect endpoint has no subscription or invoice handling beyond logging: it never calls `subscriptions.*` or `subscriptionSchedules.*`, and it no longer writes `paymentsMade` metadata (removed with the dead subscription scaffolding).
+
+### Billing endpoint (DFWSC's own clients, account level)
+`POST /api/v1/webhooks/stripe-billing` (production: `https://api.dfwsc.com/api/v1/webhooks/stripe-billing`)
+
+DFWSC bills its own clients through Stripe Customers on the **platform account** (`billing_customers`; docs/BACKEND.md sections 10 and 13). That is a different Stripe scope from Connect. A Connect endpoint ("Listen to events on Connected accounts") never receives events of the platform account, and `STRIPE_WEBHOOK_SECRET` is the signing secret of that Connect endpoint, so billing events need a **second, account-level endpoint with its own secret**, `STRIPE_BILLING_WEBHOOK_SECRET`.
+
+- Add it in the Stripe dashboard (Developers > Webhooks > Add endpoint) with "Listen to events on **Your account**", the URL above, and exactly these events: `invoice.created`, `invoice.finalized`, `invoice.updated`, `invoice.paid`, `invoice.payment_failed`, `invoice.voided`, `invoice.marked_uncollectible`, `invoice.overdue`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `subscription_schedule.created`, `subscription_schedule.updated`, `subscription_schedule.canceled`, `subscription_schedule.completed`, `subscription_schedule.released`. Put its signing secret in `STRIPE_BILLING_WEBHOOK_SECRET`.
+- Unset secret: the route answers 404. The Client Billing mirror still works: the sweep re-reads every Customer at boot and every `BILLING_SWEEP_INTERVAL_MS` (default 1 hour).
+- **Hard guard**: an event with `account` set (a connected account) answers 200 and is ignored before anything is claimed or looked up.
+- Same `webhook_events` lease and dedupe as the Connect endpoint. The Customer is resolved through `billing_customers`; an unknown Customer is ignored; a known one only gets `billing_snapshots.dirty_at = now()`. The event payload is never used for data: the refresh re-reads `subscriptions.list` (`status: all`, `expand: data.schedule`), `subscriptionSchedules.list` (`scheduled: true`) and `invoices.list` for the Customer. These are the only Stripe calls of the billing mirror and all are reads; a test asserts that no Stripe write method is ever called.
+
 ## 6. Products
 Products and prices are created on the **connected account** (not the platform account) by passing `stripeAccount` to Stripe API calls. Both `GET /products` and `POST /products` require a `clientId` parameter to resolve the connected account.
 
@@ -74,7 +86,8 @@ Products and prices are created on the **connected account** (not the platform a
 | Variable | Description |
 |----------|-------------|
 | `STRIPE_SECRET_KEY` | Stripe secret key (platform account) |
-| `STRIPE_WEBHOOK_SECRET` | Webhook endpoint signing secret |
+| `STRIPE_WEBHOOK_SECRET` | Webhook endpoint signing secret (the Connect endpoint) |
+| `STRIPE_BILLING_WEBHOOK_SECRET` | (optional) Signing secret of the account-level billing endpoint; unset = `/webhooks/stripe-billing` answers 404 |
 | `DEFAULT_PROCESS_FEE_CENTS` | (optional) Last-resort fallback fee (cents) when no client/group/DB default is configured |
 | `DEFAULT_PAYMENT_SUCCESS_URL` | (optional) Default Checkout success redirect URL used after client/group config |
 | `DEFAULT_PAYMENT_CANCEL_URL` | (optional) Default Checkout cancel redirect URL used after client/group config |
