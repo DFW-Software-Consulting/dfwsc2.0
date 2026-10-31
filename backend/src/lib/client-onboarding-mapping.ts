@@ -1,5 +1,5 @@
 // Pure mapping for the "DFWSC — Convert Won Lead to Client" onboarding: Forms
-// answers to a client folder name, a contact card, a Cerebo Projects row, a
+// answers to a client folder name, a contact card, a Client Projects row, a
 // Collectives page and a Sales Pipeline match. No I/O here.
 //
 // Form questions are matched by their technical name (Forms "name"), table columns
@@ -43,7 +43,8 @@ const PROJECT_COLUMN_TITLES = {
 const PIPELINE_COLUMN_TITLES = {
   company: "Company",
   stage: "Stage",
-  cereboProject: "Cerebo Project",
+  // Renamed from "Cerebo Project"; both titles are accepted (the first one is preferred).
+  clientProject: ["Client Project", "Cerebo Project"],
 } as const;
 
 const INTAKE_STATUS = "Intake";
@@ -192,15 +193,16 @@ export type PipelineColumnMap = Record<PipelineField, TableColumn>;
 
 function resolveByTitle<F extends string>(
   columns: TableColumn[],
-  titles: Record<F, string>,
+  titles: Record<F, string | readonly string[]>,
   code: string
 ): Record<F, TableColumn> {
   const byTitle = new Map(columns.map((c) => [c.title.trim(), c]));
   const missing: string[] = [];
   const map = {} as Record<F, TableColumn>;
-  for (const [field, title] of Object.entries(titles) as [F, string][]) {
-    const column = byTitle.get(title);
-    if (!column) missing.push(title);
+  for (const [field, accepted] of Object.entries(titles) as [F, string | readonly string[]][]) {
+    const candidates = typeof accepted === "string" ? [accepted] : accepted;
+    const column = candidates.map((t) => byTitle.get(t)).find((c) => c !== undefined);
+    if (!column) missing.push(candidates[0]);
     else map[field] = column;
   }
   if (missing.length) throw new OnboardingConfigError(code, missing);
@@ -443,7 +445,7 @@ function tableCell(value: string): string {
 }
 
 /**
- * Page body: the team's Project Brief template (Cerebo Pilot/Templates/Project-Brief.md)
+ * Page body: the team's Project Brief template (Client Projects/Templates/Project-Brief.md)
  * filled with what the form knows, plus our links as extra rows. Owner, Success
  * criteria and Constraints stay blank for the team. No contact details.
  */

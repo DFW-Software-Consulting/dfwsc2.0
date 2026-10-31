@@ -396,7 +396,7 @@ export class ClientOnboardingNextcloud {
 
   // ── Collectives ────────────────────────────────────────────────────────────
 
-  /** The collective's URL slug ("Cerebo-Pilot") and name; null when not visible. */
+  /** The collective's URL slug (e.g. "Cerebo-Pilot", which can differ from the name) and name; null when not visible. */
   async getCollective(): Promise<{ name: string; slug: string | null } | null> {
     const label = "collectives.list";
     const res = await nextcloudRequest(this.nc, {
