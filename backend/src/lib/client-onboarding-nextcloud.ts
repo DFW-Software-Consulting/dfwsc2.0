@@ -1,5 +1,11 @@
 import type { IntakeAnswer, IntakeQuestion } from "./client-onboarding-mapping";
 import { encodePathSegments, type NextcloudConfig, nextcloudRequest } from "./nextcloud";
+import {
+  addressbookCollection,
+  createContactDirectory,
+  type StoredCard,
+  updateCard,
+} from "./nextcloud-contacts";
 import type { TableColumn } from "./sales-lead-mapping";
 import {
   NextcloudBadResponseError,
@@ -41,13 +47,6 @@ export interface TableRow {
   cells: Map<number, unknown>;
 }
 
-export interface StoredCard {
-  /** Path of the card below the base URL, as the server sent it (percent-encoded). */
-  href: string;
-  etag: string | null;
-  data: string;
-}
-
 export interface CollectivePage {
   id: number;
   parentId: number;
@@ -58,14 +57,6 @@ export interface CollectivePage {
   collectivePath: string | null;
 }
 
-/** A card changed between our read and our write (If-Match failed); retried. */
-export class ContactChangedError extends Error {
-  constructor() {
-    super("The contact card changed while it was being updated");
-    this.name = "ContactChangedError";
-  }
-}
-
 const FORMS_BASE = "/ocs/v2.php/apps/forms/api/v3/forms";
 const TABLES_BASE = "/index.php/apps/tables/api/1";
 const COLLECTIVES_BASE = "/ocs/v2.php/apps/collectives/api/v1.0/collectives";
@@ -74,31 +65,6 @@ const MAX_ROW_PAGES = 50;
 
 const PROPFIND_FILEID =
   '<?xml version="1.0"?><d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop><oc:fileid/></d:prop></d:propfind>';
-// Every card has an FN, so this lists the whole address book with its data.
-const ADDRESSBOOK_QUERY =
-  '<?xml version="1.0"?><c:addressbook-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"><d:prop><d:getetag/><c:address-data/></d:prop><c:filter><c:prop-filter name="FN"/></c:filter></c:addressbook-query>';
-
-function decodeXmlText(text: string): string {
-  return text
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) =>
-      String.fromCodePoint(Number.parseInt(hex, 16))
-    )
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&");
-}
-
-function xmlElement(block: string, localName: string): string | null {
-  const match = new RegExp(
-    `<(?:[\\w-]+:)?${localName}\\b[^>]*>([\\s\\S]*?)</(?:[\\w-]+:)?${localName}>`
-  ).exec(block);
-  return match ? decodeXmlText(match[1]) : null;
-}
-
 function toPage(raw: unknown, label: string): CollectivePage {
   const p = (raw ?? {}) as Record<string, unknown>;
   return {
@@ -271,37 +237,19 @@ export class ClientOnboardingNextcloud {
 
   // ── CardDAV ────────────────────────────────────────────────────────────────
 
+  /** The configured address book (where new cards are created). */
   private get addressbookCollection(): string {
-    return `/remote.php/dav/addressbooks/users/${encodePathSegments([
-      this.nc.username,
-      this.targets.addressbookPath,
-    ])}/`;
+    return addressbookCollection(this.nc, this.targets.addressbookPath);
   }
 
-  async listCards(): Promise<StoredCard[]> {
-    const label = "carddav.list";
-    const res = await nextcloudRequest(this.nc, {
-      method: "REPORT",
-      label,
-      path: this.addressbookCollection,
-      headers: { depth: "1", "content-type": "application/xml; charset=utf-8" },
-      body: ADDRESSBOOK_QUERY,
-    });
-    const cards: StoredCard[] = [];
-    const responses = res.body.match(
-      /<(?:[\w-]+:)?response\b[^>]*>[\s\S]*?<\/(?:[\w-]+:)?response>/g
-    );
-    for (const block of responses ?? []) {
-      const href = xmlElement(block, "href")?.trim();
-      const data = xmlElement(block, "address-data");
-      if (!href || !data) continue;
-      // Only cards inside this address book can ever be written back.
-      if (!href.startsWith(this.addressbookCollection) || href.includes("/../")) {
-        throw new NextcloudBadResponseError(label);
-      }
-      cards.push({ href, etag: xmlElement(block, "getetag")?.trim() || null, data });
-    }
-    return cards;
+  /** Existing cards for this person across every visible address book. */
+  /** A per-cycle view of every visible address book; see ContactDirectory. */
+  contactDirectory(onSkippedBook?: (addressbook: string, status: number) => void) {
+    return createContactDirectory(this.nc, this.targets.addressbookPath, onSkippedBook);
+  }
+
+  updateCard(card: StoredCard, vcard: string): Promise<void> {
+    return updateCard(this.nc, card, vcard);
   }
 
   /** Creates the card once; "exists" when a card with this UID is already there. */
@@ -315,21 +263,6 @@ export class ClientOnboardingNextcloud {
       okStatuses: [412],
     });
     return res.status === 412 ? "exists" : "created";
-  }
-
-  /** Overwrites a card only if it is unchanged since it was read. */
-  async updateCard(card: StoredCard, vcard: string): Promise<void> {
-    const headers: Record<string, string> = { "content-type": "text/vcard; charset=utf-8" };
-    if (card.etag) headers["if-match"] = card.etag;
-    const res = await nextcloudRequest(this.nc, {
-      method: "PUT",
-      label: "carddav.update_contact",
-      path: card.href,
-      headers,
-      body: vcard,
-      okStatuses: [412],
-    });
-    if (res.status === 412) throw new ContactChangedError();
   }
 
   // ── WebDAV ─────────────────────────────────────────────────────────────────

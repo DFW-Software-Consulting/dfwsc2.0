@@ -1,9 +1,10 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../db/client";
 import { clientOnboardingSubmissions, clientOnboardingSyncState } from "../../db/schema";
 import {
   allocateProjectCode,
+  claimNextOnboarding,
   getClientOnboardingStats,
   resetClientOnboardingStateForTests,
   runClientOnboardingCycle,
@@ -282,9 +283,11 @@ describe("client onboarding: steps", () => {
     await cycle();
     expect(fake.cards.size).toBe(1);
     const card = fake.cards.get("dfwsc-lead-4-9.vcf")?.data ?? "";
-    expect(card).toContain("ORG:Zephyrine Widgets LLC");
+    // Someone else's card: its company is kept, only missing details are added.
+    expect(card).toContain("ORG:Zephyrine\r\n");
+    expect(card).not.toContain("Zephyrine Widgets LLC");
     expect(card).toContain("TEL;TYPE=WORK:+1 214 555 0199");
-    expect(card).toContain("CATEGORIES:Lead");
+    expect(card).toContain("CATEGORIES:Lead,Client");
     expect(card.match(/EMAIL/g)).toHaveLength(1);
     expect(
       fake.requests.find((r) => r.method === "PUT" && r.path.includes("dfwsc-lead-4-9"))?.headers[
@@ -307,6 +310,184 @@ describe("client onboarding: steps", () => {
       status: "completed",
       contactStatus: "ambiguous",
       contactUid: null,
+    });
+  });
+
+  describe("contact matching across address books", () => {
+    const STRIPE_CARD =
+      "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:stripe-cus_X\r\nFN:Ophelia Quartermaine\r\nORG:Zephyrine Widgets LLC\r\nEMAIL:ophelia@zephyrine.example\r\nEND:VCARD\r\n";
+
+    it("merges a card from another address book in place and creates nothing", async () => {
+      await baseline();
+      fake.addBook("contacts");
+      fake.addCardTo("contacts", "stripe-cus_X.vcf", STRIPE_CARD);
+      fake.addSubmission(5, FULL);
+      await cycle();
+      expect(fake.cards.size).toBe(0);
+      const merged = fake.otherBooks.get("contacts")?.cards.get("stripe-cus_X.vcf")?.data ?? "";
+      expect(merged).toContain("TEL;TYPE=WORK:+1 214 555 0199");
+      expect(fake.otherBooks.get("contacts")?.cards.size).toBe(1);
+      expect(await sub(5)).toMatchObject({ contactStatus: "updated", contactUid: "stripe-cus_X" });
+      expect(log.lines.some((l) => l.text.includes('"addressbook":"contacts"'))).toBe(true);
+    });
+
+    it("skips system address books", async () => {
+      await baseline();
+      await cycle();
+      fake.addSubmission(5, FULL);
+      await cycle();
+      expect(fake.requests.some((r) => r.path.includes("z-server-generated"))).toBe(false);
+    });
+
+    it("flags matches in two address books as ambiguous and writes nothing", async () => {
+      await baseline();
+      fake.addBook("contacts");
+      fake.addCardTo("contacts", "stripe-cus_X.vcf", STRIPE_CARD);
+      fake.addCard("a.vcf", STRIPE_CARD.replace("stripe-cus_X", "a"));
+      fake.addSubmission(5, FULL);
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(fake.count("PUT", "/addressbooks/")).toBe(0);
+      expect(await sub(5)).toMatchObject({ contactStatus: "ambiguous", contactUid: null });
+    });
+
+    it("does not create a duplicate when the matching book is read-only", async () => {
+      await baseline();
+      fake.addBook("contacts", true);
+      fake.addCardTo("contacts", "stripe-cus_X.vcf", STRIPE_CARD);
+      fake.addSubmission(5, FULL);
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(fake.cards.size).toBe(0);
+      // Known read-only from the privilege set, so no write is even attempted.
+      expect(fake.count("PUT", "/addressbooks/")).toBe(0);
+      expect(await sub(5)).toMatchObject({
+        status: "completed",
+        contactStatus: "read_only",
+        contactUid: "stripe-cus_X",
+      });
+      expect(
+        log.lines.some((l) => l.text.includes("read-only") && l.text.includes("contacts"))
+      ).toBe(true);
+    });
+
+    it("retries and creates nothing when the address books cannot be listed", async () => {
+      await baseline();
+      fake.addSubmission(5, FULL);
+      fake.fail({
+        match: (r) => r.method === "PROPFIND" && r.path.includes("/addressbooks/"),
+        status: 403,
+      });
+      expect(await cycle()).toMatchObject({ retried: 1 });
+      expect(fake.count("PUT", "/addressbooks/")).toBe(0);
+      expect(await sub(5)).toMatchObject({
+        status: "pending",
+        lastErrorCode: "carddav.discovery_failed",
+        contactStatus: null,
+      });
+    });
+
+    it("retries when another address book cannot be read", async () => {
+      await baseline();
+      fake.addBook("contacts");
+      fake.addSubmission(5, FULL);
+      fake.fail({
+        match: (r) => r.method === "REPORT" && r.path.includes("/contacts/"),
+        status: 500,
+      });
+      expect(await cycle()).toMatchObject({ retried: 1 });
+      expect(fake.count("PUT", "/addressbooks/")).toBe(0);
+      expect(await sub(5)).toMatchObject({ lastErrorCode: "carddav.discovery_failed" });
+    });
+
+    it("counts its own earlier card as ours on a retry, not as an ambiguity", async () => {
+      await baseline();
+      fake.addBook("contacts");
+      fake.addCardTo("contacts", "stripe-cus_X.vcf", STRIPE_CARD);
+      // Created by an earlier attempt whose result was never saved.
+      fake.addCard("dfwsc-client-2-5.vcf", STRIPE_CARD.replace("stripe-cus_X", "dfwsc-client-2-5"));
+      fake.addSubmission(5, FULL);
+      await cycle();
+      expect(fake.count("PUT", "/addressbooks/")).toBe(0);
+      expect(await sub(5)).toMatchObject({
+        contactStatus: "created",
+        contactUid: "dfwsc-client-2-5",
+      });
+    });
+
+    it("falls back to the 403 when a read-only book does not advertise its privileges", async () => {
+      await baseline();
+      fake.addBook("contacts", true, false);
+      fake.addCardTo("contacts", "stripe-cus_X.vcf", STRIPE_CARD);
+      fake.addSubmission(5, FULL);
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(fake.cards.size).toBe(0);
+      expect(fake.count("PUT", "/addressbooks/")).toBe(1);
+      expect(await sub(5)).toMatchObject({ contactStatus: "read_only" });
+    });
+
+    it("skips an address book it cannot read and still creates in the configured one", async () => {
+      await baseline();
+      fake.addBook("revoked");
+      fake.fail({
+        match: (r) => r.method === "REPORT" && r.path.includes("/revoked/"),
+        status: 403,
+      });
+      fake.addSubmission(5, FULL);
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      expect(fake.cards.has("dfwsc-client-2-5.vcf")).toBe(true);
+      expect(
+        log.lines.some((l) => l.level === "warn" && l.text.includes('"addressbook":"revoked"'))
+      ).toBe(true);
+    });
+
+    it("never overwrites the name or company of a card matched only by email", async () => {
+      await baseline();
+      fake.addBook("contacts");
+      fake.addCardTo(
+        "contacts",
+        "shared.vcf",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:shared\r\nFN:Front Desk\r\nN:Desk;Front;;;\r\nORG:Another Company\r\nEMAIL:ophelia@zephyrine.example\r\nEND:VCARD\r\n"
+      );
+      fake.addSubmission(5, FULL);
+      await cycle();
+      const card = fake.otherBooks.get("contacts")?.cards.get("shared.vcf")?.data ?? "";
+      expect(card).toContain("FN:Front Desk");
+      expect(card).toContain("ORG:Another Company");
+      expect(card).toContain("TEL;TYPE=WORK:+1 214 555 0199");
+      expect(fake.cards.size).toBe(0);
+    });
+
+    it("lists the address books once per cycle and sees cards created earlier in it", async () => {
+      await baseline();
+      for (const id of [5, 6]) {
+        fake.addSubmission(id, { ...FULL, project_name: `P${id}`, lead_link: undefined });
+      }
+      expect(await cycle()).toMatchObject({ completed: 2 });
+      // Same email twice: the second submission merges into the first one's card.
+      expect(fake.cards.size).toBe(1);
+      expect(fake.count("PROPFIND", "/addressbooks/")).toBe(1);
+      expect(await sub(5)).toMatchObject({ contactStatus: "created" });
+      expect(await sub(6)).toMatchObject({
+        contactStatus: "updated",
+        contactUid: "dfwsc-client-2-5",
+      });
+    });
+
+    it("creates in the configured address book when no book has a match", async () => {
+      await baseline();
+      fake.addBook("contacts");
+      fake.addCardTo(
+        "contacts",
+        "other.vcf",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:other\r\nFN:Someone Else\r\nORG:Elsewhere Inc\r\nEMAIL:else@elsewhere.example\r\nEND:VCARD\r\n"
+      );
+      fake.addSubmission(5, FULL);
+      await cycle();
+      expect(fake.cards.has("dfwsc-client-2-5.vcf")).toBe(true);
+      expect(fake.otherBooks.get("contacts")?.cards.size).toBe(1);
+      expect(await sub(5)).toMatchObject({
+        contactStatus: "created",
+        contactUid: "dfwsc-client-2-5",
+      });
     });
   });
 
@@ -969,5 +1150,22 @@ describe("client onboarding: runner", () => {
     const calls = vi.mocked(fetch).mock.calls.length;
     runner?.trigger();
     expect(vi.mocked(fetch).mock.calls.length).toBe(calls);
+  });
+});
+
+describe("client onboarding: claiming", () => {
+  it("claims exactly one due row per call, lowest id first", async () => {
+    await db
+      .insert(clientOnboardingSubmissions)
+      .values([5, 6, 7].map((submissionId) => ({ formId: ONB_FORM_ID, submissionId })));
+    expect((await claimNextOnboarding(ONB_FORM_ID))?.submissionId).toBe(5);
+    const claimed = () =>
+      db
+        .select()
+        .from(clientOnboardingSubmissions)
+        .where(isNotNull(clientOnboardingSubmissions.claimToken));
+    expect(await claimed()).toHaveLength(1);
+    expect((await claimNextOnboarding(ONB_FORM_ID))?.submissionId).toBe(6);
+    expect(await claimed()).toHaveLength(2);
   });
 });

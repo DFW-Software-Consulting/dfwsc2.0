@@ -22,6 +22,13 @@ import {
   NextcloudRequestError,
 } from "./nextcloud";
 import {
+  AddressbookDiscoveryError,
+  ContactChangedError,
+  type ContactDirectory,
+  mergeContactVCard,
+  vCardUid,
+} from "./nextcloud-contacts";
+import {
   buildRowData,
   buildVCard,
   type ColumnMap,
@@ -29,6 +36,7 @@ import {
   extractLead,
   folderNameCandidate,
   hasPerson,
+  type Lead,
   leadRef,
   linkCellUrl,
   linkValue,
@@ -242,26 +250,38 @@ async function discover(api: SalesLeadNextcloud, formId: number, logger: Logger)
   return inserted.length;
 }
 
-async function claimNext(formId: number): Promise<SubmissionRow | null> {
-  const t = salesLeadSubmissions;
+/**
+ * Claims the lowest-id due row. The candidate is picked in a MATERIALIZED CTE so it is
+ * evaluated once: with the subquery inline, Postgres may re-run it per row of the
+ * UPDATE and claim every due row, leaving all but one stuck until the lease runs out.
+ */
+export async function claimNextSalesLead(formId: number): Promise<SubmissionRow | null> {
   const token = crypto.randomUUID();
   const leaseSeconds = Math.floor(SALES_LEAD_CLAIM_LEASE_MS / 1000);
-  const [row] = await db
-    .update(t)
-    .set({ claimedAt: sql`now()`, claimToken: token })
-    .where(
-      sql`(${t.formId}, ${t.submissionId}) IN (
-        SELECT form_id, submission_id FROM sales_lead_submissions
-        WHERE form_id = ${formId}
-          AND status = 'pending'
-          AND next_attempt_at <= now()
-          AND (claimed_at IS NULL OR claimed_at < now() - make_interval(secs => ${leaseSeconds}))
-        ORDER BY submission_id
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-      )`
+  const claimed = await db.execute<{ submission_id: number }>(sql`
+    WITH c AS MATERIALIZED (
+      SELECT form_id, submission_id FROM sales_lead_submissions
+      WHERE form_id = ${formId}
+        AND status = 'pending'
+        AND next_attempt_at <= now()
+        AND (claimed_at IS NULL OR claimed_at < now() - make_interval(secs => ${leaseSeconds}))
+      ORDER BY submission_id
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
     )
-    .returning();
+    UPDATE sales_lead_submissions AS u
+    SET claimed_at = now(), claim_token = ${token}
+    FROM c
+    WHERE u.form_id = c.form_id AND u.submission_id = c.submission_id
+    RETURNING u.submission_id
+  `);
+  if (claimed.rows.length === 0) return null;
+  const [row] = await db
+    .select()
+    .from(salesLeadSubmissions)
+    .where(
+      and(eq(salesLeadSubmissions.formId, formId), eq(salesLeadSubmissions.claimToken, token))
+    );
   return row ?? null;
 }
 
@@ -293,6 +313,8 @@ interface ProcessingContext {
   formId: number;
   questions: QuestionMap;
   columns: ColumnMap;
+  /** Address books listed once per cycle; see ContactDirectory. */
+  contacts: ContactDirectory;
   logger: Logger;
 }
 
@@ -303,6 +325,18 @@ const RETRYABLE_HTTP_STATUSES = new Set([401, 408, 423, 425, 429]);
 function classify(error: unknown): { code: string; retryable: boolean } {
   if (error instanceof SalesLeadInvalidError) return { code: error.code, retryable: false };
   if (error instanceof LinksNotPersistedError) return { code: error.code, retryable: true };
+  if (error instanceof AddressbookDiscoveryError) {
+    return {
+      code:
+        error.status === null
+          ? "carddav.discovery_failed"
+          : `carddav.discovery_failed:${error.status}`,
+      retryable: error.retryable,
+    };
+  }
+  if (error instanceof ContactChangedError) {
+    return { code: "carddav.contact_changed", retryable: true };
+  }
   if (error instanceof NextcloudHttpError) {
     return {
       code: `${error.label}:${error.status}`,
@@ -329,6 +363,96 @@ async function chooseFolderName(api: SalesLeadNextcloud, base: string): Promise<
     if (!(await api.folderExists(candidate))) return candidate;
   }
   throw new SalesLeadInvalidError("folder_names_exhausted");
+}
+
+/**
+ * Contact card, only when a person was given. Every address book is searched first: a
+ * card that already exists (e.g. Stripe-synced, in another book) is merged in place
+ * instead of duplicated. The deterministic UID plus a create-only PUT make a repeat of
+ * the create a no-op. Several matches or a read-only book are recorded, not retried.
+ */
+async function contactStep(
+  row: SubmissionRow,
+  lead: Lead,
+  ctx: ProcessingContext
+): Promise<{ uid: string | null; addressbook: string }> {
+  const { api, formId, logger } = ctx;
+  const ids = { formId, submissionId: row.submissionId };
+  let uid: string | null = null;
+  let addressbook = api.targets.addressbookPath;
+  const ownUid = contactUid(formId, row.submissionId);
+  const { own, matches } = await ctx.contacts.find(lead, ownUid);
+  if (own) {
+    uid = ownUid;
+    addressbook = own.addressbook;
+    await saveUnderClaim(row, {
+      contactStatus: "created",
+      contactUid: uid,
+      contactAddressbook: addressbook,
+    });
+    logger.info({ ...ids, addressbook }, "Sales lead contact card already created.");
+  } else if (matches.length > 1) {
+    await saveUnderClaim(row, { contactStatus: "ambiguous" });
+    logger.warn(
+      {
+        ...ids,
+        matches: matches.length,
+        addressbooks: [...new Set(matches.map((m) => m.addressbook))],
+      },
+      "Several contact cards match the lead; none was changed."
+    );
+  } else if (matches.length === 1) {
+    const [card] = matches;
+    uid = vCardUid(card.data) ?? ownUid;
+    addressbook = card.addressbook;
+    let status: "updated" | "read_only" = "updated";
+    // Not our card: only add what is missing, never overwrite its name or company.
+    const merged = mergeContactVCard(card.data, lead, new Date(), {
+      additive: true,
+      category: "Lead",
+    });
+    try {
+      if (card.readOnly) throw new NextcloudHttpError(403, "carddav.update_contact");
+      if (merged !== null) {
+        await api.updateCard(card, merged);
+        ctx.contacts.invalidate(card.addressbook);
+      }
+    } catch (error) {
+      // A read-only shared book refuses the write. Creating a card elsewhere would
+      // duplicate the contact, so link the existing one and carry on.
+      if (!(error instanceof NextcloudHttpError && error.status === 403)) throw error;
+      status = "read_only";
+    }
+    await saveUnderClaim(row, {
+      contactStatus: status,
+      contactUid: uid,
+      contactAddressbook: addressbook,
+    });
+    if (status === "read_only") {
+      logger.warn(
+        { ...ids, addressbook },
+        "Matched existing contact in a read-only address book; not modified."
+      );
+    } else {
+      logger.info(
+        { ...ids, addressbook, changed: merged !== null },
+        "Sales lead contact card updated."
+      );
+    }
+  } else {
+    uid = ownUid;
+    addressbook = api.targets.addressbookPath;
+    await api.putContact(uid, buildVCard(lead, uid));
+    ctx.contacts.invalidate(addressbook);
+    await saveUnderClaim(row, {
+      contactStatus: "created",
+      contactUid: uid,
+      contactAddressbook: addressbook,
+    });
+    logger.info({ ...ids, addressbook }, "Sales lead contact card created.");
+  }
+
+  return { uid, addressbook };
 }
 
 async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<void> {
@@ -358,14 +482,30 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
     await saveUnderClaim(row, { tableRowId: rowId });
   }
 
-  // 2. Contact card, only when a person was given. The UID is deterministic and the
-  // PUT is create-only, so a repeat is a no-op.
+  // 2. Contact card (see contactStep). It must never cost the lead: a transient failure
+  // is retried like any other step, but once attempts run out, or when the failure is not
+  // transient, the failure is recorded and the folder and links below still happen.
   let uid = row.contactUid;
-  if (uid === null && hasPerson(lead)) {
-    uid = contactUid(formId, row.submissionId);
-    await api.putContact(uid, buildVCard(lead, uid));
-    await saveUnderClaim(row, { contactUid: uid });
-    logger.info(ids, "Sales lead contact card created.");
+  let addressbook = row.contactAddressbook ?? api.targets.addressbookPath;
+  if (uid === null && row.contactStatus === null && hasPerson(lead)) {
+    try {
+      ({ uid, addressbook } = await contactStep(row, lead, ctx));
+    } catch (error) {
+      if (error instanceof ClaimLostError || error instanceof NextcloudCircuitOpenError)
+        throw error;
+      const { code, retryable } = classify(error);
+      if (retryable && row.attempts + 1 < SALES_LEAD_MAX_ATTEMPTS) throw error;
+      await saveUnderClaim(row, { contactStatus: "failed" });
+      logger.error(
+        {
+          ...ids,
+          errorCode: code,
+          status: error instanceof AddressbookDiscoveryError ? error.status : undefined,
+          addressbook: error instanceof AddressbookDiscoveryError ? error.addressbook : undefined,
+        },
+        "Sales lead contact step failed; continuing without a contact card."
+      );
+    }
   }
 
   // 3. Folder. The chosen name is saved before MKCOL, so on a retry an existing
@@ -396,7 +536,8 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
     const links: [number, string, string][] = [
       [columns.notesFiles.id, "Lead folder", api.folderLink(fileId)],
     ];
-    if (uid !== null) links.push([columns.contactCard.id, "Contact card", api.contactLink(uid)]);
+    if (uid !== null)
+      links.push([columns.contactCard.id, "Contact card", api.contactLink(uid, addressbook)]);
     const data: Record<string, unknown> = {};
     for (const [columnId, title, url] of links) data[columnId] = linkValue(title, url);
     await api.updateRow(rowId, data);
@@ -494,7 +635,7 @@ export async function runSalesLeadCycle(options: {
   try {
     result.discovered = await discover(api, formId, logger);
     for (let i = 0; i < SALES_LEAD_MAX_PER_CYCLE; i++) {
-      const row = await claimNext(formId);
+      const row = await claimNextSalesLead(formId);
       if (!row) break;
       if (!ctx) {
         try {
@@ -504,6 +645,12 @@ export async function runSalesLeadCycle(options: {
             logger,
             questions: resolveQuestions(await api.getQuestions()),
             columns: resolveColumns(await api.getColumns()),
+            contacts: api.contactDirectory((addressbook, status) =>
+              logger.warn(
+                { formId, addressbook, status },
+                "Address book could not be read; skipped when looking for an existing contact."
+              )
+            ),
           };
         } catch (error) {
           await saveUnderClaim(row, { claimedAt: null, claimToken: null }).catch(() => undefined);

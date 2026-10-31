@@ -156,7 +156,7 @@ interface Submission {
 
 const FORMS = `/ocs/v2.php/apps/forms/api/v3/forms/${ONB_FORM_ID}`;
 const TABLES = "/index.php/apps/tables/api/1";
-const CARDS = `/remote.php/dav/addressbooks/users/${ONB_NC_USER}/${ONB_ADDRESSBOOK}/`;
+const BOOKS_HOME = `/remote.php/dav/addressbooks/users/${ONB_NC_USER}/`;
 const FILES = `/remote.php/dav/files/${ONB_NC_USER}/`;
 const COLLECTIVES = "/ocs/v2.php/apps/collectives/api/v1.0/collectives";
 /** Where the collective is mounted in the service account's files. */
@@ -201,6 +201,11 @@ export class FakeOnboardingNextcloud {
     },
   ];
   cards = new Map<string, Card>();
+  /** Address books besides the configured one (own or shared with the account). */
+  otherBooks = new Map<
+    string,
+    { cards: Map<string, Card>; readOnly: boolean; advertise: boolean }
+  >();
   folders = new Map<string, number>([[ONB_CLIENTS_FOLDER, 700]]);
   files = new Map<string, string>();
   collectiveSlug: string | null = "Cerebo-Pilot";
@@ -267,6 +272,16 @@ export class FakeOnboardingNextcloud {
 
   addCard(name: string, data: string) {
     this.cards.set(name, { data, etag: this.nextEtag++ });
+  }
+
+  /** Another address book the account can see; a read-only one refuses writes with 403. */
+  /** `advertise: false` hides the privilege set, so a read-only book only shows as a 403. */
+  addBook(name: string, readOnly = false, advertise = true) {
+    this.otherBooks.set(name, { cards: new Map(), readOnly, advertise });
+  }
+
+  addCardTo(book: string, name: string, data: string) {
+    this.otherBooks.get(book)?.cards.set(name, { data, etag: this.nextEtag++ });
   }
 
   fail(fault: Omit<Fault, "times"> & { times?: number }) {
@@ -454,27 +469,54 @@ export class FakeOnboardingNextcloud {
     }
 
     // CardDAV
-    if (method === "REPORT" && path === CARDS) {
-      const responses = [...this.cards].map(
-        ([name, card]) =>
-          `<d:response><d:href>${CARDS}${encodeURIComponent(name)}</d:href><d:propstat><d:prop><d:getetag>&quot;${card.etag}&quot;</d:getetag><card:address-data>${xmlEscape(card.data)}</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
-      );
+    if (method === "PROPFIND" && path === BOOKS_HOME) {
+      const book = (name: string) => {
+        const other = this.otherBooks.get(name);
+        const privileges =
+          other && !other.advertise
+            ? ""
+            : `<d:current-user-privilege-set><d:privilege><d:read/></d:privilege>${other?.readOnly ? "" : "<d:privilege><d:write-content/></d:privilege>"}</d:current-user-privilege-set>`;
+        return `<d:response><d:href>${BOOKS_HOME}${encodeURIComponent(name)}/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype>${privileges}</d:prop></d:propstat></d:response>`;
+      };
       return new Response(
-        `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">${responses.join("")}</d:multistatus>`,
+        `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:response><d:href>${BOOKS_HOME}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>${[ONB_ADDRESSBOOK, ...this.otherBooks.keys(), "z-server-generated--system"].map(book).join("")}</d:multistatus>`,
         { status: 207 }
       );
     }
-    if (method === "PUT" && path.startsWith(CARDS)) {
-      const name = path.slice(CARDS.length);
-      const existing = this.cards.get(name);
-      if (existing && req.headers["if-none-match"] === "*")
-        return new Response("", { status: 412 });
-      const ifMatch = req.headers["if-match"];
-      if (ifMatch && (!existing || ifMatch !== `"${existing.etag}"`)) {
-        return new Response("", { status: 412 });
+    if (path.startsWith(BOOKS_HOME)) {
+      const bookName = path.slice(BOOKS_HOME.length).split("/")[0];
+      const other = this.otherBooks.get(bookName);
+      const book =
+        bookName === ONB_ADDRESSBOOK
+          ? { cards: this.cards, readOnly: false, advertise: true }
+          : bookName === "z-server-generated--system"
+            ? { cards: new Map<string, Card>(), readOnly: true, advertise: true }
+            : other;
+      if (!book) return new Response("", { status: 404 });
+      const collection = `${BOOKS_HOME}${encodeURIComponent(bookName)}/`;
+      if (method === "REPORT" && path === `${BOOKS_HOME}${bookName}/`) {
+        const responses = [...book.cards].map(
+          ([name, card]) =>
+            `<d:response><d:href>${collection}${encodeURIComponent(name)}</d:href><d:propstat><d:prop><d:getetag>&quot;${card.etag}&quot;</d:getetag><card:address-data>${xmlEscape(card.data)}</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
+        );
+        return new Response(
+          `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">${responses.join("")}</d:multistatus>`,
+          { status: 207 }
+        );
       }
-      this.cards.set(name, { data: req.body, etag: this.nextEtag++ });
-      return new Response(null, { status: existing ? 204 : 201 });
+      if (method === "PUT") {
+        if (book.readOnly) return new Response("", { status: 403 });
+        const name = path.slice(`${BOOKS_HOME}${bookName}/`.length);
+        const existing = book.cards.get(name);
+        if (existing && req.headers["if-none-match"] === "*")
+          return new Response("", { status: 412 });
+        const ifMatch = req.headers["if-match"];
+        if (ifMatch && (!existing || ifMatch !== `"${existing.etag}"`)) {
+          return new Response("", { status: 412 });
+        }
+        book.cards.set(name, { data: req.body, etag: this.nextEtag++ });
+        return new Response(null, { status: existing ? 204 : 201 });
+      }
     }
 
     // WebDAV
