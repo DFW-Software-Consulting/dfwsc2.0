@@ -30,7 +30,7 @@ export const SUBMISSION_PAGE_SIZE = 50;
 const ROW_PAGE_SIZE = 200;
 const MAX_ROW_PAGES = 50;
 
-class NextcloudBadResponseError extends Error {
+export class NextcloudBadResponseError extends Error {
   constructor(readonly label: string) {
     super(`Nextcloud sent an unexpected response for ${label}`);
     this.name = "NextcloudBadResponseError";
@@ -41,7 +41,7 @@ export function isBadResponseError(error: unknown): error is NextcloudBadRespons
   return error instanceof NextcloudBadResponseError;
 }
 
-function parseJson(body: string, label: string): unknown {
+export function parseJson(body: string, label: string): unknown {
   try {
     return JSON.parse(body) as unknown;
   } catch {
@@ -49,13 +49,13 @@ function parseJson(body: string, label: string): unknown {
   }
 }
 
-function ocsData(body: string, label: string): unknown {
+export function ocsData(body: string, label: string): unknown {
   const data = (parseJson(body, label) as { ocs?: { data?: unknown } } | null)?.ocs?.data;
   if (data === undefined) throw new NextcloudBadResponseError(label);
   return data;
 }
 
-function positiveInt(value: unknown, label: string): number {
+export function positiveInt(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
     throw new NextcloudBadResponseError(label);
   }

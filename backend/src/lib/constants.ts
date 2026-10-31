@@ -72,3 +72,18 @@ export const SALES_LEAD_MAX_FOLDER_SUFFIX = 50;
 // capped): bounds what a spam run can push into the sales pipeline.
 export const WEBSITE_LEAD_CAP_MAX = 20;
 export const WEBSITE_LEAD_CAP_WINDOW_MS = 60 * 60 * 1000;
+
+// "Convert Won Lead to Client" onboarding (lib/client-onboarding-sync.ts). The webhook
+// is the fast path; the poll is the safety net, so its default is slower than sales.
+export const CLIENT_ONBOARDING_DEFAULT_POLL_INTERVAL_MS = 5 * 60 * 1000;
+export const CLIENT_ONBOARDING_MIN_POLL_INTERVAL_MS = 30 * 1000;
+export const CLIENT_ONBOARDING_MAX_ATTEMPTS = 10;
+export const CLIENT_ONBOARDING_RETRY_BASE_MS = 60 * 1000;
+export const CLIENT_ONBOARDING_RETRY_MAX_MS = 60 * 60 * 1000;
+export const CLIENT_ONBOARDING_CLAIM_LEASE_MS = 10 * 60 * 1000;
+export const CLIENT_ONBOARDING_MAX_PER_CYCLE = 20;
+export const CLIENT_ONBOARDING_MAX_DISCOVERY_PAGES = 20;
+// The webhook secret is compared in constant time; short secrets are refused at startup.
+export const CLIENT_ONBOARDING_MIN_WEBHOOK_SECRET_LENGTH = 32;
+// Webhook calls per minute per IP (Nextcloud sends one per submission).
+export const CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX = 60;

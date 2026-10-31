@@ -1,9 +1,15 @@
 import crypto from "node:crypto";
-import { count, isNull } from "drizzle-orm";
+import { count, eq, isNull, ne, or } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client";
-import { clients, salesLeadSubmissions, webhookEvents } from "../db/schema";
+import {
+  clientOnboardingSubmissions,
+  clients,
+  salesLeadSubmissions,
+  webhookEvents,
+} from "../db/schema";
 import { getCircuitBreakerStates } from "../lib/circuit-breakers";
+import { getClientOnboardingStats } from "../lib/client-onboarding-sync";
 import { getNextcloudBreakerState } from "../lib/nextcloud";
 import { getSalesLeadSyncStats } from "../lib/sales-lead-sync";
 
@@ -48,6 +54,22 @@ export default async function metricsRoute(fastify: FastifyInstance) {
       .groupBy(salesLeadSubmissions.status);
     const salesLeadCounts = new Map(salesLeadRows.map((row) => [row.status, row.count]));
     const salesLeadStats = getSalesLeadSyncStats();
+    const onboardingRows = await db
+      .select({ status: clientOnboardingSubmissions.status, count: count() })
+      .from(clientOnboardingSubmissions)
+      .groupBy(clientOnboardingSubmissions.status);
+    const onboardingCounts = new Map(onboardingRows.map((row) => [row.status, row.count]));
+    // Completed, but the lead or contact needs an operator (no match, ambiguous, ...).
+    const [onboardingFlagged] = await db
+      .select({ count: count() })
+      .from(clientOnboardingSubmissions)
+      .where(
+        or(
+          ne(clientOnboardingSubmissions.leadStatus, "won"),
+          eq(clientOnboardingSubmissions.contactStatus, "ambiguous")
+        )
+      );
+    const onboardingStats = getClientOnboardingStats();
 
     const metrics = [
       `# HELP dfwsc_clients_total Total number of clients`,
@@ -90,6 +112,21 @@ export default async function metricsRoute(fastify: FastifyInstance) {
       `# HELP dfwsc_sales_lead_last_cycle_timestamp_seconds When the last sales lead cycle ran (0 if never)`,
       `# TYPE dfwsc_sales_lead_last_cycle_timestamp_seconds gauge`,
       `dfwsc_sales_lead_last_cycle_timestamp_seconds ${salesLeadStats.lastCycleAt ? Math.floor(salesLeadStats.lastCycleAt.getTime() / 1000) : 0}`,
+      `# HELP dfwsc_client_onboarding_submissions Client onboarding submissions by status`,
+      `# TYPE dfwsc_client_onboarding_submissions gauge`,
+      ...SALES_LEAD_STATUSES.map(
+        (status) =>
+          `dfwsc_client_onboarding_submissions{status="${status}"} ${onboardingCounts.get(status) ?? 0}`
+      ),
+      `# HELP dfwsc_client_onboarding_flagged Client onboardings whose lead or contact needs an operator`,
+      `# TYPE dfwsc_client_onboarding_flagged gauge`,
+      `dfwsc_client_onboarding_flagged ${onboardingFlagged?.count ?? 0}`,
+      `# HELP dfwsc_client_onboarding_last_cycle_ok 1 if the last client onboarding cycle succeeded, 0 if not`,
+      `# TYPE dfwsc_client_onboarding_last_cycle_ok gauge`,
+      `dfwsc_client_onboarding_last_cycle_ok ${onboardingStats.lastCycleStatus === "ok" ? 1 : 0}`,
+      `# HELP dfwsc_client_onboarding_last_cycle_timestamp_seconds When the last client onboarding cycle ran (0 if never)`,
+      `# TYPE dfwsc_client_onboarding_last_cycle_timestamp_seconds gauge`,
+      `dfwsc_client_onboarding_last_cycle_timestamp_seconds ${onboardingStats.lastCycleAt ? Math.floor(onboardingStats.lastCycleAt.getTime() / 1000) : 0}`,
     ].join("\n");
 
     return reply.type("text/plain").send(metrics);

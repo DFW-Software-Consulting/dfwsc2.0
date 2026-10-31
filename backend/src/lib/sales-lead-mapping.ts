@@ -228,7 +228,7 @@ function selectionOptions(column: TableColumn): { id: number; label: string }[] 
   return [];
 }
 
-function findOptionId(column: TableColumn, label: string): number | undefined {
+export function findOptionId(column: TableColumn, label: string): number | undefined {
   const wanted = label.trim().toLowerCase();
   return selectionOptions(column).find((o) => o.label.trim().toLowerCase() === wanted)?.id;
 }
@@ -337,7 +337,7 @@ export function contactUid(formId: number, submissionId: number): string {
   return `dfwsc-lead-${formId}-${submissionId}`;
 }
 
-function escapeVCardText(value: string): string {
+export function escapeVCardText(value: string): string {
   return value
     .replace(/\\/g, "\\\\")
     .replace(/\r\n|\r|\n/g, "\\n")
@@ -347,7 +347,7 @@ function escapeVCardText(value: string): string {
 
 // RFC 6350 §3.2: lines longer than 75 octets are folded with CRLF + one space,
 // never splitting a multi-byte UTF-8 character.
-function foldLine(line: string): string {
+export function foldLine(line: string): string {
   const out: string[] = [];
   let current = "";
   let bytes = 0;
@@ -397,9 +397,14 @@ const MAX_FOLDER_NAME_LENGTH = 100;
 /**
  * A single safe path segment from the company name: no path separators, the
  * characters Windows and Nextcloud clients reject, control characters or a leading
- * dot. Falls back to "Lead <submissionId>" when nothing usable is left.
+ * dot. Falls back to "<fallbackPrefix> <submissionId>" ("Lead 12" by default) when
+ * nothing usable is left.
  */
-export function sanitizeFolderName(company: string, submissionId: number): string {
+export function sanitizeFolderName(
+  company: string,
+  submissionId: number,
+  fallbackPrefix = "Lead"
+): string {
   const cleaned = company
     // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point.
     .replace(/[\u0000-\u001f\u007f/\\:*?"<>|]/g, " ")
@@ -410,7 +415,7 @@ export function sanitizeFolderName(company: string, submissionId: number): strin
     .slice(0, MAX_FOLDER_NAME_LENGTH)
     .join("")
     .replace(/[.\s]+$/, "");
-  if (!truncated) return `Lead ${submissionId}`;
+  if (!truncated) return `${fallbackPrefix} ${submissionId}`;
   return truncated;
 }
 
