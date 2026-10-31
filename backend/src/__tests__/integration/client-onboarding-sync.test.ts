@@ -899,6 +899,9 @@ describe("client onboarding: CP code allocation", () => {
       fake.addSubmission(id, {
         ...FULL,
         company: `Co ${id}`,
+        // Own contact per submission: a shared email makes overlapping cycles race on
+        // one address-book card (carddav.contact_changed), leaving one for the next cycle.
+        email: `contact${id}@example.test`,
         project_name: `P${id}`,
         lead_link: undefined,
       });
