@@ -1428,3 +1428,135 @@ describe("client codes", () => {
     expect(stripe.calls).toHaveLength(0);
   });
 });
+
+describe("the age limit holds unless an object is actually found", () => {
+  const DAY = 24 * 3600 * 1000;
+  const ageBy = (id: number, days: number) =>
+    db
+      .update(billingRequestSubmissions)
+      .set({ submittedAt: new Date(Date.now() - days * DAY) })
+      .where(eq(billingRequestSubmissions.submissionId, id));
+  const META = (id: number) => ({ nc_form: String(BR_FORM_ID), nc_submission: String(id) });
+
+  it("expires a one-off whose first create failed outright and which then stalled past the limit", async () => {
+    stripe.fail("invoices.create", apiError(503));
+    await submit(181, ONE_OFF);
+    expect(await sub(181)).toMatchObject({ status: "pending", stripeInvoiceId: null });
+    expect((await sub(181)).stripeStartedAt).not.toBeNull();
+    await ageBy(181, 4);
+    await makeDue(181);
+    await cycle();
+    expect(await sub(181)).toMatchObject({ status: "failed", lastErrorCode: "request_expired" });
+    expect(stripe.callsTo("invoices.create")).toHaveLength(1); // the failed first one only
+    expect(stripe.callsTo("invoices.list").length).toBeGreaterThan(0); // it did look first
+    expect(stripe.created("invoices.create")).toHaveLength(0);
+    expect(cell(resultRows()[0], "Status")).toBe("Expired");
+  });
+
+  it("expires a plan whose first create failed and which then stalled, without making a product", async () => {
+    stripe.fail("products.create", apiError(503));
+    await submit(182, recurring());
+    await ageBy(182, 4);
+    await makeDue(182);
+    await cycle();
+    expect(await sub(182)).toMatchObject({ status: "failed", lastErrorCode: "request_expired" });
+    expect(stripe.callsTo("subscriptionSchedules.list").length).toBeGreaterThan(0);
+    expect(stripe.callsTo("products.create")).toHaveLength(1);
+    expect(stripe.callsTo("subscriptionSchedules.create")).toHaveLength(0);
+    expect(cell(resultRows()[0], "Status")).toBe("Expired");
+  });
+
+  it("still adopts an object that exists, at any age: a one-off invoice", async () => {
+    stripe.fail("invoices.create", connectionError(), 1, true);
+    await submit(183, ONE_OFF);
+    await ageBy(183, 20);
+    await makeDue(183);
+    await cycle();
+    expect(await sub(183)).toMatchObject({ status: "completed", outcome: "sent" });
+    expect(stripe.callsTo("invoices.create")).toHaveLength(1);
+  });
+
+  it("still adopts an object that exists, at any age: a plan's schedule", async () => {
+    stripe.fail("subscriptionSchedules.create", connectionError(), 1, true);
+    await submit(184, recurring());
+    await ageBy(184, 20);
+    await makeDue(184);
+    await cycle();
+    expect(await sub(184)).toMatchObject({ status: "completed", outcome: "scheduled" });
+    expect(stripe.callsTo("subscriptionSchedules.create")).toHaveLength(1);
+  });
+
+  it("resumes at any age once an id is saved", async () => {
+    stripe.fail("invoiceItems.create", apiError(503));
+    await submit(185, ONE_OFF);
+    await ageBy(185, 20);
+    await makeDue(185);
+    await cycle();
+    expect(await sub(185)).toMatchObject({ status: "completed", outcome: "sent" });
+  });
+
+  describe("an object with the same metadata on another Customer", () => {
+    const foreign = (id: number) => ({ ...META(id) });
+
+    it("is never adopted as an invoice", async () => {
+      stripe.fail("invoices.create", apiError(503));
+      await submit(191, ONE_OFF);
+      stripe.searchResults["invoices.list"] = [
+        { id: "in_decoy", customer: "cus_other", metadata: foreign(191) },
+      ];
+      await makeDue(191);
+      await cycle();
+      const row = await sub(191);
+      expect(row.status).toBe("completed");
+      expect(row.stripeInvoiceId).not.toBe("in_decoy");
+      expect(stripe.created("invoices.create")).toHaveLength(1);
+    });
+
+    it("is never adopted as a schedule, and does not stop the real one being created", async () => {
+      stripe.fail("products.create", apiError(503));
+      await submit(192, recurring());
+      stripe.searchResults["subscriptionSchedules.list"] = [
+        { id: "sub_sched_decoy", customer: "cus_other", metadata: foreign(192) },
+      ];
+      await makeDue(192);
+      await cycle();
+      const row = await sub(192);
+      expect(row).toMatchObject({ status: "completed", outcome: "scheduled" });
+      expect(row.stripeScheduleId).not.toBe("sub_sched_decoy");
+      expect(stripe.created("subscriptionSchedules.create")).toHaveLength(1);
+    });
+
+    it("does not rescue an expired request", async () => {
+      stripe.fail("invoices.create", apiError(503));
+      await submit(193, ONE_OFF);
+      stripe.searchResults["invoices.list"] = [
+        { id: "in_decoy", customer: "cus_other", metadata: foreign(193) },
+      ];
+      await ageBy(193, 4);
+      await makeDue(193);
+      await cycle();
+      expect(await sub(193)).toMatchObject({
+        status: "failed",
+        lastErrorCode: "request_expired",
+        stripeInvoiceId: null,
+      });
+    });
+
+    it("is ignored when it is older than the request (created filter)", async () => {
+      stripe.fail("invoices.create", apiError(503));
+      await submit(194, ONE_OFF);
+      stripe.searchResults["invoices.list"] = [
+        {
+          id: "in_old_same_customer",
+          customer: CUSTOMER,
+          created: 1_000_000,
+          metadata: foreign(194),
+        },
+      ];
+      await makeDue(194);
+      await cycle();
+      expect((await sub(194)).stripeInvoiceId).not.toBe("in_old_same_customer");
+      expect(stripe.created("invoices.create")).toHaveLength(1);
+    });
+  });
+});

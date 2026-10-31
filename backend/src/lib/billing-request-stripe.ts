@@ -82,6 +82,11 @@ export interface StripeJob {
   startUnix: number | null;
   /** The plan's start time has passed: refuse, but only after looking for a schedule that exists. */
   startPassed: boolean;
+  /**
+   * The request is older than the age limit and no Stripe id is saved: it resumes only if the
+   * lookup finds an object of its own; otherwise it is refused as expired before any create.
+   */
+  expiredUnlessFound: boolean;
 }
 
 export type Save = (patch: Partial<typeof billingRequestSubmissions.$inferInsert>) => Promise<void>;
@@ -203,6 +208,7 @@ export async function runStripeSteps(
         )?.id;
       }
       if (!id) {
+        if (job.expiredUnlessFound) throw new BillingRequestStripeError("request_expired", false);
         const invoice = await call("invoice", () =>
           stripe.invoices.create(
             {
@@ -309,6 +315,7 @@ export async function runStripeSteps(
       await save({ stripeScheduleId: found });
       return "scheduled";
     }
+    if (job.expiredUnlessFound) throw new BillingRequestStripeError("request_expired", false);
     if (job.startPassed) throw new BillingRequestStripeError("start_date_passed", false);
   }
   if (!row.stripeProductId) {

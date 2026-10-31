@@ -146,12 +146,17 @@ export class FakeInvoicingStripe {
       ...result,
       customer: params?.customer,
       invoice: params?.invoice,
+      created: Math.floor(Date.now() / 1000),
     });
   }
 
   private listPage(call: string, params: Record<string, any> | undefined) {
     let all = [...(this.searchResults[call] ?? []), ...(this.objects[call] ?? [])];
     if (params?.customer) all = all.filter((o) => !o.customer || o.customer === params.customer);
+    // Like Stripe, honour `created[gte]`; an object without a `created` is always in range.
+    if (params?.created?.gte !== undefined) {
+      all = all.filter((o) => o.created === undefined || o.created >= params.created.gte);
+    }
     if (params?.invoice) all = all.filter((o) => !o.invoice || o.invoice === params.invoice);
     if (typeof params?.query === "string") {
       all = all.filter(

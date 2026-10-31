@@ -516,13 +516,17 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
     row.stripeProductId !== null ||
     row.stripeScheduleId !== null;
 
-  if (
-    !priorAttempt &&
-    row.submittedAt &&
-    Date.now() - row.submittedAt.getTime() > ctx.settings.maxAgeHours * 3_600_000
-  ) {
+  // Too old to bill. With no Stripe call ever made that is final. After one, only an object that is
+  // actually found (a saved id, or the metadata lookup in runStripeSteps) resumes the request.
+  const tooOld =
+    row.submittedAt !== null &&
+    Date.now() - row.submittedAt.getTime() > ctx.settings.maxAgeHours * 3_600_000;
+  const hasSavedId =
+    row.stripeInvoiceId !== null || row.stripeProductId !== null || row.stripeScheduleId !== null;
+  if (tooOld && row.stripeStartedAt === null && !hasSavedId) {
     throw new BillingRequestInvalidError("request_expired");
   }
+  const expiredUnlessFound = tooOld && !hasSavedId;
 
   // Once Stripe has been called for this request it was authorized; a retry does not re-ask.
   if (!priorAttempt) await authorize(submission.userId, ctx);
@@ -563,6 +567,7 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
       daysUntilDue: ctx.settings.daysUntilDue,
       startUnix,
       startPassed,
+      expiredUnlessFound,
     },
     (patch) => saveUnderClaim(row, patch)
   );
