@@ -25,11 +25,11 @@ export default function SettingsPanel({ showToast }) {
 
   return (
     <div className="space-y-6">
-      <div className="p-4 bg-gray-700/50 rounded-lg border border-gray-600">
-        <h4 className="text-md font-semibold text-white mb-4 flex items-center gap-2">
+      <div className="p-4 bg-surface rounded-lg border border-line">
+        <h4 className="text-md font-semibold text-fg mb-4 flex items-center gap-2">
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            className="h-5 w-5 text-blue-400"
+            className="h-5 w-5 text-accent"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -49,10 +49,10 @@ export default function SettingsPanel({ showToast }) {
         <div className="space-y-4">
           {/* Default Fee Cents */}
           <div>
-            <label htmlFor="default_fee_cents" className="block text-sm text-gray-300 mb-1">
+            <label htmlFor="default_fee_cents" className="block text-sm text-fg mb-1">
               Global Default Fee (Fixed Cents)
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 id="default_fee_cents"
                 type="number"
@@ -60,7 +60,7 @@ export default function SettingsPanel({ showToast }) {
                 onChange={(e) =>
                   setFormValues({ ...formValues, default_fee_cents: e.target.value })
                 }
-                className="flex-1 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
+                className="min-w-0 flex-[1_1_10rem] rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus"
               />
               <button
                 type="button"
@@ -70,22 +70,22 @@ export default function SettingsPanel({ showToast }) {
                     getValueForSave("default_fee_cents", settings.defaultFeeCents)
                   )
                 }
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
+                className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
               </button>
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-fg-muted mt-1">
               Applied to transactions that don't have a specific client or group fee set.
             </p>
           </div>
 
           {/* Default Fee Percent */}
           <div>
-            <label htmlFor="default_fee_percent" className="block text-sm text-gray-300 mb-1">
+            <label htmlFor="default_fee_percent" className="block text-sm text-fg mb-1">
               Global Default Fee (%) (Optional)
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 id="default_fee_percent"
                 type="number"
@@ -94,7 +94,7 @@ export default function SettingsPanel({ showToast }) {
                 onChange={(e) =>
                   setFormValues({ ...formValues, default_fee_percent: e.target.value })
                 }
-                className="flex-1 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
+                className="min-w-0 flex-[1_1_10rem] rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus"
                 placeholder="e.g. 2.9"
               />
               <button
@@ -105,27 +105,27 @@ export default function SettingsPanel({ showToast }) {
                     getValueForSave("default_fee_percent", settings.defaultFeePercent ?? "")
                   )
                 }
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
+                className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
               </button>
             </div>
           </div>
 
-          <hr className="border-gray-700" />
+          <hr className="border-line" />
 
           {/* Company Name */}
           <div>
-            <label htmlFor="company_name" className="block text-sm text-gray-300 mb-1">
+            <label htmlFor="company_name" className="block text-sm text-fg mb-1">
               Platform Company Name
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 id="company_name"
                 type="text"
                 value={formValues.company_name ?? settings.companyName}
                 onChange={(e) => setFormValues({ ...formValues, company_name: e.target.value })}
-                className="flex-1 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
+                className="min-w-0 flex-[1_1_10rem] rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus"
               />
               <button
                 type="button"
@@ -135,7 +135,7 @@ export default function SettingsPanel({ showToast }) {
                     getValueForSave("company_name", settings.companyName)
                   )
                 }
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
+                className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
               </button>
@@ -144,16 +144,16 @@ export default function SettingsPanel({ showToast }) {
 
           {/* Contact Email */}
           <div>
-            <label htmlFor="contact_email" className="block text-sm text-gray-300 mb-1">
+            <label htmlFor="contact_email" className="block text-sm text-fg mb-1">
               Platform Contact Email
             </label>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 id="contact_email"
                 type="email"
                 value={formValues.contact_email ?? settings.contactEmail}
                 onChange={(e) => setFormValues({ ...formValues, contact_email: e.target.value })}
-                className="flex-1 rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100"
+                className="min-w-0 flex-[1_1_10rem] rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus"
               />
               <button
                 type="button"
@@ -163,24 +163,24 @@ export default function SettingsPanel({ showToast }) {
                     getValueForSave("contact_email", settings.contactEmail)
                   )
                 }
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
+                className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
               </button>
             </div>
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-fg-muted mt-1">
               Contact email shown to customers for support inquiries.
             </p>
           </div>
 
-          <hr className="border-gray-700" />
+          <hr className="border-line" />
 
           {/* Email Configuration - Read Only */}
           <div>
-            <h5 className="text-sm font-medium text-gray-200 mb-3 flex items-center gap-2">
+            <h5 className="text-sm font-medium text-fg mb-3 flex items-center gap-2">
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 text-gray-400"
+                className="h-4 w-4 text-fg-muted"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -195,19 +195,19 @@ export default function SettingsPanel({ showToast }) {
               Email Configuration
             </h5>
 
-            <div className="bg-gray-800/50 rounded-md p-3 border border-gray-600/50">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="block text-xs text-gray-400 mb-0.5">Sender Email</p>
-                  <span className="text-sm text-gray-200 font-mono">
+            <div className="bg-card rounded-md p-3 border border-line">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="block text-xs text-fg-muted mb-0.5">Sender Email</p>
+                  <span className="text-sm text-fg font-mono break-all">
                     {settings.smtpFrom || "Not configured"}
                   </span>
                 </div>
-                <span className="text-xs text-gray-500 bg-gray-700/50 px-2 py-1 rounded">
+                <span className="text-xs text-fg-muted bg-surface border border-line px-2 py-1 rounded">
                   Read-only
                 </span>
               </div>
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="text-xs text-fg-muted mt-2">
                 Configured via environment variables. Contact your administrator to change SMTP
                 settings.
               </p>

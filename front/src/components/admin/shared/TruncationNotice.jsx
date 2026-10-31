@@ -3,7 +3,7 @@
 export default function TruncationNotice({ shown, total, noun }) {
   if (typeof total !== "number" || total <= shown) return null;
   return (
-    <p className="text-xs text-yellow-400 py-2 text-center" role="status">
+    <p className="text-xs text-yellow-800 dark:text-yellow-400 py-2 text-center" role="status">
       Showing {shown} of {total} {noun}
     </p>
   );

@@ -13,6 +13,8 @@ export function scrollToSection(id) {
   const elementTop = element.getBoundingClientRect().top + window.scrollY;
   const targetPosition = Math.max(elementTop - headerOffset, 0);
 
-  window.scrollTo({ top: targetPosition, behavior: "smooth" });
+  // The CSS reduced-motion rule doesn't reach JS-requested smooth scrolling.
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: targetPosition, behavior: reduceMotion ? "auto" : "smooth" });
   return true;
 }

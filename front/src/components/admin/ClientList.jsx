@@ -31,12 +31,16 @@ function formatFee(client, groups) {
 
 function renderSyncBadge(client) {
   if (client.syncStatus === "failed") {
-    return <span className="text-xs font-semibold text-red-300">Failed</span>;
+    return <span className="text-xs font-semibold text-red-700 dark:text-red-300">Failed</span>;
   }
   if (client.syncStatus === "pending") {
-    return <span className="text-xs font-semibold text-yellow-300">Pending</span>;
+    return (
+      <span className="text-xs font-semibold text-yellow-800 dark:text-yellow-300">Pending</span>
+    );
   }
-  return <span className="text-xs font-semibold text-emerald-300">Synced</span>;
+  return (
+    <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Synced</span>
+  );
 }
 
 export default function ClientList({ showToast, workspace = "client_portal" }) {
@@ -176,7 +180,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
             header: "Group",
             render: (client) => {
               const groupName = groups.find((g) => g.id === client.groupId)?.name;
-              return groupName ?? <span className="text-gray-500">—</span>;
+              return groupName ?? <span className="text-fg-muted">—</span>;
             },
           },
         ]
@@ -218,8 +222,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
             {!isDfwscMode && (
               <Button
                 size="sm"
-                variant="ghost"
-                className="bg-purple-600 hover:bg-purple-700 text-white"
+                variant="secondary"
                 disabled={isOnboarded || isResending}
                 title={isOnboarded ? "Already onboarded" : "Resend onboarding link"}
                 onClick={() => handleResendLink(client)}
@@ -230,8 +233,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
             {!isDfwscMode && (
               <Button
                 size="sm"
-                variant="ghost"
-                className="bg-amber-600 hover:bg-amber-700 text-white"
+                variant="warning"
                 disabled={
                   regenerateKeyMutation.isPending && regenerateKeyMutation.variables === client.id
                 }

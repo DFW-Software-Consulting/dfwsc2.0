@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "../contexts/ThemeContext.jsx";
 import { scrollToSection } from "../utils/scrollToSection.js";
@@ -7,28 +7,28 @@ const navItems = [
   { type: "scroll", id: "services", label: "Solutions" },
   { type: "scroll", id: "values", label: "Values" },
   { type: "link", href: "/pricing", label: "Pricing" },
-  { type: "route", href: "/team", label: "Meet our team" },
+  { type: "route", href: "/team", label: "Our team" },
 ];
 
 function ThemeToggle({ theme, toggleTheme, mobile = false }) {
+  const label = `Switch to ${theme === "dark" ? "light" : "dark"} theme`;
   return (
     <button
       type="button"
       onClick={toggleTheme}
       className={`${
         mobile
-          ? "flex items-center gap-3 rounded-xl border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] px-4 py-3 text-[var(--text-muted)] dark:text-slate-300 transition-all hover:bg-slate-100 dark:hover:bg-white/[0.08]"
-          : "relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 dark:border-white/5 transition-all hover:bg-slate-100 dark:hover:bg-white/[0.05] hover:border-slate-300 dark:hover:border-white/20"
-      } cursor-pointer group shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500`}
-      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-      title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          ? "flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
+          : "relative flex h-10 w-10 items-center justify-center rounded-full border border-line transition-colors hover:bg-surface hover:border-line-strong"
+      } cursor-pointer group focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus`}
+      aria-label={mobile ? undefined : label}
     >
       <div className="relative h-5 w-5">
         {/* Sun icon */}
         <svg
           className={`absolute inset-0 transform transition-all duration-500 ${
             theme === "dark" ? "scale-0 rotate-90 opacity-0" : "scale-100 rotate-0 opacity-100"
-          } text-amber-500`}
+          } text-amber-700`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -61,11 +61,7 @@ function ThemeToggle({ theme, toggleTheme, mobile = false }) {
           />
         </svg>
       </div>
-      {mobile && (
-        <span className="text-sm font-medium">
-          {theme === "dark" ? "Switch to Light" : "Switch to Dark"}
-        </span>
-      )}
+      {mobile && <span className="text-sm font-medium">{label}</span>}
     </button>
   );
 }
@@ -76,15 +72,16 @@ export default function Navbar() {
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [prevPathname, setPrevPathname] = useState(location.pathname);
+  const menuButtonRef = useRef(null);
 
   // Unified clickable pill style
   const desktopItemClasses =
-    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-slate-200 dark:border-white/5 px-4 py-2 text-sm font-medium text-[var(--text-muted)] dark:text-slate-300 transition-all duration-300 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
+    "group relative inline-flex items-center justify-center overflow-hidden rounded-full border border-line px-4 py-2 text-sm font-medium text-fg-muted transition-colors duration-200 hover:border-line-strong hover:text-fg hover:bg-surface aria-[current=page]:border-line-strong aria-[current=page]:bg-accent-soft aria-[current=page]:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus cursor-pointer";
   const desktopGlow =
     "pointer-events-none absolute inset-0 rounded-full bg-gradient-to-r from-brand-500/0 via-brand-500/5 to-brand-500/0 opacity-0 transition-opacity duration-500 group-hover:opacity-100";
 
   const mobileItemClasses =
-    "group relative overflow-hidden rounded-xl border border-slate-200 dark:border-white/5 px-4 py-3 text-left text-[var(--text-muted)] dark:text-slate-200 transition-all duration-200 hover:border-brand-500/30 dark:hover:border-white/20 hover:text-brand-800 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-white/[0.05] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none";
+    "group relative overflow-hidden rounded-xl border border-line px-4 py-3 text-left text-fg-muted transition-colors duration-200 hover:border-line-strong hover:text-fg hover:bg-surface aria-[current=page]:border-line-strong aria-[current=page]:bg-accent-soft aria-[current=page]:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus cursor-pointer";
   const mobileGlow =
     "pointer-events-none absolute inset-0 rounded-xl bg-brand-500/0 opacity-0 transition duration-200 group-hover:opacity-100 group-hover:bg-brand-500/5";
 
@@ -95,6 +92,18 @@ export default function Navbar() {
     setPrevPathname(location.pathname);
     setMenuOpen(false);
   }
+
+  // Escape closes the open mobile menu and returns focus to its toggle.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      setMenuOpen(false);
+      menuButtonRef.current?.focus();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [menuOpen]);
 
   const handleScroll = (id) => {
     if (location.pathname !== "/") {
@@ -112,8 +121,8 @@ export default function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-200 dark:border-white/[0.08] bg-[var(--bg-main)] dark:bg-[var(--bg-main)]/80 backdrop-blur-xl transition-colors duration-300">
-      <div className="relative mx-auto flex h-20 w-full max-w-6xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-50 border-b border-line bg-page/90 backdrop-blur-xl transition-colors duration-300">
+      <div className="page-wrap relative flex h-20 items-center justify-between gap-6">
         <Link
           to="/"
           onClick={handleLogoClick}
@@ -127,7 +136,7 @@ export default function Navbar() {
           />
         </Link>
 
-        <nav className="hidden items-center gap-4 text-sm font-medium sm:flex">
+        <nav aria-label="Main" className="hidden items-center gap-3 text-sm font-medium lg:flex">
           {navItems.map((item) => {
             if (item.type === "scroll") {
               return (
@@ -136,7 +145,6 @@ export default function Navbar() {
                   type="button"
                   onClick={() => handleScroll(item.id)}
                   className={desktopItemClasses}
-                  title={item.label}
                 >
                   <span aria-hidden="true" className={desktopGlow} />
                   <span className="relative z-10">{item.label}</span>
@@ -149,7 +157,6 @@ export default function Navbar() {
                 key={item.label}
                 to={item.href}
                 className={desktopItemClasses}
-                title={item.label}
                 aria-current={location.pathname === item.href ? "page" : undefined}
               >
                 <span aria-hidden="true" className={desktopGlow} />
@@ -159,27 +166,27 @@ export default function Navbar() {
           })}
         </nav>
 
-        <div className="hidden items-center gap-4 sm:flex">
+        <div className="hidden items-center gap-4 lg:flex">
           <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
           <Link
             to="/"
             state={{ scrollTo: "contact" }}
-            className="cursor-pointer items-center justify-center gap-2 rounded-full bg-gradient-to-b from-brand-400 to-brand-600 px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition-all duration-300 hover:shadow-glow-strong hover:-translate-y-0.5 active:translate-y-0 active:scale-95 inline-flex focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
-            title="Start a project"
+            className="cursor-pointer items-center justify-center gap-2 rounded-full bg-brand-500 px-6 py-2.5 text-sm font-semibold text-white shadow-glow transition-all duration-300 hover:bg-brand-600 hover:shadow-glow-strong hover:-translate-y-0.5 active:translate-y-0 active:scale-95 inline-flex focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             Start a project
           </Link>
         </div>
 
-        <div className="flex items-center gap-4 sm:hidden">
+        <div className="flex items-center gap-4 lg:hidden">
           <ThemeToggle theme={theme} toggleTheme={toggleTheme} />
           <button
+            ref={menuButtonRef}
             type="button"
             onClick={() => setMenuOpen((prev) => !prev)}
-            className="inline-flex items-center justify-center rounded-full border border-slate-200 dark:border-white/10 p-2 text-slate-600 dark:text-slate-400 transition hover:border-brand-400 hover:text-brand-600 dark:hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500 cursor-pointer shadow-sm dark:shadow-none"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-line text-fg-muted transition-colors hover:border-line-strong hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus cursor-pointer"
             aria-expanded={menuOpen}
-            aria-label="Toggle navigation"
-            title="Toggle navigation"
+            aria-controls="mobile-menu"
+            aria-label="Menu"
           >
             <span className="relative flex h-5 w-6 flex-col justify-between">
               <span
@@ -203,8 +210,12 @@ export default function Navbar() {
       </div>
 
       {menuOpen && (
-        <div className="border-t border-slate-200 dark:border-white/10 bg-[var(--bg-main)]/95 sm:hidden transition-colors duration-300">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-6 text-sm font-medium">
+        <nav
+          id="mobile-menu"
+          aria-label="Main"
+          className="border-t border-line bg-page/95 lg:hidden transition-colors duration-300"
+        >
+          <div className="page-wrap flex flex-col gap-3 py-6 text-sm font-medium">
             {navItems.map((item) => {
               if (item.type === "scroll") {
                 return (
@@ -213,7 +224,6 @@ export default function Navbar() {
                     type="button"
                     onClick={() => handleScroll(item.id)}
                     className={mobileItemClasses}
-                    title={item.label}
                   >
                     <span aria-hidden="true" className={mobileGlow} />
                     <span className="relative z-10">{item.label}</span>
@@ -226,8 +236,7 @@ export default function Navbar() {
                   key={item.label}
                   to={item.href}
                   onClick={() => setMenuOpen(false)}
-                  className={`${mobileItemClasses} text-center`}
-                  title={item.label}
+                  className={mobileItemClasses}
                   aria-current={location.pathname === item.href ? "page" : undefined}
                 >
                   <span aria-hidden="true" className={mobileGlow} />
@@ -240,13 +249,12 @@ export default function Navbar() {
               to="/"
               state={{ scrollTo: "contact" }}
               onClick={() => setMenuOpen(false)}
-              className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-glow transition duration-200 hover:-translate-y-0.5 hover:bg-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
-              title="Start a project"
+              className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-glow transition duration-200 hover:-translate-y-0.5 hover:bg-brand-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               Start a project
             </Link>
           </div>
-        </div>
+        </nav>
       )}
     </header>
   );

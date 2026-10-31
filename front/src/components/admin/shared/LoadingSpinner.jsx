@@ -7,7 +7,7 @@ export default function LoadingSpinner({ message = "Loading...", size = "md" }) 
           isSmall ? "h-6 w-6" : "h-8 w-8"
         }`}
       />
-      <p className={isSmall ? "mt-2 text-sm text-gray-400" : "mt-3 text-gray-300"}>{message}</p>
+      <p className={isSmall ? "mt-2 text-sm text-fg-muted" : "mt-3 text-fg-muted"}>{message}</p>
     </div>
   );
 }

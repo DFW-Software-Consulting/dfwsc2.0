@@ -1,9 +1,20 @@
+// Variants own every color class. `className` is for layout only (width, margin, shadow):
+// two utilities for the same property resolve by stylesheet order, not by their order in
+// the class string, so a color passed through `className` cannot reliably beat the variant.
+// Add a variant here instead of overriding colors at the call site.
 const VARIANT_CLASSES = {
   primary: "bg-blue-600 hover:bg-blue-700 text-white",
   danger: "bg-red-600 hover:bg-red-700 text-white",
   success: "bg-green-600 hover:bg-green-700 text-white",
-  secondary: "bg-gray-700 hover:bg-gray-600 text-white",
-  ghost: "bg-transparent hover:bg-gray-700 text-gray-300",
+  warning: "bg-amber-700 hover:bg-amber-800 text-white",
+  secondary: "border border-line bg-surface hover:border-line-strong text-fg",
+  ghost: "bg-transparent hover:bg-accent-soft text-fg-muted",
+  "ghost-info":
+    "bg-transparent text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-400/10",
+  "ghost-warning":
+    "bg-transparent text-yellow-800 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-400/10",
+  "ghost-danger":
+    "bg-transparent text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-400/10",
 };
 
 const SIZE_CLASSES = {
@@ -19,11 +30,13 @@ export default function Button({
   onClick,
   type = "button",
   children,
+  title,
   className = "",
 }) {
   return (
     <button
       type={type}
+      title={title}
       onClick={onClick}
       disabled={disabled || isLoading}
       className={`rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${VARIANT_CLASSES[variant] ?? VARIANT_CLASSES.primary} ${SIZE_CLASSES[size] ?? SIZE_CLASSES.md} ${className}`}
