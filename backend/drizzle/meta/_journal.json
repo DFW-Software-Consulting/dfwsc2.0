@@ -183,6 +183,13 @@
       "when": 1791032751993,
       "tag": "0025_payment_ledger_per_client_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793402541038,
+      "tag": "0026_cerebo_module",
+      "breakpoints": true
     }
   ]
 }

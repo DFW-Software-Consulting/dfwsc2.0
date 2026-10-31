@@ -34,6 +34,10 @@ services:
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
       API_BASE_URL: ${API_BASE_URL}
       ALLOW_ADMIN_SETUP: ${ALLOW_ADMIN_SETUP}
+      CEREBO_ENABLED: ${CEREBO_ENABLED}
+      NEXTCLOUD_BASE_URL: ${NEXTCLOUD_BASE_URL}
+      NEXTCLOUD_USERNAME: ${NEXTCLOUD_USERNAME}
+      NEXTCLOUD_APP_PASSWORD: ${NEXTCLOUD_APP_PASSWORD}
       # SETUP_FLAG_PATH is intentionally not wired here: it defaults to an
       # ephemeral container path with no persistent volume, so it resets on
       # every redeploy. The DB-level `setupConfirmed` guard is the
