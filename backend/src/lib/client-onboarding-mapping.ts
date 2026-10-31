@@ -32,6 +32,10 @@ const INTAKE_QUESTION_NAMES = {
   leadLink: "lead_link",
 } as const;
 
+// Optional question (technical name "billing_email"): absent from older forms, and an
+// unknown extra question is ignored, so adding or removing it never breaks the sync.
+const BILLING_EMAIL_QUESTION_NAME = "billing_email";
+
 const PROJECT_COLUMN_TITLES = {
   projectCode: "Project Code",
   projectName: "Project Name",
@@ -116,9 +120,11 @@ export interface Intake {
   startDate?: string;
   targetDate?: string;
   leadLink?: string;
+  /** Optional billing email answer (raw, trimmed); validated where it is used. */
+  billingEmail?: string;
 }
 
-export type IntakeQuestionMap = Record<IntakeField, number>;
+export type IntakeQuestionMap = Record<IntakeField, number> & { billingEmail?: number };
 
 export function resolveIntakeQuestions(questions: IntakeQuestion[]): IntakeQuestionMap {
   const byName = new Map(questions.map((q) => [q.name.trim(), q.id]));
@@ -130,13 +136,17 @@ export function resolveIntakeQuestions(questions: IntakeQuestion[]): IntakeQuest
     else map[field] = id;
   }
   if (missing.length) throw new OnboardingConfigError("form_questions_missing", missing);
+  const billingEmail = byName.get(BILLING_EMAIL_QUESTION_NAME);
+  if (billingEmail !== undefined) map.billingEmail = billingEmail;
   return map;
 }
 
 export function extractIntake(answers: IntakeAnswer[], questions: IntakeQuestionMap): Intake {
-  const textFor = (field: IntakeField): string | undefined => {
+  const textFor = (field: IntakeField | "billingEmail"): string | undefined => {
+    const questionId = questions[field];
+    if (questionId === undefined) return undefined;
     const parts = answers
-      .filter((a) => a.questionId === questions[field])
+      .filter((a) => a.questionId === questionId)
       .map((a) => a.text.trim())
       .filter(Boolean);
     return parts.length ? parts.join(", ") : undefined;
@@ -155,6 +165,7 @@ export function extractIntake(answers: IntakeAnswer[], questions: IntakeQuestion
     "startDate",
     "targetDate",
     "leadLink",
+    "billingEmail",
   ] as const) {
     const value = textFor(field);
     if (value !== undefined) intake[field] = value;

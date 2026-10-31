@@ -73,6 +73,8 @@ All resources can be deployed independently on Coolify while sharing the same mo
   # Optional: per-project Nextcloud Teams, wikis and folder shares (docs/BACKEND.md section 10); off by default
   CLIENT_ONBOARDING_PROJECT_TEAMS=false
   CLIENT_ONBOARDING_TEAM_ADMINS=user-id-one,user-id-two
+  # Optional: create/link a Stripe Customer on the platform account per client (docs/BACKEND.md section 10); off by default
+  CLIENT_ONBOARDING_BILLING_CUSTOMER=false
   ```
 - **Admin login (Nextcloud)**: the admin panel signs users in against Nextcloud; there are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ALLOW_ADMIN_SETUP` are no longer read (remove them from Coolify). Before deploying this change:
   1. **Create the Nextcloud groups first and put members in them.** The defaults are `dfwsc-admins` and `managers` (override with `ADMIN_NEXTCLOUD_GROUPS`, comma-separated, exact ids). A user whose Nextcloud account is in none of them gets 403 "This Nextcloud account isn't authorized for the admin panel".

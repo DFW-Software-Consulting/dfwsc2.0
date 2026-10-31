@@ -385,6 +385,12 @@ export const clientOnboardingSubmissions = pgTable(
     // 5. Sales Pipeline row. A non-"won" status is a flag for an operator, not a failure.
     leadStatus: text("lead_status", { enum: ["won", "no_match", "ambiguous", "already_linked"] }),
     leadRowId: integer("lead_row_id"),
+    // 6. DFWSC billing Customer (CLIENT_ONBOARDING_BILLING_CUSTOMER=true only; NULL when off).
+    // The Customer itself lives in billing_customers. Non-"linked" statuses are flags for an
+    // operator, not failures: ambiguous = several Stripe Customers share the email,
+    // no_email = the submission has no email to match on.
+    billingStatus: text("billing_status", { enum: ["linked", "ambiguous", "no_email"] }),
+    billingCustomerId: text("billing_customer_id"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
@@ -412,6 +418,38 @@ export const clientOnboardingSubmissions = pgTable(
     leadStatusCheck: check(
       "client_onboarding_submissions_lead_status_check",
       sql`${table.leadStatus} IS NULL OR ${table.leadStatus} IN ('won', 'no_match', 'ambiguous', 'already_linked')`
+    ),
+    billingStatusCheck: check(
+      "client_onboarding_submissions_billing_status_check",
+      sql`${table.billingStatus} IS NULL OR ${table.billingStatus} IN ('linked', 'ambiguous', 'no_email')`
+    ),
+  })
+);
+
+// DFWSC's own billing Customers (platform Stripe account), one row per client code.
+// Deliberately unrelated to clients / payment_ledger (Stripe Connect): a business can be
+// both. Several client codes may share one Customer, so stripe_customer_id is not unique.
+export const billingCustomers = pgTable(
+  "billing_customers",
+  {
+    clientCode: text("client_code").primaryKey(),
+    company: text("company").notNull(),
+    // Lowercased.
+    email: text("email").notNull(),
+    stripeCustomerId: text("stripe_customer_id").notNull(),
+    source: text("source", { enum: ["created", "matched", "backfill"] }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    emailIdx: index("billing_customers_email_idx").on(sql`lower(${table.email})`),
+    stripeCustomerIdx: index("billing_customers_stripe_customer_id_idx").on(table.stripeCustomerId),
+    sourceCheck: check(
+      "billing_customers_source_check",
+      sql`${table.source} IN ('created', 'matched', 'backfill')`
     ),
   })
 );

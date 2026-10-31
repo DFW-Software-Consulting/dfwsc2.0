@@ -2,7 +2,11 @@ import { Readable } from "node:stream";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
-import { clientOnboardingSubmissions, clientOnboardingSyncState } from "../../db/schema";
+import {
+  billingCustomers,
+  clientOnboardingSubmissions,
+  clientOnboardingSyncState,
+} from "../../db/schema";
 import {
   type ClientOnboardingRunner,
   getClientOnboardingStats,
@@ -13,6 +17,7 @@ import {
 import { CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX } from "../../lib/constants";
 import { resetNextcloudBreakerForTests } from "../../lib/nextcloud";
 import { hitBuckets } from "../../lib/rate-limit";
+import { stripe } from "../../lib/stripe";
 import { isAuthorizedWebhook } from "../../routes/nextcloud-webhooks";
 import { ensureBaseEnv } from "../helpers/env";
 import {
@@ -80,6 +85,7 @@ describe("POST /webhooks/nextcloud/client-onboarding", () => {
   beforeEach(async () => {
     await db.delete(clientOnboardingSubmissions);
     await db.delete(clientOnboardingSyncState);
+    await db.delete(billingCustomers);
     hitBuckets.clear();
     resetNextcloudBreakerForTests();
     resetClientOnboardingStateForTests();
@@ -230,5 +236,41 @@ describe("POST /webhooks/nextcloud/client-onboarding", () => {
     expect(created()).toHaveLength(1);
     expect(created()[0].data.get(PROJECT_COLUMNS["Project Name"])).toBe("Warehouse Portal");
     expect(JSON.stringify([...created()[0].data.values()])).not.toContain("Injected");
+  });
+
+  it("creates one billing Customer when a webhook and a poll cycle run together", async () => {
+    const list = vi
+      .spyOn(stripe.customers, "list")
+      .mockResolvedValue({ data: [] } as unknown as Awaited<
+        ReturnType<typeof stripe.customers.list>
+      >);
+    const create = vi
+      .spyOn(stripe.customers, "create")
+      .mockResolvedValue({ id: "cus_route" } as unknown as Awaited<
+        ReturnType<typeof stripe.customers.create>
+      >);
+    const env = onboardingEnv({
+      CLIENT_ONBOARDING_POLL_INTERVAL_MS: "600000",
+      CLIENT_ONBOARDING_BILLING_CUSTOMER: "true",
+    });
+    await start(env);
+    fake.addSubmission(5, {
+      company: "Zephyrine Widgets LLC",
+      email: "ophelia@zephyrine.example",
+      project_name: "Warehouse Portal",
+      summary: "Build the portal",
+    });
+    const [res] = await Promise.all([
+      post({ authorization: `Bearer ${ONB_WEBHOOK_SECRET}` }),
+      runClientOnboardingCycle({ logger: silent, env }),
+    ]);
+    expect(res.statusCode).toBe(202);
+    await vi.waitFor(async () => expect(await db.select().from(billingCustomers)).toHaveLength(1));
+    await runner?.stop();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalled();
+    const [row] = await db.select().from(clientOnboardingSubmissions);
+    expect(row).toMatchObject({ status: "completed", billingStatus: "linked" });
+    vi.restoreAllMocks();
   });
 });

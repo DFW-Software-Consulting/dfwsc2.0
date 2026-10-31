@@ -56,7 +56,11 @@ export const INTAKE_QUESTIONS = {
   lead_link: 209,
 } as const;
 
-export type IntakeAnswers = Partial<Record<keyof typeof INTAKE_QUESTIONS, string>>;
+/** Optional question, not on the default form; tests add it to fake.questions. */
+export const BILLING_EMAIL_QUESTION = { id: 210, name: "billing_email", text: "Billing email" };
+const ALL_QUESTION_IDS = { ...INTAKE_QUESTIONS, billing_email: BILLING_EMAIL_QUESTION.id };
+
+export type IntakeAnswers = Partial<Record<keyof typeof ALL_QUESTION_IDS, string>>;
 
 export const PROJECT_COLUMNS = {
   "Project Code": 26,
@@ -425,7 +429,7 @@ export class FakeOnboardingNextcloud {
     const answers = Object.entries(sub.answers).map(([name, text], i) => ({
       id: id * 100 + i,
       submissionId: id,
-      questionId: INTAKE_QUESTIONS[name as keyof typeof INTAKE_QUESTIONS],
+      questionId: ALL_QUESTION_IDS[name as keyof typeof ALL_QUESTION_IDS],
       text,
     }));
     return { id, formId: ONB_FORM_ID, userId: sub.userId, timestamp: id, answers };
