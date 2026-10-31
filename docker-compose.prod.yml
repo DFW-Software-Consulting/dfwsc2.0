@@ -33,7 +33,7 @@ services:
       JWT_EXPIRY: ${JWT_EXPIRY}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
       API_BASE_URL: ${API_BASE_URL}
-      ALLOW_ADMIN_SETUP: ${ALLOW_ADMIN_SETUP}
+      ADMIN_NEXTCLOUD_GROUPS: ${ADMIN_NEXTCLOUD_GROUPS:-dfwsc-admins,managers}
       NEXTCLOUD_BASE_URL: ${NEXTCLOUD_BASE_URL}
       NEXTCLOUD_USERNAME: ${NEXTCLOUD_USERNAME}
       NEXTCLOUD_APP_PASSWORD: ${NEXTCLOUD_APP_PASSWORD}
@@ -54,11 +54,6 @@ services:
       CLIENT_ONBOARDING_POLL_INTERVAL_MS: ${CLIENT_ONBOARDING_POLL_INTERVAL_MS:-300000}
       CLIENT_ONBOARDING_PROJECT_TEAMS: ${CLIENT_ONBOARDING_PROJECT_TEAMS:-false}
       CLIENT_ONBOARDING_TEAM_ADMINS: ${CLIENT_ONBOARDING_TEAM_ADMINS:-}
-      # SETUP_FLAG_PATH is intentionally not wired here: it defaults to an
-      # ephemeral container path with no persistent volume, so it resets on
-      # every redeploy. The DB-level `setupConfirmed` guard is the
-      # authoritative protection against re-running admin setup; the file
-      # flag is only a secondary, non-persistent safeguard.
       DEFAULT_PROCESS_FEE_CENTS: ${DEFAULT_PROCESS_FEE_CENTS}
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT}

@@ -48,7 +48,8 @@ All resources can be deployed independently on Coolify while sharing the same mo
   SMTP_PASS=your_smtp_password
   SMTP_FROM=noreply@yourdomain.com
   API_BASE_URL=https://your-backend-domain.com
-  ALLOW_ADMIN_SETUP=false  # Set to true only during initial admin setup
+  # Admin panel login: Nextcloud groups allowed to sign in (comma-separated; default shown)
+  ADMIN_NEXTCLOUD_GROUPS=dfwsc-admins,managers
   # Optional: Nextcloud New Lead automation (docs/BACKEND.md §9); off unless enabled
   NEXTCLOUD_BASE_URL=https://cloud.example.com
   NEXTCLOUD_USERNAME=dfwsc-admin
@@ -73,7 +74,13 @@ All resources can be deployed independently on Coolify while sharing the same mo
   CLIENT_ONBOARDING_PROJECT_TEAMS=false
   CLIENT_ONBOARDING_TEAM_ADMINS=user-id-one,user-id-two
   ```
-- **First admin (first deploy only)**: the first admin is created at startup from `ADMIN_USERNAME` and `ADMIN_PASSWORD`, only when the `admins` table is empty (a leftover `ADMIN_PASSWORD` is ignored later, with a startup warning). `ADMIN_PASSWORD` is plaintext (at least 12 characters in production) and is hashed by the server — never supply a bcrypt hash, because the hash string itself would become the password. With `ALLOW_ADMIN_SETUP=true` the admin is created unconfirmed: log in at `/admin`, confirm permanent credentials, then **remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment** and set `ALLOW_ADMIN_SETUP=false`. `docker-compose.prod.yml` does not currently pass `ADMIN_USERNAME` or `ADMIN_PASSWORD` to the `api` container, so they only reach it if you add them to that service's `environment` for the first deploy (and remove them again afterwards).
+- **Admin login (Nextcloud)**: the admin panel signs users in against Nextcloud; there are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ALLOW_ADMIN_SETUP` are no longer read (remove them from Coolify). Before deploying this change:
+  1. **Create the Nextcloud groups first and put members in them.** The defaults are `dfwsc-admins` and `managers` (override with `ADMIN_NEXTCLOUD_GROUPS`, comma-separated, exact ids). A user whose Nextcloud account is in none of them gets 403 "This Nextcloud account isn't authorized for the admin panel".
+  2. **`NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD` must be set** (HTTPS only). The service account must be a Nextcloud admin: it reads each user's groups with `GET /ocs/v2.php/cloud/users/{id}/groups`. Without them login answers 503 "Admin login is unavailable".
+  3. **Accounts with two-factor login must sign in with a Nextcloud app password** (Settings → Security → Devices & sessions), not the account password.
+  - **No local fallback.** If Nextcloud is down, slow or its breaker is open, admin login answers 503 until it recovers. Payments, webhooks and API-key routes do not depend on Nextcloud and are unaffected. Admin JWTs already issued stay valid until they expire (`JWT_EXPIRY`, default 1h); tokens issued before this change (whose `sub` was an `admins` row id) also keep working until then.
+  - **Brute-force note.** Nextcloud throttles failed logins by source IP, and every check comes from the API server, so unthrottled guessing here would also slow the service account's own automation calls (forms, contacts, files). `POST /auth/login` is therefore limited to 5 requests per 15 minutes per client IP and 10 per 15 minutes per username (case-insensitive). Nextcloud's own throttle (HTTP 429) is reported as 503.
+  - The `admins` table is left in the database for now and is no longer read or written; a later change drops it.
 - **Startup Command**: `node dist/index.js` (handled by Dockerfile). DB migrations run automatically on each deploy via the `migrator` service above — no separate manual migration step is needed.
 - **Dependencies**: Database must be reachable via `DATABASE_URL` before deploying; within the compose stack, `api` also depends on `migrator` (completed) and `dfwsc-redis` (started) automatically
 - **Healthcheck**: `curl -f http://localhost:4242/api/v1/health || exit 1` (the compose file itself uses an equivalent `wget` healthcheck)

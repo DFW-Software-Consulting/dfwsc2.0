@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import jwt from "jsonwebtoken";
 import { db } from "../db/client";
-import { admins, clients } from "../db/schema";
+import { clients } from "../db/schema";
 
 export function sha256Lookup(apiKey: string): string {
   return crypto.createHash("sha256").update(apiKey).digest("hex");
@@ -221,17 +221,6 @@ export async function verifyPassword(plaintext: string, hashed: string): Promise
   return bcrypt.compare(plaintext, hashed);
 }
 
-export async function getAdminFromDb(username: string): Promise<{
-  id: string;
-  username: string;
-  passwordHash: string;
-  setupConfirmed: boolean | null;
-  active: boolean | null;
-} | null> {
-  const [admin] = await db.select().from(admins).where(eq(admins.username, username)).limit(1);
-  return admin ?? null;
-}
-
 export function signJwt(payload: { role: string; sub: string }): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
@@ -272,27 +261,9 @@ export async function requireAdminJwt(request: FastifyRequest, reply: FastifyRep
       return reply.code(403).send({ error: "Forbidden: Admin role required" });
     }
 
-    // Re-validate the admin against the DB so that deactivated or deleted
-    // admins lose access immediately instead of remaining valid until the
-    // token expires. Tokens issued by signJwt always carry `sub`; if `sub`
-    // is absent we fall back to trusting the (validly signed) token.
-    if (decoded.sub) {
-      let adminRow: typeof admins.$inferSelect | undefined;
-      try {
-        [adminRow] = await db.select().from(admins).where(eq(admins.id, decoded.sub)).limit(1);
-      } catch (dbError) {
-        request.log.error({ dbError }, "Error validating admin session against DB");
-        return reply.code(500).send({ error: "Internal server error" });
-      }
-
-      if (!adminRow || adminRow.active === false) {
-        return reply.code(401).send({ error: "Account is not active" });
-      }
-
-      (request as any).admin = adminRow;
-    } else {
-      (request as any).admin = decoded;
-    }
+    // The signature, expiry and role are the whole check: the login already verified the
+    // account against Nextcloud, and the token is short-lived (JWT_EXPIRY).
+    (request as any).admin = decoded;
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
       return reply.code(401).send({ error: "Token expired" });

@@ -100,8 +100,7 @@ Rate limiting is per-IP (IPv6 visitors are limited per /64 prefix) or per Stripe
 
 | Endpoint | Limit |
 |----------|-------|
-| `POST /auth/login` | 5 req / 15 min |
-| `POST /auth/setup` | 3 req / 15 min |
+| `POST /auth/login` | 5 req / 15 min per IP, and 10 req / 15 min per username |
 | `POST /accounts` | 10 req / min |
 | `POST /onboard-client/initiate` | 10 req / min |
 | `POST /onboard-client/resend` | 5 req / min |
@@ -196,7 +195,7 @@ Honeypot submissions are silently discarded and answered with the same `201 { "o
 
 #### `POST /api/v1/auth/login`
 
-Get a JWT token for admin access.
+Get a JWT token for admin access. The credentials are a **Nextcloud** username and password, checked against Nextcloud; the account must belong to a group in `ADMIN_NEXTCLOUD_GROUPS` (default `dfwsc-admins,managers`). Accounts with two-factor login must use a Nextcloud app password.
 
 **Request:**
 ```json
@@ -217,66 +216,9 @@ Get a JWT token for admin access.
 **Errors:**
 - `400` — Missing username or password
 - `401` — Wrong credentials
+- `403` — Valid Nextcloud credentials, but the account is not in an allowed group ("This Nextcloud account isn't authorized for the admin panel")
 - `429` — Rate limited
-
----
-
-#### `GET /api/v1/auth/setup/status`
-
-Check whether first-run admin setup is available.
-
-**Response `200`:**
-```json
-{
-  "setupAllowed": true,
-  "adminConfigured": false
-}
-```
-
-> This is only relevant for first-time deployment. Once an admin is configured and `setupConfirmed` is true, bootstrap will be complete.
-
----
-
-#### `POST /api/v1/auth/setup`
-
-> **Deprecated.** This endpoint no longer creates an admin account and always returns `410 Gone`. Bootstrap the initial admin by setting the `ADMIN_USERNAME` / `ADMIN_PASSWORD` environment variables, logging in via `/auth/login`, then calling `/auth/confirm-bootstrap` (see the Setup Flow below).
-
-**Response `410`:**
-```json
-{
-  "error": "This endpoint is deprecated. Bootstrap the admin using the ADMIN_USERNAME and ADMIN_PASSWORD environment variables and /auth/confirm-bootstrap."
-}
-```
-
----
-
-#### `POST /api/v1/auth/confirm-bootstrap`
-
-**Auth: Admin JWT**
-
-Finalizes the admin account setup. Call this after logging in via `/auth/login` with the bootstrap credentials (`ADMIN_USERNAME` / `ADMIN_PASSWORD`) to obtain a JWT. This confirms the credentials in the database and clears the pending bootstrap state.
-
-**Request:**
-```json
-{
-  "username": "admin",
-  "password": "at-least-8-chars"
-}
-```
-
-**Response `200`:**
-```json
-{
-  "message": "Admin credentials confirmed"
-}
-```
-
-**Errors:**
-- `400` — Missing username/password, or bootstrap already confirmed, or no bootstrap admin found
-- `401` — Missing or invalid admin JWT
-- `429` — Rate limited
-
-> **Setup Flow:** 1) Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` environment variables → 2) Login via `/auth/login` with those credentials to obtain an admin JWT (the response indicates `bootstrapPending`) → 3) Call `/auth/confirm-bootstrap` with that Bearer token to finalize setup.
+- `503` — Nextcloud unreachable, erroring or not configured ("Admin login is unavailable"). There is no local fallback.
 
 ---
 
@@ -1065,8 +1007,6 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | `SMTP_USER` | SMTP username |
 | `SMTP_PASS` | SMTP password |
 | `JWT_SECRET` | At least 32 characters — used to sign admin JWTs |
-| `ADMIN_USERNAME` | Admin login username |
-| `ADMIN_PASSWORD` | Admin password (bcrypt hash in production) |
 
 ### Optional
 
@@ -1083,8 +1023,8 @@ Example: if a client has `processingFeePercent = 2.5` and the payment amount is 
 | `TRUST_PROXY` | `loopback,linklocal,uniquelocal` | Reverse proxies trusted for `X-Forwarded-For` (so `request.ip`, and per-IP rate limits, use the real client). Accepts `true`, `false`, or a comma-separated IP/CIDR list. Default trusts private-network proxies only. Numeric hop counts are no longer supported (Fastify 5.12+); a numeric value logs a warning and uses the default |
 | `CLOUDFLARE_IP_RANGES` | built-in Cloudflare ranges | Comma-separated CIDRs that replace the built-in Cloudflare edge list; when the proxied peer is inside this list, per-IP rate limits key on the `CF-Connecting-IP` header instead of the edge address (IPv6 visitors are limited per /64 prefix). Set to `none` to ignore `CF-Connecting-IP`; invalid entries abort startup |
 
-### First-run setup only
+### Admin login
 
 | Variable | Description |
 |----------|-------------|
-| `ALLOW_ADMIN_SETUP` | Set to `true` to enable the `/auth/setup` endpoint |
+| `ADMIN_NEXTCLOUD_GROUPS` | Comma-separated Nextcloud groups allowed to sign in (default `dfwsc-admins,managers`). Login also needs `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD` |

@@ -22,8 +22,7 @@ const OPTIONAL_ENV_VARS = [
   "DEFAULT_PAYMENT_CANCEL_URL",
   "DEFAULT_PROCESS_FEE_CENTS",
   "SMTP_FROM",
-  "ALLOW_ADMIN_SETUP",
-  "ADMIN_PASSWORD",
+  "ADMIN_NEXTCLOUD_GROUPS",
   "REDIS_URL",
   "CONTACT_INBOX",
   "NEXTCLOUD_BASE_URL",
@@ -55,7 +54,6 @@ const FULLY_SECRET_ENV_VARS = new Set([
   "JWT_SECRET",
   "SMTP_PASS",
   "DATABASE_URL",
-  "ADMIN_PASSWORD",
 ]);
 
 function isFullySecretKey(key: string): boolean {
@@ -66,8 +64,6 @@ function isFullySecretKey(key: string): boolean {
     key.endsWith("_KEY")
   );
 }
-
-const WEAK_ADMIN_PASSWORDS = new Set(["testpassword", "password", "changeme"]);
 
 export function validateEnv(): Record<string, string> {
   // Load dotenv only when validation is called
@@ -106,15 +102,6 @@ export function validateEnv(): Record<string, string> {
 
   // Set default for optional env vars
   env.JWT_EXPIRY = process.env.JWT_EXPIRY ?? "1h";
-
-  if (process.env.NODE_ENV === "production" && env.ADMIN_PASSWORD) {
-    const adminPassword = env.ADMIN_PASSWORD;
-    if (adminPassword.length < 12 || WEAK_ADMIN_PASSWORDS.has(adminPassword.toLowerCase())) {
-      throw new Error(
-        "ADMIN_PASSWORD is too weak for production. Use a value at least 12 characters long that is not a known default."
-      );
-    }
-  }
 
   return env;
 }

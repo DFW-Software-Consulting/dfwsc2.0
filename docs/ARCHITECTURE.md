@@ -63,7 +63,7 @@ sequenceDiagram
 - **`client_groups`**: Shared fee/URL configuration for multiple clients.
 - **`onboarding_tokens`**: Lifecycle management for Stripe Connect onboarding. Statuses: `pending`, `in_progress`, `completed`, `revoked`.
 - **`webhook_events`**: Idempotency log for Stripe webhooks.
-- **`admins`**: Admin accounts with hashed passwords.
+- **`admins`**: Legacy, no longer used (admin login is checked against Nextcloud); to be dropped.
 - **`settings`**: Key-value store for system-wide configuration (e.g., `company_name`).
 - **`sales_lead_submissions`** / **`sales_lead_sync_state`**: Progress and baseline of the Nextcloud New Lead automation (off unless `SALES_AUTOMATION_ENABLED=true`; see [BACKEND.md](./BACKEND.md) §9).
 - **`client_onboarding_submissions`** / **`client_onboarding_sync_state`**: Progress and baseline of the Nextcloud client onboarding (off unless `CLIENT_ONBOARDING_ENABLED=true`; see [BACKEND.md](./BACKEND.md) §10).

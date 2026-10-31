@@ -6,7 +6,15 @@ import { validatePassword } from "../../utils/validation";
 import Button from "./shared/Button";
 import FormInput from "./shared/FormInput";
 
-const MIN_PASSWORD_LENGTH = 8;
+const NOT_AUTHORIZED_MESSAGE = "This Nextcloud account isn't authorized for the admin panel";
+const UNAVAILABLE_MESSAGE = "Admin login is unavailable";
+
+// The API's own message is shown when it sent one; the status decides the wording otherwise.
+function loginErrorMessage(err) {
+  if (err?.status === 403) return err.message || NOT_AUTHORIZED_MESSAGE;
+  if (err?.status === 503) return err.message || UNAVAILABLE_MESSAGE;
+  return err?.message || "Login failed";
+}
 
 export default function AdminLogin({ showToast }) {
   const { login: authLogin } = useAuth();
@@ -17,19 +25,20 @@ export default function AdminLogin({ showToast }) {
   const loginMutation = useMutation({
     mutationFn: (vars) => login(vars),
     onSuccess: (data) => {
-      authLogin(data.token, data.bootstrapPending);
+      authLogin(data.token);
       setUsername("");
       setPassword("");
     },
     onError: (err) => {
-      setError(err.message || "Login failed");
-      showToast?.(err.message || "Login failed", "error");
+      const message = loginErrorMessage(err);
+      setError(message);
+      showToast?.(message, "error");
     },
   });
 
   const validateForm = useCallback(() => {
     if (!username.trim()) return "Username is required";
-    const pwErr = validatePassword(password, MIN_PASSWORD_LENGTH);
+    const pwErr = validatePassword(password, 1);
     if (pwErr) return pwErr;
     return null;
   }, [username, password]);
@@ -50,12 +59,17 @@ export default function AdminLogin({ showToast }) {
 
   return (
     <form onSubmit={handleSubmit}>
+      <p className="mb-1 text-sm font-medium text-fg">Sign in with your Nextcloud account</p>
+      <p className="mb-4 text-xs text-fg-muted">
+        Accounts with two-factor login need a Nextcloud app password
+      </p>
+
       <FormInput
         id="adminUsername"
         label="Username"
         value={username}
         onChange={(e) => setUsername(e.target.value)}
-        placeholder="Enter admin username"
+        placeholder="Nextcloud username"
         disabled={loginMutation.isPending}
         autoComplete="username"
         wrapperClassName="mb-4"
@@ -67,10 +81,9 @@ export default function AdminLogin({ showToast }) {
         type="password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        placeholder="Enter admin password"
+        placeholder="Nextcloud password or app password"
         disabled={loginMutation.isPending}
         autoComplete="current-password"
-        helper={`Minimum ${MIN_PASSWORD_LENGTH} characters`}
         wrapperClassName="mb-6"
       />
 
