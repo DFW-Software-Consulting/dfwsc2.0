@@ -8,7 +8,7 @@ import {
   clientOnboardingSyncState,
   clients,
 } from "../../db/schema";
-import { ensureBillingCustomer } from "../../lib/billing-customer";
+import { ensureBillingCustomer, linkPinnedBillingCustomer } from "../../lib/billing-customer";
 import {
   resetClientOnboardingStateForTests,
   runClientOnboardingCycle,
@@ -205,7 +205,7 @@ describe("billing customer step: onboarding flow", () => {
     });
   });
 
-  it("fails permanently on a Stripe authentication error", async () => {
+  it("retries on a Stripe authentication error and heals once the key is fixed", async () => {
     list.mockRejectedValue(
       Stripe.errors.StripeError.generate({
         type: "authentication_error",
@@ -213,8 +213,60 @@ describe("billing customer step: onboarding flow", () => {
         message: "bad key",
       } as never)
     );
+    expect(await onboard()).toMatchObject({ retried: 1, failed: 0 });
+    expect(await sub(5)).toMatchObject({ status: "pending", lastErrorCode: "stripe.customer:401" });
+    list.mockResolvedValue(customerList());
+    await makeDue(5);
+    expect(await cycle()).toMatchObject({ completed: 1 });
+    expect(await sub(5)).toMatchObject({ status: "completed", billingStatus: "linked" });
+  });
+
+  it("fails permanently on another Stripe invalid request", async () => {
+    list.mockRejectedValue(
+      Stripe.errors.StripeError.generate({
+        type: "invalid_request_error",
+        statusCode: 400,
+        message: "bad",
+        param: "limit",
+      } as never)
+    );
     expect(await onboard()).toMatchObject({ failed: 1 });
-    expect(await sub(5)).toMatchObject({ status: "failed", lastErrorCode: "stripe.customer:401" });
+    expect(await sub(5)).toMatchObject({ status: "failed", lastErrorCode: "stripe.customer:400" });
+  });
+
+  it("treats an invalid contact email as no_email without calling Stripe", async () => {
+    expect((await cycle()).status).toBe("ok");
+    fake.addSubmission(5, { ...FULL, email: "not-an-email" });
+    expect(await cycle()).toMatchObject({ completed: 1, failed: 0 });
+    expect(list).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(await sub(5)).toMatchObject({ billingStatus: "no_email" });
+    const warn = lines.find((l) => l.text.includes("contact_email_invalid"));
+    expect(warn?.text).not.toMatch(/not-an-email|zephyrine/i);
+  });
+
+  it("uses a valid contact email when the billing email is invalid, and none when both are", async () => {
+    fake.questions.push({ ...BILLING_EMAIL_QUESTION });
+    expect((await cycle()).status).toBe("ok");
+    fake.addSubmission(5, { ...FULL, email: "bad", billing_email: "also bad" });
+    expect(await cycle()).toMatchObject({ completed: 1 });
+    expect(list).not.toHaveBeenCalled();
+    expect(await sub(5)).toMatchObject({ billingStatus: "no_email" });
+  });
+
+  it("records no_email when Stripe itself rejects the email", async () => {
+    list.mockRejectedValue(
+      Stripe.errors.StripeError.generate({
+        type: "invalid_request_error",
+        statusCode: 400,
+        message: "Invalid email address",
+        param: "email",
+      } as never)
+    );
+    expect(await onboard()).toMatchObject({ completed: 1, failed: 0 });
+    expect(create).not.toHaveBeenCalled();
+    expect(await sub(5)).toMatchObject({ status: "completed", billingStatus: "no_email" });
+    expect(await db.select().from(billingCustomers)).toHaveLength(0);
   });
 
   it("does not call Stripe again once the Customer is recorded", async () => {
@@ -226,7 +278,7 @@ describe("billing customer step: onboarding flow", () => {
     await makeDue(5);
     expect(await cycle()).toMatchObject({ completed: 1 });
     expect(create).toHaveBeenCalledTimes(1);
-    expect(list).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -282,7 +334,7 @@ describe("billing email question", () => {
 describe("ensureBillingCustomer", () => {
   const input = { clientCode: "CP-010", company: "Acme", email: "AP@Acme.example" };
 
-  it("is idempotent for one client code, even concurrently", async () => {
+  it("is idempotent for one client code concurrently (DB upsert; Stripe is mocked)", async () => {
     const results = await Promise.all([
       ensureBillingCustomer(input),
       ensureBillingCustomer(input),
@@ -354,6 +406,37 @@ describe("ensureBillingCustomer", () => {
       new Stripe.errors.StripeConnectionError({ message: "x" } as never)
     );
     await expect(ensureBillingCustomer(input)).rejects.toMatchObject({ retryable: true });
+    expect(await db.select().from(billingCustomers)).toHaveLength(0);
+  });
+});
+
+describe("linkPinnedBillingCustomer", () => {
+  const input = { clientCode: "CP-020", company: "Acme", email: "ap@acme.example" };
+
+  it("links a Customer that exists, without modifying it", async () => {
+    const retrieve = vi
+      .spyOn(stripe.customers, "retrieve")
+      .mockResolvedValue({ id: "cus_pin" } as never);
+    const update = vi.spyOn(stripe.customers, "update");
+    expect(await linkPinnedBillingCustomer(input, "cus_pin")).toMatchObject({
+      status: "linked",
+      stripeCustomerId: "cus_pin",
+      source: "backfill",
+    });
+    expect(retrieve).toHaveBeenCalledWith("cus_pin");
+    expect(update).not.toHaveBeenCalled();
+    expect(await db.select().from(billingCustomers)).toHaveLength(1);
+  });
+
+  it("refuses a deleted Customer and writes nothing", async () => {
+    vi.spyOn(stripe.customers, "retrieve").mockResolvedValue({
+      id: "cus_gone",
+      deleted: true,
+    } as never);
+    await expect(linkPinnedBillingCustomer(input, "cus_gone")).rejects.toMatchObject({
+      code: "stripe.customer:deleted",
+      retryable: false,
+    });
     expect(await db.select().from(billingCustomers)).toHaveLength(0);
   });
 });

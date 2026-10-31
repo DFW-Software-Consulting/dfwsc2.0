@@ -1102,20 +1102,24 @@ async function billingCustomerStep(row: SubmissionRow, intake: Intake, ctx: Proc
   if (!ctx.billingCustomer || row.billingStatus !== null) return;
   const ids = { formId: ctx.formId, submissionId: row.submissionId };
   const billing = intake.billingEmail?.trim();
-  const billingValid = billing !== undefined && isValidEmail(billing);
-  if (billing !== undefined && !billingValid) {
+  const contact = intake.email?.trim();
+  if (billing && !isValidEmail(billing)) {
     ctx.logger.warn(
       { ...ids, reason: "billing_email_invalid" },
       "Billing email is not a valid address; using the contact email."
     );
   }
-  const email = billingValid ? billing : intake.email?.trim();
-  if (!email) {
+  const email =
+    billing && isValidEmail(billing) ? billing : contact && isValidEmail(contact) ? contact : null;
+  const noEmail = async (reason: string) => {
     await saveUnderClaim(row, { billingStatus: "no_email" });
     ctx.logger.warn(
-      { ...ids, billingStatus: "no_email" },
-      "No email on the submission; billing Customer not created. Needs an operator."
+      { ...ids, billingStatus: "no_email", reason },
+      "No usable email on the submission; billing Customer not created. Needs an operator."
     );
+  };
+  if (!email) {
+    await noEmail(contact ? "contact_email_invalid" : "missing_email");
     return;
   }
   const result = await ensureBillingCustomer({
@@ -1124,6 +1128,10 @@ async function billingCustomerStep(row: SubmissionRow, intake: Intake, ctx: Proc
     email,
     submissionId: row.submissionId,
   });
+  if (result.status === "invalid_email") {
+    await noEmail("stripe_rejected_email");
+    return;
+  }
   if (result.status === "ambiguous") {
     await saveUnderClaim(row, { billingStatus: "ambiguous" });
     ctx.logger.warn(

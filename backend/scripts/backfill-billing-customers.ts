@@ -7,13 +7,20 @@ import {
   BillingCustomerStripeError,
   ensureBillingCustomer,
   findExistingBillingCustomer,
+  isValidEmail,
+  linkPinnedBillingCustomer,
 } from "../src/lib/billing-customer";
+import { stripe } from "../src/lib/stripe";
 
-// Links already-onboarded clients (e.g. CP-004) to a DFWSC billing Stripe Customer.
-// Dry run by default: only reads the database and lists Stripe Customers (read-only).
-// Form answers are not stored, so the email comes from a CSV: "client_code,email". Put the
-// billing email there (the "Billing email" answer, else the contact email).
-// Uses whichever DATABASE_URL / STRIPE_SECRET_KEY are in the environment: check them first.
+// Links already-onboarded clients (e.g. CP-004) to a DFWSC billing Stripe Customer, and
+// resolves submissions flagged "ambiguous" by pinning a Customer id.
+// Dry run by default: only reads the database and Stripe (list/retrieve).
+// Form answers are not stored, so the data comes from a CSV (no quoting, no commas inside
+// values): client_code,email[,company][,stripe_customer_id]
+//   - email: the billing email (the "Billing email" answer, else the contact email).
+//   - company: overrides the folder-derived name used when a Customer is created.
+//   - stripe_customer_id: link exactly this Customer (it must exist and not be deleted).
+// Uses whichever DATABASE_URL / STRIPE_SECRET_KEY are in the environment; it prints them first.
 
 const out = (line: string): void => {
   process.stdout.write(`${line}\n`);
@@ -21,18 +28,58 @@ const out = (line: string): void => {
 
 function printHelp(): void {
   out(
-    "\nBackfill billing Customers\n\nUsage:\n  npx tsx scripts/backfill-billing-customers.ts --csv emails.csv [--apply]\n\nOptions:\n  --csv <file>  Required. Lines of client_code,email (header optional)\n  --apply       Create/link for real. Without it nothing is written anywhere\n  --help        Show this help\n"
+    "\nBackfill billing Customers\n\nUsage:\n  npx tsx scripts/backfill-billing-customers.ts --csv emails.csv [--apply]\n\nCSV columns: client_code,email[,company][,stripe_customer_id]\n\nOptions:\n  --csv <file>  Required.\n  --apply       Create/link for real. Without it nothing is written anywhere\n  --help        Show this help\n"
   );
 }
 
-function parseCsv(text: string): Map<string, string> {
-  const out = new Map<string, string>();
+interface CsvEntry {
+  email: string;
+  company?: string;
+  stripeCustomerId?: string;
+}
+
+function parseCsv(text: string): Map<string, CsvEntry> {
+  const entries = new Map<string, CsvEntry>();
   for (const raw of text.split(/\r?\n/)) {
-    const [code, email] = raw.split(",").map((v) => v.trim());
+    const [code, email, company, customerId] = raw.split(",").map((v) => v.trim());
     if (!code || !email || code.toLowerCase() === "client_code") continue;
-    out.set(code.toUpperCase(), email);
+    entries.set(code.toUpperCase(), {
+      email,
+      ...(company ? { company } : {}),
+      ...(customerId ? { stripeCustomerId: customerId } : {}),
+    });
   }
-  return out;
+  return entries;
+}
+
+function stripeMode(key: string | undefined): string {
+  if (!key) return "unknown (no key)";
+  const kind = key.startsWith("rk_") ? "restricted" : key.startsWith("sk_") ? "secret" : "unknown";
+  const mode = key.includes("_live_") ? "LIVE" : key.includes("_test_") ? "test" : "unknown";
+  return `${mode} (${kind} key)`;
+}
+
+function databaseTarget(url: string | undefined): string {
+  try {
+    const parsed = new URL(url ?? "");
+    return `${parsed.hostname}${parsed.port ? `:${parsed.port}` : ""}${parsed.pathname}`;
+  } catch {
+    return "unknown";
+  }
+}
+
+async function preflight(): Promise<void> {
+  out(`Stripe mode: ${stripeMode(process.env.STRIPE_SECRET_KEY)}`);
+  try {
+    const account = await stripe.accounts.retrieve();
+    out(`Stripe platform account: ${account.id}`);
+  } catch {
+    out("Stripe platform account: could not be read (check the key)");
+  }
+  out(`Database: ${databaseTarget(process.env.DATABASE_URL)}`);
+  out(
+    `CLIENT_ONBOARDING_BILLING_CUSTOMER: ${process.env.CLIENT_ONBOARDING_BILLING_CUSTOMER?.trim() === "true" ? "on" : "off"}`
+  );
 }
 
 async function main(): Promise<number> {
@@ -48,7 +95,10 @@ async function main(): Promise<number> {
     printHelp();
     return 1;
   }
-  const emails = parseCsv(readFileSync(csvPath, "utf8"));
+  const entries = parseCsv(readFileSync(csvPath, "utf8"));
+
+  await preflight();
+  out(apply ? "APPLY mode" : "DRY RUN (nothing is written; pass --apply)");
 
   const rows = await db
     .select({
@@ -70,44 +120,70 @@ async function main(): Promise<number> {
     )
     .orderBy(asc(clientOnboardingSubmissions.projectNumber));
 
-  const tally = { exists: 0, matched: 0, created: 0, ambiguous: 0, skipped: 0, failed: 0 };
-  out(apply ? "APPLY mode" : "DRY RUN (nothing is written; pass --apply)");
+  const tally = { linked: 0, created: 0, ambiguous: 0, skipped: 0, failed: 0 };
   for (const row of rows) {
     const code = row.projectCode as string;
-    const email = emails.get(code);
-    if (!email) {
+    const entry = entries.get(code);
+    if (!entry) {
       tally.skipped++;
-      out(`${code}: skipped (no email in the CSV)`);
+      out(`${code}: skipped (not in the CSV)`);
       continue;
     }
-    const company = row.company ?? code;
+    if (!isValidEmail(entry.email)) {
+      tally.skipped++;
+      out(`${code}: skipped (the CSV email is not a valid address)`);
+      continue;
+    }
+    const input = {
+      clientCode: code,
+      company: entry.company ?? row.company ?? code,
+      email: entry.email,
+      linkSource: "backfill" as const,
+    };
     try {
       if (!apply) {
-        const found = await findExistingBillingCustomer({ clientCode: code, email });
-        if (found.kind === "ambiguous") tally.ambiguous++;
-        else if (found.kind === "none") tally.created++;
-        else tally.matched++;
+        if (entry.stripeCustomerId) {
+          const found = await stripe.customers.retrieve(entry.stripeCustomerId);
+          if (found.deleted) throw new BillingCustomerStripeError("stripe.customer:deleted", false);
+          tally.linked++;
+          out(`${code}: would link ${entry.stripeCustomerId}`);
+          continue;
+        }
+        const found = await findExistingBillingCustomer(input);
+        if (found.kind === "ambiguous") {
+          tally.ambiguous++;
+          out(`${code}: would flag as ambiguous (add stripe_customer_id to the CSV to pin one)`);
+        } else if (found.kind === "none") {
+          tally.created++;
+          out(`${code}: would create a Customer`);
+        } else {
+          tally.linked++;
+          out(`${code}: would link ${found.stripeCustomerId}`);
+        }
+        continue;
+      }
+      const result = entry.stripeCustomerId
+        ? await linkPinnedBillingCustomer(input, entry.stripeCustomerId)
+        : await ensureBillingCustomer(input);
+      if (result.status !== "linked") {
+        tally.ambiguous++;
         out(
-          `${code}: would ${found.kind === "none" ? "create a Customer" : found.kind === "ambiguous" ? "flag as ambiguous" : `link ${found.stripeCustomerId}`}`
+          `${code}: ${result.status} (several Customers share the email; add stripe_customer_id to the CSV)`
         );
         continue;
       }
-      const result = await ensureBillingCustomer({
-        clientCode: code,
-        company,
-        email,
-        linkSource: "backfill",
-      });
-      if (result.status === "ambiguous") tally.ambiguous++;
-      else if (result.source === "created") tally.created++;
-      else tally.matched++;
-      out(
-        `${code}: ${result.status === "ambiguous" ? "ambiguous (several Customers share the email)" : `${result.source} ${result.stripeCustomerId}`}`
-      );
+      await db
+        .update(clientOnboardingSubmissions)
+        .set({ billingStatus: "linked", billingCustomerId: result.stripeCustomerId })
+        .where(eq(clientOnboardingSubmissions.projectCode, code));
+      if (result.source === "created") tally.created++;
+      else tally.linked++;
+      out(`${code}: ${result.source} ${result.stripeCustomerId}`);
     } catch (error) {
       tally.failed++;
-      const detail = error instanceof BillingCustomerStripeError ? error.code : "error";
-      out(`${code}: failed (${detail})`);
+      out(
+        `${code}: failed (${error instanceof BillingCustomerStripeError ? error.code : "error"})`
+      );
     }
   }
   out(JSON.stringify(tally));
