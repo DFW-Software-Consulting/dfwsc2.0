@@ -13,7 +13,7 @@ import {
   OnboardingInvalidError,
   parseLeadReference,
   parseProjectNumber,
-  projectPageContent,
+  projectBriefContent,
   projectPageTitle,
   resolveIntakeQuestions,
   resolvePipelineColumns,
@@ -270,17 +270,60 @@ describe("names, folders and pages", () => {
     expect(projectPageTitle("CP-003", "A/B tests", 4)).toBe("CP-003 — A B tests");
   });
 
-  it("writes page content with links only and escapes markdown in names", () => {
-    const content = projectPageContent({
-      title: "CP-003 — *Bold* [x]",
+  describe("projectBriefContent", () => {
+    const input = {
+      projectCode: "CP-003",
+      summary: "Build it",
+      targetDate: "2027-01-29",
       rowUrl: "https://c/row",
       folderUrl: "https://c/f/1",
       intakeTitle: "Intake submission #5",
       intakeUrl: "https://c/results",
+    };
+
+    it("fills the template and keeps every link", () => {
+      expect(projectBriefContent(input)).toBe(
+        [
+          "# Project Brief",
+          "",
+          "> This is the DFWSC client-projects workspace; real client data is allowed. Do not store credentials, Stripe data, or production secrets.",
+          "",
+          "| Field | Value |",
+          "|---|---|",
+          "| Project code | CP-003 |",
+          "| Purpose | Build it |",
+          "| Owner | |",
+          "| Target date | 2027-01-29 |",
+          "| Success criteria | |",
+          "| Constraints | |",
+          "| Project row | [Project row](https://c/row) |",
+          "| Client folder | [Client folder](https://c/f/1) |",
+          "| Intake results | [Intake submission \\#5](https://c/results) |",
+          "",
+        ].join("\n")
+      );
     });
-    expect(content).toContain("# CP-003 — \\*Bold\\* \\[x\\]");
-    expect(content).toContain("- [Project row](https://c/row)");
-    expect(content).toContain("- [Client folder](https://c/f/1)");
-    expect(content).toContain("- [Intake submission \\#5](https://c/results)");
+
+    it("escapes markdown in the intake link title", () => {
+      expect(projectBriefContent({ ...input, intakeTitle: "Intake *x* [1]" })).toContain(
+        "[Intake \\*x\\* \\[1\\]](https://c/results)"
+      );
+    });
+
+    it("leaves the target date blank when missing", () => {
+      expect(projectBriefContent({ ...input, targetDate: undefined })).toContain(
+        "| Target date |  |"
+      );
+    });
+
+    it("keeps a summary with pipes and newlines inside one table cell", () => {
+      const content = projectBriefContent({
+        ...input,
+        summary: "  Line one | with pipe\r\nline two\n\n| x  ",
+      });
+      expect(content).toContain("| Purpose | Line one \\| with pipe line two \\| x |");
+      const purpose = content.split("\n").filter((l) => l.startsWith("| Purpose"));
+      expect(purpose).toHaveLength(1);
+    });
   });
 });

@@ -438,20 +438,41 @@ function markdownText(value: string): string {
   return value.replace(/\s+/g, " ").replace(/([\\`*_[\]<>#])/g, "\\$1");
 }
 
-/** Page body: links only. Status and dates live in Tables, not on the page. */
-export function projectPageContent(input: {
-  title: string;
+function tableCell(value: string): string {
+  return markdownText(value).replace(/\|/g, "\\|").trim();
+}
+
+/**
+ * Page body: the team's Project Brief template (Cerebo Pilot/Templates/Project-Brief.md)
+ * filled with what the form knows, plus our links as extra rows. Owner, Success
+ * criteria and Constraints stay blank for the team. No contact details.
+ */
+export function projectBriefContent(input: {
+  projectCode: string;
+  summary: string;
+  /** Target date as YYYY-MM-DD; omitted or empty leaves the cell blank. */
+  targetDate?: string;
   rowUrl: string;
   folderUrl: string;
   intakeTitle: string;
   intakeUrl: string;
 }): string {
   return [
-    `# ${markdownText(input.title)}`,
+    "# Project Brief",
     "",
-    `- [Project row](${input.rowUrl})`,
-    `- [Client folder](${input.folderUrl})`,
-    `- [${markdownText(input.intakeTitle)}](${input.intakeUrl})`,
+    "> This is the DFWSC client-projects workspace; real client data is allowed. Do not store credentials, Stripe data, or production secrets.",
+    "",
+    "| Field | Value |",
+    "|---|---|",
+    `| Project code | ${tableCell(input.projectCode)} |`,
+    `| Purpose | ${tableCell(input.summary)} |`,
+    "| Owner | |",
+    `| Target date | ${input.targetDate ?? ""} |`,
+    "| Success criteria | |",
+    "| Constraints | |",
+    `| Project row | [Project row](${input.rowUrl}) |`,
+    `| Client folder | [Client folder](${input.folderUrl}) |`,
+    `| Intake results | [${markdownText(input.intakeTitle)}](${input.intakeUrl}) |`,
     "",
   ].join("\n");
 }

@@ -362,15 +362,36 @@ export class ClientOnboardingNextcloud {
     return Number(match[1]);
   }
 
-  /** Writes a text file at a path relative to the service account's files root. */
-  async putFile(segments: string[], content: string): Promise<void> {
-    await nextcloudRequest(this.nc, {
+  /** Reads a text file at a path relative to the service account's files root; null when missing. */
+  async getFile(segments: string[]): Promise<{ body: string; etag: string | null } | null> {
+    const res = await nextcloudRequest(this.nc, {
+      method: "GET",
+      label: "webdav.get_page",
+      path: this.filesPath(segments),
+      okStatuses: [404],
+    });
+    if (res.status === 404) return null;
+    return { body: res.body, etag: res.etag };
+  }
+
+  /**
+   * Writes a text file at a path relative to the service account's files root.
+   * With `ifMatch` the write only happens while the file still has that ETag;
+   * false means it changed meanwhile (412) and nothing was written.
+   */
+  async putFile(segments: string[], content: string, ifMatch?: string | null): Promise<boolean> {
+    const headers: Record<string, string> = { "content-type": "text/markdown; charset=utf-8" };
+    // Cloudflare weakens ETags (W/"x") when it compresses; the opaque tag is unchanged.
+    if (ifMatch) headers["if-match"] = ifMatch.replace(/^W\//, "");
+    const res = await nextcloudRequest(this.nc, {
       method: "PUT",
       label: "webdav.put_page",
       path: this.filesPath(segments),
-      headers: { "content-type": "text/markdown; charset=utf-8" },
+      headers,
       body: content,
+      okStatuses: [412],
     });
+    return res.status !== 412;
   }
 
   // ── Collectives ────────────────────────────────────────────────────────────
