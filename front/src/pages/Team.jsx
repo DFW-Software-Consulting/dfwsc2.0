@@ -1,105 +1,220 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import DiegoImage from "../assets/diego.jpg";
-import HectorImage from "../assets/hector.webp";
-import JcImage from "../assets/jc.jpg";
-import Banner from "../components/Banner.jsx";
+import DiegoEspinoImage from "../assets/diego-espino.jpg";
+import HectorOropesaImage from "../assets/hector-oropesa.webp";
+import JeremyAshleyImage from "../assets/jeremy-ashley.jpg";
+import { MotionRoot, Reveal, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
+import { LEAVE, PAGE_HERO, ProcessGrid, RISE, ScrollFx } from "../components/motion/ScrollFx.jsx";
+import "../styles/studio.css";
+import "./Team.css";
+import { usePageTitle } from "../hooks/usePageTitle.js";
 
+// Add a member's personal profile as `linkedin` (https://www.linkedin.com/in/...) to link their photo.
 const teamMembers = [
   {
     name: "Jeremy Ashley",
+    linkedin: "https://www.linkedin.com/in/dev-jc/",
     role: "Founder & CTO",
+    intro: "Your partner in figuring out what to build—and why.",
     bio: "Drives technical strategy and architecture across the organization. Oversees full-stack product delivery, DevOps automation, and scalable cloud infrastructure design.",
-    image: JcImage,
+    focus: "Discovery · Technical direction · Full-stack delivery",
+    image: JeremyAshleyImage,
   },
   {
     name: "Diego Espino",
+    linkedin: "https://www.linkedin.com/in/developerdiego/",
     role: "Full Stack & DevOps Engineer",
+    intro: "Turning the plan into software your team can use.",
     bio: "Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.",
-    image: DiegoImage,
+    focus: "Application development · Deployment · Performance",
+    image: DiegoEspinoImage,
   },
   {
     name: "Hector Oropesa",
+    linkedin: "https://www.linkedin.com/in/hectororopesa/",
     role: "Full Stack Developer • DevOps & Network Engineer",
+    intro: "Bringing your software, systems, and infrastructure together.",
     bio: "Combines full-stack development with deep IT and network engineering experience. Bridges software, systems, and networking by managing cloud environments, hardening systems, and supporting scalable, reliable deployments across DevOps workflows.",
-    image: HectorImage,
+    focus: "Application development · Cloud systems · Networking",
+    image: HectorOropesaImage,
   },
 ];
 
-export default function Team() {
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+const processSteps = [
+  [
+    "01",
+    "A conversation first.",
+    "We learn how your team works, what’s getting in the way, and what a useful outcome looks like.",
+  ],
+  [
+    "02",
+    "Progress you can see.",
+    "Early previews and regular check-ins let you give feedback while the solution is taking shape.",
+  ],
+  [
+    "03",
+    "A plan for what’s next.",
+    "We discuss ongoing support and handoff options so you know how the work will be maintained.",
+  ],
+];
 
-  return (
-    <section className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300">
-      {/* Header */}
-      <div className="mb-20 flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-        <div className="max-w-3xl">
-          <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-800 dark:text-brand-200">
-            Meet our team
-          </span>
-          <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-[var(--text-main)] sm:text-6xl text-gradient">
-            Experts building reliable software outcomes
-          </h1>
-          <p className="mt-8 text-xl text-[var(--text-muted)] leading-relaxed transition-colors">
-            Every engagement is led by seasoned practitioners who have shipped critical systems for
-            finance, logistics, and high-growth startups. We stay close to business goals, turning
-            strategy into running software.
-          </p>
-        </div>
-        <Link
-          to="/"
-          state={{ scrollTo: "contact" }}
-          className="inline-flex w-fit items-center justify-center gap-2 rounded-full bg-brand-500 px-8 py-3 text-base font-bold text-white shadow-glow transition-all duration-300 hover:shadow-glow-strong hover:-translate-y-1"
+const LINKEDIN_PATH =
+  "M20.447 20.452h-3.554v-5.569c0-1.328-.024-3.037-1.852-3.037-1.853 0-2.137 1.447-2.137 2.941v5.665H9.35V9h3.414v1.561h.048c.476-.9 1.637-1.85 3.37-1.85 3.602 0 4.268 2.371 4.268 5.455zm-15.34-12.27a2.062 2.062 0 1 1 .002-4.124 2.062 2.062 0 0 1-.002 4.124zm1.779 12.27H3.33V9h3.556z";
+
+/**
+ * A member's photo with its name badge. With a LinkedIn profile the whole frame is one
+ * link (opens in a new tab); without one it stays a plain container.
+ */
+export function MemberPhoto({ name, image, linkedin }) {
+  const badge = (
+    <span className="studio-member-badge" aria-hidden="true">
+      {name}
+      {linkedin ? (
+        <svg
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+          focusable="false"
+          className="studio-member-badge-icon"
         >
-          Start a project
-        </Link>
+          <path d={LINKEDIN_PATH} />
+        </svg>
+      ) : null}
+    </span>
+  );
+  if (!linkedin) {
+    return (
+      <div className="studio-member-photo">
+        <img src={image} alt={name} loading="lazy" />
+        {badge}
       </div>
+    );
+  }
+  return (
+    <a
+      className="studio-member-photo studio-member-photo-link"
+      href={linkedin}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`${name} on LinkedIn (opens in a new tab)`}
+    >
+      <img src={image} alt="" loading="lazy" />
+      {badge}
+    </a>
+  );
+}
 
-      {/* Team Members */}
-      <div className="space-y-12">
-        {teamMembers.map((member, idx) => (
-          <article
-            key={member.name}
-            className={`group relative flex flex-col items-center gap-10 rounded-[2.5rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-10 transition-all duration-500 hover:bg-slate-100 dark:hover:bg-white/[0.04] md:flex-row shadow-sm ${
-              idx % 2 === 1 ? "md:flex-row-reverse" : ""
-            }`}
-          >
-            <div className="absolute -inset-px rounded-[2.5rem] bg-gradient-to-br from-brand-500/10 via-transparent to-transparent opacity-0 transition-opacity duration-500 group-hover:opacity-100 pointer-events-none" />
-
-            {/* Image */}
-            <div className="relative w-full md:w-1/3 flex-shrink-0 flex justify-center">
-              <div className="relative">
-                <div className="absolute -inset-4 rounded-full bg-brand-500/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                <img
-                  src={member.image}
-                  alt={member.name}
-                  className="relative z-10 h-64 w-64 rounded-2xl border border-slate-200 dark:border-white/10 object-cover shadow-2xl transition-all duration-500 grayscale-[0.4] group-hover:grayscale-0 group-hover:scale-[1.02]"
-                />
-              </div>
-            </div>
-
-            {/* Info */}
-            <div className="relative z-10 w-full md:w-2/3 text-center md:text-left">
-              <span className="text-xs font-bold uppercase tracking-[0.2em] text-brand-600 dark:text-brand-400 transition-colors">
-                {member.role}
-              </span>
-              <h2 className="mt-2 text-3xl font-bold text-[var(--text-main)] group-hover:text-brand-600 dark:group-hover:text-brand-100 transition-colors">
-                {member.name}
+export default function Team() {
+  usePageTitle("Our Team");
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, []);
+  return (
+    <MotionRoot>
+      <div className="studio studio-page">
+        <section className="studio-page-hero studio-team-hero">
+          <ScrollFx offset={LEAVE} fx={PAGE_HERO}>
+            <RevealGroup mount className="page-wrap">
+              <RevealItem as="p" className="studio-eyebrow">
+                SMALL TEAM. DIRECT CONNECTION.
+              </RevealItem>
+              <RevealItem as="h1">
+                Good software.
+                <br />
+                <em>Real people.</em>
+              </RevealItem>
+              <RevealItem as="p">
+                We’re the people who turn your business challenges into a plan, a working
+                application, and the support to keep improving.
+              </RevealItem>
+              <RevealItem className="studio-actions">
+                <a className="studio-button" href="#people">
+                  Meet your team <span aria-hidden="true">↓</span>
+                </a>
+                <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
+                  Tell us about your business <span aria-hidden="true">↗</span>
+                </Link>
+              </RevealItem>
+              <RevealItem className="studio-team-hero-note">
+                Dallas–Fort Worth based · Working remotely with businesses across the US
+              </RevealItem>
+            </RevealGroup>
+          </ScrollFx>
+        </section>
+        <section id="people" className="studio-section page-wrap">
+          <Reveal className="studio-section-heading">
+            <div>
+              <p className="studio-eyebrow">THE PEOPLE BEHIND THE WORK</p>
+              <h2>
+                Meet your
+                <br />
+                <em>development team.</em>
               </h2>
-              <p className="mt-6 text-lg leading-relaxed text-[var(--text-muted)] transition-colors">
-                {member.bio}
-              </p>
             </div>
-          </article>
-        ))}
+            <p>
+              Business understanding, application development, and the systems behind it—all part of
+              the same conversation.
+            </p>
+          </Reveal>
+          <div className="studio-member-list">
+            {teamMembers.map((member) => (
+              <ScrollFx as="article" className="studio-member" key={member.name} fx={RISE}>
+                <MemberPhoto name={member.name} image={member.image} linkedin={member.linkedin} />
+                <div className="studio-member-copy">
+                  <p className="studio-mini-label">{member.role}</p>
+                  <h3>{member.name}</h3>
+                  <p className="studio-member-intro">{member.intro}</p>
+                  <p className="studio-member-bio">{member.bio}</p>
+                  <dl className="studio-member-focus">
+                    <dt>FOCUS</dt>
+                    <dd>{member.focus}</dd>
+                  </dl>
+                </div>
+              </ScrollFx>
+            ))}
+          </div>
+        </section>
+        <section className="studio-band">
+          <div className="page-wrap">
+            <Reveal className="studio-section-heading">
+              <div>
+                <p className="studio-eyebrow">HOW WE WORK WITH YOU</p>
+                <h2>
+                  A shared goal.
+                  <br />
+                  <em>A clear way forward.</em>
+                </h2>
+              </div>
+              <p>
+                You bring the knowledge of your business. We bring the technical perspective and
+                explain the choices along the way.
+              </p>
+            </Reveal>
+            <ProcessGrid steps={processSteps} />
+          </div>
+        </section>
+        <section className="studio-contact studio-inverse">
+          <Reveal className="page-wrap">
+            <p className="studio-eyebrow">YOUR NEXT PROJECT STARTS WITH A CONVERSATION</p>
+            <h2>
+              Let’s put a team
+              <br />
+              <em>behind your idea.</em>
+            </h2>
+            <p>
+              Whether you have a detailed plan or a problem you’re still sorting out, tell us where
+              you’d like to go.
+            </p>
+            <div className="studio-actions">
+              <Link className="studio-button" to="/" state={{ scrollTo: "contact" }}>
+                Talk about your project <span aria-hidden="true">↗</span>
+              </Link>
+              <Link className="studio-text-link" to="/pricing">
+                Explore ways to work together <span aria-hidden="true">↗</span>
+              </Link>
+            </div>
+          </Reveal>
+        </section>
       </div>
-
-      <Banner
-        className="mt-24 glass rounded-3xl p-6 border-brand-500/20 shadow-sm transition-colors"
-        message="🤝 Embedded software engineers and web developers partner with you from whiteboard to launch."
-      />
-    </section>
+    </MotionRoot>
   );
 }

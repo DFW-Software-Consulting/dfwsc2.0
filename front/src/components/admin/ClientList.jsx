@@ -11,7 +11,6 @@ import logger from "../../utils/logger";
 import ConfirmModal from "./ConfirmModal";
 import EditClientModal from "./EditClientModal";
 import AdminTable from "./shared/AdminTable";
-import Button from "./shared/Button";
 import { getOnboardingState } from "./shared/onboardingState";
 import StatusBadge from "./shared/StatusBadge";
 import TruncationNotice from "./shared/TruncationNotice";
@@ -31,12 +30,16 @@ function formatFee(client, groups) {
 
 function renderSyncBadge(client) {
   if (client.syncStatus === "failed") {
-    return <span className="text-xs font-semibold text-red-300">Failed</span>;
+    return <span className="text-xs font-semibold text-red-700 dark:text-red-300">Failed</span>;
   }
   if (client.syncStatus === "pending") {
-    return <span className="text-xs font-semibold text-yellow-300">Pending</span>;
+    return (
+      <span className="text-xs font-semibold text-yellow-800 dark:text-yellow-300">Pending</span>
+    );
   }
-  return <span className="text-xs font-semibold text-emerald-300">Synced</span>;
+  return (
+    <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Synced</span>
+  );
 }
 
 export default function ClientList({ showToast, workspace = "client_portal" }) {
@@ -149,7 +152,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
 
   const columns = [
     { header: "Name", key: "name" },
-    { header: "Email", key: "email" },
+    { header: "Email", key: "email", cardClassName: "break-all" },
     ...(!isDfwscMode
       ? [
           {
@@ -176,7 +179,7 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
             header: "Group",
             render: (client) => {
               const groupName = groups.find((g) => g.id === client.groupId)?.name;
-              return groupName ?? <span className="text-gray-500">—</span>;
+              return groupName ?? <span className="text-fg-muted">—</span>;
             },
           },
         ]
@@ -193,18 +196,20 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
       ? [
           {
             header: "Stripe Customer",
+            cardClassName: "break-all",
             render: (client) => client.stripeCustomerId || "N/A",
           },
         ]
       : [
           {
             header: "Stripe Account",
+            cardClassName: "break-all",
             render: (client) => client.stripeAccountId || "N/A",
           },
         ]),
     {
       header: "Actions",
-      render: (client) => {
+      actions: (client) => {
         const isTogglingStatus =
           patchClientStatusMutation.isPending &&
           patchClientStatusMutation.variables?.id === client.id;
@@ -213,58 +218,46 @@ export default function ClientList({ showToast, workspace = "client_portal" }) {
           resendMutation.isPending && resendMutation.variables?.clientId === client.id;
         const isDeleting =
           deleteClientMutation.isPending && deleteClientMutation.variables === client.id;
-        return (
-          <div className="flex gap-2">
-            {!isDfwscMode && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="bg-purple-600 hover:bg-purple-700 text-white"
-                disabled={isOnboarded || isResending}
-                title={isOnboarded ? "Already onboarded" : "Resend onboarding link"}
-                onClick={() => handleResendLink(client)}
-              >
-                Resend Link
-              </Button>
-            )}
-            {!isDfwscMode && (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="bg-amber-600 hover:bg-amber-700 text-white"
-                disabled={
-                  regenerateKeyMutation.isPending && regenerateKeyMutation.variables === client.id
-                }
-                onClick={() => handleRegenerateKey(client)}
-              >
-                Regen Key
-              </Button>
-            )}
-            <Button size="sm" onClick={() => setEditingClient(client)}>
-              Edit
-            </Button>
-            <Button
-              size="sm"
-              variant={client.status === "active" ? "danger" : "success"}
-              disabled={isTogglingStatus}
-              isLoading={isTogglingStatus}
-              onClick={() => handleStatusToggle(client)}
-            >
-              {isTogglingStatus ? "..." : client.status === "active" ? "Deactivate" : "Activate"}
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={isDeleting}
-              isLoading={isDeleting}
-              onClick={() =>
-                setDeleteModal({ isOpen: true, clientId: client.id, clientName: client.name })
-              }
-            >
-              {isDeleting ? "..." : "Delete"}
-            </Button>
-          </div>
-        );
+        const isActive = client.status === "active";
+        return [
+          !isDfwscMode && {
+            key: "resend",
+            label: "Resend Link",
+            disabled: isOnboarded || isResending,
+            title: isOnboarded ? "Already onboarded" : "Resend onboarding link",
+            onClick: () => handleResendLink(client),
+          },
+          !isDfwscMode && {
+            key: "regen",
+            label: "Regen Key",
+            disabled:
+              regenerateKeyMutation.isPending && regenerateKeyMutation.variables === client.id,
+            onClick: () => handleRegenerateKey(client),
+          },
+          {
+            key: "edit",
+            label: "Edit",
+            primary: true,
+            onClick: () => setEditingClient(client),
+          },
+          {
+            key: "toggle",
+            label: isTogglingStatus ? "..." : isActive ? "Deactivate" : "Activate",
+            variant: isActive ? "danger" : "secondary",
+            disabled: isTogglingStatus,
+            isLoading: isTogglingStatus,
+            onClick: () => handleStatusToggle(client),
+          },
+          {
+            key: "delete",
+            label: isDeleting ? "..." : "Delete",
+            variant: "danger",
+            disabled: isDeleting,
+            isLoading: isDeleting,
+            onClick: () =>
+              setDeleteModal({ isOpen: true, clientId: client.id, clientName: client.name }),
+          },
+        ].filter(Boolean);
       },
     },
   ];

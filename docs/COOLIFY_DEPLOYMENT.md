@@ -49,6 +49,16 @@ All resources can be deployed independently on Coolify while sharing the same mo
   SMTP_FROM=noreply@yourdomain.com
   API_BASE_URL=https://your-backend-domain.com
   ALLOW_ADMIN_SETUP=false  # Set to true only during initial admin setup
+  # Optional: Nextcloud New Lead automation (docs/BACKEND.md §9); off unless enabled
+  NEXTCLOUD_BASE_URL=https://cloud.example.com
+  NEXTCLOUD_USERNAME=dfwsc-admin
+  NEXTCLOUD_APP_PASSWORD=your_nextcloud_app_password
+  SALES_AUTOMATION_ENABLED=false
+  SALES_LEAD_FORM_ID=12
+  SALES_PIPELINE_TABLE_ID=8
+  SALES_ADDRESSBOOK_PATH=dfwsc-sales_shared_by_messyginger0804
+  SALES_LEADS_FOLDER=DFWSC Sales/Leads
+  SALES_POLL_INTERVAL_MS=120000
   ```
 - **First admin (first deploy only)**: the first admin is created at startup from `ADMIN_USERNAME` and `ADMIN_PASSWORD`, only when the `admins` table is empty (a leftover `ADMIN_PASSWORD` is ignored later, with a startup warning). `ADMIN_PASSWORD` is plaintext (at least 12 characters in production) and is hashed by the server — never supply a bcrypt hash, because the hash string itself would become the password. With `ALLOW_ADMIN_SETUP=true` the admin is created unconfirmed: log in at `/admin`, confirm permanent credentials, then **remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment** and set `ALLOW_ADMIN_SETUP=false`. `docker-compose.prod.yml` does not currently pass `ADMIN_USERNAME` or `ADMIN_PASSWORD` to the `api` container, so they only reach it if you add them to that service's `environment` for the first deploy (and remove them again afterwards).
 - **Startup Command**: `node dist/index.js` (handled by Dockerfile). DB migrations run automatically on each deploy via the `migrator` service above — no separate manual migration step is needed.
@@ -61,7 +71,11 @@ All resources can be deployed independently on Coolify while sharing the same mo
 - **Build**: Multi-stage `front/Dockerfile` (already exists — see below)
 - **Port**: 80 (expose as HTTP/HTTPS via Coolify)
 - **Environment Variables** (minimal):
-  - VITE_API_URL=/api/v1 (optional, used during build if needed)
+  - `VITE_API_URL=/api/v1` (optional, used during build if needed)
+  - `VITE_ANALYTICS_SRC` and `VITE_ANALYTICS_DOMAIN` (optional; configure as
+    Docker **build arguments**, not runtime-only variables). The image derives
+    the analytics origin from the script URL and limits CSP script and event
+    connections to that origin.
 - **Configuration**: Uses existing `front/nginx.conf` which:
   - Serves React static files from root path (`/`)
   - Proxies `/api/*` requests to the API container by its network alias (`dfwsc-api:4242`) — the `api` service joins the external `coolify` network with that alias in `docker-compose.prod.yml`, and the frontend container is on that network by default
@@ -117,13 +131,20 @@ RUN npm ci
 COPY . .
 
 ARG VITE_API_URL=/api/v1
+ARG VITE_ANALYTICS_SRC=
+ARG VITE_ANALYTICS_DOMAIN=
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_ANALYTICS_SRC=$VITE_ANALYTICS_SRC
+ENV VITE_ANALYTICS_DOMAIN=$VITE_ANALYTICS_DOMAIN
 
 RUN npm run build
 
+RUN ANALYTICS_ORIGIN="$(node -e 'const source = process.env.VITE_ANALYTICS_SRC; if (!source) process.exit(0); const url = new URL(source); if (!/^https?:$/.test(url.protocol)) throw new Error("VITE_ANALYTICS_SRC must use http or https"); process.stdout.write(url.origin);')" \
+    && sed "s|__ANALYTICS_ORIGIN__|${ANALYTICS_ORIGIN}|g" nginx.conf > nginx.production.conf
+
 FROM nginx:alpine AS production
 COPY --from=builder /app/build-dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/nginx.production.conf /etc/nginx/conf.d/default.conf
 
 RUN chown -R nginx:nginx /usr/share/nginx/html /etc/nginx/conf.d /var/cache/nginx \
     && sed -i 's#pid .*nginx\.pid;#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf
@@ -162,7 +183,10 @@ The existing `front/nginx.conf` is already configured correctly:
    - Set source to your repository
    - Set build context to `./front`
    - Use the existing `front/Dockerfile`
-   - Add minimal environment variables (VITE_API_URL=/api/v1 if needed)
+   - Add minimal build arguments (`VITE_API_URL=/api/v1` if needed). For
+     analytics, pass both `VITE_ANALYTICS_SRC` and `VITE_ANALYTICS_DOMAIN` as
+     build arguments; redeploy after changing either because Vite bakes them
+     into the static assets.
    - Leave it on Coolify's default `coolify` network; the backend's `api` service joins that network as `dfwsc-api`, so the nginx proxy can reach `dfwsc-api:4242`
    - Add healthcheck: `curl -f http://localhost || exit 1`
    - Save and deploy

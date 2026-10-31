@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getPaymentSession } from "../api/payments";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 // Mirrors the payment_ledger status enum in backend/src/db/schema.ts.
 const PAID_STATUSES = new Set(["paid"]);
@@ -121,9 +122,7 @@ function StatusCard({ title, children, variant = "neutral", live = "polite" }) {
         >
           <StatusIcon variant={variant} />
         </div>
-        <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4 transition-colors">
-          {title}
-        </h1>
+        <h1 className="text-3xl font-bold text-fg mb-4 transition-colors">{title}</h1>
         {children}
       </div>
     </div>
@@ -131,14 +130,14 @@ function StatusCard({ title, children, variant = "neutral", live = "polite" }) {
 }
 
 const TITLE_MAP = {
-  loading: "Verifying Payment - DFW Software Consulting",
-  checking: "Verifying Payment - DFW Software Consulting",
-  pending: "Payment Pending - DFW Software Consulting",
-  paid: "Payment Successful - DFW Software Consulting",
-  refund: "Payment Refunded - DFW Software Consulting",
-  failed: "Payment Not Completed - DFW Software Consulting",
-  unavailable: "Payment Unavailable - DFW Software Consulting",
-  missing: "Payment Session Missing - DFW Software Consulting",
+  loading: "Verifying Payment",
+  checking: "Verifying Payment",
+  pending: "Payment Pending",
+  paid: "Payment Successful",
+  refund: "Payment Refunded",
+  failed: "Payment Not Completed",
+  unavailable: "Payment Unavailable",
+  missing: "Payment Session Missing",
 };
 
 export default function PaymentSuccess() {
@@ -147,6 +146,7 @@ export default function PaymentSuccess() {
     return params.get("session_id") || "";
   });
   const [state, setState] = useState(() => (sessionId ? { type: "loading" } : { type: "missing" }));
+  usePageTitle(TITLE_MAP[state.type] || TITLE_MAP.loading);
 
   const summary = useMemo(() => {
     if (state.type !== "paid" && state.type !== "refund" && state.type !== "failed") {
@@ -160,10 +160,6 @@ export default function PaymentSuccess() {
       date: formatDate(data.createdAt),
     };
   }, [state]);
-
-  useEffect(() => {
-    document.title = TITLE_MAP[state.type] || TITLE_MAP.loading;
-  }, [state.type]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -217,11 +213,11 @@ export default function PaymentSuccess() {
   if (state.type === "missing") {
     return (
       <StatusCard title="Payment Session Missing" variant="failed" live="assertive">
-        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+        <p className="text-fg-muted text-lg mb-6 transition-colors">
           We could not find a session to verify. If you just completed a payment, please use the
           link or button from the checkout page.
         </p>
-        <p className="text-slate-500 dark:text-gray-400 transition-colors">
+        <p className="text-fg-muted transition-colors">
           Need help? Contact the DFWSC team and we can look it up for you.
         </p>
       </StatusCard>
@@ -231,10 +227,10 @@ export default function PaymentSuccess() {
   if (state.type === "unavailable") {
     return (
       <StatusCard title="Payment Status Unavailable" variant="neutral" live="assertive">
-        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+        <p className="text-fg-muted text-lg mb-6 transition-colors">
           We could not verify this payment right now. This may be a temporary issue.
         </p>
-        <p className="text-slate-500 dark:text-gray-400 transition-colors">
+        <p className="text-fg-muted transition-colors">
           Please return to the site where you started the payment, or contact the DFWSC team for
           assistance.
         </p>
@@ -245,7 +241,7 @@ export default function PaymentSuccess() {
   if (state.type === "loading" || state.type === "checking") {
     return (
       <StatusCard title="Verifying Payment" variant="neutral">
-        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+        <p className="text-fg-muted text-lg mb-6 transition-colors">
           {state.type === "loading"
             ? "Hang tight while we confirm your payment with our payment provider."
             : "Payment is still being processed. We are checking again..."}
@@ -263,11 +259,11 @@ export default function PaymentSuccess() {
   if (state.type === "pending") {
     return (
       <StatusCard title="Payment Pending" variant="neutral">
-        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+        <p className="text-fg-muted text-lg mb-6 transition-colors">
           Your payment is still being processed by our payment provider. It may take a few minutes
           to complete.
         </p>
-        <p className="text-slate-500 dark:text-gray-400 transition-colors">
+        <p className="text-fg-muted transition-colors">
           You can close this page. Once confirmed, you will receive a receipt by email.
         </p>
       </StatusCard>
@@ -277,15 +273,15 @@ export default function PaymentSuccess() {
   if (state.type === "failed") {
     return (
       <StatusCard title="Payment Not Completed" variant="failed" live="assertive">
-        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+        <p className="text-fg-muted text-lg mb-6 transition-colors">
           This payment was not completed. It may have been canceled, expired, or failed.
         </p>
         {summary?.total && (
-          <p className="text-slate-500 dark:text-gray-400 transition-colors mb-6">
+          <p className="text-fg-muted transition-colors mb-6">
             Amount: <span className="font-semibold">{summary.total}</span>
           </p>
         )}
-        <p className="text-slate-500 dark:text-gray-400 transition-colors">
+        <p className="text-fg-muted transition-colors">
           Return to the site where you started the payment to try again, or contact the DFWSC team
           for help.
         </p>
@@ -296,17 +292,17 @@ export default function PaymentSuccess() {
   if (state.type === "refund") {
     return (
       <StatusCard title="Payment Refunded" variant="refund" live="assertive">
-        <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+        <p className="text-fg-muted text-lg mb-6 transition-colors">
           This payment has been refunded or is under review.
         </p>
-        <div className="text-slate-600 dark:text-gray-200 text-lg mb-6 space-y-2 transition-colors">
+        <div className="text-fg-muted text-lg mb-6 space-y-2 transition-colors">
           {summary?.total && (
             <p>
               Total amount: <span className="font-semibold">{summary.total}</span>
             </p>
           )}
         </div>
-        <p className="text-slate-500 dark:text-gray-400 transition-colors">
+        <p className="text-fg-muted transition-colors">
           Contact the DFWSC team if you have questions.
         </p>
       </StatusCard>
@@ -315,31 +311,29 @@ export default function PaymentSuccess() {
 
   return (
     <StatusCard title="Payment Successful" variant="paid">
-      <p className="text-slate-600 dark:text-gray-200 text-lg mb-6 transition-colors">
+      <p className="text-fg-muted text-lg mb-6 transition-colors">
         Thank you. Your payment was completed successfully.
       </p>
       {summary && (
-        <dl className="text-left sm:text-center grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 text-slate-600 dark:text-gray-200 transition-colors">
+        <dl className="text-left sm:text-center grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 text-fg-muted transition-colors">
           <div className="rounded-lg border border-slate-200 dark:border-white/10 p-3 bg-white/50 dark:bg-white/[0.03]">
-            <dt className="text-sm text-slate-500 dark:text-gray-400">Amount</dt>
+            <dt className="text-sm text-fg-muted">Amount</dt>
             <dd className="text-lg font-semibold">{summary.base}</dd>
           </div>
           <div className="rounded-lg border border-slate-200 dark:border-white/10 p-3 bg-white/50 dark:bg-white/[0.03]">
-            <dt className="text-sm text-slate-500 dark:text-gray-400">Processing fee</dt>
+            <dt className="text-sm text-fg-muted">Processing fee</dt>
             <dd className="text-lg font-semibold">{summary.fee}</dd>
           </div>
           <div className="rounded-lg border border-slate-200 dark:border-white/10 p-3 bg-white/50 dark:bg-white/[0.03]">
-            <dt className="text-sm text-slate-500 dark:text-gray-400">Total paid</dt>
+            <dt className="text-sm text-fg-muted">Total paid</dt>
             <dd className="text-lg font-semibold">{summary.total}</dd>
           </div>
         </dl>
       )}
       {summary?.date && (
-        <p className="text-sm text-slate-500 dark:text-gray-400 mb-6 transition-colors">
-          Paid on {summary.date}
-        </p>
+        <p className="text-sm text-fg-muted mb-6 transition-colors">Paid on {summary.date}</p>
       )}
-      <p className="text-slate-500 dark:text-gray-400 transition-colors">
+      <p className="text-fg-muted transition-colors">
         You can close this page or return to the site where you started the payment.
       </p>
     </StatusCard>

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useRequestApiKeyRegeneration } from "../hooks/useApiKey";
+import { usePageTitle } from "../hooks/usePageTitle";
 import logger from "../utils/logger";
 import { validateEmail } from "../utils/validation";
 
@@ -8,10 +9,7 @@ export default function RequestApiKeyRegeneration() {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
   const { mutate, isPending } = useRequestApiKeyRegeneration();
-
-  useEffect(() => {
-    document.title = "Regenerate API Key";
-  }, []);
+  usePageTitle("Regenerate API Key");
 
   const handleSubmit = useCallback(
     (e) => {
@@ -38,14 +36,14 @@ export default function RequestApiKeyRegeneration() {
   return (
     <section className="min-h-[90vh] flex items-center justify-center p-4 transition-colors duration-300">
       <div className="w-full max-w-xl mx-auto">
-        <div className="bg-[var(--bg-main)] dark:bg-white/[0.02] backdrop-blur-md p-8 rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 transition-colors">
-          <h1 className="text-3xl font-bold text-center mb-4 text-slate-900 dark:text-white transition-colors">
+        <div className="bg-card p-8 rounded-2xl shadow-xl border border-line transition-colors">
+          <h1 className="text-3xl font-bold text-center mb-4 text-fg transition-colors">
             Regenerate API Key
           </h1>
 
           {!submitted ? (
             <>
-              <p className="text-center text-slate-600 dark:text-gray-300 mb-8 transition-colors">
+              <p className="text-center text-fg-muted mb-8 transition-colors">
                 Enter your email address and we will send you a link to regenerate your API key.
               </p>
 
@@ -53,7 +51,7 @@ export default function RequestApiKeyRegeneration() {
                 <div className="mb-6">
                   <label
                     htmlFor="email"
-                    className="block text-sm font-semibold text-slate-700 dark:text-gray-200 mb-2 transition-colors"
+                    className="block text-sm font-semibold text-fg mb-2 transition-colors"
                   >
                     Email Address
                   </label>
@@ -92,10 +90,10 @@ export default function RequestApiKeyRegeneration() {
             </>
           ) : (
             <div className="text-center">
-              <p className="text-slate-600 dark:text-gray-300 mb-4 transition-colors">
+              <p className="text-fg-muted mb-4 transition-colors">
                 If an account with that email exists, a regeneration link has been sent.
               </p>
-              <p className="text-sm text-slate-500 dark:text-gray-400 transition-colors">
+              <p className="text-sm text-fg-muted transition-colors">
                 Check your inbox and click the link to generate a new API key. The link expires in
                 15 minutes.
               </p>

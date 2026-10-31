@@ -1,0 +1,129 @@
+.studio-hero { position: relative; isolation: isolate; background: radial-gradient(ellipse at 90% 70%, var(--hero-glow) 0, transparent 55%), var(--bg-main); border-bottom: 1px solid var(--border-subtle); padding: 84px 0 92px; overflow: hidden; }
+.studio-hero-grid { display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 64px; }
+.studio-hero .studio-eyebrow { margin-bottom: 32px; }
+.studio-intro { font-size: 20px; line-height: 1.55; margin-top: 26px; max-width: 440px; }
+.studio-hero-copy { color: var(--text-muted); font-size: 16px; line-height: 1.75; max-width: 460px; margin-top: 16px; }
+.studio-hero-note { margin-top: 40px; display: flex; flex-wrap: wrap; gap: 10px 20px; font-size: 13px; color: var(--text-muted); }
+
+/* Illustrative app preview: a card-style "product" window that follows the theme
+   (white card in light mode, navy card in dark mode). Its palette is local (--win-*). */
+.studio-preview {
+  --win-bg: #ffffff; --win-bar: #f3f1ea; --win-ink: #0f1e33; --win-muted: #4b5a6e;
+  --win-line: #dcd8cb; --win-accent: #735c20; --win-active: #245a91; --win-soft: #e3edf8; --win-chip: #efede6;
+  --win-faint: #8a97a8; --win-live: #2c6daf; --win-pulse: #6ea8e6; --win-edge: rgb(15 30 51 / 0.14);
+  --win-shadow: 0 25px 60px rgb(15 30 51 / 0.16); --note-shadow: 0 8px 30px rgb(15 30 51 / 0.14);
+}
+.dark .studio-preview {
+  --win-bg: #17243b; --win-bar: #111c30; --win-ink: #eef2f8; --win-muted: #a6b3c7;
+  --win-line: rgb(255 255 255 / 0.12); --win-accent: #d6c89a; --win-active: #d6e6f9; --win-soft: #254670; --win-chip: #1f3050;
+  --win-faint: #7f8da3; --win-live: #6ea8e6; --win-pulse: #6ea8e6; --win-edge: rgb(255 255 255 / 0.2);
+  --win-shadow: 0 25px 80px rgb(0 0 0 / 0.5); --note-shadow: 0 8px 30px rgb(0 0 0 / 0.4);
+}
+.studio-preview-label { display: flex; align-items: center; gap: 9px; color: var(--text-muted); font-size: 12px; letter-spacing: .12em; margin-bottom: 14px; }
+.studio-preview-label > span:last-child { margin-left: auto; }
+.studio-window {
+  background: var(--win-bg); color: var(--win-ink); border: 1px solid var(--win-edge); border-radius: 14px; overflow: hidden; box-shadow: var(--win-shadow); transform: rotate(-1.5deg);
+}
+.studio-window-bar { display: flex; justify-content: space-between; align-items: center; padding: 12px 17px; border-bottom: 1px solid var(--win-line); color: var(--win-muted); background: var(--win-bar); font-size: 12px; }
+.studio-dots { letter-spacing: 3px; font-size: 9px; color: var(--win-faint); }
+.studio-workspace { padding: 24px; container-type: inline-size; }
+.studio-workspace-header { display: flex; align-items: center; gap: 12px; }
+.studio-monogram { display: grid; place-items: center; width: 36px; height: 36px; background: var(--win-soft); color: var(--win-accent); border-radius: 9px; font-family: var(--font-serif); font-size: 23px; }
+.studio-workspace-header strong { font-size: 15px; display: block; }
+.studio-workspace-header small { font-size: 12px; color: var(--win-muted); display: block; margin-top: 3px; }
+.studio-workflow-tabs { display: flex; flex-wrap: wrap; gap: 6px; border: 0; border-bottom: 1px solid var(--win-line); margin: 0; min-inline-size: 0; padding: 20px 0 12px; }
+.studio-workflow-tabs button { font-size: 13px; padding: 8px 11px; border-radius: 6px; cursor: pointer; color: var(--win-muted); transition: background .15s, color .15s; }
+.studio-workflow-tabs button:hover { background: var(--win-chip); color: var(--win-ink); }
+.studio-workflow-tabs button[aria-pressed="true"] { background: var(--win-soft); color: var(--win-active); font-weight: 700; }
+/* Four tabs need ~432px on one row. Below that, use an even 2x2 grid instead of
+   letting the last tab wrap alone. */
+@container (max-width: 439px) {
+  .studio-workflow-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .studio-workflow-tabs button { text-align: center; border: 1px solid var(--win-line); }
+  .studio-workflow-tabs button[aria-pressed="true"] { border-color: var(--win-soft); }
+}
+/* Touch: 44px tab hit area. */
+@media (pointer: coarse) { .studio-workflow-tabs button { min-height: 44px; } }
+.studio-workflow-content { padding-top: 20px; min-height: 340px; }
+.studio-workflow-content .studio-mini-label { color: var(--win-accent); }
+.studio-workflow-content h2 { font-size: 23px; line-height: 1.2; letter-spacing: -.04em; margin: 8px 0; max-width: 320px; font-weight: 600; }
+.studio-workflow-content p:not(.studio-mini-label) { font-size: 13px; color: var(--win-muted); line-height: 1.6; max-width: 340px; }
+.studio-flow { display: grid; grid-template-columns: repeat(3, 1fr); margin: 22px 0; gap: 8px; position: relative; }
+.studio-flow::before { content: ''; position: absolute; top: 14px; left: 20px; right: 40px; border-top: 1px dashed var(--win-faint); }
+.studio-flow > div { position: relative; }
+.studio-flow span { display: grid; place-items: center; background: var(--win-soft); border: 4px solid var(--win-bg); box-sizing: content-box; width: 22px; height: 22px; border-radius: 50%; color: var(--win-accent); font-size: 12px; font-weight: 600; animation: studio-step 6s infinite; }
+.studio-flow > div:nth-child(2) span { animation-delay: 2s; }
+.studio-flow > div:nth-child(3) span { animation-delay: 4s; }
+.studio-flow small { display: block; margin-top: 5px; font-size: 12px; line-height: 1.35; }
+.studio-task-list > div { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--win-line); font-size: 13px; }
+.studio-task-list small { margin-left: auto; font-size: 12px; background: var(--win-chip); padding: 3px 8px; border-radius: 4px; white-space: nowrap; }
+.studio-task-icon { color: var(--win-accent); }
+.studio-window-footer { display: flex; gap: 8px; align-items: center; padding-top: 16px; margin-top: 8px; border-top: 1px solid var(--win-line); font-size: 12px; color: var(--win-muted); }
+.studio-window-footer .studio-status { background: var(--win-live); }
+.studio-window-footer > span:last-child { margin-left: auto; }
+/* Caption and note share a wrapping row: side by side when there's room, otherwise the
+   note drops below the caption. Neither can overlap the other at any width. */
+.studio-preview-foot { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 16px 24px; margin-top: 16px; }
+.studio-preview-caption { flex: 1 1 180px; font-size: 12px; line-height: 1.5; color: var(--text-muted); margin: 4px 0 0 8px; }
+.studio-floating-note { flex: 0 1 auto; max-width: 100%; margin: 0 -13px 0 auto; background: var(--sticker-bg); color: var(--sticker-text); font-size: 13px; line-height: 1.7; padding: 15px 22px; border-radius: 8px; transform: rotate(3deg); box-shadow: var(--note-shadow); }
+.studio-floating-note > span { float: left; font-size: 30px; margin-right: 12px; }
+@keyframes studio-step { 0%, 28%, 100% { background: var(--win-soft); } 8%, 20% { background: var(--win-pulse); box-shadow: 0 0 0 4px color-mix(in srgb, var(--win-pulse) 15%, transparent); } }
+
+.studio-promise-strip { background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); }
+.studio-promise-strip > div { display: flex; justify-content: space-between; padding-block: 22px; gap: 16px; font-size: 14px; font-weight: 600; }
+
+.studio-service-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.studio-service-card { padding: 26px 24px 30px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 10px; transition: transform .2s, box-shadow .2s; }
+.studio-service-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-card); }
+.studio-card-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--accent); margin-bottom: 40px; }
+.studio-service-card h3 { font-size: 23px; letter-spacing: -.035em; line-height: 1.16; font-weight: 600; margin: 12px 0 16px; }
+.studio-service-card > p:last-child { font-size: 15px; line-height: 1.7; color: var(--text-muted); }
+
+.studio-mission { display: grid; grid-template-columns: 1.1fr 1fr; gap: 70px; align-items: center; }
+.studio-mission .studio-eyebrow { margin-bottom: 22px; }
+.studio-mission-statement { font-size: 18px; line-height: 1.8; color: var(--text-muted); }
+.studio-mission .studio-text-link { margin-top: 24px; }
+
+@media (max-width: 1000px) {
+  .studio-hero-grid { gap: 36px; }
+  .studio-service-grid { grid-template-columns: repeat(2, 1fr); }
+  .studio-workspace { padding: 18px; }
+}
+@media (max-width: 760px) {
+  .studio-hero { padding-block: 52px 60px; }
+  .studio-hero-grid { grid-template-columns: 1fr; gap: 48px; }
+  .studio-hero-copy { max-width: 540px; }
+  .studio-preview { max-width: 520px; width: 100%; margin: auto; }
+  .studio-floating-note { margin-right: 0; }
+  /* Two wrapped lines read as one pair: the dot closes the first line. */
+  .studio-hero-note > span:first-child::after { content: " ·"; }
+  .studio-promise-strip > div { flex-wrap: wrap; justify-content: center; font-size: 13px; gap: 10px 24px; }
+  .studio-mission { grid-template-columns: 1fr; gap: 28px; }
+}
+@media (max-width: 480px) {
+  .studio-service-grid { grid-template-columns: 1fr; }
+  .studio-card-top { margin-bottom: 24px; }
+  .studio-workspace { padding: 16px; }
+  .studio-workflow-tabs button { padding-inline: 9px; }
+  .studio-intro { font-size: 18px; }
+  .studio-floating-note { padding: 12px 16px; }
+}
+/* Small phones: the workspace card sits level so it keeps the page gutter. */
+@media (max-width: 400px) {
+  .studio-window { transform: none; }
+}
+
+/* Hero backdrop: static blueprint grid always; the three.js canvas (wide screens, motion allowed)
+   layers over it. A mask keeps the text column calm and lets the field show on the right. */
+.studio-line { display: block; }
+.studio-hero-grid { position: relative; z-index: 1; }
+.studio-backdrop { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
+  -webkit-mask-image: linear-gradient(100deg, rgb(0 0 0 / .05) 0%, rgb(0 0 0 / .07) 46%, black 78%);
+  mask-image: linear-gradient(100deg, rgb(0 0 0 / .05) 0%, rgb(0 0 0 / .07) 46%, black 78%); }
+.studio-backdrop-grid { position: absolute; inset: 0; opacity: .5;
+  background-image: linear-gradient(var(--border-subtle) 1px, transparent 1px), linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+  background-size: 56px 56px; }
+.studio-backdrop[data-scene="3d"] .studio-backdrop-grid { opacity: .25; }
+.studio-backdrop-scene { position: absolute; inset: 0; }
+.studio-backdrop-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0; transition: opacity 1s ease; }
+.studio-backdrop-canvas.is-shown { opacity: 1; }

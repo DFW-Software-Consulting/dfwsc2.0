@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useInitiateOnboarding } from "../hooks/useOnboarding";
+import { usePageTitle } from "../hooks/usePageTitle";
 import logger from "../utils/logger";
 
 function readTokenFromSearch() {
@@ -17,9 +18,9 @@ export default function OnboardClient() {
   });
   const [message, setMessage] = useState("");
   const { mutate, isPending } = useInitiateOnboarding();
+  usePageTitle("Client Onboarding");
 
   useEffect(() => {
-    document.title = "Client Stripe Onboarding";
     if (location.search || location.hash) {
       navigate(location.pathname, { replace: true });
     }
@@ -67,12 +68,12 @@ export default function OnboardClient() {
   return (
     <section className="min-h-[90vh] flex items-center justify-center p-4 transition-colors duration-300">
       <div className="w-full max-w-xl mx-auto">
-        <div className="bg-[var(--bg-main)] dark:bg-white/[0.02] backdrop-blur-md p-8 rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 transition-colors">
-          <h1 className="text-3xl font-bold text-center mb-4 text-slate-900 dark:text-white transition-colors">
+        <div className="bg-card p-8 rounded-2xl shadow-xl border border-line transition-colors">
+          <h1 className="text-3xl font-bold text-center mb-4 text-fg transition-colors">
             Stripe Account Setup
           </h1>
 
-          <p className="text-center text-slate-600 dark:text-gray-300 mb-8 transition-colors">
+          <p className="text-center text-fg-muted mb-8 transition-colors">
             Please enter the onboarding token provided by{" "}
             <span className="text-brand-600 dark:text-brand-400 font-semibold transition-colors">
               DFW Software Consulting
@@ -84,7 +85,7 @@ export default function OnboardClient() {
             <div className="mb-6">
               <label
                 htmlFor="onboardingToken"
-                className="block text-sm font-semibold text-slate-700 dark:text-gray-200 mb-2 transition-colors"
+                className="block text-sm font-semibold text-fg mb-2 transition-colors"
               >
                 Onboarding Token
               </label>

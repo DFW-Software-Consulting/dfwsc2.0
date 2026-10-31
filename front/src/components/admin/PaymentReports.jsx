@@ -3,6 +3,7 @@ import { useClients } from "../../hooks/useClients";
 import { useGroups } from "../../hooks/useGroups";
 import { usePaymentReport } from "../../hooks/usePaymentReports";
 import AdminTable from "./shared/AdminTable";
+import Button from "./shared/Button";
 import StatusBadge from "./shared/StatusBadge";
 
 function formatCurrency(amount, currency) {
@@ -92,7 +93,8 @@ export default function PaymentReports({ workspace = "client_portal" }) {
     },
     {
       header: "Payment ID",
-      tdClassName: "font-mono text-gray-400 text-xs",
+      tdClassName: "font-mono text-fg-muted text-xs",
+      cardClassName: "font-mono text-fg-muted text-xs break-all",
       render: (pi) => pi.id,
     },
     ...(showClientColumn
@@ -122,15 +124,15 @@ export default function PaymentReports({ workspace = "client_portal" }) {
 
   return (
     <div>
-      <div className="mb-6 p-4 bg-gray-700/50 rounded-lg">
-        <h4 className="text-md font-semibold text-white mb-4">Payment Reports</h4>
+      <div className="mb-6 p-4 bg-surface border border-line rounded-lg">
+        <h4 className="text-md font-semibold text-fg mb-4">Payment Reports</h4>
 
         {/* Report type toggle */}
-        <div className="flex gap-6 mb-4">
+        <div className="flex flex-wrap gap-x-6 mb-4">
           {reportTypes.map(({ value, label }) => (
             <label
               key={value}
-              className="flex items-center gap-1.5 text-sm text-gray-300 cursor-pointer"
+              className="flex min-h-11 items-center gap-2 text-sm text-fg cursor-pointer md:min-h-0 pointer-coarse:min-h-11"
             >
               <input
                 type="radio"
@@ -138,7 +140,7 @@ export default function PaymentReports({ workspace = "client_portal" }) {
                 value={value}
                 checked={reportType === value}
                 onChange={() => handleTypeChange(value)}
-                className="accent-blue-500"
+                className="size-5 accent-brand-500"
               />
               {label}
             </label>
@@ -154,8 +156,8 @@ export default function PaymentReports({ workspace = "client_portal" }) {
                 setSelectedId(e.target.value);
                 setReportEnabled(false);
               }}
-              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-md border border-line bg-card px-3 py-2 text-fg
+                         focus:outline-none focus:ring-2 focus:ring-focus"
             >
               <option value="">— Select {reportType} —</option>
               {isDfwscMode && reportType === "client" && (
@@ -172,8 +174,8 @@ export default function PaymentReports({ workspace = "client_portal" }) {
             <select
               value={limit}
               onChange={(e) => setLimit(e.target.value)}
-              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                         focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-md border border-line bg-card px-3 py-2 text-fg
+                         focus:outline-none focus:ring-2 focus:ring-focus"
             >
               {["10", "25", "50", "100"].map((v) => (
                 <option key={v} value={v}>
@@ -184,29 +186,23 @@ export default function PaymentReports({ workspace = "client_portal" }) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={handleRunReport}
-          disabled={isFetching || !selectedId}
-          className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-medium
-                     transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
+        <Button onClick={handleRunReport} disabled={isFetching || !selectedId}>
           {isFetching ? "Loading..." : "Run Report"}
-        </button>
+        </Button>
       </div>
 
       {/* Results */}
       {results && (
         <div>
           {results.data?.length === 0 ? (
-            <p className="text-gray-400 text-sm text-center py-6">
+            <p className="text-fg-muted text-sm text-center py-6">
               No payments found for this {reportType}.
             </p>
           ) : (
             <>
               <AdminTable columns={resultColumns} rows={results.data ?? []} keyField="id" />
               {results.hasMore && (
-                <p className="text-xs text-gray-400 mt-3 text-center">
+                <p className="text-xs text-fg-muted mt-3 text-center">
                   More results available — increase the limit to see them.
                 </p>
               )}

@@ -137,5 +137,59 @@ All routes are prefixed with `/api/v1`.
 | POST | `/api-key/regenerate-request/admin` | Admin-initiated API key regeneration | Admin JWT |
 | POST | `/api-key/regenerate` | Consume regeneration token, return new API key | Public (rate-limited, token in body) |
 
+### Contact
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/contact` | Contact form submission (`company` required): emailed to `CONTACT_INBOX` and, when sales automation is ready, submitted as a lead to the New Lead form (honeypot hits get the same 201 and are dropped). 201 if at least one enabled channel succeeded, else 502 `EMAIL_DELIVERY_FAILED` | Public (rate-limited) |
+
 ## 8. Swagger
 Swagger UI is available at `/docs` when the backend is started with `ENABLE_SWAGGER=true`. It is disabled by default in production to keep the build lean.
+
+## 9. Sales Lead Automation (Nextcloud)
+When an operator submits the Nextcloud Form **DFWSC — New Lead**, the API creates, exactly once per submission:
+1. a row in the Tables table **DFWSC — Sales Pipeline** (Stage `New Lead`; Owner is left empty for the operator to fill in, since the submitter is not necessarily the owner),
+2. a vCard in the address book `dfwsc-sales`, only if a contact name, email or phone was given (email and phone go only on the vCard, never on the row),
+3. a folder `<SALES_LEADS_FOLDER>/<Company>/`, then fills the row's **Contact Card** and **Notes / Files** links.
+
+**How it runs.** An in-process poller (`lib/sales-lead-sync.ts`, started from `index.ts` and stopped before the DB pool closes on shutdown) reads the form's submissions every `SALES_POLL_INTERVAL_MS`. There is no webhook route: Forms itself is the queue, so nothing is lost while Nextcloud or the API is down. On its first cycle for a form it records a baseline (`sales_lead_sync_state`), and submissions at or below it are never processed. Progress per submission lives in `sales_lead_submissions`. Each step's output (row id, contact UID, folder name, folder file id) is saved as soon as that step succeeds, so a retry resumes at the first missing step. Rows are claimed with a 10-minute lease (`FOR UPDATE SKIP LOCKED`), so overlapping cycles or replicas never process the same submission twice. Answers are never stored in Postgres; each attempt re-reads them from Forms.
+
+**Exactly-once per step.**
+- *Row*: the row's hidden **Lead Ref** column holds `<formId>:<submissionId>`. It is searched before every create, so a create whose response was lost is adopted rather than repeated.
+- *vCard*: the UID is deterministic (`dfwsc-lead-<formId>-<submissionId>`) and the `PUT` uses `If-None-Match: *` (412 means it already exists).
+- *Folder*: the chosen name is saved before `MKCOL`, so on a retry a 405 for that name is ours. A name already in use (same company, or a manual folder) gets the next free suffix, `Acme (2)`, `Acme (3)`, and a `duplicateCompany` warning is logged. Each submission still gets its own row.
+- *Links*: the Contact Card and Notes / Files cells are written as `Title (https://…)`, the format Tables 2.4 stores (a JSON `{title, value, providerId}` value gets a 200 but nothing is saved). Tables converts it on write and returns each stored link cell as that JSON string, with slashes escaped as `\/`. The row is then read back, each link cell's `value` URL is parsed out, and `links_backfilled_at` is set only once both URLs are there; otherwise the attempt fails with `tables.link_not_persisted` and is retried.
+
+**Titles, not ids.** Form questions (`Company`, `Contact name`, `Email`, `Phone`, `Source`, `Temperature`, `Estimated value`, `Next follow-up`, `Notes`) and table columns (`Company`, `Contact Name`, `Contact Card`, `Stage`, `Temperature`, `Source`, `Estimated Value`, `Next Follow-up`, `Notes / Files`, `Summary`, `Lead Ref`) are matched by exact title on each cycle. A missing title, or a Stage column with no `New Lead` option, stops the cycle with one error log until it is fixed. An answer that fits no option or value (e.g. an unknown Temperature) is left out of the row and its field name is logged.
+
+**Website contacts become leads.** `POST /contact` (when `SALES_AUTOMATION_ENABLED` is ready, same gate as the poller) also POSTs the contact to the New Lead form as the service account (`lib/website-lead.ts`, `SalesLeadNextcloud.submitLead`, Forms v3 `POST /forms/{id}/submissions` with `{"answers": {"<questionId>": [value]}}`, via `nextcloudRequest`, so the breaker and timeouts apply). Questions are resolved by the same titles: Company, Contact name, Email, Notes from the form; Source is the dropdown option matching `/website/i` (or "Website" for a text question). With no such option or question, Source stays blank and Notes starts with `Source: website contact form`. The poller then handles it like any submission (no submitter filter; it is above the baseline). The form must allow repeated submissions (`submitMultiple` on) and have no submission cap or expiry, otherwise Forms rejects the service account's second submission and the lead channel fails (the email still goes out). Email and lead run in parallel; failures are logged per channel without the message. A missing or invalid `CONTACT_INBOX`/`SMTP_FROM` fails only the email channel, so the lead still goes through. The lead channel has a global cap of `WEBSITE_LEAD_CAP_MAX` (20) attempts per rolling hour (`lib/constants.ts`, in memory per process, so a restart resets it); beyond it the lead is skipped with a `contact.lead_cap_reached` warning and only the email is sent.
+
+**Failures.** Network errors, timeouts, 5xx, 401, 408, 423, 425 and 429 are retried with backoff (1 min doubling, capped at 1 h) for up to 10 attempts, after which the submission becomes `failed`. Other 4xx (a share or id is wrong), a missing Company or a deleted submission fail immediately. While the Nextcloud circuit breaker (`lib/nextcloud.ts`, its own breaker, separate from Stripe and SMTP) is open, the cycle is skipped and no attempt is used. Logs contain only form, submission and row ids, step labels and error codes such as `tables.create_row:503`, never answers, names, emails, phone numbers, folder names or DAV paths.
+
+**Environment variables** (all optional; the automation is off unless `SALES_AUTOMATION_ENABLED=true`, and then the rest are required. An invalid config is logged once at startup and the poller stays off; payments are never affected):
+
+| Variable | Example | Notes |
+|---|---|---|
+| `NEXTCLOUD_BASE_URL` | `https://cloud.example.com` | HTTPS only |
+| `NEXTCLOUD_USERNAME` | `dfwsc-admin` | Service account |
+| `NEXTCLOUD_APP_PASSWORD` | `xxxxx-xxxxx-…` | App password, never logged |
+| `SALES_AUTOMATION_ENABLED` | `true` | Default `false` |
+| `SALES_LEAD_FORM_ID` | `12` | Form id (from the form's URL or `GET /ocs/v2.php/apps/forms/api/v3/forms?type=shared`) |
+| `SALES_PIPELINE_TABLE_ID` | `8` | |
+| `SALES_ADDRESSBOOK_PATH` | `dfwsc-sales_shared_by_messyginger0804` | The address book's collection name as the service account sees it |
+| `SALES_LEADS_FOLDER` | `DFWSC Sales/Leads` | Relative to the service account's files root |
+| `SALES_POLL_INTERVAL_MS` | `120000` | Default 120000, minimum 30000 |
+
+**Nextcloud prerequisites.**
+- The form owner shares the form with the service account with the **`results`** permission (Forms → Share → the user → enable "View responses"). Being a Nextcloud admin does not grant this.
+- A **manage** share on the Sales Pipeline table, and a text column **Lead Ref** on it (it can be hidden from views).
+- **Read-write** shares of the `dfwsc-sales` address book and the sales folder to the service account, accepted if shares need acceptance. Check the paths as the service account with `PROPFIND /remote.php/dav/addressbooks/users/<user>/` and `PROPFIND /remote.php/dav/files/<user>/` (a folder share may sit under `Shared/`).
+- Nextcloud **cron** (background jobs) running normally. The poller does not depend on it, but share and file-cache maintenance does.
+
+**Ops runbook.**
+- *Watch*: `GET /api/v1/metrics` exposes `dfwsc_sales_lead_submissions{status=...}`, `dfwsc_sales_lead_last_cycle_ok`, `dfwsc_sales_lead_last_cycle_timestamp_seconds` and `dfwsc_nextcloud_circuit_open`. Alert on `failed` > 0 or a stale last cycle.
+- *See failures*: `SELECT form_id, submission_id, attempts, last_error_code, updated_at FROM sales_lead_submissions WHERE status = 'failed';`
+- *Retry a failed row* once the cause is fixed. Completed steps are kept, so it resumes where it stopped:
+  `UPDATE sales_lead_submissions SET status = 'pending', attempts = 0, next_attempt_at = now(), claimed_at = NULL, claim_token = NULL WHERE form_id = <form> AND submission_id = <id>;`
+- *Skip a submission for good*: leave it `failed`. To redo it from scratch, delete the Nextcloud row, contact and folder, then delete its `sales_lead_submissions` row. It is rediscovered only if its id is above every other known id, so normally re-insert it with `INSERT INTO sales_lead_submissions (form_id, submission_id) VALUES (<form>, <id>);`.
+- *Empty links on early leads*: leads processed before the link-format fix have empty Contact Card and Notes / Files cells even though they are `completed`. Fill them by hand in Tables (folder: `<base>/index.php/f/<folder_file_id>`; contact: open it from the Contacts app).
+- *Disable*: set `SALES_AUTOMATION_ENABLED=false` and redeploy or restart the `api` service. Nothing is lost: submissions made meanwhile are picked up when it is re-enabled (the baseline is kept).

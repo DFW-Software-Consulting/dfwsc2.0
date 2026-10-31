@@ -51,3 +51,24 @@ export const WEBHOOK_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 export const SMTP_CONNECTION_TIMEOUT_MS = 10_000;
 export const SMTP_GREETING_TIMEOUT_MS = 10_000;
 export const SMTP_SOCKET_TIMEOUT_MS = 10_000;
+
+// "DFWSC — New Lead" automation (lib/sales-lead-sync.ts).
+export const SALES_LEAD_DEFAULT_POLL_INTERVAL_MS = 2 * 60 * 1000;
+export const SALES_LEAD_MIN_POLL_INTERVAL_MS = 30 * 1000;
+// Retryable failures back off from 1 minute, doubling, capped at 1 hour; after this
+// many attempts the submission is marked failed and needs an operator.
+export const SALES_LEAD_MAX_ATTEMPTS = 10;
+export const SALES_LEAD_RETRY_BASE_MS = 60 * 1000;
+export const SALES_LEAD_RETRY_MAX_MS = 60 * 60 * 1000;
+// A claim older than this is treated as abandoned by a crashed process.
+export const SALES_LEAD_CLAIM_LEASE_MS = 10 * 60 * 1000;
+// Per cycle: submissions processed, and submission pages read while discovering.
+export const SALES_LEAD_MAX_PER_CYCLE = 20;
+export const SALES_LEAD_MAX_DISCOVERY_PAGES = 20;
+// "Acme (2)" ... "Acme (50)": beyond this the folder step fails rather than guess.
+export const SALES_LEAD_MAX_FOLDER_SUFFIX = 50;
+
+// Global ceiling on website contacts turned into CRM leads (the email channel is not
+// capped): bounds what a spam run can push into the sales pipeline.
+export const WEBSITE_LEAD_CAP_MAX = 20;
+export const WEBSITE_LEAD_CAP_WINDOW_MS = 60 * 60 * 1000;
