@@ -517,7 +517,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
 export function createStripeMock() {
   const webhookHelper = new Stripe("sk_test_12345", { apiVersion: "2023-10-16" });
   return {
-    accounts: { create: vi.fn(), retrieve: vi.fn() },
+    accounts: { create: vi.fn(), retrieve: vi.fn(), del: vi.fn() },
     accountLinks: { create: vi.fn() },
     customers: { create: vi.fn() },
     paymentIntents: { create: vi.fn(), list: vi.fn() },

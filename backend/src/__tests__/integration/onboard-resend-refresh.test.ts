@@ -2,7 +2,7 @@ import { vi } from "vitest";
 
 vi.mock("../../lib/stripe", () => ({
   stripe: {
-    accounts: { create: vi.fn() },
+    accounts: { create: vi.fn(), del: vi.fn() },
     accountLinks: { create: vi.fn() },
     webhooks: { constructEvent: vi.fn() },
     paymentIntents: { create: vi.fn(), list: vi.fn() },
@@ -125,6 +125,7 @@ describe("Onboard Resend + Connect Refresh", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    (stripe.accounts.del as any).mockResolvedValue({ deleted: true });
   });
 
   afterEach(() => {
@@ -507,6 +508,32 @@ describe("Onboard Resend + Connect Refresh", () => {
       });
 
       expect(response.statusCode).toBe(502);
+    });
+
+    it("does not create an account link when a legacy account ID cannot be persisted", async () => {
+      const { clientId, state } = await seedRefreshPair("pending");
+      const ownerId = randomUUID();
+      const occupiedAccountId = `acct_occupied_${ownerId.replace(/-/g, "").slice(0, 10)}`;
+      await db.insert(clients).values({
+        id: ownerId,
+        name: "Occupied Account Owner",
+        email: `occupied-${ownerId}@example.com`,
+        stripeAccountId: occupiedAccountId,
+      });
+      extraClientIds.push(ownerId);
+      (stripe.accounts.create as any).mockResolvedValueOnce({ id: occupiedAccountId });
+
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/connect/refresh?client_id=${clientId}&state=${state}`,
+      });
+
+      expect(response.statusCode).toBe(502);
+      expect(stripe.accountLinks.create).not.toHaveBeenCalled();
+      // The account ID is persisted on another row, so it must never be deleted.
+      expect(stripe.accounts.del).not.toHaveBeenCalled();
+      const [legacy] = await db.select().from(clients).where(eq(clients.id, clientId));
+      expect(legacy.stripeAccountId).toBeNull();
     });
   });
 });

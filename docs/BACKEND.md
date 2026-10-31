@@ -56,10 +56,10 @@ All payments resolve `application_fee_amount` via a 6-level priority chain:
 If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environment variable is applied as a fallback; if that is also unset, no fee is applied.
 
 ### Onboarding Flow
-1. **Create client**: `POST /api/v1/accounts` creates a client record + pending onboarding token in one transaction, returns `apiKey`, `clientId`, and `onboardingUrlHint` (a URL embedding the onboarding token; the raw token is no longer returned as a separate `onboardingToken` field).
+1. **Create client**: `POST /api/v1/accounts` creates the client's Stripe Express account first, then stores the client record (with `stripeAccountId` and readiness flags) + pending onboarding token in one transaction, and returns `apiKey`, `clientId`, and `onboardingUrlHint` (a URL embedding the onboarding token; the raw token is no longer returned as a separate `onboardingToken` field).
 2. **Send email**: `POST /api/v1/onboard-client/initiate` does the same but also emails the client. Unlike `/accounts`, it does **not** return the plaintext `apiKey` (response `apiKey` is `null`); instead the email includes a 15-minute `/regenerate-key#token=...` link that, when clicked, rotates and reveals the API key once via `POST /api/v1/api-key/regenerate` (token in request body, not URL).
-3. **Resend**: `POST /api/v1/onboard-client/resend` revokes active tokens and issues a new one with a fresh email.
-4. **Onboard**: `POST /api/v1/onboard-client` with body `{ "token": "..." }` creates a Stripe Express Account (if not already) and returns an Account Link URL.
+3. **Resend**: `POST /api/v1/onboard-client/resend` revokes active tokens and issues a new one (in one transaction) with a fresh email; it returns 200 only after the email is sent.
+4. **Onboard**: `POST /api/v1/onboard-client` with body `{ "token": "..." }` returns an Account Link URL for the client's stored Stripe account. Clients created before eager provisioning (null `stripeAccountId`) get their account created here as a fallback.
 5. **Callback**: Stripe redirects to the platform-registered return URL, `GET /api/v1/connect/callback` with `client_id` and `state` (Stripe does not append `account`; it is accepted only as an optional legacy cross-check). Validates CSRF state, looks up `stripeAccountId` from the client record, marks token `completed`, redirects browser to `/onboarding-success`. The state expires after 24 hours; an expired state redirects to `/onboarding-success?status=expired` instead of returning an error.
 6. **Refresh**: `GET /api/v1/connect/refresh?client_id=...&state=...` regenerates an expired account link and redirects the client.
 
@@ -120,12 +120,14 @@ All routes are prefixed with `/api/v1`.
 ### Onboarding & Connect
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| POST | `/accounts` | Create client + onboarding token (no email) | Admin JWT |
-| POST | `/onboard-client/initiate` | Create client + onboarding token + send email | Admin JWT |
-| POST | `/onboard-client/resend` | Revoke old tokens + resend email | Admin JWT |
+| POST | `/accounts` | Create Stripe Express account + client + onboarding token (no email) | Admin JWT |
+| POST | `/onboard-client/initiate` | Create Stripe Express account + client + onboarding/retrieval tokens + send email | Admin JWT |
+| POST | `/onboard-client/resend` | Revoke old tokens + send a newly issued link (502 and new-token revocation if delivery fails) | Admin JWT |
 | GET | `/onboard-client` | Get Stripe Account Link URL | Public (token) |
 | GET | `/connect/callback` | Stripe Connect callback | Public |
 | GET | `/connect/refresh` | Refresh expired account link | Public |
+
+The two client-creation routes call Stripe before their atomic database write, without holding a transaction across the network call. A Stripe failure leaves no client row and returns no credentials (mapped Stripe errors such as `503 STRIPE_BUSY`, otherwise `502 STRIPE_FAILED`). A duplicate email is rejected with 409 before Stripe is called; the database unique constraint remains authoritative. A database failure after Stripe returned an account triggers best-effort account deletion; if deletion fails, the client and Stripe account IDs are logged at error level for reconciliation. An initiate email failure keeps the client and Stripe account but revokes exactly the newly issued onboarding and API-key retrieval tokens and returns `502 EMAIL_DELIVERY_FAILED`; recover with `/onboard-client/resend` (onboarding link) and `/api-key/regenerate-request/admin` (API key), not another initiate call. A resend email failure revokes its new token and returns the same 502 (older tokens stay revoked). If revoking an undelivered token fails, the response tells the admin to contact support. Legacy clients with no stored Stripe account are provisioned lazily when an Account Link is requested, and the link is created only after the account ID is confirmed persisted.
 
 ### Payments
 | Method | Path | Description | Auth |

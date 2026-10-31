@@ -175,6 +175,13 @@ beforeEach(async () => {
   mailhogMessages.length = 0;
 
   vi.clearAllMocks();
+  stripeMock.accounts.create.mockImplementation(async (params: any) => ({
+    id: `acct_${params.metadata.clientId.replace(/-/g, "").slice(0, 20)}`,
+    charges_enabled: false,
+    payouts_enabled: false,
+    details_submitted: false,
+  }));
+  stripeMock.accounts.del.mockResolvedValue({ deleted: true });
 });
 
 afterEach(() => {
@@ -765,7 +772,63 @@ describe("connect onboarding", () => {
     expect(json.onboardingToken).toBeUndefined();
     expect(json.onboardingUrlHint).toBeDefined();
     expect(json.workspace).toBe("client_portal");
+    const saved = dataStore.clients.get(json.clientId);
+    expect(saved?.stripeAccountId).toMatch(/^acct_/);
+    expect(saved?.chargesEnabled).toBe(false);
+    expect(saved?.payoutsEnabled).toBe(false);
+    expect(saved?.detailsSubmitted).toBe(false);
+    expect(stripeMock.accounts.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "express", metadata: { clientId: json.clientId } }),
+      { idempotencyKey: `acct-create-${json.clientId}` }
+    );
 
+    await server.close();
+  });
+
+  it("maps a Stripe busy error on /accounts to 503 and persists nothing", async () => {
+    const server = await createServer();
+    // Imported after the server so the class matches the instance the routes check against.
+    const { ConcurrencyLimitError } = await import("../lib/concurrency-limiter");
+    stripeMock.accounts.create.mockRejectedValueOnce(new ConcurrencyLimitError("wait_timeout"));
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/accounts",
+      headers: { authorization: `Bearer ${makeAdminToken()}` },
+      payload: { name: "Busy Client", email: "busy@example.com", workspace: "client_portal" },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ code: "STRIPE_BUSY" });
+    expect(
+      Array.from(dataStore.clients.values()).find((client) => client.email === "busy@example.com")
+    ).toBeUndefined();
+    await server.close();
+  });
+
+  it("does not create an /accounts client when Stripe provisioning fails", async () => {
+    stripeMock.accounts.create.mockRejectedValueOnce(new Error("stripe timeout"));
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/accounts",
+      headers: { authorization: `Bearer ${makeAdminToken()}` },
+      payload: {
+        name: "Unpersisted Client",
+        email: "unpersisted@example.com",
+        workspace: "client_portal",
+      },
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({ code: "STRIPE_FAILED" });
+    expect(
+      Array.from(dataStore.clients.values()).find(
+        (client) => client.email === "unpersisted@example.com"
+      )
+    ).toBeUndefined();
+    expect(response.json().apiKey).toBeUndefined();
     await server.close();
   });
 
@@ -799,6 +862,10 @@ describe("connect onboarding", () => {
     );
     expect(savedClient?.apiKeyHash).toMatch(/^hashed:.+/);
     expect(savedClient?.id).toBe(body.clientId);
+    expect(savedClient?.stripeAccountId).toBeDefined();
+    expect(savedClient?.chargesEnabled).toBe(false);
+    expect(savedClient?.payoutsEnabled).toBe(false);
+    expect(savedClient?.detailsSubmitted).toBe(false);
     expect(mailhogMessages.length).toBe(1);
     expect(mailhogMessages[0].Content.Headers.Subject[0]).toBe(
       "DFW Software Consulting - Stripe Onboarding"
@@ -871,6 +938,41 @@ describe("connect onboarding", () => {
 
     const updatedClient = dataStore.clients.get(clientId);
     expect(updatedClient?.stripeAccountId).toBe("acct_new");
+    await server.close();
+  });
+
+  it("uses an already persisted Stripe account without creating another one", async () => {
+    stripeMock.accountLinks.create.mockResolvedValue({
+      url: "https://connect.stripe.com/setup/existing",
+    });
+    const clientId = "client_existing_connect";
+    seedClient({
+      id: clientId,
+      stripeAccountId: "acct_existing_connect",
+      name: "Existing Connect Client",
+      email: "existing-connect@example.com",
+    });
+    seedOnboardingToken(dataStore, {
+      id: "token_existing_connect",
+      clientId,
+      token: "token_existing_connect_value",
+      status: "pending",
+      email: "existing-connect@example.com",
+    });
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/onboard-client",
+      payload: { token: "token_existing_connect_value" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(stripeMock.accounts.create).not.toHaveBeenCalled();
+    expect(stripeMock.accountLinks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ account: "acct_existing_connect" }),
+      expect.any(Object)
+    );
     await server.close();
   });
 });
