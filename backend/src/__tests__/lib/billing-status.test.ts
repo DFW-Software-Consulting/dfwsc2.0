@@ -325,6 +325,58 @@ describe("deriveBilling status rules", () => {
     expect(values.amountPaid).toBe(30000);
   });
 
+  it("all payments made but an open invoice or past_due status keeps the plan live", () => {
+    const start = days(-133);
+    const base = { start_date: start, cancel_at: start + 19 * 7 * 86400 };
+    const paid = Array.from({ length: 19 }, (_, i) =>
+      paidInvoice(`in_${i}`, "sub_o", 150000, 7 * i)
+    );
+    const open = invoice({
+      id: "in_open",
+      status: "open",
+      amount_remaining: 150000,
+      due_date: days(2),
+      parent: { subscription_details: { subscription: "sub_o" } },
+    });
+    const withOpen = derive({
+      subscriptions: [sub({ id: "sub_o", ...base })],
+      invoices: [...paid, open],
+    });
+    expect(withOpen.subscription).toBe("$1,500/week for 19 weeks");
+    expect(withOpen.paymentsMade).toBe("19 of 19");
+    const pastDue = derive({
+      subscriptions: [sub({ id: "sub_o", status: "past_due", ...base })],
+      invoices: paid,
+    });
+    expect(pastDue.paymentsMade).toBe("19 of 19");
+  });
+
+  it("marks a canceled open-ended plan (ended), not (done)", () => {
+    const values = derive({
+      subscriptions: [sub({ id: "sub_n", status: "canceled" })],
+      invoices: [paidInvoice("in_1", "sub_n", 150000, 20)],
+    });
+    expect(values.subscription).toBe("$1,500/week (ended)");
+    expect(values.paymentsMade).toBe("1 (ended)");
+  });
+
+  it("an overdue invoice without due_date uses next_payment_attempt, else created", () => {
+    const failed = {
+      status: "open",
+      amount_remaining: 100,
+      collection_method: "charge_automatically",
+      attempt_count: 1,
+    };
+    const retry = derive({
+      invoices: [
+        invoice({ id: "in_a", ...failed, next_payment_attempt: days(-1), created: days(-8) }),
+      ],
+    });
+    expect(retry.nextDue).toBe("2026-10-30 12:00");
+    const created = derive({ invoices: [invoice({ id: "in_b", ...failed, created: days(-8) })] });
+    expect(created.nextDue).toBe("2026-10-23 12:00");
+  });
+
   it("marks a canceled finite plan (done) even when payments are missing", () => {
     const start = days(-60);
     const values = derive({
