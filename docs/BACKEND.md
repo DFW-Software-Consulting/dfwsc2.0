@@ -140,7 +140,7 @@ All routes are prefixed with `/api/v1`.
 ### Contact
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| POST | `/contact` | Contact form submission (`company` required): emailed to `CONTACT_INBOX` and, when sales automation is ready, submitted as a lead to the New Lead form (honeypot hits get the same 201 and are dropped). 201 if at least one enabled channel succeeded, else 502 `EMAIL_DELIVERY_FAILED` | Public (rate-limited) |
+| POST | `/contact` | Contact form submission (`company` required): emailed to `CONTACT_INBOX` and, when sales automation is ready, submitted as a lead to the New Lead form (honeypot hits get the same 201 and are dropped). Optional `context` (referrer host, landing path, UTM, pages, seconds on site; `lib/visit-context.ts`) is appended to the email and the lead's Notes as a `--- Visit context ---` block; an invalid context is dropped, never a 400. 201 if at least one enabled channel succeeded, else 502 `EMAIL_DELIVERY_FAILED` | Public (rate-limited) |
 
 ## 8. Swagger
 Swagger UI is available at `/docs` when the backend is started with `ENABLE_SWAGGER=true`. It is disabled by default in production to keep the build lean.

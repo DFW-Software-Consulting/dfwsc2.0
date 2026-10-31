@@ -3,11 +3,13 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import Analytics from "./components/Analytics.jsx";
 import Footer from "./components/Footer.jsx";
 import Navbar from "./components/Navbar.jsx";
+import RouteTracker from "./components/RouteTracker.jsx";
 import { lazyPage } from "./utils/lazyPage.js";
 
 const Home = lazyPage(() => import("./pages/Home.jsx"));
 const Pricing = lazyPage(() => import("./pages/Pricing.jsx"));
 const Team = lazyPage(() => import("./pages/Team.jsx"));
+const Privacy = lazyPage(() => import("./pages/Privacy.jsx"));
 const Docs = lazyPage(() => import("./pages/Docs.jsx"));
 const OnboardClient = lazyPage(() => import("./pages/OnboardClient"));
 const AdminPage = lazyPage(() => import("./pages/AdminPage"));
@@ -22,6 +24,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <Analytics />
+      <RouteTracker />
       <div className="min-h-screen relative isolate bg-[var(--bg-main)] text-[var(--text-main)] selection:bg-brand-500/30 transition-colors duration-300">
         {/* Background glow effects */}
         <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
@@ -42,6 +45,7 @@ export default function App() {
               <Route path="/" element={<Home />} />
               <Route path="/pricing" element={<Pricing />} />
               <Route path="/team" element={<Team />} />
+              <Route path="/privacy" element={<Privacy />} />
               <Route path="/docs" element={<Docs />} />
               <Route path="/onboard" element={<OnboardClient />} />
               <Route path="/admin" element={<AdminPage />} />

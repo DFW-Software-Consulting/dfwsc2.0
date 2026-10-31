@@ -64,6 +64,32 @@ describe("buildWebsiteLeadAnswers", () => {
     expect(answers[QUESTION_IDS.Notes]).toEqual(["Source: website contact form\n\nHello there"]);
   });
 
+  it("appends the visit context block to Notes", () => {
+    const answers = buildWebsiteLeadAnswers(textQuestions(), {
+      ...contact,
+      context: { referrer: "google.com", landingPath: "/services" },
+    });
+    expect(answers[QUESTION_IDS.Notes]).toEqual([
+      "Hello there\n\n--- Visit context ---\nFound us via: google.com\nLanded on: /services",
+    ]);
+  });
+
+  it("keeps the Source prefix and puts the context after the message", () => {
+    const questions = textQuestions().filter((q) => q.text !== "Source");
+    const answers = buildWebsiteLeadAnswers(questions, {
+      ...contact,
+      context: { secondsOnSite: 45 },
+    });
+    expect(answers[QUESTION_IDS.Notes]).toEqual([
+      "Source: website contact form\n\nHello there\n\n--- Visit context ---\nFound us via: direct or unknown\nTime on site: 45s",
+    ]);
+  });
+
+  it("leaves Notes unchanged for an empty context", () => {
+    const answers = buildWebsiteLeadAnswers(textQuestions(), { ...contact, context: {} });
+    expect(answers[QUESTION_IDS.Notes]).toEqual(["Hello there"]);
+  });
+
   it("skips optional questions that do not exist and never answers the others", () => {
     const questions = textQuestions().filter(
       (q) => !["Email", "Contact name", "Notes"].includes(q.text)
