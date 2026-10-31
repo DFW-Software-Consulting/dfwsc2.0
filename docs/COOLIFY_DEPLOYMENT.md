@@ -86,6 +86,18 @@ All resources can be deployed independently on Coolify while sharing the same mo
   # BILLING_SWEEP_INTERVAL_MS=3600000
   # Secret of the account-level Stripe webhook endpoint https://api.dfwsc.com/api/v1/webhooks/stripe-billing (docs/STRIPE.md); unset = endpoint answers 404
   # STRIPE_BILLING_WEBHOOK_SECRET=whsec_...
+  # Optional: "New invoice" Nextcloud form that creates REAL Stripe invoices and plans (docs/BACKEND.md section 14); off by default.
+  # Rollout: create and restrict the form, share responses with dfwsc-admin, set the form id and secret, register the
+  # webhook listener, deploy, then set BILLING_REQUESTS_ENABLED=true (the first cycle records a baseline).
+  BILLING_REQUESTS_ENABLED=false
+  # BILLING_REQUESTS_FORM_ID=<id of the New invoice form>
+  # BILLING_REQUESTS_WEBHOOK_SECRET=at_least_32_random_characters   (unset = poll only)
+  # BILLING_REQUESTS_POLL_INTERVAL_MS=300000
+  # BILLING_REQUESTS_ALLOWED_GROUPS=dfwsc-admins,managers   (who may submit; default shown)
+  # BILLING_REQUESTS_SHARE_GROUPS=dfwsc-admins,managers   (read-only "Billing Requests" table; default shown)
+  # BILLING_MAX_AMOUNT_CENTS=2500000   (per invoice or per plan payment)
+  # BILLING_AUTO_SEND=true   (false = leave one-off invoices as drafts)
+  # BILLING_DEFAULT_DAYS_UNTIL_DUE=7
   ```
 - **Admin login (Nextcloud)**: the admin panel signs users in against Nextcloud; there are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ALLOW_ADMIN_SETUP` are no longer read (remove them from Coolify). Before deploying this change:
   1. **Create the Nextcloud groups first and put members in them.** The defaults are `dfwsc-admins` and `managers` (override with `ADMIN_NEXTCLOUD_GROUPS`, comma-separated, exact ids). A user whose Nextcloud account is in none of them gets 403 "This Nextcloud account isn't authorized for the admin panel".

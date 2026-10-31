@@ -79,6 +79,12 @@ DFWSC bills its own clients through Stripe Customers on the **platform account**
 - **Hard guard**: an event with `account` set (a connected account) answers 200 and is ignored before anything is claimed or looked up.
 - Same `webhook_events` lease and dedupe as the Connect endpoint. The Customer is resolved through `billing_customers`; an unknown Customer is ignored; a known one only gets `billing_snapshots.dirty_at = now()`. The event payload is never used for data: the refresh re-reads `subscriptions.list` (`status: all`, `expand: data.schedule`), `subscriptionSchedules.list` (`scheduled: true`) and `invoices.list` for the Customer. These are the only Stripe calls of the billing mirror and all are reads; a test asserts that no Stripe write method is ever called.
 
+### Invoices and plans created from Nextcloud (DFWSC's own clients, platform account)
+The "New invoice" Nextcloud Form (docs/BACKEND.md section 14) is the only place the API **creates** billing objects on the platform account. All on the platform account: no call passes `stripeAccount`, Connect is not involved. It creates, per submission:
+- one-off: `invoices.create` (`send_invoice`, `pending_invoice_items_behavior: exclude`, `auto_advance: false`), `invoiceItems.create`, then (`BILLING_AUTO_SEND`, default on) `invoices.finalizeInvoice` and `invoices.sendInvoice`;
+- plan: `products.create`, then `subscriptionSchedules.create` with `end_behavior: cancel`, `send_invoice` collection and one phase. On the pinned API version `2025-09-30.clover` the phase length is `duration: { interval, interval_count }` (payments x the interval); `iterations` no longer exists in the types.
+Every call has the idempotency key `ncbill-{formId}-{submissionId}-{step}`; objects carry metadata `nc_form`, `nc_submission`, `client_code`. It reads (`retrieve`, `search`, `list`) only to resume a request older than the 24 h key window, and never updates, voids, cancels or deletes an existing object. The Client Billing mirror and its account-level webhook (above) pick the new invoices and schedules up; the request also marks the client's `billing_snapshots` row dirty.
+
 ## 6. Products
 Products and prices are created on the **connected account** (not the platform account) by passing `stripeAccount` to Stripe API calls. Both `GET /products` and `POST /products` require a `clientId` parameter to resolve the connected account.
 
