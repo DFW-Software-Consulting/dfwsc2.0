@@ -5,7 +5,6 @@ import {
   accountColumns,
   cellMatches,
   contentHash,
-  DEFAULT_MIRROR_OPTIONS,
   effectiveFee,
   formatDateTime,
   onboardingState,
@@ -14,7 +13,7 @@ import {
 } from "../../lib/portal-mirror-render";
 
 const spec = (key: string) => {
-  const found = accountColumns(DEFAULT_MIRROR_OPTIONS).find((s) => s.key === key);
+  const found = accountColumns().find((s) => s.key === key);
   if (!found) throw new Error(key);
   return found;
 };
@@ -77,12 +76,7 @@ describe("portal mirror rendering", () => {
   });
 
   it("renders labels, yes/no, dollars, and leaves out PII and secrets", () => {
-    const values = renderAccount(
-      baseClient,
-      group({ processingFeeCents: 250 }),
-      defaults,
-      DEFAULT_MIRROR_OPTIONS
-    );
+    const values = renderAccount(baseClient, group({ processingFeeCents: 250 }), defaults);
     expect(values).toMatchObject({
       id: "c1",
       name: "Acme",
@@ -103,14 +97,8 @@ describe("portal mirror rendering", () => {
     for (const secret of ["555-0100", "1 Main St", "secret note", "hash", "lookup"]) {
       expect(text).not.toContain(secret);
     }
-    const titles = accountColumns(DEFAULT_MIRROR_OPTIONS).map((c) => c.title);
+    const titles = accountColumns().map((c) => c.title);
     expect(titles.slice(0, 3)).toEqual(["Client ID", "Name", "Email"]);
-  });
-
-  it("can hide the email column", () => {
-    const options = { ...DEFAULT_MIRROR_OPTIONS, includeEmail: false };
-    expect(accountColumns(options).map((c) => c.title)).not.toContain("Email");
-    expect(renderAccount(baseClient, null, defaults, options).email).toBeUndefined();
   });
 
   it("hashes stably and ignores key order", () => {
@@ -119,7 +107,7 @@ describe("portal mirror rendering", () => {
   });
 
   it("maps values to column ids and compares cells tolerantly", () => {
-    const specs = accountColumns(DEFAULT_MIRROR_OPTIONS);
+    const specs = accountColumns();
     const ids = new Map(specs.map((s, i) => [s.key, i + 1]));
     const data = toRowData(specs, ids, { id: "c1", feeAmount: 2.5 });
     expect(data["1"]).toBe("c1");
@@ -135,7 +123,7 @@ describe("portal mirror rendering", () => {
   });
 
   it("builds the verified Tables request shapes, with read-only shares", () => {
-    const specs = accountColumns(DEFAULT_MIRROR_OPTIONS);
+    const specs = accountColumns();
     expect(columnBody(spec("feeAmount"))).toEqual({
       title: "Fee $",
       type: "number",

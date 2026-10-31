@@ -26,6 +26,8 @@ export interface MirrorRow {
 export interface MirrorShare {
   receiver: string;
   receiverType: string;
+  /** True when the share grants anything beyond read (create, update, delete or manage). */
+  writable: boolean;
 }
 
 // The one place a column request body is built.
@@ -141,10 +143,23 @@ export class PortalMirrorNextcloud {
     });
     const shares = parseJson(res.body, label);
     if (!Array.isArray(shares)) throw new NextcloudBadResponseError(label);
-    return shares.map((s: { receiver?: unknown; receiverType?: unknown }) => ({
-      receiver: typeof s.receiver === "string" ? s.receiver : "",
-      receiverType: typeof s.receiverType === "string" ? s.receiverType : "",
-    }));
+    return shares.map(
+      (
+        s: {
+          receiver?: unknown;
+          receiverType?: unknown;
+        } & Record<string, unknown>
+      ) => ({
+        receiver: typeof s.receiver === "string" ? s.receiver : "",
+        receiverType: typeof s.receiverType === "string" ? s.receiverType : "",
+        writable: [
+          s.permissionCreate,
+          s.permissionUpdate,
+          s.permissionDelete,
+          s.permissionManage,
+        ].some((p) => p === true),
+      })
+    );
   }
 
   async shareReadOnly(tableId: number, group: string): Promise<void> {

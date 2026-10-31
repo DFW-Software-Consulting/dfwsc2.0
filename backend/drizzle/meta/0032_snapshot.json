@@ -1,5 +1,5 @@
 {
-  "id": "f028ed34-3d12-47ba-a024-be932cc70cb5",
+  "id": "bc30eea9-0f1f-41ad-8122-3fa57a7d8dac",
   "prevId": "119985f3-9786-4c9f-906b-d4a0594c92c4",
   "version": "7",
   "dialect": "postgresql",
@@ -1384,6 +1384,27 @@
           "method": "btree",
           "with": {}
         },
+        "payment_ledger_client_updated_idx": {
+          "name": "payment_ledger_client_updated_idx",
+          "columns": [
+            {
+              "expression": "client_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "payment_ledger_session_id_uniq": {
           "name": "payment_ledger_session_id_uniq",
           "columns": [
@@ -1563,6 +1584,38 @@
           "value": "\"portal_mirror_rows\".\"kind\" IN ('account')"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.portal_mirror_state": {
+      "name": "portal_mirror_state",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.sales_lead_submissions": {

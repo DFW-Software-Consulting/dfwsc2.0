@@ -1,7 +1,25 @@
-import { and, asc, eq, inArray, isNull, ne, notExists, or, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  exists,
+  inArray,
+  isNull,
+  ne,
+  notExists,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import { db, pool } from "../db/client";
-import { clientGroups, clients, paymentLedger, portalMirrorRows } from "../db/schema";
+import {
+  clientGroups,
+  clients,
+  paymentLedger,
+  portalMirrorRows,
+  portalMirrorState,
+} from "../db/schema";
 import {
   getNextcloudConfig,
   NextcloudCircuitOpenError,
@@ -25,6 +43,7 @@ import {
   renderAccount,
   toRowData,
 } from "./portal-mirror-render";
+import type { TableColumn } from "./sales-lead-mapping";
 import { getSettings } from "./stripe-billing";
 
 // Read-only mirror of the Stripe Connect side of the portal (the `clients` table) into a
@@ -35,8 +54,13 @@ import { getSettings } from "./stripe-billing";
 //
 // Change tracking needs no trigger and no column on `clients`: a client is dirty when it has no
 // portal_mirror_rows row, or its updated_at (or its group's) is newer than the row's synced_at
-// minus an overlap (updated_at is the transaction start, so a long transaction can commit late),
-// or the latest updated_at among that client's payment_ledger rows is.
+// minus an overlap, or any of that client's payment_ledger rows changed after that point.
+// updated_at comes from two clocks: Drizzle's $onUpdate stamps the API's Node clock when the
+// statement is built, a plain INSERT stamps the database's now() (transaction start), while
+// synced_at is the database clock at the start of a cycle. Clock skew and a transaction that
+// commits some time after its stamp can therefore put a committed write slightly BEFORE a
+// synced_at taken later. The 5 minute overlap absorbs both; anything older is caught by the
+// daily reconcile.
 // Every Drizzle write bumps updated_at ($onUpdate); the daily reconcile also catches raw SQL and
 // FK effects (a deleted group nulls clients.group_id without touching updated_at).
 //
@@ -143,7 +167,6 @@ export function loadPortalMirrorConfig(env: NodeJS.ProcessEnv): ConfigResult {
       options: {
         ...DEFAULT_MIRROR_OPTIONS,
         includeArchived: env.PORTAL_MIRROR_INCLUDE_ARCHIVED?.trim() === "true",
-        includeEmail: env.PORTAL_MIRROR_INCLUDE_EMAIL?.trim() !== "false",
       },
       minGapMs: 200,
     },
@@ -233,53 +256,121 @@ const isAuthError = (error: unknown) =>
 
 // ── Provisioning ─────────────────────────────────────────────────────────────
 
+const TABLE_ID_KEY = "accounts_table_id";
+
+async function storedTableId(): Promise<number | null> {
+  const [row] = await db
+    .select({ value: portalMirrorState.value })
+    .from(portalMirrorState)
+    .where(eq(portalMirrorState.key, TABLE_ID_KEY));
+  const id = row ? Number(row.value) : Number.NaN;
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+async function saveTableId(id: number | null): Promise<void> {
+  if (id === null) {
+    await db.delete(portalMirrorState).where(eq(portalMirrorState.key, TABLE_ID_KEY));
+    return;
+  }
+  await db
+    .insert(portalMirrorState)
+    .values({ key: TABLE_ID_KEY, value: String(id) })
+    .onConflictDoUpdate({
+      target: portalMirrorState.key,
+      set: { value: String(id), updatedAt: new Date() },
+    });
+}
+
+const isNotFound = (error: unknown) => error instanceof NextcloudHttpError && error.status === 404;
+
+/**
+ * Finds or creates the table and its columns, and (API-created tables only) the read-only
+ * shares. Runs every cycle with one GET of the columns, so a table or column deleted in
+ * Nextcloud is noticed on the next cycle without a restart:
+ *
+ * - The table id is, in order: PORTAL_ACCOUNTS_TABLE_ID, the id stored in portal_mirror_state,
+ *   a title lookup. A renamed table keeps being used through its stored id.
+ * - A stored table that answers 404 is forgotten and found or created again by title.
+ * - Missing columns are re-created by title.
+ * - Anything re-created forces a reconcile in this cycle (rows or cells may be missing).
+ */
 async function provision(
   nc: PortalMirrorNextcloud,
-  settings: PortalMirrorSettings
+  settings: PortalMirrorSettings,
+  logger: Logger
 ): Promise<Provisioned> {
-  const specs = accountColumns(settings.options);
-  const signature = JSON.stringify([
-    settings.nextcloud.baseUrl,
-    settings.accountsTableId,
-    specs.map((s) => s.title),
-    settings.shareGroups,
-  ]);
-  if (provisioned?.signature === signature) return provisioned.value;
+  const specs = accountColumns();
+  const signature = JSON.stringify([settings.nextcloud.baseUrl, settings.shareGroups]);
+  const cached = provisioned?.signature === signature ? provisioned.value : null;
+  const override = settings.accountsTableId;
 
-  let tableId = settings.accountsTableId;
+  let tableId = override ?? cached?.tableId ?? (await storedTableId());
+  let columns: TableColumn[] | null = null;
+  let changed = false;
+  let sharesChecked = cached !== null;
+
+  if (tableId !== null) {
+    try {
+      columns = await nc.getColumns(tableId);
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      if (override !== null) throw new PortalMirrorConfigError(`table ${override} was not found`);
+      logger.warn({ tableId }, "Portal mirror: its table is gone; looking for or creating one.");
+      await saveTableId(null);
+      tableId = null;
+      sharesChecked = false;
+    }
+  }
   if (tableId === null) {
-    const tables = await nc.listTables();
-    const mine = tables.find(
-      (t) =>
-        t.title === ACCOUNTS_TABLE_TITLE &&
-        (t.ownership === null || t.ownership === nc.serviceUsername)
-    );
-    tableId = mine ? mine.id : await nc.createTable(ACCOUNTS_TABLE_TITLE, "📊");
+    const owned = (await nc.listTables())
+      .filter(
+        (t) =>
+          t.title === ACCOUNTS_TABLE_TITLE &&
+          (t.ownership === null || t.ownership === nc.serviceUsername)
+      )
+      .sort((a, b) => a.id - b.id);
+    if (owned.length > 1) {
+      logger.warn(
+        { tableIds: owned.map((t) => t.id), using: owned[0].id },
+        "Portal mirror: several tables have the mirror's title; using the lowest id."
+      );
+    }
+    tableId = owned.length ? owned[0].id : await nc.createTable(ACCOUNTS_TABLE_TITLE, "📊");
+    await saveTableId(tableId);
+    columns = await nc.getColumns(tableId);
+    changed = true;
+    sharesChecked = false;
+  } else if (override === null && cached === null && (await storedTableId()) !== tableId) {
+    await saveTableId(tableId);
   }
 
-  let columns = await nc.getColumns(tableId);
-  const byTitle = new Map(columns.map((c) => [c.title.trim(), c.id]));
+  const byTitle = new Map((columns ?? []).map((c) => [c.title.trim(), c.id]));
   const missing = specs.filter((s) => !byTitle.has(s.title));
   if (missing.length) {
-    if (settings.accountsTableId !== null) {
+    if (override !== null) {
       throw new PortalMirrorConfigError(
         `table ${tableId} lacks columns: ${missing.map((m) => m.title).join(", ")}`
       );
     }
     // Columns are created in order, so the table reads left to right as specified.
     for (const spec of missing) byTitle.set(spec.title, await nc.createColumn(tableId, spec));
-    columns = [];
+    changed = true;
   }
 
-  if (settings.accountsTableId === null) {
+  if (override === null && !sharesChecked) {
     const shares = await nc.listShares(tableId);
     for (const group of settings.shareGroups) {
-      if (!shares.some((s) => s.receiver === group && s.receiverType === "group")) {
+      const existing = shares.find((s) => s.receiver === group && s.receiverType === "group");
+      if (!existing) {
         await nc.shareReadOnly(tableId, group);
+      } else if (existing.writable) {
+        // Not corrected here: only logged, because the share update call is unverified.
+        logger.warn({ group }, "Portal mirror: a share of its table grants more than read access.");
       }
     }
   }
 
+  if (changed) lastReconcileAt = 0; // rows or cells may be missing: reconcile this cycle
   const value: Provisioned = {
     tableId,
     columnIds: new Map(specs.map((s) => [s.key, byTitle.get(s.title) as number])),
@@ -422,21 +513,10 @@ async function syncDirtyAccounts(
   ctx: CycleContext
 ): Promise<void> {
   const defaults = await feeDefaults();
-  // Latest payment change per client: a payment insert or webhook update re-renders the row.
-  // payment_ledger_client_id_idx covers the grouping; the ledger is small, so no extra index.
-  const pay = db
-    .select({
-      clientId: paymentLedger.clientId,
-      lastChange: sql<Date>`max(${paymentLedger.updatedAt})`.as("last_change"),
-    })
-    .from(paymentLedger)
-    .groupBy(paymentLedger.clientId)
-    .as("pay");
   const dirty = await db
     .select({ client: clients, group: clientGroups, mirror: m })
     .from(clients)
     .leftJoin(clientGroups, eq(clientGroups.id, clients.groupId))
-    .leftJoin(pay, eq(pay.clientId, clients.id))
     .leftJoin(m, and(eq(m.kind, KIND), eq(m.sourceId, clients.id)))
     .where(
       and(
@@ -444,7 +524,20 @@ async function syncDirtyAccounts(
         or(
           isNull(m.sourceId),
           isNull(m.syncedAt),
-          sql`greatest(${clients.updatedAt}, coalesce(${clientGroups.updatedAt}, '-infinity'::timestamptz), coalesce(${pay.lastChange}, '-infinity'::timestamptz)) >= ${m.syncedAt} - make_interval(secs => ${OVERLAP_SECONDS})`
+          sql`greatest(${clients.updatedAt}, coalesce(${clientGroups.updatedAt}, '-infinity'::timestamptz)) >= ${m.syncedAt} - make_interval(secs => ${OVERLAP_SECONDS})`,
+          // A payment of this client changed since the row was written: an index range probe on
+          // payment_ledger_client_updated_idx, not an aggregate over the whole ledger.
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(paymentLedger)
+              .where(
+                and(
+                  eq(paymentLedger.clientId, clients.id),
+                  sql`${paymentLedger.updatedAt} >= ${m.syncedAt} - make_interval(secs => ${OVERLAP_SECONDS})`
+                )
+              )
+          )
         ),
         or(isNull(m.nextAttemptAt), sql`${m.nextAttemptAt} <= now()`)
       )
@@ -465,7 +558,6 @@ async function syncDirtyAccounts(
       row.client,
       row.group,
       defaults,
-      settings.options,
       summaries.get(row.client.id) ?? EMPTY_PAYMENT_SUMMARY
     );
     const hash = contentHash(values);
@@ -568,7 +660,6 @@ async function reconcileAccounts(
         s.client,
         s.group,
         defaults,
-        settings.options,
         summaries.get(s.client.id) ?? EMPTY_PAYMENT_SUMMARY
       ),
     ])
@@ -633,7 +724,7 @@ async function syncOnce(
   const nc = new PortalMirrorNextcloud(settings.nextcloud, settings.minGapMs);
   const out = result("ok");
   const ctx: CycleContext = { warnedNonUsd: false };
-  const prov = await provision(nc, settings);
+  const prov = await provision(nc, settings, logger);
   if (Date.now() - lastReconcileAt >= RECONCILE_EVERY_MS) {
     await reconcileAccounts(nc, prov, settings, cycleStart, logger, ctx);
     lastReconcileAt = Date.now();

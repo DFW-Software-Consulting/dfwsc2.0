@@ -6,7 +6,7 @@ import type { clientGroups, clients } from "../db/schema";
 // found again when the mapping is lost (daily reconcile).
 //
 // Never rendered, on purpose: connected_account_id of payments, phone, address, notes, API keys.
-// The client email is shown (owner decision) and can be turned off with MirrorOptions.includeEmail.
+// The client email is always shown (owner decision).
 //
 // Per-account payment columns (Last Payment, Payments (30d), DFWSC Fees (30d)) are aggregates
 // only (PaymentSummary, computed in SQL by lib/portal-mirror-sync.ts): no individual payment, id
@@ -26,14 +26,12 @@ export interface ColumnSpec {
   prefix?: string;
 }
 
-/** The owner's open choices, each one a switch here (see PORTAL_MIRROR_* in lib/portal-mirror-sync.ts). */
+/** Owner choices that are switches (see PORTAL_MIRROR_* in lib/portal-mirror-sync.ts). */
 export interface MirrorOptions {
-  includeEmail: boolean;
   includeArchived: boolean;
 }
 
 export const DEFAULT_MIRROR_OPTIONS: MirrorOptions = {
-  includeEmail: true,
   includeArchived: false,
 };
 
@@ -45,11 +43,11 @@ const money = (): Pick<ColumnSpec, "type" | "decimals" | "prefix"> => ({
   prefix: "$",
 });
 
-export function accountColumns(options: MirrorOptions): ColumnSpec[] {
+export function accountColumns(): ColumnSpec[] {
   return [
     { key: "id", title: "Client ID", type: "text" },
     { key: "name", title: "Name", type: "text" },
-    ...(options.includeEmail ? [{ key: "email", title: "Email", type: "text" } as ColumnSpec] : []),
+    { key: "email", title: "Email", type: "text" },
     { key: "group", title: "Group", type: "text" },
     { key: "status", title: "Status", type: "text" },
     { key: "stripeAccount", title: "Stripe Account", type: "text" },
@@ -148,13 +146,13 @@ export function renderAccount(
   client: typeof clients.$inferSelect,
   group: typeof clientGroups.$inferSelect | null,
   defaults: FeeDefaults,
-  options: MirrorOptions,
   summary: PaymentSummary = EMPTY_PAYMENT_SUMMARY
 ): RenderedValues {
   const fee = effectiveFee(client, group, defaults);
   const values: RenderedValues = {
     id: client.id,
     name: client.name,
+    email: client.email,
     group: group?.name ?? "",
     status: ACCOUNT_STATUS_LABELS[client.status] ?? client.status,
     stripeAccount: client.stripeAccountId ?? "",
@@ -170,7 +168,6 @@ export function renderAccount(
     created: formatDateTime(client.createdAt),
     updated: formatDateTime(client.updatedAt),
   };
-  if (options.includeEmail) values.email = client.email;
   return values;
 }
 

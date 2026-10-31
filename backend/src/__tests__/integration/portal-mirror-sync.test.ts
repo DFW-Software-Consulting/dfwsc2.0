@@ -4,7 +4,13 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../../app";
 import { db, pool } from "../../db/client";
-import { clientGroups, clients, paymentLedger, portalMirrorRows } from "../../db/schema";
+import {
+  clientGroups,
+  clients,
+  paymentLedger,
+  portalMirrorRows,
+  portalMirrorState,
+} from "../../db/schema";
 import { createClientWithOnboardingToken } from "../../lib/client-factory";
 import {
   getNextcloudBreakerState,
@@ -116,6 +122,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await db.delete(portalMirrorRows);
+  await db.delete(portalMirrorState);
   await db.delete(clients);
   await db.delete(clientGroups);
   resetNextcloudBreakerForTests();
@@ -127,6 +134,7 @@ beforeEach(async () => {
 afterEach(async () => {
   vi.unstubAllGlobals();
   await db.delete(portalMirrorRows);
+  await db.delete(portalMirrorState);
   await db.delete(clients);
   await db.delete(clientGroups);
 });
@@ -219,6 +227,88 @@ describe("provisioning", () => {
     expect(fake.tables).toHaveLength(2);
   });
 
+  it("stores the table id and re-provisions a table deleted in Nextcloud without a restart", async () => {
+    const id = await addClient();
+    await cycle();
+    const first = tableId();
+    const [stored] = await db.select().from(portalMirrorState);
+    expect(stored.value).toBe(String(first));
+
+    fake.tables = [];
+    fake.columns.delete(first);
+    fake.rows = [];
+    const result = await cycle();
+    expect(result.status).toBe("ok");
+    expect(fake.tables).toHaveLength(1);
+    expect(tableId()).not.toBe(first);
+    expect(cellOf(id, "Name")).toBe(`Client ${id}`);
+    const [after] = await db.select().from(portalMirrorState);
+    expect(after.value).toBe(String(tableId()));
+    expect(fake.shares.filter((sh) => sh.nodeId === tableId())).toHaveLength(2);
+  });
+
+  it("re-creates a column deleted in Nextcloud and refills its cells", async () => {
+    const id = await addClient({ processingFeeCents: 250 });
+    await cycle();
+    const columns = fake.columns.get(tableId()) ?? [];
+    fake.columns.set(
+      tableId(),
+      columns.filter((c) => c.title !== "Fee $")
+    );
+    expect((await cycle()).status).toBe("ok");
+    expect(fake.columns.get(tableId())?.some((c) => c.title === "Fee $")).toBe(true);
+    expect(cellOf(id, "Fee $")).toBe(2.5);
+  });
+
+  it("keeps using a table that was renamed, without creating a duplicate", async () => {
+    await addClient();
+    await cycle();
+    fake.tables[0].title = "Renamed by hand";
+    const later = await addClient();
+    await cycle();
+    resetPortalMirrorStateForTests(); // a restart: only the stored id remains
+    await cycle();
+    expect(fake.tables).toHaveLength(1);
+    expect(fake.shares).toHaveLength(2);
+    expect(cellOf(later, "Name")).toBe(`Client ${later}`);
+  });
+
+  it("picks the lowest id among same-title tables and warns", async () => {
+    for (const id of [20, 8]) {
+      fake.tables.push({ id, title: "Portal Accounts", ownership: MIRROR_NC_USER });
+      fake.columns.set(id, []);
+    }
+    await addClient();
+    await cycle();
+    expect(fake.tables).toHaveLength(2);
+    expect(fake.rowsOf(8)).toHaveLength(1);
+    expect(fake.rowsOf(20)).toHaveLength(0);
+    expect(lines.some((l) => l.level === "warn" && l.text.includes("lowest id"))).toBe(true);
+    const [stored] = await db.select().from(portalMirrorState);
+    expect(stored.value).toBe("8");
+  });
+
+  it("warns, without changing it, about a share that grants more than read", async () => {
+    fake.tables.push({ id: 5, title: "Portal Accounts", ownership: MIRROR_NC_USER });
+    fake.columns.set(5, []);
+    fake.shares.push({
+      nodeId: 5,
+      nodeType: "table",
+      receiver: "managers",
+      receiverType: "group",
+      permissionRead: true,
+      permissionCreate: false,
+      permissionUpdate: true,
+      permissionDelete: false,
+      permissionManage: false,
+    });
+    await cycle();
+    expect(lines.some((l) => l.level === "warn" && l.text.includes("managers"))).toBe(true);
+    expect(fake.shares.filter((sh) => sh.receiver === "managers")).toHaveLength(1);
+    expect(fake.shares.find((sh) => sh.receiver === "managers")?.permissionUpdate).toBe(true);
+    expect(fake.callsTo("PUT", /shares/)).toHaveLength(0);
+  });
+
   it("uses a hand-made table by id, does not share it, and needs its columns", async () => {
     fake.tables.push({ id: 9, title: "Hand made", ownership: MIRROR_NC_USER });
     fake.columns.set(9, [{ id: 91, title: "Client ID", type: "text" }]);
@@ -275,16 +365,10 @@ describe("rows", () => {
     expect(rowOf(archived)).toBeDefined();
   });
 
-  it("shows the client email by default and can hide it", async () => {
+  it("always shows the client email", async () => {
     const id = await addClient();
     await cycle();
     expect(cellOf(id, "Email")).toBe(`${id}@example.com`);
-    resetPortalMirrorStateForTests();
-    fake = new FakeTablesNextcloud();
-    vi.stubGlobal("fetch", vi.fn(fake.fetch));
-    await db.delete(portalMirrorRows);
-    await cycle(mirrorEnv({ PORTAL_MIRROR_INCLUDE_EMAIL: "false" }));
-    expect(fake.columns.get(tableId())?.map((c) => c.title)).not.toContain("Email");
   });
 
   it("keeps inactive clients, labelled Inactive", async () => {
