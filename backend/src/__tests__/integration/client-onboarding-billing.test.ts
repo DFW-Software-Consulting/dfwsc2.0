@@ -276,8 +276,9 @@ describe("billing customer step: onboarding flow", () => {
       .set({ status: "pending", completedAt: null })
       .where(eq(clientOnboardingSubmissions.submissionId, 5));
     await makeDue(5);
+    list.mockClear();
     expect(await cycle()).toMatchObject({ completed: 1 });
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(list).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledTimes(1);
   });
 });
