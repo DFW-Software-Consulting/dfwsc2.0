@@ -54,7 +54,7 @@ function ActionButton({ action }) {
 }
 
 const ITEM_BASE =
-  "flex w-full items-center rounded px-3 text-left text-sm min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50 disabled:cursor-not-allowed";
+  "flex w-full items-center rounded px-3 text-left text-sm min-h-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus aria-disabled:opacity-50 aria-disabled:cursor-not-allowed";
 
 function OverflowMenu({ actions, label }) {
   const [open, setOpen] = useState(false);
@@ -63,9 +63,9 @@ function OverflowMenu({ actions, label }) {
   const menuRef = useRef(null);
   const menuId = useId();
 
-  const items = () => [
-    ...(menuRef.current?.querySelectorAll('[role="menuitem"]:not([disabled])') ?? []),
-  ];
+  // Disabled and loading items stay in the arrow-key order (aria-disabled, not the native
+  // disabled attribute) so every action stays reachable with its name; activation is guarded.
+  const items = () => [...(menuRef.current?.querySelectorAll('[role="menuitem"]') ?? [])];
 
   const close = useCallback((returnFocus = true) => {
     setOpen(false);
@@ -74,7 +74,7 @@ function OverflowMenu({ actions, label }) {
 
   // Move focus into the menu when it opens.
   useEffect(() => {
-    if (open) menuRef.current?.querySelector('[role="menuitem"]:not([disabled])')?.focus();
+    if (open) menuRef.current?.querySelector('[role="menuitem"]')?.focus();
   }, [open]);
 
   // Close on outside press without stealing focus from whatever was pressed.
@@ -144,27 +144,54 @@ function OverflowMenu({ actions, label }) {
           onKeyDown={onMenuKeyDown}
           className="absolute left-0 z-20 mt-1 min-w-44 rounded-md border border-line bg-card p-1 shadow-lg"
         >
-          {actions.map((a) => (
-            <button
-              key={a.key}
-              type="button"
-              role="menuitem"
-              tabIndex={-1}
-              disabled={a.disabled || a.isLoading}
-              title={a.title}
-              onClick={() => {
-                close();
-                a.onClick?.();
-              }}
-              className={`${ITEM_BASE} ${
-                a.variant === "danger" || a.variant === "ghost-danger"
-                  ? "text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-400/10"
-                  : "text-fg hover:bg-accent-soft"
-              }`}
-            >
-              {a.isLoading ? "..." : a.label}
-            </button>
-          ))}
+          {actions.map((a) => {
+            const inactive = Boolean(a.disabled || a.isLoading);
+            return (
+              <button
+                key={a.key}
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                aria-disabled={inactive ? "true" : undefined}
+                aria-busy={a.isLoading ? "true" : undefined}
+                title={a.title}
+                onClick={() => {
+                  if (inactive) return;
+                  close();
+                  a.onClick?.();
+                }}
+                className={`${ITEM_BASE} ${
+                  a.variant === "danger" || a.variant === "ghost-danger"
+                    ? "text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-400/10"
+                    : "text-fg hover:bg-accent-soft"
+                }`}
+              >
+                {a.label}
+                {a.isLoading && (
+                  <svg
+                    aria-hidden="true"
+                    className="ml-auto size-3 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                    />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

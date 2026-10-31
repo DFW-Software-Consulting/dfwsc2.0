@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminTable from "../components/admin/shared/AdminTable";
 import RowActions from "../components/admin/shared/RowActions";
 
@@ -149,5 +149,71 @@ describe("overflow menu", () => {
     expect(onDelete).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+  });
+});
+
+describe("row-specific menu names", () => {
+  const twoRows = [
+    ...rows,
+    { id: "2", name: "Beta LLC", email: "ops@beta.example", status: "paused" },
+  ];
+
+  it("names each card's trigger and menu after its row", async () => {
+    mockViewport(false);
+    const user = userEvent.setup();
+    render(<AdminTable columns={columns} rows={twoRows} />);
+    const acmeTrigger = screen.getByRole("button", { name: "More actions for Acme Co" });
+    const betaTrigger = screen.getByRole("button", { name: "More actions for Beta LLC" });
+    expect(acmeTrigger).toHaveAttribute("aria-haspopup", "menu");
+    expect(betaTrigger).toHaveAttribute("aria-haspopup", "menu");
+
+    await user.click(acmeTrigger);
+    expect(screen.getByRole("menu", { name: "More actions for Acme Co" })).toBeInTheDocument();
+  });
+});
+
+describe("loading menu items", () => {
+  beforeEach(() => {
+    onDelete.mockClear();
+  });
+
+  const loadingColumns = [
+    { header: "Name", key: "name" },
+    {
+      header: "Actions",
+      actions: () => [
+        { key: "edit", label: "Edit", primary: true, onClick: onEdit },
+        { key: "resend", label: "Resend Link", onClick: onResend },
+        {
+          key: "delete",
+          label: "Delete",
+          variant: "danger",
+          isLoading: true,
+          onClick: onDelete,
+        },
+      ],
+    },
+  ];
+
+  it("keeps the label, marks busy and disabled, stays in arrow-key order and ignores activation", async () => {
+    mockViewport(false);
+    const user = userEvent.setup();
+    render(<AdminTable columns={loadingColumns} rows={rows} />);
+    await user.click(screen.getByRole("button", { name: "More actions for Acme Co" }));
+
+    const loading = screen.getByRole("menuitem", { name: "Delete" });
+    expect(loading).toHaveAttribute("aria-busy", "true");
+    expect(loading).toHaveAttribute("aria-disabled", "true");
+    expect(loading).not.toBeDisabled();
+
+    // Opening focuses Resend Link; the loading item is the next stop with ArrowDown.
+    expect(screen.getByRole("menuitem", { name: "Resend Link" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(loading).toHaveFocus();
+
+    await user.click(loading);
+    await user.keyboard("{Enter}");
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.getByRole("menu", { name: "More actions for Acme Co" })).toBeInTheDocument();
   });
 });

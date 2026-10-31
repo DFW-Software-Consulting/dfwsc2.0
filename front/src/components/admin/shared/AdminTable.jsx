@@ -13,6 +13,14 @@ function cellValue(col, row) {
   return col.render ? col.render(row) : col.key ? row[col.key] : null;
 }
 
+// Names a card's overflow menu after its row so screen-reader users can tell cards apart.
+// Falls back to RowActions' generic label when the title is not plain text.
+function rowMenuLabel(title) {
+  return typeof title === "string" || typeof title === "number"
+    ? `More actions for ${title}`
+    : undefined;
+}
+
 export default function AdminTable({
   columns,
   rows,
@@ -56,20 +64,29 @@ export default function AdminTable({
     const fieldCols = columns.filter((c) => c !== titleCol && c !== actionsCol && !c.cardHidden);
     return (
       <ul className="grid gap-3" data-testid="admin-cards">
-        {rows.map((row) => (
-          <AdminCard
-            key={row[keyField]}
-            title={cellValue(titleCol, row)}
-            fields={fieldCols.map((c) => ({
-              label: c.header,
-              value: cellValue(c, row) ?? "—",
-              className: c.cardClassName ?? c.tdClassName,
-            }))}
-            actions={
-              actionsCol ? <RowActions mode="card" actions={actionsCol.actions(row)} /> : null
-            }
-          />
-        ))}
+        {rows.map((row) => {
+          const title = cellValue(titleCol, row);
+          return (
+            <AdminCard
+              key={row[keyField]}
+              title={title}
+              fields={fieldCols.map((c) => ({
+                label: c.header,
+                value: cellValue(c, row) ?? "—",
+                className: c.cardClassName ?? c.tdClassName,
+              }))}
+              actions={
+                actionsCol ? (
+                  <RowActions
+                    mode="card"
+                    actions={actionsCol.actions(row)}
+                    menuLabel={rowMenuLabel(title)}
+                  />
+                ) : null
+              }
+            />
+          );
+        })}
       </ul>
     );
   }

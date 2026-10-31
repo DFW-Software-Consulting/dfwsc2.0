@@ -79,8 +79,28 @@ export function ScrollItem({
   span = 0.7,
   ...props
 }) {
-  const reduced = useReducedMotion();
   const progress = useContext(GroupContext);
+  // Outside a <ScrollGroup> there is no progress to drive, so render a plain element.
+  if (!progress) {
+    const Plain = m[as];
+    return <Plain {...props} />;
+  }
+  return (
+    <TrackedScrollItem
+      as={as}
+      progress={progress}
+      index={index}
+      y={y}
+      min={min}
+      step={step}
+      span={span}
+      {...props}
+    />
+  );
+}
+
+function TrackedScrollItem({ as, progress, index, y, min, step, span, ...props }) {
+  const reduced = useReducedMotion();
   const start = index * step;
   const end = start + span;
   const style = useFxStyle(progress, {

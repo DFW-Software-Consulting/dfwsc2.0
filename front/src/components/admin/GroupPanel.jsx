@@ -413,7 +413,13 @@ export default function GroupPanel({ showToast, workspace = "client_portal" }) {
                   { label: "Fee", value: formatFee(g) },
                   { label: "Members", value: <MemberCount count={members.length} /> },
                 ]}
-                actions={<RowActions mode="card" actions={getActions(g)} />}
+                actions={
+                  <RowActions
+                    mode="card"
+                    actions={getActions(g)}
+                    menuLabel={`More actions for ${g.name}`}
+                  />
+                }
               >
                 {isExpanded && (
                   <div className="mt-4 rounded-md bg-surface/60 p-3">
