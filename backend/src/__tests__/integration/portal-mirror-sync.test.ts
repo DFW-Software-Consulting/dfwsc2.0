@@ -160,6 +160,7 @@ describe("provisioning", () => {
     expect(titles).toEqual([
       "Client ID",
       "Name",
+      "Email",
       "Group",
       "Status",
       "Stripe Account",
@@ -197,7 +198,7 @@ describe("provisioning", () => {
     await cycle();
     expect(fake.tables).toHaveLength(1);
     expect(fake.shares).toHaveLength(2);
-    expect(fake.callsTo("POST", /\/columns$/).length).toBe(16);
+    expect(fake.callsTo("POST", /\/columns$/).length).toBe(17);
     expect(fake.calls.length).toBeGreaterThan(before);
   });
 
@@ -207,7 +208,7 @@ describe("provisioning", () => {
     fake.columns.set(id, [{ id: 71, title: "Client ID", type: "text" }]);
     await cycle(mirrorEnv({ PORTAL_MIRROR_SHARE_GROUPS: "ops" }));
     expect(fake.tables).toHaveLength(1);
-    expect(fake.columns.get(id)).toHaveLength(16);
+    expect(fake.columns.get(id)).toHaveLength(17);
     expect(fake.shares.map((s) => s.receiver)).toEqual(["ops"]);
   });
 
@@ -229,7 +230,7 @@ describe("provisioning", () => {
 });
 
 describe("rows", () => {
-  it("mirrors clients with labels, yes/no, group and fee, and leaves out PII", async () => {
+  it("mirrors clients with labels, yes/no, group and fee, and leaves out phone, address, notes and keys", async () => {
     await db.insert(clientGroups).values({ id: "g1", name: "Building A", processingFeeCents: 250 });
     const id = await addClient({
       name: "Acme Co",
@@ -241,6 +242,8 @@ describe("rows", () => {
       phone: "555-0100",
       notes: "private",
       addressLine1: "1 Main St",
+      apiKeyHash: "hash-secret",
+      apiKeyLookup: "lookup-secret",
     });
     await cycle();
     expect(cellOf(id, "Name")).toBe("Acme Co");
@@ -251,7 +254,8 @@ describe("rows", () => {
     expect(cellOf(id, "Fee $")).toBe(2.5);
     expect(cellOf(id, "Fee %")).toBeNull();
     const dump = JSON.stringify(accountRows().map((r) => [...r.data.entries()]));
-    for (const secret of [`${id}@example.com`, "555-0100", "private", "1 Main St"]) {
+    expect(cellOf(id, "Email")).toBe(`${id}@example.com`);
+    for (const secret of ["555-0100", "private", "1 Main St", "hash-secret", "lookup-secret"]) {
       expect(dump).not.toContain(secret);
     }
     expect(dump).not.toContain("acct_x");
@@ -271,10 +275,22 @@ describe("rows", () => {
     expect(rowOf(archived)).toBeDefined();
   });
 
-  it("includes the email column only when asked", async () => {
+  it("shows the client email by default and can hide it", async () => {
     const id = await addClient();
-    await cycle(mirrorEnv({ PORTAL_MIRROR_INCLUDE_EMAIL: "true" }));
+    await cycle();
     expect(cellOf(id, "Email")).toBe(`${id}@example.com`);
+    resetPortalMirrorStateForTests();
+    fake = new FakeTablesNextcloud();
+    vi.stubGlobal("fetch", vi.fn(fake.fetch));
+    await db.delete(portalMirrorRows);
+    await cycle(mirrorEnv({ PORTAL_MIRROR_INCLUDE_EMAIL: "false" }));
+    expect(fake.columns.get(tableId())?.map((c) => c.title)).not.toContain("Email");
+  });
+
+  it("keeps inactive clients, labelled Inactive", async () => {
+    const id = await addClient({ status: "inactive" });
+    await cycle();
+    expect(cellOf(id, "Status")).toBe("Inactive");
   });
 
   it("backfills in batches and skips unchanged rows afterwards", async () => {

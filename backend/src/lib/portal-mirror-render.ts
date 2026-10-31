@@ -6,7 +6,7 @@ import type { clientGroups, clients } from "../db/schema";
 // found again when the mapping is lost (daily reconcile).
 //
 // Never rendered, on purpose: connected_account_id of payments, phone, address, notes, API keys.
-// The client email is off unless MirrorOptions.includeEmail.
+// The client email is shown (owner decision) and can be turned off with MirrorOptions.includeEmail.
 //
 // Per-account payment columns (Last Payment, Payments (30d), DFWSC Fees (30d)) are aggregates
 // only (PaymentSummary, computed in SQL by lib/portal-mirror-sync.ts): no individual payment, id
@@ -33,7 +33,7 @@ export interface MirrorOptions {
 }
 
 export const DEFAULT_MIRROR_OPTIONS: MirrorOptions = {
-  includeEmail: false,
+  includeEmail: true,
   includeArchived: false,
 };
 

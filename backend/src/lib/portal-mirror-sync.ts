@@ -143,7 +143,7 @@ export function loadPortalMirrorConfig(env: NodeJS.ProcessEnv): ConfigResult {
       options: {
         ...DEFAULT_MIRROR_OPTIONS,
         includeArchived: env.PORTAL_MIRROR_INCLUDE_ARCHIVED?.trim() === "true",
-        includeEmail: env.PORTAL_MIRROR_INCLUDE_EMAIL?.trim() === "true",
+        includeEmail: env.PORTAL_MIRROR_INCLUDE_EMAIL?.trim() !== "false",
       },
       minGapMs: 200,
     },

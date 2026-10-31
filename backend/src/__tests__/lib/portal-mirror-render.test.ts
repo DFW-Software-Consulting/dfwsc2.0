@@ -99,23 +99,18 @@ describe("portal mirror rendering", () => {
       updated: "2026-10-02 01:02",
     });
     const text = JSON.stringify(values);
-    for (const secret of [
-      "owner@acme.example",
-      "555-0100",
-      "1 Main St",
-      "secret note",
-      "hash",
-      "lookup",
-    ]) {
+    expect(values.email).toBe("owner@acme.example");
+    for (const secret of ["555-0100", "1 Main St", "secret note", "hash", "lookup"]) {
       expect(text).not.toContain(secret);
     }
-    expect(accountColumns(DEFAULT_MIRROR_OPTIONS).map((c) => c.title)).not.toContain("Email");
+    const titles = accountColumns(DEFAULT_MIRROR_OPTIONS).map((c) => c.title);
+    expect(titles.slice(0, 3)).toEqual(["Client ID", "Name", "Email"]);
   });
 
-  it("adds the email column only when asked", () => {
-    const options = { ...DEFAULT_MIRROR_OPTIONS, includeEmail: true };
-    expect(accountColumns(options).map((c) => c.title)).toContain("Email");
-    expect(renderAccount(baseClient, null, defaults, options).email).toBe("owner@acme.example");
+  it("can hide the email column", () => {
+    const options = { ...DEFAULT_MIRROR_OPTIONS, includeEmail: false };
+    expect(accountColumns(options).map((c) => c.title)).not.toContain("Email");
+    expect(renderAccount(baseClient, null, defaults, options).email).toBeUndefined();
   });
 
   it("hashes stably and ignores key order", () => {
