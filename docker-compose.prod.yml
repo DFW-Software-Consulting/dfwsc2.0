@@ -55,9 +55,9 @@ services:
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
       # Deliberately not ${REDIS_URL}: this is the stack's own Redis, addressed by
-      # its unique alias. The plain name `redis` also resolves to Coolify's
-      # control-plane Redis on the shared `coolify` network (which needs a
-      # password), so a Coolify-level REDIS_URL must not override this.
+      # its unique service name. The plain name `redis` also resolves to
+      # Coolify's control-plane Redis on the shared `coolify` network (which
+      # needs a password), so a Coolify-level REDIS_URL must not override this.
       REDIS_URL: redis://dfwsc-redis:6379
       CONTACT_INBOX: ${CONTACT_INBOX}
     ports:
@@ -65,7 +65,7 @@ services:
     depends_on:
       migrator:
         condition: service_completed_successfully
-      redis:
+      dfwsc-redis:
         condition: service_started
     deploy:
       resources:
@@ -93,15 +93,15 @@ services:
         aliases:
           - dfwsc-api
 
-  redis:
+  # The service name must be unique on the host: Coolify's own control-plane
+  # Redis answers to `redis` on the shared `coolify` network, and Coolify
+  # ignores custom network aliases, so only the service name is reliable.
+  # Backend network only; do not add it to `coolify`.
+  dfwsc-redis:
     image: redis:7-alpine
     restart: unless-stopped
     networks:
-      backend:
-        # Unique name for the API to connect to. The service name `redis` is
-        # not unique on a host running Coolify, whose own Redis answers to it.
-        aliases:
-          - dfwsc-redis
+      - backend
 
   backup:
     build:

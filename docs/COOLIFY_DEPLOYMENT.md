@@ -6,7 +6,7 @@ This guide explains how to deploy the DFW Software Consulting payment portal to 
 
 The application deploys to Coolify as two independent resources, plus a database:
 1. **Database** - PostgreSQL (Coolify-managed or an external instance — there is no `db` service in `docker-compose.prod.yml`)
-2. **Backend** - a Coolify **Docker Compose** resource built from `docker-compose.prod.yml`, which runs four containers: `migrator`, `api`, `redis`, and `backup` (see below)
+2. **Backend** - a Coolify **Docker Compose** resource built from `docker-compose.prod.yml`, which runs four containers: `migrator`, `api`, `dfwsc-redis`, and `backup` (see below)
 3. **Frontend** - a **separate** Coolify **Nginx** application serving the built React app with API proxying — it is not one of the services in `docker-compose.prod.yml` and deploys/scales independently of the backend
 
 All resources can be deployed independently on Coolify while sharing the same monorepo.
@@ -30,7 +30,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
 - **Containers**: that compose file defines four services:
   - `migrator` - runs `npm run db:migrate` once against `DATABASE_URL`, then exits; `api` will not start until this completes successfully
   - `api` (reachable as `dfwsc-api` via a network alias on Coolify's `coolify` network; Coolify ignores `container_name`) - the Fastify server, `node dist/index.js`, port 4242
-  - `redis` - backs rate limiting and circuit-breaker state; it has the network alias `dfwsc-redis` on the stack's `backend` network, and `docker-compose.prod.yml` sets the API's `REDIS_URL` to `redis://dfwsc-redis:6379`. The plain name `redis` is not used because the `api` service also sits on Coolify's shared `coolify` network, where Coolify's own control-plane Redis (password-protected) answers to `redis` too. The Coolify `REDIS_URL` variable is **not read** by the API in production; it is not interpolated into the compose file, so it can be deleted, and leaving a stale value there does nothing. To use an external Redis instead, edit the `REDIS_URL` line in `docker-compose.prod.yml`.
+  - `dfwsc-redis` - backs rate limiting and circuit-breaker state; the service itself is named `dfwsc-redis` and sits only on the stack's `backend` network, and `docker-compose.prod.yml` sets the API's `REDIS_URL` to `redis://dfwsc-redis:6379`. The plain name `redis` is not used because the `api` service also sits on Coolify's shared `coolify` network, where Coolify's own control-plane Redis (password-protected) answers to `redis` too. A network alias would not help, since Coolify ignores custom network aliases; the unique service name is what makes it resolve. The Coolify `REDIS_URL` variable is **not read** by the API in production; it is not interpolated into the compose file, so it can be deleted, and leaving a stale value there does nothing. To use an external Redis instead, edit the `REDIS_URL` line in `docker-compose.prod.yml`.
   - `backup` - runs `scripts/backup-db.sh` on a nightly cron schedule (`0 2 * * *`) into the `postgres_backups` volume, optionally pushing to S3 if `AWS_S3_BACKUP_BUCKET` is set
 - **Build**: Use existing Dockerfile (multi-stage production build)
 - **Port**: 4242 (expose for internal communication)
@@ -62,7 +62,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
   ```
 - **First admin (first deploy only)**: the first admin is created at startup from `ADMIN_USERNAME` and `ADMIN_PASSWORD`, only when the `admins` table is empty (a leftover `ADMIN_PASSWORD` is ignored later, with a startup warning). `ADMIN_PASSWORD` is plaintext (at least 12 characters in production) and is hashed by the server — never supply a bcrypt hash, because the hash string itself would become the password. With `ALLOW_ADMIN_SETUP=true` the admin is created unconfirmed: log in at `/admin`, confirm permanent credentials, then **remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment** and set `ALLOW_ADMIN_SETUP=false`. `docker-compose.prod.yml` does not currently pass `ADMIN_USERNAME` or `ADMIN_PASSWORD` to the `api` container, so they only reach it if you add them to that service's `environment` for the first deploy (and remove them again afterwards).
 - **Startup Command**: `node dist/index.js` (handled by Dockerfile). DB migrations run automatically on each deploy via the `migrator` service above — no separate manual migration step is needed.
-- **Dependencies**: Database must be reachable via `DATABASE_URL` before deploying; within the compose stack, `api` also depends on `migrator` (completed) and `redis` (started) automatically
+- **Dependencies**: Database must be reachable via `DATABASE_URL` before deploying; within the compose stack, `api` also depends on `migrator` (completed) and `dfwsc-redis` (started) automatically
 - **Healthcheck**: `curl -f http://localhost:4242/api/v1/health || exit 1` (the compose file itself uses an equivalent `wget` healthcheck)
 
 ### 3. Frontend Service (React + Nginx)
@@ -173,7 +173,7 @@ The existing `front/nginx.conf` is already configured correctly:
 
 2. **Create Backend Service** (Coolify "Docker Compose" resource type)
    - Set source to your repository
-   - Point it at `docker-compose.prod.yml` — this single resource brings up `migrator`, `api`, `redis`, and `backup` together
+   - Point it at `docker-compose.prod.yml` — this single resource brings up `migrator`, `api`, `dfwsc-redis`, and `backup` together
    - Add all environment variables from the list above
    - Set dependency on Database being reachable (`DATABASE_URL`)
    - Healthcheck is already defined per-service in the compose file
@@ -216,7 +216,7 @@ The existing `front/nginx.conf` is already configured correctly:
 ### Service Dependencies
 - Use Coolify's dependency management to ensure resources start in correct order:
   - Database → Backend → Frontend
-- Within the Backend resource, `docker-compose.prod.yml`'s own `depends_on` already orders `migrator` (must complete) and `redis` (must start) before `api` — no extra Coolify configuration is needed for that internal ordering
+- Within the Backend resource, `docker-compose.prod.yml`'s own `depends_on` already orders `migrator` (must complete) and `dfwsc-redis` (must start) before `api` — no extra Coolify configuration is needed for that internal ordering
 
 ### Environment Management
 - Use Coolify's built-in secrets management for:
@@ -293,7 +293,7 @@ The existing `front/nginx.conf` is already configured correctly:
 
 Key files for Coolify deployment:
 - `backend/Dockerfile` - Production backend build
-- `docker-compose.prod.yml` - Compose source for the Backend resource (`migrator`, `api`, `redis`, `backup`)
+- `docker-compose.prod.yml` - Compose source for the Backend resource (`migrator`, `api`, `dfwsc-redis`, `backup`)
 - `front/Dockerfile` - Frontend build (already exists)
 - `front/nginx.conf` - Already configured for API proxying
 - `scripts/backup-db.sh` - Nightly DB backup script, run by the `backup` service
