@@ -45,6 +45,7 @@ const OPTIONAL_ENV_VARS = [
   "CLIENT_ONBOARDING_POLL_INTERVAL_MS",
   "CLIENT_ONBOARDING_PROJECT_TEAMS",
   "CLIENT_ONBOARDING_TEAM_ADMINS",
+  "CLIENT_ONBOARDING_BILLING_CUSTOMER",
 ];
 
 // Vars whose values must never appear in logs, even partially — presence only.

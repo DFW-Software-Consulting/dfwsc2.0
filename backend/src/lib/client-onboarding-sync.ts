@@ -4,6 +4,11 @@ import type { FastifyBaseLogger } from "fastify";
 import { db } from "../db/client";
 import { clientOnboardingSubmissions, clientOnboardingSyncState } from "../db/schema";
 import {
+  BillingCustomerStripeError,
+  ensureBillingCustomer,
+  isValidEmail,
+} from "./billing-customer";
+import {
   buildClientVCard,
   buildProjectRowData,
   CLIENT_SUBFOLDERS,
@@ -106,6 +111,8 @@ interface ProjectTeamsSettings {
 
 interface ClientOnboardingSettings extends ClientOnboardingTargets {
   teams: ProjectTeamsSettings | null;
+  /** Create/link the DFWSC billing Stripe Customer (CLIENT_ONBOARDING_BILLING_CUSTOMER). */
+  billingCustomer: boolean;
   pollIntervalMs: number;
   /** Shared secret for the webhook; null leaves the webhook off (poll only). */
   webhookSecret: string | null;
@@ -205,6 +212,8 @@ function loadClientOnboardingConfig(
     teams = { admins };
   }
 
+  const billingCustomer = env.CLIENT_ONBOARDING_BILLING_CUSTOMER?.trim() === "true";
+
   if (!nc.ok || problems.length || !clientsFolder) return { status: "invalid", problems };
   return {
     status: "ready",
@@ -217,6 +226,7 @@ function loadClientOnboardingConfig(
       addressbookPath,
       clientsFolder,
       teams,
+      billingCustomer,
       pollIntervalMs,
       webhookSecret,
     },
@@ -464,6 +474,8 @@ interface ProcessingContext {
   projectsPageId: number;
   /** Per-project Teams settings; null when the flag is off (the team steps do not run). */
   teams: ProjectTeamsSettings | null;
+  /** Billing Customer step on; see billingCustomerStep. */
+  billingCustomer: boolean;
   /** Address books listed once per cycle; see ContactDirectory. */
   contacts: ContactDirectory;
   logger: Logger;
@@ -491,6 +503,9 @@ function classify(error: unknown): { code: string; retryable: boolean } {
   }
   if (error instanceof NextcloudRequestError) {
     return { code: `${error.label}:${error.kind}`, retryable: true };
+  }
+  if (error instanceof BillingCustomerStripeError) {
+    return { code: error.code, retryable: error.retryable };
   }
   if (isBadResponseError(error)) return { code: `${error.label}:bad_response`, retryable: true };
   return { code: "internal_error", retryable: true };
@@ -1080,6 +1095,58 @@ async function leadStep(row: SubmissionRow, intake: Intake, ctx: ProcessingConte
   ctx.logger.info({ ...ids, leadRowId: lead.id }, "Sales Pipeline lead set to Won.");
 }
 
+// 6. DFWSC's own Stripe Customer for billing development work. Not Stripe Connect: no
+// clients row, no Express account. A Stripe failure fails the attempt (retried with
+// backoff); the earlier steps are already saved and are skipped on the retry.
+async function billingCustomerStep(row: SubmissionRow, intake: Intake, ctx: ProcessingContext) {
+  if (!ctx.billingCustomer || row.billingStatus !== null) return;
+  const ids = { formId: ctx.formId, submissionId: row.submissionId };
+  const billing = intake.billingEmail?.trim();
+  const contact = intake.email?.trim();
+  if (billing && !isValidEmail(billing)) {
+    ctx.logger.warn(
+      { ...ids, reason: "billing_email_invalid" },
+      "Billing email is not a valid address; using the contact email."
+    );
+  }
+  const email =
+    billing && isValidEmail(billing) ? billing : contact && isValidEmail(contact) ? contact : null;
+  const noEmail = async (reason: string) => {
+    await saveUnderClaim(row, { billingStatus: "no_email" });
+    ctx.logger.warn(
+      { ...ids, billingStatus: "no_email", reason },
+      "No usable email on the submission; billing Customer not created. Needs an operator."
+    );
+  };
+  if (!email) {
+    await noEmail(contact ? "contact_email_invalid" : "missing_email");
+    return;
+  }
+  const result = await ensureBillingCustomer({
+    clientCode: row.projectCode as string,
+    company: intake.company,
+    email,
+    submissionId: row.submissionId,
+  });
+  if (result.status === "invalid_email") {
+    await noEmail("stripe_rejected_email");
+    return;
+  }
+  if (result.status === "ambiguous") {
+    await saveUnderClaim(row, { billingStatus: "ambiguous" });
+    ctx.logger.warn(
+      { ...ids, billingStatus: "ambiguous" },
+      "Several Stripe Customers share the email; billing Customer not linked. Needs an operator."
+    );
+    return;
+  }
+  await saveUnderClaim(row, {
+    billingStatus: "linked",
+    billingCustomerId: result.stripeCustomerId,
+  });
+  ctx.logger.info({ ...ids, source: result.source }, "Billing Stripe Customer linked.");
+}
+
 async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<void> {
   const { api } = ctx;
   const submission = await api.getSubmission(row.submissionId);
@@ -1096,6 +1163,7 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
   await pageStep(row, intake, ctx); // 4 (hub when the flag is on)
   await projectLinksStep(row, ctx); // 3, links (needs the page)
   await leadStep(row, intake, ctx); // 5
+  await billingCustomerStep(row, intake, ctx); // 6, flag only
 
   await saveUnderClaim(row, {
     status: "completed",
@@ -1157,6 +1225,7 @@ async function buildContext(
   api: ClientOnboardingNextcloud,
   formId: number,
   teams: ProjectTeamsSettings | null,
+  billingCustomer: boolean,
   logger: Logger
 ): Promise<ProcessingContext> {
   const form = await api.getForm();
@@ -1178,6 +1247,7 @@ async function buildContext(
     collectiveSlug: collective.slug ?? slugify(collective.name),
     projectsPageId: projects[0].id,
     teams,
+    billingCustomer,
     contacts: api.contactDirectory((addressbook, status) =>
       logger.warn(
         { formId, addressbook, status },
@@ -1223,7 +1293,13 @@ export async function runClientOnboardingCycle(options: {
       if (!row) break;
       if (!ctx) {
         try {
-          ctx = await buildContext(api, formId, config.settings.teams, logger);
+          ctx = await buildContext(
+            api,
+            formId,
+            config.settings.teams,
+            config.settings.billingCustomer,
+            logger
+          );
         } catch (error) {
           await saveUnderClaim(row, { claimedAt: null, claimToken: null }).catch(() => undefined);
           throw error;
