@@ -95,7 +95,7 @@ Per-form baseline for the client onboarding, as for `sales_lead_sync_state`.
 CardDAV sync-token per address book for the contact card to billing Customer sync (`CONTACT_STRIPE_SYNC=true`, docs/BACKEND.md section 11). **PK** `addressbook`; `syncToken` (NULL forces a full scan), `syncedAt`, `updatedAt`.
 
 ### `contact_stripe_sync_cards`
-Per onboarding contact card (`dfwsc-client-*`) linked to a billing Customer. **PK** `contactUid`; `clientCode`, `stripeCustomerId` (plain index), `href`, `etag`, `lastHash` and `fieldHashes` (jsonb: sha256 per mapped Stripe field name/email/phone/address, never the values), `baselineAt` (NULL = card not seen yet or deleted), `lastPushedAt`, `lastError` (PII-free code) and `lastErrorHash` (a non-retryable error is retried only when the card hash differs), `createdAt`, `updatedAt`. Nothing on `clients` or `payment_ledger`.
+Per onboarding contact card (`dfwsc-client-*`) linked to a billing Customer. **PK** `contactUid`; `clientCode`, `stripeCustomerId` (plain index), `href`, `etag`, `lastHash` and `fieldHashes` (jsonb: sha256 per mapped Stripe field name/email/phone/address, never the values), `baselineAt` (NULL = card not seen yet, deleted, or reset), `baselineResetAt` (set when the automation rewrote the card; a cycle that started earlier must not overwrite the row), `lastPushedAt`, `lastError` (PII-free code) and `lastErrorHash` (a non-retryable error is retried only when the card hash differs), `createdAt`, `updatedAt`. Nothing on `clients` or `payment_ledger`.
 
 ## 3. Tooling & Migrations
 - **Schema Changes**: Edit `backend/src/db/schema.ts`.

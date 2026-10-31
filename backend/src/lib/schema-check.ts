@@ -161,6 +161,7 @@ export const REQUIRED_TABLES: TableColumns[] = [
       "last_hash",
       "field_hashes",
       "baseline_at",
+      "baseline_reset_at",
       "last_pushed_at",
       "last_error",
       "last_error_hash",

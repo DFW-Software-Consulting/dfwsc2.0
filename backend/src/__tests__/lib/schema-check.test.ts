@@ -121,6 +121,7 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "last_hash" },
             { column_name: "field_hashes" },
             { column_name: "baseline_at" },
+            { column_name: "baseline_reset_at" },
             { column_name: "last_pushed_at" },
             { column_name: "last_error" },
             { column_name: "last_error_hash" },

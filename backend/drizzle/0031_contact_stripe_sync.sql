@@ -14,6 +14,7 @@ CREATE TABLE "contact_stripe_sync_cards" (
 	"last_hash" text,
 	"field_hashes" jsonb,
 	"baseline_at" timestamp with time zone,
+	"baseline_reset_at" timestamp with time zone,
 	"last_pushed_at" timestamp with time zone,
 	"last_error" text,
 	"last_error_hash" text,

@@ -13,8 +13,14 @@ import {
   resetClientOnboardingStateForTests,
   runClientOnboardingCycle,
 } from "../../lib/client-onboarding-sync";
-import { countryCode, mapCardToStripe } from "../../lib/contact-stripe-fields";
 import {
+  combinedHash,
+  countryCode,
+  fieldHashes,
+  mapCardToStripe,
+} from "../../lib/contact-stripe-fields";
+import {
+  resetCardBaseline,
   resetContactStripeSyncStateForTests,
   runContactStripeSyncCycle,
   startContactStripeSync,
@@ -933,6 +939,47 @@ describe("the automation's own card writes", () => {
       [...BASE, "NOTE:x"].map((l) => (l.startsWith("TEL") ? "TEL:+1 111 555 0000" : l))
     );
     expect(await cycle()).toMatchObject({ pushed: 1 });
+  });
+});
+
+describe("an onboarding write racing a sync cycle", () => {
+  it("cycle reads, onboarding rewrites and resets, cycle writes: the next cycle baselines the new card without pushing", async () => {
+    await baselined();
+    // Make the next cycle re-baseline the card (the Customer changed), from what it reads now (v1).
+    await db
+      .update(billingCustomers)
+      .set({ stripeCustomerId: "cus_relinked" })
+      .where(eq(billingCustomers.clientCode, "CP-003"));
+    const v2 = withBase(["TEL", "TEL:+1 111 555 0000"]);
+    let raced = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const res = await fake.fetch(...args);
+        const init = args[1] as RequestInit | undefined;
+        if (!raced && init?.method === "REPORT" && String(init.body).includes("sync-collection")) {
+          raced = true;
+          // The cycle has its v1 response; now the onboarding step rewrites the card and resets it.
+          putCard(UID_A, v2);
+          await resetCardBaseline(UID_A);
+        }
+        return res;
+      })
+    );
+    expect(await cycle()).toMatchObject({ status: "ok", baselined: 1, pushed: 0 });
+    expect(raced).toBe(true);
+    // The stale v1 baseline was not written over the reset row.
+    expect((await stateOf(UID_A)).baselineAt).toBeNull();
+
+    expect(await cycle()).toMatchObject({ status: "ok", baselined: 1, pushed: 0 });
+    expect(update).not.toHaveBeenCalled();
+    const after = await stateOf(UID_A);
+    expect(after.baselineAt).toBeInstanceOf(Date);
+    expect(after.lastHash).toBe(
+      combinedHash(fieldHashes(mapCardToStripe(vcard(UID_A, v2)).fields))
+    );
+    expect(await cycle()).toMatchObject({ pushed: 0 });
+    expect(update).not.toHaveBeenCalled();
   });
 });
 

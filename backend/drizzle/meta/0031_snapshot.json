@@ -1,5 +1,5 @@
 {
-  "id": "8eaa0015-a1e9-44db-a499-9052889f75d4",
+  "id": "119985f3-9786-4c9f-906b-d4a0594c92c4",
   "prevId": "b0a2e556-f91c-4081-bc60-58dfe796a96b",
   "version": "7",
   "dialect": "postgresql",
@@ -1072,6 +1072,12 @@
         },
         "baseline_at": {
           "name": "baseline_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "baseline_reset_at": {
+          "name": "baseline_reset_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

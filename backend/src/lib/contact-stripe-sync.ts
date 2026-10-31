@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, eq, inArray, isNotNull, like } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, like, sql } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import Stripe from "stripe";
 import { db, pool } from "../db/client";
@@ -237,6 +237,9 @@ export function resetContactStripeSyncStateForTests() {
   authBackoff.until = 0;
 }
 
+const notResetSince = (cycleStart: Date) =>
+  sql`(${contactStripeSyncCards.baselineResetAt} is null or ${contactStripeSyncCards.baselineResetAt} <= ${cycleStart})`;
+
 /**
  * Forgets a card's recorded state so its next sighting is a baseline, not an edit. For writes
  * the automation makes itself (the onboarding contact step adding to a card): they are not a
@@ -245,7 +248,13 @@ export function resetContactStripeSyncStateForTests() {
 export async function resetCardBaseline(contactUid: string): Promise<void> {
   await db
     .update(contactStripeSyncCards)
-    .set({ baselineAt: null, etag: null, lastHash: null, fieldHashes: null })
+    .set({
+      baselineAt: null,
+      etag: null,
+      lastHash: null,
+      fieldHashes: null,
+      baselineResetAt: sql`now()`,
+    })
     .where(eq(contactStripeSyncCards.contactUid, contactUid));
 }
 
@@ -289,7 +298,9 @@ export async function runContactStripeSyncCycle(options: {
       );
       if (!lock.rows[0]?.ok) return result("busy");
       try {
-        outcome = await syncOnce(config.settings, logger);
+        // Database clock, taken before any read: see resetCardBaseline / notResetSince.
+        const started = await client.query<{ now: Date }>("SELECT now() AS now");
+        outcome = await syncOnce(config.settings, logger, started.rows[0].now);
       } finally {
         await client
           .query("SELECT pg_advisory_unlock(hashtext($1))", [CYCLE_LOCK_NAME])
@@ -325,7 +336,8 @@ export async function runContactStripeSyncCycle(options: {
 
 async function syncOnce(
   settings: ContactStripeSyncSettings,
-  logger: Logger
+  logger: Logger,
+  cycleStart: Date
 ): Promise<ContactStripeSyncResult> {
   const { nextcloud: nc, addressbook } = settings;
   const links = await loadLinks();
@@ -386,13 +398,18 @@ async function syncOnce(
     const hash = combinedHash(hashes);
 
     if (!state || state.baselineAt === null || state.stripeCustomerId !== link.customerId) {
-      await saveState(link, card, {
-        lastHash: hash,
-        fieldHashes: hashes,
-        baselineAt: new Date(),
-        lastError: null,
-        lastErrorHash: null,
-      });
+      await saveState(
+        link,
+        card,
+        {
+          lastHash: hash,
+          fieldHashes: hashes,
+          baselineAt: new Date(),
+          lastError: null,
+          lastErrorHash: null,
+        },
+        cycleStart
+      );
       outcome.baselined++;
       logger.info(
         { contactUid: uid, stripeCustomerId: link.customerId },
@@ -409,18 +426,23 @@ async function syncOnce(
     }
     if (hash === state.lastHash || state.lastErrorHash === hash) {
       // Nothing mapped changed, or this exact content already failed for good.
-      await saveState(link, card, {});
+      await saveState(link, card, {}, cycleStart);
       continue;
     }
     const changed = changedFields(mapped.fields, hashes, state.fieldHashes);
     if (!Object.keys(changed).length) {
       // Only blanked or removed fields: recorded, nothing to push.
-      await saveState(link, card, {
-        lastHash: hash,
-        fieldHashes: hashes,
-        lastError: null,
-        lastErrorHash: null,
-      });
+      await saveState(
+        link,
+        card,
+        {
+          lastHash: hash,
+          fieldHashes: hashes,
+          lastError: null,
+          lastErrorHash: null,
+        },
+        cycleStart
+      );
       continue;
     }
     candidates.push({
@@ -468,7 +490,13 @@ async function syncOnce(
       .where(inArray(contactStripeSyncCards.href, delta.removed));
   }
 
-  const retryNeeded = await pushCandidates(candidates, logger, outcome, settings.intervalMs);
+  const retryNeeded = await pushCandidates(
+    candidates,
+    logger,
+    outcome,
+    settings.intervalMs,
+    cycleStart
+  );
 
   // A retryable failure keeps the old token, so the same delta comes back next cycle; the
   // cards that were handled are skipped by their recorded ETag.
@@ -493,7 +521,8 @@ async function syncOnce(
 async function saveState(
   link: Link,
   card: StoredCard,
-  extra: Partial<typeof contactStripeSyncCards.$inferInsert>
+  extra: Partial<typeof contactStripeSyncCards.$inferInsert>,
+  cycleStart: Date
 ) {
   const values = {
     contactUid: link.contactUid,
@@ -515,6 +544,9 @@ async function saveState(
         etag: values.etag,
         ...extra,
       },
+      // The automation rewrote this card after the cycle started (resetCardBaseline): what the
+      // cycle read is stale, so it must not overwrite the row. The next cycle baselines it.
+      setWhere: notResetSince(cycleStart),
     });
 }
 
@@ -523,7 +555,8 @@ async function pushCandidates(
   candidates: Candidate[],
   logger: Logger,
   outcome: ContactStripeSyncResult,
-  intervalMs: number
+  intervalMs: number,
+  cycleStart: Date
 ): Promise<boolean> {
   const byCustomer = new Map<string, Candidate[]>();
   for (const c of candidates) {
@@ -565,22 +598,27 @@ async function pushCandidates(
             Math.min(MAX_AUTH_BACKOFF_MS, intervalMs * 2 ** (authBackoff.failures - 1));
         }
         if (retryable) {
-          await saveErrorOnly(c, code);
+          await saveErrorOnly(c, code, cycleStart);
           retryNeeded = true;
           break; // later cards of this Customer wait, to keep the REV order
         }
-        await saveState(c.link, c.card, { lastError: code, lastErrorHash: c.hash });
+        await saveState(c.link, c.card, { lastError: code, lastErrorHash: c.hash }, cycleStart);
         continue;
       }
       authBackoff.failures = 0;
       authBackoff.until = 0;
-      await saveState(c.link, c.card, {
-        lastHash: c.hash,
-        fieldHashes: c.hashes,
-        lastPushedAt: new Date(),
-        lastError: null,
-        lastErrorHash: null,
-      });
+      await saveState(
+        c.link,
+        c.card,
+        {
+          lastHash: c.hash,
+          fieldHashes: c.hashes,
+          lastPushedAt: new Date(),
+          lastError: null,
+          lastErrorHash: null,
+        },
+        cycleStart
+      );
       outcome.pushed++;
       logger.info(
         {
@@ -596,11 +634,13 @@ async function pushCandidates(
 }
 
 /** Notes a retryable failure without moving the recorded ETag, so the card is retried. */
-async function saveErrorOnly(c: Candidate, code: string) {
+async function saveErrorOnly(c: Candidate, code: string, cycleStart: Date) {
   await db
     .update(contactStripeSyncCards)
     .set({ lastError: code })
-    .where(eq(contactStripeSyncCards.contactUid, c.link.contactUid));
+    .where(
+      and(eq(contactStripeSyncCards.contactUid, c.link.contactUid), notResetSince(cycleStart))
+    );
 }
 
 // ── Runner ───────────────────────────────────────────────────────────────────
