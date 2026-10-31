@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, eq, isNull, max, sql } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, max, sql } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import { db } from "../db/client";
 import { clientOnboardingSubmissions, clientOnboardingSyncState } from "../db/schema";
@@ -221,6 +221,15 @@ class ClaimLostError extends Error {
   }
 }
 
+/** The allocated CP code was taken in Tables by someone else; a new one is already saved. */
+class ProjectCodeTakenError extends Error {
+  readonly code = "project_code_taken";
+  constructor() {
+    super("project_code_taken");
+    this.name = "ProjectCodeTakenError";
+  }
+}
+
 /** Tables accepted a row update but the read-back does not show it; retried. */
 class LinksNotPersistedError extends Error {
   readonly code = "tables.link_not_persisted";
@@ -337,10 +346,15 @@ async function saveUnderClaim(
  * reused) and the highest code already in the Projects table (`tableHighest`, e.g.
  * rows made by hand), plus one. The code is written in the same transaction, so a
  * retry of any later step keeps it.
+ *
+ * With `replace`, a code that turned out to be taken in the Projects table (no row
+ * made yet) is swapped for a fresh one above everything seen, including the burned
+ * code itself, so it is never handed out again.
  */
 export async function allocateProjectCode(
   row: Pick<SubmissionRow, "formId" | "submissionId" | "claimToken">,
-  tableHighest: number
+  tableHighest: number,
+  replace = false
 ): Promise<{ projectNumber: number; projectCode: string }> {
   const claimToken = row.claimToken;
   if (!claimToken) throw new ClaimLostError();
@@ -350,7 +364,7 @@ export async function allocateProjectCode(
       .select({ projectNumber: t.projectNumber, projectCode: t.projectCode })
       .from(t)
       .where(and(eq(t.formId, row.formId), eq(t.submissionId, row.submissionId)));
-    if (current?.projectNumber != null && current.projectCode) {
+    if (!replace && current?.projectNumber != null && current.projectCode) {
       return { projectNumber: current.projectNumber, projectCode: current.projectCode };
     }
     const [{ highest }] = await tx.select({ highest: max(t.projectNumber) }).from(t);
@@ -364,7 +378,7 @@ export async function allocateProjectCode(
           eq(t.formId, row.formId),
           eq(t.submissionId, row.submissionId),
           eq(t.claimToken, claimToken),
-          isNull(t.projectCode)
+          replace ? isNotNull(t.projectCode) : isNull(t.projectCode)
         )
       )
       .returning({ submissionId: t.submissionId });
@@ -394,6 +408,7 @@ const RETRYABLE_HTTP_STATUSES = new Set([401, 408, 423, 425, 429]);
 function classify(error: unknown): { code: string; retryable: boolean } {
   if (error instanceof OnboardingInvalidError) return { code: error.code, retryable: false };
   if (error instanceof LinksNotPersistedError) return { code: error.code, retryable: true };
+  if (error instanceof ProjectCodeTakenError) return { code: error.code, retryable: true };
   if (error instanceof ContactChangedError) {
     return { code: "carddav.contact_changed", retryable: true };
   }
@@ -488,18 +503,16 @@ async function projectRowStep(
   const ids = { formId: ctx.formId, submissionId: row.submissionId };
   const rows = await api.listRows(api.targets.projectsTableId);
   const codeOf = (r: TableRow) => r.cells.get(cols.projectCode.id);
+  const tableHighest = Math.max(0, ...rows.map((r) => parseProjectNumber(codeOf(r)) ?? 0));
 
-  let code = row.projectCode;
-  if (code === null) {
-    const tableHighest = Math.max(0, ...rows.map((r) => parseProjectNumber(codeOf(r)) ?? 0));
-    const allocated = await allocateProjectCode(row, tableHighest);
-    Object.assign(row, allocated);
-    code = allocated.projectCode;
-    ctx.logger.info({ ...ids, projectCode: code }, "Client project code allocated.");
+  if (row.projectCode === null) {
+    Object.assign(row, await allocateProjectCode(row, tableHighest));
+    ctx.logger.info({ ...ids, projectCode: row.projectCode }, "Client project code allocated.");
   }
+  const code = row.projectCode as string;
 
   // A create whose response was lost left a row with our code: adopt it. A row
-  // with our code but another project name was made by someone else: stop.
+  // with our code but another project name was made by someone else.
   const existing = rows.filter((r) => String(codeOf(r) ?? "").trim() === code);
   let rowId: number;
   if (existing.length) {
@@ -508,7 +521,18 @@ async function projectRowStep(
         normalizeName(String(r.cells.get(cols.projectName.id) ?? "")) ===
         normalizeName(intake.projectName)
     );
-    if (ours.length !== 1) throw new OnboardingInvalidError("project_code_taken");
+    if (ours.length > 1) throw new OnboardingInvalidError("project_code_taken");
+    if (ours.length === 0) {
+      // The code is burned (never reused). Take a fresh one above both the database
+      // and the table, then retry; every collision uses an attempt, so repeated
+      // collisions end in `failed` like any other retried error.
+      Object.assign(row, await allocateProjectCode(row, tableHighest, true));
+      ctx.logger.warn(
+        { ...ids, projectCode: row.projectCode },
+        "Client project code was taken in Tables; allocated a new one."
+      );
+      throw new ProjectCodeTakenError();
+    }
     rowId = ours[0].id;
     ctx.logger.info({ ...ids, rowId }, "Client project row already existed; adopted it.");
   } else {

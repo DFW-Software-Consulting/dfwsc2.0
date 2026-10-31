@@ -1,3 +1,4 @@
+import { Readable } from "node:stream";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
@@ -9,7 +10,9 @@ import {
   runClientOnboardingCycle,
   startClientOnboarding,
 } from "../../lib/client-onboarding-sync";
+import { CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX } from "../../lib/constants";
 import { resetNextcloudBreakerForTests } from "../../lib/nextcloud";
+import { hitBuckets } from "../../lib/rate-limit";
 import { isAuthorizedWebhook } from "../../routes/nextcloud-webhooks";
 import { ensureBaseEnv } from "../helpers/env";
 import {
@@ -77,6 +80,7 @@ describe("POST /webhooks/nextcloud/client-onboarding", () => {
   beforeEach(async () => {
     await db.delete(clientOnboardingSubmissions);
     await db.delete(clientOnboardingSyncState);
+    hitBuckets.clear();
     resetNextcloudBreakerForTests();
     resetClientOnboardingStateForTests();
     fake = new FakeOnboardingNextcloud();
@@ -125,6 +129,54 @@ describe("POST /webhooks/nextcloud/client-onboarding", () => {
       expect((await post({ authorization })).statusCode).toBe(401);
     }
     expect(vi.mocked(fetch).mock.calls.length).toBe(before);
+  });
+
+  // The route's content-type parser drains the request with `payload.resume()`, which
+  // only runs after onRequest. A refused request must never reach it.
+  const postCountingBodyReads = async (headers: Record<string, string>) => {
+    const resume = vi.spyOn(Readable.prototype, "resume");
+    try {
+      const res = await post(headers);
+      const bodyReads = resume.mock.contexts.filter(
+        (c) => (c as { url?: string }).url === URL
+      ).length;
+      return { res, bodyRead: bodyReads > 0 };
+    } finally {
+      resume.mockRestore();
+    }
+  };
+  it("refuses a bad secret before the body is read", async () => {
+    await start();
+    for (const headers of [{ authorization: "Bearer wrong" }, {}] as Record<string, string>[]) {
+      const { res, bodyRead } = await postCountingBodyReads(headers);
+      expect(res.statusCode).toBe(401);
+      expect(bodyRead).toBe(false);
+    }
+    // The same request with the right secret does read it, so the check above is meaningful.
+    const ok = await postCountingBodyReads({ authorization: `Bearer ${ONB_WEBHOOK_SECRET}` });
+    expect(ok.res.statusCode).toBe(202);
+    expect(ok.bodyRead).toBe(true);
+  });
+
+  it("answers 404 before the body is read when the webhook is off", async () => {
+    const { res, bodyRead } = await postCountingBodyReads({
+      authorization: `Bearer ${ONB_WEBHOOK_SECRET}`,
+    });
+    expect(res.statusCode).toBe(404);
+    expect(bodyRead).toBe(false);
+  });
+
+  it("rate limits before the body is read, ahead of the secret check", async () => {
+    await start();
+    for (let i = 0; i < CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX; i++) {
+      expect((await post({ authorization: "Bearer wrong" })).statusCode).toBe(401);
+    }
+    const { res, bodyRead } = await postCountingBodyReads({
+      authorization: `Bearer ${ONB_WEBHOOK_SECRET}`,
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.headers["retry-after"]).toBeDefined();
+    expect(bodyRead).toBe(false);
   });
 
   it("accepts the body as webhook_listeners sends it: no Content-Type header", async () => {

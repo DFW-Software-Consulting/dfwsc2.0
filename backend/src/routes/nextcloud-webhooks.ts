@@ -40,21 +40,30 @@ export default async function nextcloudWebhookRoutes(fastify: FastifyInstance) {
   // a cycle is started (or queued behind the running one) and the submissions are
   // re-read from the Forms API. Answers 202 at once; the work runs in the background.
   // 404 when the onboarding or its webhook secret is not configured.
+  // The rate limit and the secret check run in onRequest, before Fastify buffers the
+  // body (up to 256 KB), so a refused request never costs a body read.
   fastify.post(
     "/webhooks/nextcloud/client-onboarding",
     {
-      preHandler: rateLimit({
-        max: CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX,
-        windowMs: RATE_LIMIT_WINDOW_MS,
-      }),
+      onRequest: [
+        rateLimit({
+          max: CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX,
+          windowMs: RATE_LIMIT_WINDOW_MS,
+        }),
+        async (request, reply) => {
+          const webhook = getClientOnboardingWebhook();
+          if (!webhook) return reply.status(404).send({ error: "Not Found" });
+          if (!isAuthorizedWebhook(request.headers.authorization, webhook.secret)) {
+            request.log.warn("Nextcloud webhook rejected: bad or missing secret.");
+            return reply.status(401).send({ error: "Unauthorized" });
+          }
+        },
+      ],
     },
-    async (request, reply) => {
+    async (_request, reply) => {
+      // The secret was checked in onRequest; the webhook can only have gone away since.
       const webhook = getClientOnboardingWebhook();
       if (!webhook) return reply.status(404).send({ error: "Not Found" });
-      if (!isAuthorizedWebhook(request.headers.authorization, webhook.secret)) {
-        request.log.warn("Nextcloud webhook rejected: bad or missing secret.");
-        return reply.status(401).send({ error: "Unauthorized" });
-      }
       webhook.trigger();
       return reply.status(202).send({ accepted: true });
     }

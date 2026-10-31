@@ -533,7 +533,17 @@ describe("client onboarding: resume after a failure", () => {
     expect(await sub(6)).toMatchObject({ status: "completed", projectCode: "CP-004" });
   });
 
-  it("stops when someone else's row already has the allocated code", async () => {
+  const handMade = (id: number, code: string) =>
+    fake.rows.push({
+      id,
+      tableId: ONB_PROJECTS_TABLE,
+      data: new Map<number, unknown>([
+        [26, code],
+        [27, "Hand Made"],
+      ]),
+    });
+
+  it("allocates a fresh code when someone else's row took the allocated one, and never reuses the burned one", async () => {
     await baseline();
     fake.addSubmission(5, FULL);
     fake.fail({
@@ -541,19 +551,62 @@ describe("client onboarding: resume after a failure", () => {
       status: 503,
     });
     await cycle();
+    expect(await sub(5)).toMatchObject({ status: "pending", projectCode: "CP-003" });
     // Meanwhile CP-003 is typed in by hand for another project.
-    fake.rows.push({
-      id: 77,
-      tableId: ONB_PROJECTS_TABLE,
-      data: new Map<number, unknown>([
-        [26, "CP-003"],
-        [27, "Hand Made"],
-      ]),
-    });
+    handMade(77, "CP-003");
     await makeDue(5);
-    expect(await cycle()).toMatchObject({ failed: 1 });
-    expect(await sub(5)).toMatchObject({ status: "failed", lastErrorCode: "project_code_taken" });
+    expect(await cycle()).toMatchObject({ retried: 1, failed: 0 });
+    expect(await sub(5)).toMatchObject({ status: "pending", projectCode: "CP-004" });
     expect(newProjectRows()).toHaveLength(0);
+    await makeDue(5);
+    expect(await cycle()).toMatchObject({ completed: 1, failed: 0 });
+    expect(await sub(5)).toMatchObject({ status: "completed", projectCode: "CP-004" });
+    expect(newProjectRows()).toHaveLength(1);
+    expect(newProjectRows()[0].data.get(26)).toBe("CP-004");
+    expect(fake.row(77)?.data.get(27)).toBe("Hand Made");
+
+    fake.addSubmission(6, { ...FULL, project_name: "Second" });
+    await cycle();
+    expect(await sub(6)).toMatchObject({ status: "completed", projectCode: "CP-005" });
+  });
+
+  it("gives up with project_code_taken when the allocated code keeps being taken", async () => {
+    await baseline();
+    fake.addSubmission(5, FULL);
+    fake.fail({
+      match: (r) => r.method === "POST" && r.path.endsWith("/tables/6/rows"),
+      status: 503,
+      times: 100,
+    });
+    // Before every listing of the Projects table, someone types in the code the
+    // submission currently holds.
+    const inner = fake.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        if ((init?.method ?? "GET") === "GET" && /\/tables\/6\/rows\?/.test(String(input))) {
+          const held = (await sub(5))?.projectCode;
+          if (held && !fake.projectRows().some((r) => r.data.get(26) === held)) {
+            handMade(800 + fake.rows.length, held);
+          }
+        }
+        return inner(input, init);
+      })
+    );
+    for (let i = 0; i < CLIENT_ONBOARDING_MAX_ATTEMPTS + 1; i++) {
+      await makeDue(5);
+      await cycle();
+    }
+    const final = await sub(5);
+    expect(final).toMatchObject({
+      status: "failed",
+      lastErrorCode: "project_code_taken",
+      attempts: CLIENT_ONBOARDING_MAX_ATTEMPTS,
+    });
+    expect(newProjectRows()).toHaveLength(0);
+    // The held code is never one that is already in the table.
+    const codes = fake.projectRows().map((r) => r.data.get(26));
+    expect(new Set(codes).size).toBe(codes.length);
   });
 
   it("fails permanently, with no writes, when a required answer is missing", async () => {
