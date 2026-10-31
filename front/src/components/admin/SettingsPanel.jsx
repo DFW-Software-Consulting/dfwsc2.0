@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSettings, useUpdateSetting } from "../../hooks/useSettings";
+import Button from "./shared/Button";
 import ErrorMessage from "./shared/ErrorMessage";
 import LoadingSpinner from "./shared/LoadingSpinner";
 
@@ -62,18 +63,17 @@ export default function SettingsPanel({ showToast }) {
                 }
                 className="min-w-0 flex-[1_1_10rem] rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus"
               />
-              <button
-                type="button"
+              <Button
+                className="shrink-0"
                 onClick={() =>
                   handleUpdate(
                     "default_fee_cents",
                     getValueForSave("default_fee_cents", settings.defaultFeeCents)
                   )
                 }
-                className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
-              </button>
+              </Button>
             </div>
             <p className="text-xs text-fg-muted mt-1">
               Applied to transactions that don't have a specific client or group fee set.
@@ -97,18 +97,17 @@ export default function SettingsPanel({ showToast }) {
                 className="min-w-0 flex-[1_1_10rem] rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus"
                 placeholder="e.g. 2.9"
               />
-              <button
-                type="button"
+              <Button
+                className="shrink-0"
                 onClick={() =>
                   handleUpdate(
                     "default_fee_percent",
                     getValueForSave("default_fee_percent", settings.defaultFeePercent ?? "")
                   )
                 }
-                className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -127,18 +126,17 @@ export default function SettingsPanel({ showToast }) {
                 onChange={(e) => setFormValues({ ...formValues, company_name: e.target.value })}
                 className="min-w-0 flex-[1_1_10rem] rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus"
               />
-              <button
-                type="button"
+              <Button
+                className="shrink-0"
                 onClick={() =>
                   handleUpdate(
                     "company_name",
                     getValueForSave("company_name", settings.companyName)
                   )
                 }
-                className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -155,18 +153,17 @@ export default function SettingsPanel({ showToast }) {
                 onChange={(e) => setFormValues({ ...formValues, contact_email: e.target.value })}
                 className="min-w-0 flex-[1_1_10rem] rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted focus:outline-none focus:ring-2 focus:ring-focus"
               />
-              <button
-                type="button"
+              <Button
+                className="shrink-0"
                 onClick={() =>
                   handleUpdate(
                     "contact_email",
                     getValueForSave("contact_email", settings.contactEmail)
                   )
                 }
-                className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm transition-colors"
               >
                 Save
-              </button>
+              </Button>
             </div>
             <p className="text-xs text-fg-muted mt-1">
               Contact email shown to customers for support inquiries.

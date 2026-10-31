@@ -50,7 +50,7 @@ export default function BaseModal({ isOpen, onClose, title, titleId, size = "md"
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded text-fg-muted hover:text-fg text-2xl leading-none transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              className="-mt-2 -mr-3 inline-flex size-11 shrink-0 items-center justify-center rounded text-fg-muted hover:text-fg text-2xl leading-none transition-colors md:-mt-1 md:-mr-1 md:size-8 pointer-coarse:size-11 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               aria-label="Close"
             >
               &times;
