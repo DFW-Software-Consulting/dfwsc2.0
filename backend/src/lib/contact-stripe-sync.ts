@@ -291,6 +291,9 @@ export async function runContactStripeSyncCycle(options: {
   try {
     const client = await pool.connect();
     let outcome: ContactStripeSyncResult;
+    // A connection that may still hold the advisory lock is destroyed, never pooled: it would
+    // keep every later cycle "busy" for as long as the process lives.
+    let destroyClient = false;
     try {
       const lock = await client.query<{ ok: boolean }>(
         "SELECT pg_try_advisory_lock(hashtext($1)) AS ok",
@@ -302,12 +305,24 @@ export async function runContactStripeSyncCycle(options: {
         const started = await client.query<{ now: Date }>("SELECT now() AS now");
         outcome = await syncOnce(config.settings, logger, started.rows[0].now);
       } finally {
-        await client
-          .query("SELECT pg_advisory_unlock(hashtext($1))", [CYCLE_LOCK_NAME])
-          .catch(() => {});
+        try {
+          const unlock = await client.query<{ ok: boolean }>(
+            "SELECT pg_advisory_unlock(hashtext($1)) AS ok",
+            [CYCLE_LOCK_NAME]
+          );
+          destroyClient = !unlock.rows[0]?.ok;
+        } catch {
+          destroyClient = true;
+        }
+        if (destroyClient) {
+          logger.error(
+            {},
+            "Contact to Stripe sync could not release its cycle lock; connection discarded."
+          );
+        }
       }
     } finally {
-      client.release();
+      client.release(destroyClient);
     }
     if (outcome.status === "ok") lastLoggedProblem = null;
     return outcome;
@@ -368,7 +383,13 @@ async function syncOnce(
   // card itself, which a delta that does not list the card cannot do.
   const needsBaseline = [...links.values()].some((link) => {
     const state = states.get(link.contactUid);
-    return !state || state.stripeCustomerId !== link.customerId;
+    return (
+      !state ||
+      state.stripeCustomerId !== link.customerId ||
+      // Reset by the onboarding step and not seen since: baseline it from the card itself, or
+      // the next real edit would be swallowed as the baseline.
+      (state.baselineAt === null && state.baselineResetAt !== null)
+    );
   });
   let fullScan = !bookRow?.syncToken || needsBaseline;
   let delta: Awaited<ReturnType<typeof syncAddressbook>> | null = null;
@@ -475,6 +496,7 @@ async function syncOnce(
             clientCode: link.clientCode,
             stripeCustomerId: link.customerId,
             baselineAt: null,
+            baselineResetAt: null,
             etag: null,
             href: null,
             lastHash: null,
@@ -573,6 +595,27 @@ async function pushCandidates(
       );
     }
     for (const c of group) {
+      // The card may have been rewritten by the onboarding step after this cycle read it (or be
+      // waiting for a baseline): then what was read is not a person's edit. Skip; the next cycle
+      // baselines the card.
+      const [current] = await db
+        .select({
+          baselineAt: contactStripeSyncCards.baselineAt,
+          baselineResetAt: contactStripeSyncCards.baselineResetAt,
+        })
+        .from(contactStripeSyncCards)
+        .where(eq(contactStripeSyncCards.contactUid, c.link.contactUid));
+      if (
+        !current ||
+        current.baselineAt === null ||
+        (current.baselineResetAt !== null && current.baselineResetAt > cycleStart)
+      ) {
+        logger.info(
+          { contactUid: c.link.contactUid, stripeCustomerId: customerId },
+          "Contact card was reset by onboarding; not pushed, it will be baselined."
+        );
+        continue;
+      }
       const params: Stripe.CustomerUpdateParams = { ...c.changed };
       try {
         await stripe.customers.update(customerId, params, {

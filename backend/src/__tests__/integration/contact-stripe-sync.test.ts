@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { db } from "../../db/client";
+import { db, pool } from "../../db/client";
 import {
   billingCustomers,
   clientOnboardingSubmissions,
@@ -980,6 +980,104 @@ describe("an onboarding write racing a sync cycle", () => {
     );
     expect(await cycle()).toMatchObject({ pushed: 0 });
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("onboarding rewrite windows", () => {
+  it("does not push a card whose reset and rewrite landed after the cycle started", async () => {
+    await baselined();
+    // A cycle starts, then onboarding resets and rewrites the card, then the cycle reads v2.
+    const v2 = withBase(["TEL", "TEL:+1 111 555 0000"]);
+    let raced = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const init = args[1] as RequestInit | undefined;
+        if (!raced && init?.method === "REPORT" && String(init.body).includes("sync-collection")) {
+          raced = true;
+          await resetCardBaseline(UID_A);
+          putCard(UID_A, v2);
+        }
+        return fake.fetch(...args);
+      })
+    );
+    expect(await cycle()).toMatchObject({ status: "ok", pushed: 0 });
+    expect(raced).toBe(true);
+    expect(update).not.toHaveBeenCalled();
+    expect(lines.some((l) => l.text.includes("reset by onboarding"))).toBe(true);
+
+    expect(await cycle()).toMatchObject({ status: "ok", baselined: 1, pushed: 0 });
+    expect(update).not.toHaveBeenCalled();
+    expect((await stateOf(UID_A)).lastHash).toBe(
+      combinedHash(fieldHashes(mapCardToStripe(vcard(UID_A, v2)).fields))
+    );
+  });
+
+  it("re-baselines, without pushing, a card whose onboarding write failed after the reset", async () => {
+    await link(5, "CP-009", "cus_dash");
+    putCard(UID_A, BASE);
+    expect(await cycle()).toMatchObject({ baselined: 1 });
+    vi.spyOn(stripe.customers, "list").mockResolvedValue({ data: [] } as never);
+    fake.addLead(301, "Zephyrine Widgets LLC");
+    fake.questions.push({ ...BILLING_EMAIL_QUESTION });
+    const env = onboardingEnv({ CONTACT_STRIPE_SYNC: "true" });
+    const run = () => runClientOnboardingCycle({ logger: logger(), env });
+    expect((await run()).status).toBe("ok");
+    fake.fail({
+      match: (r) => r.method === "PUT" && r.path.includes(UID_A),
+      status: 500,
+      times: 1,
+    });
+    fake.addSubmission(8, {
+      company: "Zephyrine Widgets LLC",
+      contact_name: "Ophelia Quartermaine",
+      email: "ap@zephyrine.example",
+      project_name: "Second Project",
+      summary: "More work",
+      billing_email: "second-project@zephyrine.example",
+    });
+    await run();
+    expect(fake.cards.get(`${UID_A}.vcf`)?.data).not.toMatch(/X-ABLABEL/i); // write failed
+    expect((await stateOf(UID_A)).baselineAt).toBeNull(); // but the card was reset
+    // A person edits the card afterwards: the reset card is baselined from what is there, once.
+    expect(await cycle()).toMatchObject({ status: "ok", fullScan: true, baselined: 1, pushed: 0 });
+    expect(update).not.toHaveBeenCalled();
+    putCard(UID_A, withBase(["TEL", "TEL:+1 111 555 0000"]));
+    expect(await cycle()).toMatchObject({ pushed: 1 });
+  });
+});
+
+describe("cycle lock release failure", () => {
+  it("destroys a connection whose unlock fails, so the next cycle can take the lock", async () => {
+    await baselined();
+    const realConnect = pool.connect.bind(pool) as () => Promise<
+      Awaited<ReturnType<typeof pool.connect>>
+    >;
+    const releases: unknown[] = [];
+    vi.spyOn(pool, "connect").mockImplementationOnce((async () => {
+      const client = await realConnect();
+      const query = client.query.bind(client) as (...a: unknown[]) => Promise<unknown>;
+      client.query = ((text: unknown, ...rest: unknown[]) =>
+        typeof text === "string" && text.includes("pg_advisory_unlock")
+          ? Promise.reject(new Error("connection reset"))
+          : query(text, ...rest)) as never;
+      const release = client.release.bind(client) as (err?: boolean | Error) => void;
+      client.release = ((err?: boolean | Error) => {
+        releases.push(err);
+        release(err);
+      }) as never;
+      return client;
+    }) as never);
+    expect(await cycle()).toMatchObject({ status: "ok" });
+    expect(releases).toEqual([true]);
+    expect(lines.some((l) => l.level === "error" && l.text.includes("cycle lock"))).toBe(true);
+    // The destroyed session frees its lock; the next cycle gets it.
+    let next = await cycle();
+    for (let i = 0; i < 40 && next.status === "busy"; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      next = await cycle();
+    }
+    expect(next.status).toBe("ok");
   });
 });
 
