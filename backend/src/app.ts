@@ -14,6 +14,7 @@ import contactRoutes from "./routes/contact";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
 import metricsRoutes from "./routes/metrics";
+import nextcloudWebhookRoutes from "./routes/nextcloud-webhooks";
 import paymentsRoutes from "./routes/payments";
 import productRoutes from "./routes/products";
 import settingsRoutes from "./routes/settings";
@@ -210,6 +211,7 @@ export async function buildServer() {
   server.register(contactRoutes, { prefix: "/api/v1" });
   server.register(paymentsRoutes, { prefix: "/api/v1" });
   server.register(webhooksRoute, { prefix: "/api/v1" });
+  server.register(nextcloudWebhookRoutes, { prefix: "/api/v1" });
   server.register(clientRoutes, { prefix: "/api/v1" });
   server.register(groupRoutes, { prefix: "/api/v1" });
   server.register(productRoutes, { prefix: "/api/v1" });

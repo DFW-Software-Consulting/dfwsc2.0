@@ -110,6 +110,15 @@ describe("verifyDatabaseSchema", () => {
             // sales_lead_sync_state columns
             { column_name: "baseline_submission_id" },
             { column_name: "baselined_at" },
+            // client_onboarding_submissions columns (others are listed above)
+            { column_name: "contact_status" },
+            { column_name: "project_number" },
+            { column_name: "project_code" },
+            { column_name: "page_id" },
+            { column_name: "page_url" },
+            { column_name: "page_content_at" },
+            { column_name: "lead_status" },
+            { column_name: "lead_row_id" },
           ],
         };
       }
@@ -118,7 +127,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(10);
+    expect(mockDb.execute).toHaveBeenCalledTimes(12);
   });
 
   it("throws when a table is missing required columns", async () => {

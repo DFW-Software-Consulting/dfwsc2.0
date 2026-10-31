@@ -323,3 +323,78 @@ export const salesLeadSyncState = pgTable("sales_lead_sync_state", {
   baselineSubmissionId: integer("baseline_submission_id").notNull(),
   baselinedAt: timestamp("baselined_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// "Convert Won Lead to Client" onboarding (lib/client-onboarding-sync.ts). One row
+// per Forms submission. Like sales_lead_submissions: no answers are stored, each
+// step's output is saved as soon as the step succeeds, and a retry resumes at the
+// first step without output.
+export const clientOnboardingSubmissions = pgTable(
+  "client_onboarding_submissions",
+  {
+    formId: integer("form_id").notNull(),
+    submissionId: integer("submission_id").notNull(),
+    status: text("status", { enum: ["pending", "completed", "failed"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimToken: text("claim_token"),
+    // PII-free failure code such as "tables.create_row:503" or "missing_company".
+    lastErrorCode: text("last_error_code"),
+    // 1. Client folder clients/<Company>/ and its Meetings/ Decisions/ Deliverables/.
+    folderName: text("folder_name"),
+    folderFileId: bigint("folder_file_id", { mode: "number" }),
+    // 2. Contact card: created, updated, or left alone because several cards matched.
+    contactStatus: text("contact_status", { enum: ["created", "updated", "ambiguous"] }),
+    contactUid: text("contact_uid"),
+    // 3. CP-### code. Allocated once under an advisory lock and never reused.
+    projectNumber: integer("project_number"),
+    projectCode: text("project_code"),
+    tableRowId: integer("table_row_id"),
+    // 4. Collectives page.
+    pageId: integer("page_id"),
+    pageUrl: text("page_url"),
+    pageContentAt: timestamp("page_content_at", { withTimezone: true }),
+    // Row links (folder, page, intake submission), verified on read-back.
+    linksBackfilledAt: timestamp("links_backfilled_at", { withTimezone: true }),
+    // 5. Sales Pipeline row. A non-"won" status is a flag for an operator, not a failure.
+    leadStatus: text("lead_status", { enum: ["won", "no_match", "ambiguous", "already_linked"] }),
+    leadRowId: integer("lead_row_id"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.formId, table.submissionId] }),
+    dueIdx: index("client_onboarding_submissions_due_idx").on(table.status, table.nextAttemptAt),
+    projectNumberUnique: uniqueIndex("client_onboarding_submissions_project_number_idx").on(
+      table.projectNumber
+    ),
+    projectCodeUnique: uniqueIndex("client_onboarding_submissions_project_code_idx").on(
+      table.projectCode
+    ),
+    statusCheck: check(
+      "client_onboarding_submissions_status_check",
+      sql`${table.status} IN ('pending', 'completed', 'failed')`
+    ),
+    contactStatusCheck: check(
+      "client_onboarding_submissions_contact_status_check",
+      sql`${table.contactStatus} IS NULL OR ${table.contactStatus} IN ('created', 'updated', 'ambiguous')`
+    ),
+    leadStatusCheck: check(
+      "client_onboarding_submissions_lead_status_check",
+      sql`${table.leadStatus} IS NULL OR ${table.leadStatus} IN ('won', 'no_match', 'ambiguous', 'already_linked')`
+    ),
+  })
+);
+
+// Per-form baseline, as for sales_lead_sync_state.
+export const clientOnboardingSyncState = pgTable("client_onboarding_sync_state", {
+  formId: integer("form_id").primaryKey(),
+  baselineSubmissionId: integer("baseline_submission_id").notNull(),
+  baselinedAt: timestamp("baselined_at", { withTimezone: true }).notNull().defaultNow(),
+});
