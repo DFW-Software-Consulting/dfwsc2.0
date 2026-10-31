@@ -296,6 +296,13 @@ export const salesLeadSubmissions = pgTable(
     lastErrorCode: text("last_error_code"),
     tableRowId: integer("table_row_id"),
     contactUid: text("contact_uid"),
+    // Existing-card handling: created, updated in place, left alone (several matches),
+    // or matched in a read-only address book. contactAddressbook is the book the
+    // linked card lives in.
+    contactStatus: text("contact_status", {
+      enum: ["created", "updated", "ambiguous", "read_only"],
+    }),
+    contactAddressbook: text("contact_addressbook"),
     folderName: text("folder_name"),
     folderFileId: bigint("folder_file_id", { mode: "number" }),
     linksBackfilledAt: timestamp("links_backfilled_at", { withTimezone: true }),
@@ -312,6 +319,10 @@ export const salesLeadSubmissions = pgTable(
     statusCheck: check(
       "sales_lead_submissions_status_check",
       sql`${table.status} IN ('pending', 'completed', 'failed')`
+    ),
+    contactStatusCheck: check(
+      "sales_lead_submissions_contact_status_check",
+      sql`${table.contactStatus} IS NULL OR ${table.contactStatus} IN ('created', 'updated', 'ambiguous', 'read_only')`
     ),
   })
 );
@@ -345,8 +356,11 @@ export const clientOnboardingSubmissions = pgTable(
     // 1. Client folder clients/<Company>/ and its Meetings/ Decisions/ Deliverables/.
     folderName: text("folder_name"),
     folderFileId: bigint("folder_file_id", { mode: "number" }),
-    // 2. Contact card: created, updated, or left alone because several cards matched.
-    contactStatus: text("contact_status", { enum: ["created", "updated", "ambiguous"] }),
+    // 2. Contact card: created, updated, or left alone (several cards matched, or the one
+    // match is in a read-only address book).
+    contactStatus: text("contact_status", {
+      enum: ["created", "updated", "ambiguous", "read_only"],
+    }),
     contactUid: text("contact_uid"),
     // 3. CP-### code. Allocated once under an advisory lock and never reused.
     projectNumber: integer("project_number"),
@@ -383,7 +397,7 @@ export const clientOnboardingSubmissions = pgTable(
     ),
     contactStatusCheck: check(
       "client_onboarding_submissions_contact_status_check",
-      sql`${table.contactStatus} IS NULL OR ${table.contactStatus} IN ('created', 'updated', 'ambiguous')`
+      sql`${table.contactStatus} IS NULL OR ${table.contactStatus} IN ('created', 'updated', 'ambiguous', 'read_only')`
     ),
     leadStatusCheck: check(
       "client_onboarding_submissions_lead_status_check",

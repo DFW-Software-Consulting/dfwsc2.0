@@ -1,4 +1,10 @@
 import { encodePathSegments, type NextcloudConfig, nextcloudRequest } from "./nextcloud";
+import {
+  type ContactPerson,
+  findContactCards,
+  type StoredCard,
+  updateCard,
+} from "./nextcloud-contacts";
 import type {
   FormAnswer,
   FormQuestion,
@@ -65,7 +71,7 @@ export function positiveInt(value: unknown, label: string): number {
 export class SalesLeadNextcloud {
   constructor(
     private readonly nc: NextcloudConfig,
-    private readonly targets: SalesLeadTargets
+    readonly targets: SalesLeadTargets
   ) {}
 
   // ── Forms ──────────────────────────────────────────────────────────────────
@@ -302,12 +308,22 @@ export class SalesLeadNextcloud {
     return `${this.nc.baseUrl}/index.php/f/${fileId}`;
   }
 
+  /** Existing cards for this lead across every visible address book. */
+  findContactCards(person: ContactPerson, ownUid: string) {
+    return findContactCards(this.nc, this.targets.addressbookPath, person, ownUid);
+  }
+
+  updateCard(card: StoredCard, vcard: string): Promise<void> {
+    return updateCard(this.nc, card, vcard);
+  }
+
   /**
    * Opens the contact in the Contacts app. The address book is addressed by its
    * owner-side URI, which is the sharee's collection name without "_shared_by_<owner>".
+   * Defaults to the configured book.
    */
-  contactLink(uid: string): string {
-    const ownerUri = this.targets.addressbookPath.replace(/_shared_by_.+$/, "");
+  contactLink(uid: string, addressbook: string = this.targets.addressbookPath): string {
+    const ownerUri = addressbook.replace(/_shared_by_.+$/, "");
     return `${this.nc.baseUrl}/index.php/apps/contacts/direct/contact/${encodeURIComponent(`${uid}~${ownerUri}`)}`;
   }
 }

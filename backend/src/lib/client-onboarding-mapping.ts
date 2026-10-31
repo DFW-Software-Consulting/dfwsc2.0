@@ -6,14 +6,19 @@
 // by exact title. A missing name or title stops the automation with one error log
 // instead of writing into the wrong cells.
 
+import { mergeContactVCard, nameParts, revStamp, serialize } from "./nextcloud-contacts";
 import {
   escapeVCardText,
   findOptionId,
-  foldLine,
   parseDate,
   sanitizeFolderName,
   type TableColumn,
 } from "./sales-lead-mapping";
+
+export { normalizeName, vCardMatches, vCardUid } from "./nextcloud-contacts";
+
+/** Adds the submitted name, email and phone to an existing card; see mergeContactVCard. */
+export const mergeClientVCard = mergeContactVCard;
 
 const INTAKE_QUESTION_NAMES = {
   company: "company",
@@ -164,11 +169,6 @@ export function isNextcloudUser(userId: string | null | undefined): userId is st
 
 // ── Names ────────────────────────────────────────────────────────────────────
 
-/** Case-insensitive, whitespace-collapsed, NFC form used for "exact" name matches. */
-export function normalizeName(value: string): string {
-  return value.normalize("NFC").replace(/\s+/g, " ").trim().toLocaleLowerCase("en-US");
-}
-
 export function clientFolderName(company: string, submissionId: number): string {
   return sanitizeFolderName(company, submissionId, "Client");
 }
@@ -282,23 +282,6 @@ export function clientContactUid(formId: number, submissionId: number): string {
   return `dfwsc-client-${formId}-${submissionId}`;
 }
 
-function revStamp(now: Date): string {
-  return now
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace(/\.\d{3}/, "");
-}
-
-function serialize(lines: string[]): string {
-  return `${lines.map(foldLine).join("\r\n")}\r\n`;
-}
-
-function nameParts(contactName: string): { family: string; given: string } {
-  const parts = contactName.trim().split(/\s+/).filter(Boolean);
-  const family = parts.length > 1 ? (parts.pop() as string) : "";
-  return { family, given: parts.join(" ") };
-}
-
 /** A new card with only the fields the submission gave; ORG is always the company. */
 export function buildClientVCard(intake: Intake, uid: string, now: Date = new Date()): string {
   const fn = intake.contactName ?? intake.company;
@@ -316,108 +299,6 @@ export function buildClientVCard(intake: Intake, uid: string, now: Date = new Da
   if (intake.phone) lines.push(`TEL;TYPE=WORK:${escapeVCardText(intake.phone)}`);
   lines.push("CATEGORIES:Client", `REV:${revStamp(now)}`, "END:VCARD");
   return serialize(lines);
-}
-
-interface VCardLine {
-  /** Property name without group, upper-case ("EMAIL"). */
-  name: string;
-  raw: string;
-  value: string;
-}
-
-function unescapeVCardText(value: string): string {
-  return value.replace(/\\([\\,;nN])/g, (_, c: string) => (c === "n" || c === "N" ? "\n" : c));
-}
-
-function parseLines(card: string): VCardLine[] {
-  return card
-    .replace(/\r?\n[ \t]/g, "")
-    .split(/\r?\n/)
-    .filter((raw) => raw !== "")
-    .map((raw) => {
-      const colon = raw.indexOf(":");
-      const head = colon === -1 ? raw : raw.slice(0, colon);
-      const name = (head.split(";")[0].split(".").pop() ?? "").toUpperCase();
-      return { name, raw, value: colon === -1 ? "" : raw.slice(colon + 1) };
-    });
-}
-
-function textValues(lines: VCardLine[], name: string): string[] {
-  return lines.filter((l) => l.name === name).map((l) => unescapeVCardText(l.value));
-}
-
-const digits = (value: string) => value.replace(/\D/g, "");
-
-/** The organization name: ORG's first component, split before unescaping. */
-function orgName(lines: VCardLine[]): string | undefined {
-  const line = lines.find((l) => l.name === "ORG");
-  return line ? unescapeVCardText(line.value.split(/(?<!\\);/)[0]) : undefined;
-}
-
-export function vCardUid(card: string): string | null {
-  return textValues(parseLines(card), "UID")[0]?.trim() || null;
-}
-
-/**
- * Whether an existing card is this client contact: by email when one was given,
- * otherwise by company (ORG) and, when given, the contact's name (FN).
- */
-export function vCardMatches(card: string, intake: Intake): boolean {
-  const lines = parseLines(card);
-  if (intake.email) {
-    const wanted = intake.email.trim().toLowerCase();
-    return textValues(lines, "EMAIL").some((e) => e.trim().toLowerCase() === wanted);
-  }
-  const org = orgName(lines);
-  if (org === undefined || normalizeName(org) !== normalizeName(intake.company)) {
-    return false;
-  }
-  if (!intake.contactName) return true;
-  const fn = textValues(lines, "FN")[0];
-  return fn !== undefined && normalizeName(fn) === normalizeName(intake.contactName);
-}
-
-/**
- * The card with ORG set to the company and the given name, email and phone added
- * where missing. Nothing is removed. Null when nothing would change, so a retry
- * makes no write.
- */
-export function mergeClientVCard(
-  card: string,
-  intake: Intake,
-  now: Date = new Date()
-): string | null {
-  let lines = parseLines(card).filter((l) => l.name !== "END");
-  let changed = false;
-  const insert = (raw: string) => {
-    lines.push({ name: "", raw, value: "" });
-    changed = true;
-  };
-
-  if (orgName(lines) !== intake.company) {
-    lines = lines.filter((l) => l.name !== "ORG");
-    insert(`ORG:${escapeVCardText(intake.company)}`);
-  }
-  if (intake.contactName && textValues(lines, "FN")[0] !== intake.contactName) {
-    const { family, given } = nameParts(intake.contactName);
-    lines = lines.filter((l) => l.name !== "FN" && l.name !== "N");
-    insert(`FN:${escapeVCardText(intake.contactName)}`);
-    insert(`N:${escapeVCardText(family)};${escapeVCardText(given)};;;`);
-  }
-  if (intake.email) {
-    const wanted = intake.email.trim().toLowerCase();
-    if (!textValues(lines, "EMAIL").some((e) => e.trim().toLowerCase() === wanted)) {
-      insert(`EMAIL;TYPE=WORK:${escapeVCardText(intake.email)}`);
-    }
-  }
-  if (intake.phone && digits(intake.phone)) {
-    if (!textValues(lines, "TEL").some((t) => digits(t) === digits(intake.phone as string))) {
-      insert(`TEL;TYPE=WORK:${escapeVCardText(intake.phone)}`);
-    }
-  }
-  if (!changed) return null;
-  lines = lines.filter((l) => l.name !== "REV");
-  return serialize([...lines.map((l) => l.raw), `REV:${revStamp(now)}`, "END:VCARD"]);
 }
 
 // ── Collectives ──────────────────────────────────────────────────────────────

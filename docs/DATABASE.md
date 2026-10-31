@@ -65,7 +65,7 @@ Progress of the Nextcloud New Lead automation, one row per Forms submission (see
 
 - **PK**: (`formId`, `submissionId`).
 - **Statuses**: `pending` → `completed`, or `failed` (permanent error, or 10 attempts used).
-- **Step outputs**: `tableRowId`, `contactUid`, `folderName`, `folderFileId`, `linksBackfilledAt`, each saved as its step succeeds so retries resume.
+- **Step outputs**: `tableRowId`, `contactUid`, `contactStatus` (`created` / `updated` / `ambiguous` / `read_only`), `contactAddressbook` (the book the linked card lives in), `folderName`, `folderFileId`, `linksBackfilledAt`, each saved as its step succeeds so retries resume.
 - **Retry/lease**: `attempts`, `nextAttemptAt`, `lastErrorCode` (PII-free), `claimedAt` + `claimToken`.
 - Stores no form answers.
 
@@ -77,7 +77,7 @@ Progress of the Nextcloud client onboarding (Convert Won Lead to Client form), o
 
 - **PK**: (`formId`, `submissionId`).
 - **Statuses**: `pending` → `completed`, or `failed` (permanent error, or 10 attempts used).
-- **Step outputs**: `folderName`, `folderFileId`, `contactStatus` (`created` / `updated` / `ambiguous`), `contactUid`, `projectNumber` + `projectCode` (CP-###), `tableRowId`, `pageId`, `pageUrl`, `pageContentAt`, `linksBackfilledAt`, `leadStatus` (`won` / `no_match` / `ambiguous` / `already_linked`), `leadRowId`. Each is saved as its step succeeds so retries resume.
+- **Step outputs**: `folderName`, `folderFileId`, `contactStatus` (`created` / `updated` / `ambiguous` / `read_only`), `contactUid`, `projectNumber` + `projectCode` (CP-###), `tableRowId`, `pageId`, `pageUrl`, `pageContentAt`, `linksBackfilledAt`, `leadStatus` (`won` / `no_match` / `ambiguous` / `already_linked`), `leadRowId`. Each is saved as its step succeeds so retries resume.
 - **Project codes**: `projectNumber` and `projectCode` are unique. They are allocated under a transaction-scoped advisory lock and never reused, including for submissions that later fail.
 - **Retry/lease**: `attempts`, `nextAttemptAt`, `lastErrorCode` (PII-free), `claimedAt` + `claimToken`.
 - Stores no form answers.

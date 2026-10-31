@@ -1,0 +1,5 @@
+ALTER TABLE "client_onboarding_submissions" DROP CONSTRAINT "client_onboarding_submissions_contact_status_check";--> statement-breakpoint
+ALTER TABLE "sales_lead_submissions" ADD COLUMN "contact_status" text;--> statement-breakpoint
+ALTER TABLE "sales_lead_submissions" ADD COLUMN "contact_addressbook" text;--> statement-breakpoint
+ALTER TABLE "client_onboarding_submissions" ADD CONSTRAINT "client_onboarding_submissions_contact_status_check" CHECK ("client_onboarding_submissions"."contact_status" IS NULL OR "client_onboarding_submissions"."contact_status" IN ('created', 'updated', 'ambiguous', 'read_only'));--> statement-breakpoint
+ALTER TABLE "sales_lead_submissions" ADD CONSTRAINT "sales_lead_submissions_contact_status_check" CHECK ("sales_lead_submissions"."contact_status" IS NULL OR "sales_lead_submissions"."contact_status" IN ('created', 'updated', 'ambiguous', 'read_only'));

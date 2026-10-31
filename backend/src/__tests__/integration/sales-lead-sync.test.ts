@@ -1,10 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../../db/client";
 import { salesLeadSubmissions, salesLeadSyncState } from "../../db/schema";
 import { SALES_LEAD_MAX_ATTEMPTS } from "../../lib/constants";
 import { openNextcloudBreakerForTests, resetNextcloudBreakerForTests } from "../../lib/nextcloud";
 import {
+  claimNextSalesLead,
   getSalesLeadSyncStats,
   resetSalesLeadSyncStateForTests,
   runSalesLeadCycle,
@@ -12,6 +13,7 @@ import {
 } from "../../lib/sales-lead-sync";
 import {
   COLUMN_IDS,
+  FAKE_ADDRESSBOOK,
   FAKE_FORM_ID,
   FakeNextcloud,
   type LeadAnswers,
@@ -475,7 +477,12 @@ describe("sales lead automation: partial failure", () => {
 describe("sales lead automation: concurrency", () => {
   it("processes each submission once when cycles overlap", async () => {
     await baseline();
-    for (const id of [5, 6, 7]) fake.addSubmission(id, { ...FULL_LEAD, Company: `Company ${id}` });
+    for (const id of [5, 6, 7])
+      fake.addSubmission(id, {
+        ...FULL_LEAD,
+        Company: `Company ${id}`,
+        Email: `lead${id}@example.test`,
+      });
     fake.latencyMs = 5;
 
     const results = await Promise.all([cycle(), cycle(), cycle()]);
@@ -555,5 +562,142 @@ describe("sales lead automation: poller", () => {
     expect(await db.select().from(salesLeadSyncState)).toHaveLength(1);
     expect(log.lines.some((l) => l.text.includes("poller started"))).toBe(true);
     expect(getSalesLeadSyncStats().lastCycleStatus).toBe("ok");
+  });
+});
+
+describe("sales lead automation: contact matching across address books", () => {
+  const STRIPE_CARD =
+    "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:stripe-cus_X\r\nFN:Ophelia Quartermaine\r\nORG:Zephyrine Widgets LLC\r\nEMAIL:ophelia@zephyrine.example\r\nEND:VCARD\r\n";
+  const contactCell = () =>
+    JSON.parse(fake.rowCell(fake.rows[0].id, COLUMN_IDS["Contact Card"]) as string).value;
+
+  it("merges a card from another address book in place and creates nothing", async () => {
+    await baseline();
+    fake.addBook("contacts_shared_by_owner");
+    fake.otherBooks.get("contacts_shared_by_owner")?.cards.set("stripe-cus_X.vcf", STRIPE_CARD);
+    fake.addSubmission(5, FULL_LEAD);
+    await cycle();
+    expect(fake.cards.size).toBe(0);
+    const merged = fake.otherBooks.get("contacts_shared_by_owner")?.cards.get("stripe-cus_X.vcf");
+    expect(merged).toContain("TEL;TYPE=WORK:+1 214 555 0199");
+    expect(contactCell()).toContain("stripe-cus_X~contacts");
+    expect(await submissionRow(5)).toMatchObject({
+      status: "completed",
+      contactStatus: "updated",
+      contactUid: "stripe-cus_X",
+      contactAddressbook: "contacts_shared_by_owner",
+    });
+    expect(log.lines.some((l) => l.text.includes('"addressbook":"contacts_shared_by_owner"'))).toBe(
+      true
+    );
+  });
+
+  it("never reads the system address book", async () => {
+    await baseline();
+    fake.addSubmission(5, FULL_LEAD);
+    await cycle();
+    expect(fake.requests.some((r) => r.path.includes("z-server-generated"))).toBe(false);
+  });
+
+  it("flags several matches across books and still creates the row and folder", async () => {
+    await baseline();
+    fake.addBook("contacts");
+    fake.otherBooks.get("contacts")?.cards.set("stripe-cus_X.vcf", STRIPE_CARD);
+    fake.cards.set("a.vcf", STRIPE_CARD.replace("stripe-cus_X", "a"));
+    fake.addSubmission(5, FULL_LEAD);
+    expect(await cycle()).toMatchObject({ completed: 1 });
+    expect(fake.cardPuts).toHaveLength(0);
+    expect(fake.rowCreates).toHaveLength(1);
+    expect(fake.mkcols).toHaveLength(1);
+    expect(fake.rowCell(fake.rows[0].id, COLUMN_IDS["Contact Card"])).toBeUndefined();
+    expect(await submissionRow(5)).toMatchObject({
+      status: "completed",
+      contactStatus: "ambiguous",
+      contactUid: null,
+    });
+  });
+
+  it("links the existing card and creates no duplicate when its book is read-only", async () => {
+    await baseline();
+    fake.addBook("contacts", true);
+    fake.otherBooks.get("contacts")?.cards.set("stripe-cus_X.vcf", STRIPE_CARD);
+    fake.addSubmission(5, FULL_LEAD);
+    expect(await cycle()).toMatchObject({ completed: 1 });
+    expect(fake.cards.size).toBe(0);
+    expect(contactCell()).toContain("stripe-cus_X~contacts");
+    expect(await submissionRow(5)).toMatchObject({
+      status: "completed",
+      contactStatus: "read_only",
+      contactUid: "stripe-cus_X",
+      contactAddressbook: "contacts",
+    });
+    expect(log.lines.some((l) => l.text.includes("read-only") && l.text.includes("contacts"))).toBe(
+      true
+    );
+  });
+
+  it("retries and creates nothing when the address books cannot be listed", async () => {
+    await baseline();
+    fake.addSubmission(5, FULL_LEAD);
+    fake.fail({
+      match: (r) => r.method === "PROPFIND" && r.path.endsWith("/addressbooks/users/dfwsc-admin/"),
+      status: 403,
+    });
+    expect(await cycle()).toMatchObject({ retried: 1 });
+    expect(fake.cardPuts).toHaveLength(0);
+    expect(await submissionRow(5)).toMatchObject({
+      status: "pending",
+      lastErrorCode: "carddav.discovery_failed",
+      contactStatus: null,
+    });
+  });
+
+  it("creates in the configured book when no book has a match", async () => {
+    await baseline();
+    fake.addBook("contacts");
+    fake.otherBooks
+      .get("contacts")
+      ?.cards.set(
+        "o.vcf",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:o\r\nFN:X\r\nORG:Elsewhere\r\nEMAIL:else@e.example\r\nEND:VCARD\r\n"
+      );
+    fake.addSubmission(5, FULL_LEAD);
+    await cycle();
+    expect(fake.cards.has("dfwsc-lead-12-5.vcf")).toBe(true);
+    expect(await submissionRow(5)).toMatchObject({
+      contactStatus: "created",
+      contactUid: "dfwsc-lead-12-5",
+      contactAddressbook: FAKE_ADDRESSBOOK,
+    });
+  });
+
+  it("counts its own earlier card as ours on a retry, not as an ambiguity", async () => {
+    await baseline();
+    fake.addBook("contacts");
+    fake.otherBooks.get("contacts")?.cards.set("stripe-cus_X.vcf", STRIPE_CARD);
+    // Created by an earlier attempt whose result was never saved.
+    fake.cards.set("dfwsc-lead-12-5.vcf", STRIPE_CARD.replace("stripe-cus_X", "dfwsc-lead-12-5"));
+    fake.addSubmission(5, FULL_LEAD);
+    await cycle();
+    expect(fake.cardPuts).toHaveLength(0);
+    expect(await submissionRow(5)).toMatchObject({
+      status: "completed",
+      contactStatus: "created",
+      contactUid: "dfwsc-lead-12-5",
+    });
+  });
+});
+
+describe("sales lead automation: claiming", () => {
+  it("claims exactly one due row per call, lowest id first", async () => {
+    await db
+      .insert(salesLeadSubmissions)
+      .values([5, 6, 7].map((submissionId) => ({ formId: FAKE_FORM_ID, submissionId })));
+    expect((await claimNextSalesLead(FAKE_FORM_ID))?.submissionId).toBe(5);
+    const claimed = () =>
+      db.select().from(salesLeadSubmissions).where(isNotNull(salesLeadSubmissions.claimToken));
+    expect(await claimed()).toHaveLength(1);
+    expect((await claimNextSalesLead(FAKE_FORM_ID))?.submissionId).toBe(6);
+    expect(await claimed()).toHaveLength(2);
   });
 });

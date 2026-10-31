@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { count, eq, isNull, ne, or } from "drizzle-orm";
+import { count, inArray, isNull, ne, or } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client";
 import {
@@ -66,7 +66,7 @@ export default async function metricsRoute(fastify: FastifyInstance) {
       .where(
         or(
           ne(clientOnboardingSubmissions.leadStatus, "won"),
-          eq(clientOnboardingSubmissions.contactStatus, "ambiguous")
+          inArray(clientOnboardingSubmissions.contactStatus, ["ambiguous", "read_only"])
         )
       );
     const onboardingStats = getClientOnboardingStats();

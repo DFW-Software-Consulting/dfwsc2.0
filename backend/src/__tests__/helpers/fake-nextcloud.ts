@@ -124,7 +124,8 @@ interface Row {
 
 const FORMS = `/ocs/v2.php/apps/forms/api/v3/forms/${FAKE_FORM_ID}`;
 const TABLES = "/index.php/apps/tables/api/1";
-const CARDS = `/remote.php/dav/addressbooks/users/${FAKE_NC_USER}/${FAKE_ADDRESSBOOK}/`;
+const BOOKS_HOME = `/remote.php/dav/addressbooks/users/${FAKE_NC_USER}/`;
+const CARDS = `${BOOKS_HOME}${FAKE_ADDRESSBOOK}/`;
 const FILES = `/remote.php/dav/files/${FAKE_NC_USER}/`;
 
 export class FakeNextcloud {
@@ -137,6 +138,8 @@ export class FakeNextcloud {
   columns: Record<string, unknown>[] = defaultColumns();
   rows: Row[] = [];
   cards = new Map<string, string>();
+  /** Address books besides the configured one; a read-only one answers writes with 403. */
+  otherBooks = new Map<string, { cards: Map<string, string>; readOnly: boolean }>();
   folders = new Map<string, number>([
     ["DFWSC Sales", 500],
     ["DFWSC Sales/Leads", 501],
@@ -151,6 +154,10 @@ export class FakeNextcloud {
 
   addSubmission(id: number, answers: LeadAnswers) {
     this.submissions.set(id, answers);
+  }
+
+  addBook(name: string, readOnly = false) {
+    this.otherBooks.set(name, { cards: new Map(), readOnly });
   }
 
   fail(fault: Omit<Fault, "times"> & { times?: number }) {
@@ -317,6 +324,41 @@ export class FakeNextcloud {
       }
       for (const [k, v] of Object.entries(data)) row.data.set(Number(k), this.storedValue(k, v));
       return this.json({ id: row.id });
+    }
+
+    if (method === "PROPFIND" && path === BOOKS_HOME) {
+      const book = (name: string) =>
+        `<d:response><d:href>${BOOKS_HOME}${encodeURIComponent(name)}/</d:href><d:propstat><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype></d:prop></d:propstat></d:response>`;
+      return new Response(
+        `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:response><d:href>${BOOKS_HOME}</d:href><d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat></d:response>${[FAKE_ADDRESSBOOK, ...this.otherBooks.keys(), "z-server-generated--system"].map(book).join("")}</d:multistatus>`,
+        { status: 207 }
+      );
+    }
+    if (path.startsWith(BOOKS_HOME)) {
+      const bookName = path.slice(BOOKS_HOME.length).split("/")[0];
+      const book =
+        bookName === FAKE_ADDRESSBOOK
+          ? { cards: this.cards, readOnly: false }
+          : bookName === "z-server-generated--system"
+            ? { cards: new Map<string, string>(), readOnly: true }
+            : this.otherBooks.get(bookName);
+      if (!book) return new Response("", { status: 404 });
+      const prefix = `${BOOKS_HOME}${bookName}/`;
+      if (method === "REPORT" && path === prefix) {
+        const responses = [...book.cards].map(
+          ([name, data], i) =>
+            `<d:response><d:href>${BOOKS_HOME}${encodeURIComponent(bookName)}/${encodeURIComponent(name)}</d:href><d:propstat><d:prop><d:getetag>&quot;e${i}&quot;</d:getetag><card:address-data>${data.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</card:address-data></d:prop></d:propstat></d:response>`
+        );
+        return new Response(
+          `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">${responses.join("")}</d:multistatus>`,
+          { status: 207 }
+        );
+      }
+      if (method === "PUT" && (book.readOnly || bookName !== FAKE_ADDRESSBOOK)) {
+        if (book.readOnly) return new Response("", { status: 403 });
+        book.cards.set(path.slice(prefix.length), req.body);
+        return new Response(null, { status: 204 });
+      }
     }
 
     if (method === "PUT" && path.startsWith(CARDS)) {

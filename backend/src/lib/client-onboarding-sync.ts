@@ -31,7 +31,6 @@ import {
   selectionValue,
   slugify,
   stageOptionId,
-  vCardMatches,
   vCardUid,
   WON_STAGE,
   WON_STAGE_ID,
@@ -39,7 +38,6 @@ import {
 import {
   ClientOnboardingNextcloud,
   type ClientOnboardingTargets,
-  ContactChangedError,
   type TableRow,
 } from "./client-onboarding-nextcloud";
 import {
@@ -60,6 +58,7 @@ import {
   NextcloudHttpError,
   NextcloudRequestError,
 } from "./nextcloud";
+import { AddressbookDiscoveryError, ContactChangedError } from "./nextcloud-contacts";
 import { linkCellUrl, linkValue, parseDate } from "./sales-lead-mapping";
 import { isBadResponseError, SUBMISSION_PAGE_SIZE } from "./sales-lead-nextcloud";
 
@@ -299,25 +298,41 @@ async function discover(
   return inserted.length;
 }
 
-async function claimNext(formId: number): Promise<SubmissionRow | null> {
+/**
+ * Claims the lowest-id due row. The candidate is picked in a MATERIALIZED CTE so it is
+ * evaluated once: with the subquery inline, Postgres may re-run it per row of the
+ * UPDATE and claim every due row, leaving all but one stuck until the lease runs out.
+ */
+export async function claimNextOnboarding(formId: number): Promise<SubmissionRow | null> {
   const token = crypto.randomUUID();
   const leaseSeconds = Math.floor(CLIENT_ONBOARDING_CLAIM_LEASE_MS / 1000);
-  const [row] = await db
-    .update(t)
-    .set({ claimedAt: sql`now()`, claimToken: token })
-    .where(
-      sql`(${t.formId}, ${t.submissionId}) IN (
-        SELECT form_id, submission_id FROM client_onboarding_submissions
-        WHERE form_id = ${formId}
-          AND status = 'pending'
-          AND next_attempt_at <= now()
-          AND (claimed_at IS NULL OR claimed_at < now() - make_interval(secs => ${leaseSeconds}))
-        ORDER BY submission_id
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-      )`
+  const claimed = await db.execute<{ submission_id: number }>(sql`
+    WITH c AS MATERIALIZED (
+      SELECT form_id, submission_id FROM client_onboarding_submissions
+      WHERE form_id = ${formId}
+        AND status = 'pending'
+        AND next_attempt_at <= now()
+        AND (claimed_at IS NULL OR claimed_at < now() - make_interval(secs => ${leaseSeconds}))
+      ORDER BY submission_id
+      LIMIT 1
+      FOR UPDATE SKIP LOCKED
     )
-    .returning();
+    UPDATE client_onboarding_submissions AS u
+    SET claimed_at = now(), claim_token = ${token}
+    FROM c
+    WHERE u.form_id = c.form_id AND u.submission_id = c.submission_id
+    RETURNING u.submission_id
+  `);
+  if (claimed.rows.length === 0) return null;
+  const [row] = await db
+    .select()
+    .from(clientOnboardingSubmissions)
+    .where(
+      and(
+        eq(clientOnboardingSubmissions.formId, formId),
+        eq(clientOnboardingSubmissions.claimToken, token)
+      )
+    );
   return row ?? null;
 }
 
@@ -415,6 +430,9 @@ function classify(error: unknown): { code: string; retryable: boolean } {
   if (error instanceof ContactChangedError) {
     return { code: "carddav.contact_changed", retryable: true };
   }
+  if (error instanceof AddressbookDiscoveryError) {
+    return { code: "carddav.discovery_failed", retryable: true };
+  }
   if (error instanceof NextcloudHttpError) {
     return {
       code: `${error.label}:${error.status}`,
@@ -472,11 +490,25 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
   if (row.contactStatus !== null) return;
   const { api } = ctx;
   const ids = { formId: ctx.formId, submissionId: row.submissionId };
-  const matches = (await api.listCards()).filter((card) => vCardMatches(card.data, intake));
+  const uid = clientContactUid(ctx.formId, row.submissionId);
+  const { own, matches } = await api.findContactCards(intake, uid);
+  if (own) {
+    // Created by an earlier attempt of this submission whose result was not saved.
+    await saveUnderClaim(row, { contactStatus: "created", contactUid: uid });
+    ctx.logger.info(
+      { ...ids, addressbook: own.addressbook },
+      "Client contact card already created."
+    );
+    return;
+  }
   if (matches.length > 1) {
     await saveUnderClaim(row, { contactStatus: "ambiguous" });
     ctx.logger.warn(
-      { ...ids, matches: matches.length },
+      {
+        ...ids,
+        matches: matches.length,
+        addressbooks: [...new Set(matches.map((m) => m.addressbook))],
+      },
       "Several contact cards match the client; none was changed."
     );
     return;
@@ -484,15 +516,35 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
   if (matches.length === 1) {
     const [card] = matches;
     const merged = mergeClientVCard(card.data, intake);
-    if (merged !== null) await api.updateCard(card, merged);
-    await saveUnderClaim(row, { contactStatus: "updated", contactUid: vCardUid(card.data) });
-    ctx.logger.info({ ...ids, changed: merged !== null }, "Client contact card updated.");
+    const contactUid = vCardUid(card.data);
+    try {
+      if (merged !== null) await api.updateCard(card, merged);
+    } catch (error) {
+      // A read-only shared book refuses the write. Creating a card elsewhere would
+      // duplicate the client, so leave it for an operator and carry on.
+      if (error instanceof NextcloudHttpError && error.status === 403) {
+        await saveUnderClaim(row, { contactStatus: "read_only", contactUid });
+        ctx.logger.warn(
+          { ...ids, addressbook: card.addressbook },
+          "Matched existing contact in a read-only address book; not modified."
+        );
+        return;
+      }
+      throw error;
+    }
+    await saveUnderClaim(row, { contactStatus: "updated", contactUid });
+    ctx.logger.info(
+      { ...ids, addressbook: card.addressbook, changed: merged !== null },
+      "Client contact card updated."
+    );
     return;
   }
-  const uid = clientContactUid(ctx.formId, row.submissionId);
   await api.createCard(uid, buildClientVCard(intake, uid));
   await saveUnderClaim(row, { contactStatus: "created", contactUid: uid });
-  ctx.logger.info(ids, "Client contact card created.");
+  ctx.logger.info(
+    { ...ids, addressbook: api.targets.addressbookPath },
+    "Client contact card created."
+  );
 }
 
 async function projectRowStep(
@@ -847,7 +899,7 @@ export async function runClientOnboardingCycle(options: {
   try {
     result.discovered = await discover(api, formId, logger);
     for (let i = 0; i < CLIENT_ONBOARDING_MAX_PER_CYCLE; i++) {
-      const row = await claimNext(formId);
+      const row = await claimNextOnboarding(formId);
       if (!row) break;
       if (!ctx) {
         try {
