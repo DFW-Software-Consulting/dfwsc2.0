@@ -288,6 +288,9 @@ export class FakeOnboardingNextcloud {
   private nextShareId = 50;
   private nextWikiId = 10;
   private nextEtag = 1;
+  /** CardDAV sync-tokens older than this are refused (403), as after the server pruned its log. */
+  private minSyncToken = 0;
+  private tombstones: { book: string; name: string; version: number }[] = [];
   /** Runs once, right before a page-file PUT is evaluated (to simulate a race). */
   beforePut: ((rel: string) => void) | null = null;
   /** Content of a newly created page file; null creates no file (GET answers 404). */
@@ -336,6 +339,17 @@ export class FakeOnboardingNextcloud {
   /** `advertise: false` hides the privilege set, so a read-only book only shows as a 403. */
   addBook(name: string, readOnly = false, advertise = true) {
     this.otherBooks.set(name, { cards: new Map(), readOnly, advertise });
+  }
+
+  /** A person deletes a card from the configured address book. */
+  removeCard(name: string) {
+    this.cards.delete(name);
+    this.tombstones.push({ book: ONB_ADDRESSBOOK, name, version: this.nextEtag++ });
+  }
+
+  /** The server forgets its sync history: every token handed out so far is refused. */
+  expireSyncTokens() {
+    this.minSyncToken = this.nextEtag;
   }
 
   addCardTo(book: string, name: string, data: string) {
@@ -697,6 +711,36 @@ export class FakeOnboardingNextcloud {
             : other;
       if (!book) return new Response("", { status: 404 });
       const collection = `${BOOKS_HOME}${encodeURIComponent(bookName)}/`;
+      if (method === "REPORT" && req.body.includes("sync-collection")) {
+        const rawToken = /<d:sync-token>([^<]*)<\/d:sync-token>/.exec(req.body)?.[1] ?? "";
+        let since = 0;
+        if (rawToken) {
+          const parsed = /^http:\/\/sabre\.io\/ns\/sync\/(\d+)$/.exec(rawToken);
+          if (!parsed || Number(parsed[1]) < this.minSyncToken) {
+            return new Response(
+              '<?xml version="1.0"?><d:error xmlns:d="DAV:"><d:valid-sync-token/></d:error>',
+              { status: 403 }
+            );
+          }
+          since = Number(parsed[1]);
+        }
+        const changed = [...book.cards]
+          .filter(([, card]) => card.etag > since)
+          .map(
+            ([name, card]) =>
+              `<d:response><d:href>${collection}${encodeURIComponent(name)}</d:href><d:propstat><d:prop><d:getetag>&quot;${card.etag}&quot;</d:getetag><card:address-data>${xmlEscape(card.data)}</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
+          );
+        const gone = this.tombstones
+          .filter((t) => t.book === bookName && t.version > since)
+          .map(
+            (t) =>
+              `<d:response><d:status>HTTP/1.1 404 Not Found</d:status><d:href>${collection}${encodeURIComponent(t.name)}</d:href></d:response>`
+          );
+        return new Response(
+          `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">${changed.join("")}${gone.join("")}<d:sync-token>http://sabre.io/ns/sync/${this.nextEtag - 1}</d:sync-token></d:multistatus>`,
+          { status: 207 }
+        );
+      }
       if (method === "REPORT" && path === `${BOOKS_HOME}${bookName}/`) {
         const responses = [...book.cards].map(
           ([name, card]) =>

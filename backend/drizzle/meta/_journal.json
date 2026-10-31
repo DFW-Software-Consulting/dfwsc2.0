@@ -218,6 +218,13 @@
       "when": 1793472580641,
       "tag": "0030_billing_customers",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1793475898266,
+      "tag": "0031_contact_stripe_sync",
+      "breakpoints": true
     }
   ]
 }

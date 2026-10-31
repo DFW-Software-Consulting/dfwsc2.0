@@ -6,7 +6,7 @@ type TableColumns = {
   columns: string[];
 };
 
-const REQUIRED_TABLES: TableColumns[] = [
+export const REQUIRED_TABLES: TableColumns[] = [
   {
     table: "clients",
     columns: [
@@ -145,6 +145,29 @@ const REQUIRED_TABLES: TableColumns[] = [
   {
     table: "client_onboarding_sync_state",
     columns: ["form_id", "baseline_submission_id", "baselined_at"],
+  },
+  {
+    table: "contact_stripe_sync_books",
+    columns: ["addressbook", "sync_token", "synced_at", "updated_at"],
+  },
+  {
+    table: "contact_stripe_sync_cards",
+    columns: [
+      "contact_uid",
+      "client_code",
+      "stripe_customer_id",
+      "href",
+      "etag",
+      "last_hash",
+      "field_hashes",
+      "baseline_at",
+      "baseline_reset_at",
+      "last_pushed_at",
+      "last_error",
+      "last_error_hash",
+      "created_at",
+      "updated_at",
+    ],
   },
 ];
 

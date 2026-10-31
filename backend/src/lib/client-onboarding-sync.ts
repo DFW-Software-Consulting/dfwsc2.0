@@ -59,6 +59,7 @@ import {
   CLIENT_ONBOARDING_RETRY_BASE_MS,
   CLIENT_ONBOARDING_RETRY_MAX_MS,
 } from "./constants";
+import { resetCardBaseline } from "./contact-stripe-sync";
 import {
   getNextcloudConfig,
   NextcloudCircuitOpenError,
@@ -556,6 +557,10 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
   const { api } = ctx;
   const ids = { formId: ctx.formId, submissionId: row.submissionId };
   const uid = clientContactUid(ctx.formId, row.submissionId);
+  // A valid billing email is also written to the card as "Account email", which the contact ->
+  // billing Customer sync (lib/contact-stripe-sync.ts) reads.
+  const billing = intake.billingEmail?.trim();
+  const accountEmail = billing && isValidEmail(billing) ? billing : undefined;
   const { own, matches } = await ctx.contacts.find(intake, uid);
   if (own) {
     // Created by an earlier attempt of this submission whose result was not saved.
@@ -584,13 +589,22 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
     const merged = mergeContactVCard(card.data, intake, new Date(), {
       additive: true,
       category: "Client",
+      accountEmail,
     });
     const contactUid = vCardUid(card.data);
     try {
       if (card.readOnly) throw new NextcloudHttpError(403, "carddav.update_contact");
       if (merged !== null) {
+        // Our own write, not a person's edit: if this card is synced to a billing Customer,
+        // its next sighting must be a baseline so the change is not pushed. Reset before the
+        // write (a sync cycle that reads the new content then sees the reset) and after it
+        // (a cycle that read the old content cannot store a baseline over the new one). A
+        // write that fails in between leaves the card to be re-baselined, never pushed.
+        const synced = contactUid?.startsWith("dfwsc-client-") ? contactUid : null;
+        if (synced) await resetCardBaseline(synced);
         await api.updateCard(card, merged);
         ctx.contacts.invalidate(card.addressbook);
+        if (synced) await resetCardBaseline(synced);
       }
     } catch (error) {
       // A read-only shared book refuses the write. Creating a card elsewhere would
@@ -612,7 +626,7 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
     );
     return;
   }
-  await api.createCard(uid, buildClientVCard(intake, uid));
+  await api.createCard(uid, buildClientVCard(intake, uid, new Date(), accountEmail));
   ctx.contacts.invalidate(api.targets.addressbookPath);
   await saveUnderClaim(row, { contactStatus: "created", contactUid: uid });
   ctx.logger.info(

@@ -86,6 +86,10 @@ export const CLIENT_ONBOARDING_RETRY_MAX_MS = 60 * 60 * 1000;
 export const CLIENT_ONBOARDING_CLAIM_LEASE_MS = 10 * 60 * 1000;
 export const CLIENT_ONBOARDING_MAX_PER_CYCLE = 20;
 export const CLIENT_ONBOARDING_MAX_DISCOVERY_PAGES = 20;
+
+// Nextcloud contact card -> billing Stripe Customer sync (lib/contact-stripe-sync.ts).
+export const CONTACT_STRIPE_SYNC_DEFAULT_INTERVAL_MS = 2 * 60 * 1000;
+export const CONTACT_STRIPE_SYNC_MIN_INTERVAL_MS = 10 * 1000;
 // The webhook secret is compared in constant time; short secrets are refused at startup.
 export const CLIENT_ONBOARDING_MIN_WEBHOOK_SECRET_LENGTH = 32;
 // Webhook calls per minute per IP (Nextcloud sends one per submission).

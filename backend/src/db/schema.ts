@@ -5,6 +5,7 @@ import {
   check,
   index,
   integer,
+  jsonb,
   numeric,
   pgTable,
   primaryKey,
@@ -460,3 +461,49 @@ export const clientOnboardingSyncState = pgTable("client_onboarding_sync_state",
   baselineSubmissionId: integer("baseline_submission_id").notNull(),
   baselinedAt: timestamp("baselined_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Nextcloud contact card -> billing Stripe Customer sync (CONTACT_STRIPE_SYNC=true only).
+// CardDAV sync-token per address book; null forces a full scan on the next cycle.
+export const contactStripeSyncBooks = pgTable("contact_stripe_sync_books", {
+  addressbook: text("addressbook").primaryKey(),
+  syncToken: text("sync_token"),
+  syncedAt: timestamp("synced_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+// Per onboarding contact card (dfwsc-client-*) linked to a billing Customer. Holds hashes only,
+// never contact details: field_hashes = sha256 of each mapped Stripe field (name, email, phone,
+// address) as last seen or pushed, last_hash = hash of all of them. baseline_at NULL = the
+// card has not been seen yet (the first sighting records the hashes without pushing).
+export const contactStripeSyncCards = pgTable(
+  "contact_stripe_sync_cards",
+  {
+    contactUid: text("contact_uid").primaryKey(),
+    clientCode: text("client_code").notNull(),
+    stripeCustomerId: text("stripe_customer_id").notNull(),
+    href: text("href"),
+    etag: text("etag"),
+    lastHash: text("last_hash"),
+    fieldHashes: jsonb("field_hashes").$type<Record<string, string | null>>(),
+    baselineAt: timestamp("baseline_at", { withTimezone: true }),
+    // Set (database clock) when the automation itself rewrote the card, which forces a baseline.
+    // A sync cycle that started before it must not overwrite this row with what it had read.
+    baselineResetAt: timestamp("baseline_reset_at", { withTimezone: true }),
+    lastPushedAt: timestamp("last_pushed_at", { withTimezone: true }),
+    // PII-free failure code such as "stripe.customer_update:400"; a non-retryable one is only retried
+    // after the card changes (last_error_hash differs from the card's current hash).
+    lastError: text("last_error"),
+    lastErrorHash: text("last_error_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    customerIdx: index("contact_stripe_sync_cards_customer_idx").on(table.stripeCustomerId),
+  })
+);

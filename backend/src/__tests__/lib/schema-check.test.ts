@@ -20,7 +20,7 @@ vi.mock("drizzle-orm", async (importOriginal) => {
 });
 
 import { db } from "../../db/client";
-import { verifyDatabaseSchema } from "../../lib/schema-check";
+import { REQUIRED_TABLES, verifyDatabaseSchema } from "../../lib/schema-check";
 
 const mockDb = db as { execute: ReturnType<typeof vi.fn> };
 
@@ -110,6 +110,21 @@ describe("verifyDatabaseSchema", () => {
             // sales_lead_sync_state columns
             { column_name: "baseline_submission_id" },
             { column_name: "baselined_at" },
+            // contact_stripe_sync_* columns
+            { column_name: "addressbook" },
+            { column_name: "sync_token" },
+            { column_name: "synced_at" },
+            { column_name: "contact_uid" },
+            { column_name: "client_code" },
+            { column_name: "href" },
+            { column_name: "etag" },
+            { column_name: "last_hash" },
+            { column_name: "field_hashes" },
+            { column_name: "baseline_at" },
+            { column_name: "baseline_reset_at" },
+            { column_name: "last_pushed_at" },
+            { column_name: "last_error" },
+            { column_name: "last_error_hash" },
             // client_onboarding_submissions columns (others are listed above)
             { column_name: "contact_status" },
             { column_name: "project_number" },
@@ -132,7 +147,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(12);
+    expect(mockDb.execute).toHaveBeenCalledTimes(14);
   });
 
   it("throws when a table is missing required columns", async () => {
@@ -409,5 +424,25 @@ describe("verifyDatabaseSchema", () => {
         await verifyDatabaseSchema();
       })()
     ).rejects.toThrow(/Missing columns: token, status/);
+  });
+
+  it("checks every table's own columns, in order, and names the table and column that is missing", async () => {
+    for (let target = 0; target < REQUIRED_TABLES.length; target++) {
+      const { table, columns } = REQUIRED_TABLES[target];
+      const dropped = columns[columns.length - 1];
+      let call = 0;
+      mockDb.execute.mockReset();
+      mockDb.execute.mockImplementation(async () => {
+        const wanted = REQUIRED_TABLES[call++];
+        const cols = wanted.table === table ? wanted.columns.slice(0, -1) : wanted.columns;
+        return { rows: cols.map((column_name) => ({ column_name })) };
+      });
+      await expect(verifyDatabaseSchema()).rejects.toThrow(
+        new RegExp(`table "${table}"\\. Missing columns: ${dropped}`)
+      );
+    }
+    expect(REQUIRED_TABLES.map((t) => t.table)).toEqual(
+      expect.arrayContaining(["contact_stripe_sync_books", "contact_stripe_sync_cards"])
+    );
   });
 });
