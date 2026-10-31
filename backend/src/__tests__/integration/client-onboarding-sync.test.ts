@@ -411,6 +411,59 @@ describe("client onboarding: Sales Pipeline lead", () => {
     expect(await sub(5)).toMatchObject({ leadStatus: "already_linked", leadRowId: LEAD_ROW });
     expect(pipelineWrites()).toHaveLength(0);
   });
+
+  const leadAt = (stageCell: unknown) => {
+    fake.rows = fake.rows.filter((r) => r.id !== LEAD_ROW);
+    fake.addLead(LEAD_ROW, "Zephyrine Widgets LLC", { 49: stageCell });
+  };
+
+  it.each([
+    [0, "New Lead"],
+    [2, "Qualified"],
+    [3, "Proposal Sent"],
+    [6, "Nurture"],
+  ])("promotes a lead in the open stage %i (%s) to Won", async (stageId) => {
+    await baseline();
+    leadAt(stageId);
+    fake.addSubmission(5, FULL);
+    await cycle();
+    expect(stage()).toBe(4);
+    expect(await sub(5)).toMatchObject({ status: "completed", leadStatus: "won" });
+    expect(fake.linkUrl(LEAD_ROW, 57)).toContain("/table/6/row/");
+  });
+
+  it("leaves a Won lead's stage alone and still links the project", async () => {
+    await baseline();
+    leadAt(4);
+    fake.addSubmission(5, FULL);
+    await cycle();
+    expect(stage()).toBe(4);
+    expect(await sub(5)).toMatchObject({ status: "completed", leadStatus: "won" });
+    expect(fake.linkUrl(LEAD_ROW, 57)).toContain("/table/6/row/");
+    expect(fake.requests.some((r) => r.body.includes('"49"'))).toBe(false);
+  });
+
+  it.each([
+    ["Lost", 5],
+    ["empty", null],
+    ["unknown", 99],
+  ])("flags a lead in a %s stage and leaves its row untouched", async (_name, stageCell) => {
+    await baseline();
+    leadAt(stageCell);
+    fake.addSubmission(5, FULL);
+    await cycle();
+    expect(await sub(5)).toMatchObject({
+      status: "completed",
+      leadStatus: "ambiguous",
+      leadRowId: LEAD_ROW,
+    });
+    expect(stage()).toBe(stageCell);
+    expect(fake.linkUrl(LEAD_ROW, 57)).toBeUndefined();
+    expect(pipelineWrites()).toHaveLength(0);
+    expect(log.lines.some((l) => l.text.includes("lead_stage_not_promotable"))).toBe(true);
+    // The rest of the onboarding still completed.
+    expect(newProjectRows()).toHaveLength(1);
+  });
 });
 
 describe("client onboarding: resume after a failure", () => {

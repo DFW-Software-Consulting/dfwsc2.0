@@ -19,6 +19,7 @@ import {
   OnboardingConfigError,
   OnboardingInvalidError,
   type PipelineColumnMap,
+  PROMOTABLE_STAGE_IDS,
   type ProjectColumnMap,
   parseLeadReference,
   parseProjectNumber,
@@ -29,9 +30,11 @@ import {
   resolveProjectColumns,
   selectionValue,
   slugify,
+  stageOptionId,
   vCardMatches,
   vCardUid,
   WON_STAGE,
+  WON_STAGE_ID,
 } from "./client-onboarding-mapping";
 import {
   ClientOnboardingNextcloud,
@@ -642,6 +645,25 @@ async function leadStep(row: SubmissionRow, intake: Intake, ctx: ProcessingConte
     return;
   }
   const [lead] = candidates;
+  // Only a lead still in an open stage is promoted. Won is kept as is (its link is
+  // still written); Lost, an empty stage or an unknown id is flagged and the row
+  // is not touched at all.
+  const stageId = stageOptionId(lead.cells.get(cols.stage.id));
+  const alreadyWon = stageId === WON_STAGE_ID;
+  if (!alreadyWon && (stageId === null || !PROMOTABLE_STAGE_IDS.has(stageId))) {
+    await saveUnderClaim(row, { leadStatus: "ambiguous", leadRowId: lead.id });
+    ctx.logger.warn(
+      {
+        ...ids,
+        leadRowId: lead.id,
+        leadStatus: "ambiguous",
+        reason: "lead_stage_not_promotable",
+        stageId,
+      },
+      "Sales Pipeline lead is not in an open stage; not changed."
+    );
+    return;
+  }
   const projectUrl = api.rowLink(api.targets.projectsTableId, row.tableRowId as number);
   const linked = linkCellUrl(lead.cells.get(cols.cereboProject.id));
   if (linked !== null && linked.trim() !== "" && !linked.includes(projectUrl)) {
@@ -652,9 +674,12 @@ async function leadStep(row: SubmissionRow, intake: Intake, ctx: ProcessingConte
     );
     return;
   }
-  await writeLinks(api, lead.id, [[cols.cereboProject.id, row.projectCode as string, projectUrl]], {
-    [cols.stage.id]: selectionValue(cols.stage, WON_STAGE),
-  });
+  await writeLinks(
+    api,
+    lead.id,
+    [[cols.cereboProject.id, row.projectCode as string, projectUrl]],
+    alreadyWon ? {} : { [cols.stage.id]: selectionValue(cols.stage, WON_STAGE) }
+  );
   await saveUnderClaim(row, { leadStatus: "won", leadRowId: lead.id });
   ctx.logger.info({ ...ids, leadRowId: lead.id }, "Sales Pipeline lead set to Won.");
 }

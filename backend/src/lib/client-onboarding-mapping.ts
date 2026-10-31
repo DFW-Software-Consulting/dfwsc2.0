@@ -48,6 +48,19 @@ const PIPELINE_COLUMN_TITLES = {
 
 const INTAKE_STATUS = "Intake";
 export const WON_STAGE = "Won";
+// Live table 8 (Sales Pipeline) Stage option ids: 0 New Lead, 1 Contacted, 2 Qualified,
+// 3 Proposal Sent, 4 Won, 5 Lost, 6 Nurture. Every stage except Won and Lost is open
+// (as in the "Open Pipeline" view), so only those may be promoted to Won. Lost, an
+// empty stage and any other id are left alone and flagged.
+export const WON_STAGE_ID = 4;
+export const PROMOTABLE_STAGE_IDS: ReadonlySet<number> = new Set([0, 1, 2, 3, 6]);
+
+/** The option id in a Stage cell, or null when it is empty or not a number. */
+export function stageOptionId(cell: unknown): number | null {
+  if (typeof cell === "number") return Number.isInteger(cell) ? cell : null;
+  if (typeof cell === "string" && /^\d+$/.test(cell.trim())) return Number(cell.trim());
+  return null;
+}
 const SUBFOLDERS = ["Meetings", "Decisions", "Deliverables"] as const;
 export const CLIENT_SUBFOLDERS: readonly string[] = SUBFOLDERS;
 
