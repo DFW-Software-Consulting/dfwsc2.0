@@ -47,6 +47,35 @@ export interface TableRow {
   cells: Map<number, unknown>;
 }
 
+export interface Team {
+  id: string;
+  name: string;
+  /** The service account's level in the team (8 admin, 9 owner); 0 when not a member. */
+  initiatorLevel: number;
+}
+
+export interface TeamMember {
+  /** Member id, used to change the level. */
+  id: string;
+  userId: string;
+  /** 1 for a local user. */
+  userType: number;
+  level: number;
+}
+
+export interface CollectiveSummary {
+  id: number;
+  name: string;
+  slug: string | null;
+  circleId: string | null;
+}
+
+export interface FolderShare {
+  id: number;
+  shareType: number;
+  shareWith: string;
+}
+
 export interface CollectivePage {
   id: number;
   parentId: number;
@@ -60,6 +89,16 @@ export interface CollectivePage {
 const FORMS_BASE = "/ocs/v2.php/apps/forms/api/v3/forms";
 const TABLES_BASE = "/index.php/apps/tables/api/1";
 const COLLECTIVES_BASE = "/ocs/v2.php/apps/collectives/api/v1.0/collectives";
+const CIRCLES_BASE = "/ocs/v2.php/apps/circles";
+const SHARES_BASE = "/ocs/v2.php/apps/files_sharing/api/v1/shares";
+/** files_sharing shareType for a Team (Circle). */
+const SHARE_TYPE_TEAM = 7;
+/** Read, update, create, delete; no reshare (16). */
+export const TEAM_SHARE_PERMISSIONS = 15;
+/** Circles member levels. */
+export const TEAM_LEVEL_ADMIN = 8;
+/** Circles member type for a local user. */
+const TEAM_MEMBER_TYPE_USER = 1;
 const ROW_PAGE_SIZE = 200;
 const MAX_ROW_PAGES = 50;
 
@@ -79,11 +118,62 @@ function toPage(raw: unknown, label: string): CollectivePage {
   };
 }
 
+function toCollectiveSummary(raw: unknown, label: string): CollectiveSummary {
+  const c = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: positiveInt(c.id, label),
+    name: typeof c.name === "string" ? c.name : "",
+    slug: typeof c.slug === "string" && c.slug ? c.slug : null,
+    circleId: typeof c.circleId === "string" && c.circleId ? c.circleId : null,
+  };
+}
+
+function nonEmptyString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value === "") throw new NextcloudBadResponseError(label);
+  return value;
+}
+
+function toTeam(raw: unknown, label: string): Team {
+  const c = (raw ?? {}) as { id?: unknown; name?: unknown; initiator?: { level?: unknown } | null };
+  return {
+    id: nonEmptyString(c.id, label),
+    name: typeof c.name === "string" ? c.name : "",
+    initiatorLevel: typeof c.initiator?.level === "number" ? c.initiator.level : 0,
+  };
+}
+
+function toTeamMember(raw: unknown, label: string): TeamMember {
+  const m = (raw ?? {}) as Record<string, unknown>;
+  return {
+    id: nonEmptyString(m.id, label),
+    userId: typeof m.userId === "string" ? m.userId : "",
+    userType: typeof m.userType === "number" ? m.userType : 0,
+    level: typeof m.level === "number" ? m.level : 0,
+  };
+}
+
+function toFolderShare(raw: unknown, label: string): FolderShare {
+  const s = (raw ?? {}) as Record<string, unknown>;
+  // OCS sends share ids and types as strings or numbers depending on the version.
+  const id = Number(s.id);
+  if (!Number.isInteger(id) || id <= 0) throw new NextcloudBadResponseError(label);
+  return {
+    id,
+    shareType: Number(s.share_type),
+    shareWith: typeof s.share_with === "string" ? s.share_with : "",
+  };
+}
+
 export class ClientOnboardingNextcloud {
   constructor(
     private readonly nc: NextcloudConfig,
     readonly targets: ClientOnboardingTargets
   ) {}
+
+  /** The service account's user id (owner of the teams it creates). */
+  get serviceUsername(): string {
+    return this.nc.username;
+  }
 
   // ── Forms ──────────────────────────────────────────────────────────────────
 
@@ -349,12 +439,13 @@ export class ClientOnboardingNextcloud {
     };
   }
 
-  async listPages(): Promise<CollectivePage[]> {
+  /** Pages of the Client Projects collective, or of `collectiveId` when given. */
+  async listPages(collectiveId: number = this.targets.collectiveId): Promise<CollectivePage[]> {
     const label = "collectives.pages";
     const res = await nextcloudRequest(this.nc, {
       method: "GET",
       label,
-      path: `${COLLECTIVES_BASE}/${this.targets.collectiveId}/pages?format=json`,
+      path: `${COLLECTIVES_BASE}/${collectiveId}/pages?format=json`,
     });
     const data = ocsData(res.body, label) as { pages?: unknown[] };
     if (!Array.isArray(data.pages)) throw new NextcloudBadResponseError(label);
@@ -381,6 +472,151 @@ export class ClientOnboardingNextcloud {
       body: JSON.stringify({ title }),
     });
     return toPage((ocsData(res.body, label) as { page?: unknown }).page, label);
+  }
+
+  /** Every collective the service account can see. */
+  async listCollectives(): Promise<CollectiveSummary[]> {
+    const label = "collectives.list";
+    const res = await nextcloudRequest(this.nc, {
+      method: "GET",
+      label,
+      path: `${COLLECTIVES_BASE}?format=json`,
+    });
+    const data = ocsData(res.body, label) as { collectives?: unknown[] };
+    if (!Array.isArray(data.collectives)) throw new NextcloudBadResponseError(label);
+    return data.collectives.map((raw) => toCollectiveSummary(raw, label));
+  }
+
+  /**
+   * Creates a collective. When a team of that name exists and the service account is its
+   * admin, Collectives builds the collective on that team instead of making a new one.
+   */
+  async createCollective(name: string, emoji: string): Promise<CollectiveSummary> {
+    const label = "collectives.create";
+    const res = await nextcloudRequest(this.nc, {
+      method: "POST",
+      label,
+      path: `${COLLECTIVES_BASE}?format=json`,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, emoji }),
+    });
+    return toCollectiveSummary(
+      (ocsData(res.body, label) as { collective?: unknown }).collective,
+      label
+    );
+  }
+
+  // ── Teams (Circles) ─────────────────────────────────────────────────────────
+
+  /** Teams the service account belongs to. */
+  async listTeams(): Promise<Team[]> {
+    const label = "circles.list";
+    const res = await nextcloudRequest(this.nc, {
+      method: "GET",
+      label,
+      path: `${CIRCLES_BASE}/circles?format=json`,
+    });
+    const data = ocsData(res.body, label);
+    if (!Array.isArray(data)) throw new NextcloudBadResponseError(label);
+    return data.map((raw) => toTeam(raw, label));
+  }
+
+  /** Creates a team owned by the service account, without an extra team folder. */
+  async createTeam(name: string): Promise<Team> {
+    const label = "circles.create";
+    const res = await nextcloudRequest(this.nc, {
+      method: "POST",
+      label,
+      path: `${CIRCLES_BASE}/circles?format=json`,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, personal: false, local: false, createTeamFolder: false }),
+    });
+    return toTeam(ocsData(res.body, label), label);
+  }
+
+  async listTeamMembers(teamId: string): Promise<TeamMember[]> {
+    const label = "circles.members";
+    const res = await nextcloudRequest(this.nc, {
+      method: "GET",
+      label,
+      path: `${CIRCLES_BASE}/circles/${encodeURIComponent(teamId)}/members?format=json`,
+    });
+    const data = ocsData(res.body, label);
+    if (!Array.isArray(data)) throw new NextcloudBadResponseError(label);
+    return data.map((raw) => toTeamMember(raw, label));
+  }
+
+  async addTeamUser(teamId: string, userId: string): Promise<TeamMember> {
+    const label = "circles.add_member";
+    const res = await nextcloudRequest(this.nc, {
+      method: "POST",
+      label,
+      path: `${CIRCLES_BASE}/circles/${encodeURIComponent(teamId)}/members?format=json`,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId, type: TEAM_MEMBER_TYPE_USER }),
+    });
+    return toTeamMember(ocsData(res.body, label), label);
+  }
+
+  async setTeamMemberLevel(teamId: string, memberId: string, level: number): Promise<void> {
+    await nextcloudRequest(this.nc, {
+      method: "PUT",
+      label: "circles.set_level",
+      path: `${CIRCLES_BASE}/circles/${encodeURIComponent(teamId)}/members/${encodeURIComponent(memberId)}/level?format=json`,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ level }),
+    });
+  }
+
+  // ── Shares ──────────────────────────────────────────────────────────────────
+
+  /** Path of a client folder as the service account's file tree shows it (leading "/"). */
+  clientFolderSharePath(segments: string[]): string {
+    return `/${[...this.targets.clientsFolder, ...segments].join("/")}`;
+  }
+
+  /** Shares the service account made of `path`. */
+  async listSharesOfPath(path: string): Promise<FolderShare[]> {
+    const label = "files_sharing.list";
+    const res = await nextcloudRequest(this.nc, {
+      method: "GET",
+      label,
+      path: `${SHARES_BASE}?path=${encodeURIComponent(path)}&format=json`,
+    });
+    const data = ocsData(res.body, label);
+    if (!Array.isArray(data)) throw new NextcloudBadResponseError(label);
+    return data.map((raw) => toFolderShare(raw, label));
+  }
+
+  /** Shares `path` with a team: read, update, create, delete, no reshare. */
+  async shareWithTeam(path: string, teamId: string): Promise<FolderShare> {
+    const label = "files_sharing.create";
+    const res = await nextcloudRequest(this.nc, {
+      method: "POST",
+      label,
+      path: `${SHARES_BASE}?format=json`,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        path,
+        shareType: SHARE_TYPE_TEAM,
+        shareWith: teamId,
+        permissions: TEAM_SHARE_PERMISSIONS,
+      }),
+    });
+    return toFolderShare(ocsData(res.body, label), label);
+  }
+
+  /** Whether a share is the type-7 share with this team. */
+  isTeamShare(share: FolderShare, teamId: string): boolean {
+    return share.shareType === SHARE_TYPE_TEAM && share.shareWith === teamId;
+  }
+
+  teamLink(teamId: string): string {
+    return `${this.nc.baseUrl}/index.php/apps/contacts/circle/${encodeURIComponent(teamId)}`;
+  }
+
+  collectiveLink(slug: string, collectiveId: number): string {
+    return `${this.nc.baseUrl}/index.php/apps/collectives/${encodeURIComponent(`${slug}-${collectiveId}`)}`;
   }
 
   // ── Links ──────────────────────────────────────────────────────────────────

@@ -19,9 +19,12 @@ import {
   ONB_FORM_ID,
   ONB_PROJECTS_PAGE_ID,
   ONB_PROJECTS_TABLE,
+  ONB_TEAM_ADMINS,
   onboardingEnv,
+  onboardingTeamsEnv,
   PIPELINE_COLUMNS,
   PROJECT_COLUMNS,
+  WELCOME_TEXT,
 } from "../helpers/fake-nextcloud-onboarding";
 
 type Logger = Parameters<typeof runClientOnboardingCycle>[0]["logger"];
@@ -1167,5 +1170,535 @@ describe("client onboarding: claiming", () => {
     expect(await claimed()).toHaveLength(1);
     expect((await claimNextOnboarding(ONB_FORM_ID))?.submissionId).toBe(6);
     expect(await claimed()).toHaveLength(2);
+  });
+});
+
+describe("client onboarding: per-project Teams", () => {
+  const TEAM = "CP-003 Warehouse Portal";
+  const FOLDER_PATH = "/clients/Zephyrine Widgets LLC";
+  const HUB_FILE = `${ONB_COLLECTIVE_PATH}/Projects/CP-003 — Warehouse Portal.md`;
+  const teamsEnv = onboardingTeamsEnv();
+  const teamsCycle = () => cycle(teamsEnv);
+  const teamCalls = () =>
+    fake.requests.filter(
+      (r) =>
+        r.path.includes("/circles") ||
+        r.path.includes("/files_sharing/") ||
+        (r.method === "POST" && r.path.endsWith("/collectives"))
+    );
+  const members = () =>
+    Object.fromEntries((fake.team(TEAM)?.members ?? []).map((m) => [m.userId, m.level]));
+
+  async function setup(answers: IntakeAnswers = FULL, userId?: string) {
+    await baseline();
+    fake.addSubmission(5, answers, userId);
+  }
+
+  async function resetTeamColumns() {
+    await db
+      .update(clientOnboardingSubmissions)
+      .set({
+        status: "pending",
+        completedAt: null,
+        teamId: null,
+        teamMembersAt: null,
+        collectiveId: null,
+        collectiveContentAt: null,
+        folderShareId: null,
+        pageContentAt: null,
+        nextAttemptAt: new Date(Date.now() - 1000),
+      })
+      .where(eq(clientOnboardingSubmissions.submissionId, 5));
+  }
+
+  it("flag off: same steps, none of the new endpoints are called", async () => {
+    await setup();
+    expect(await cycle()).toMatchObject({ status: "ok", completed: 1 });
+    expect(teamCalls()).toHaveLength(0);
+    expect(fake.teams).toHaveLength(0);
+    expect(fake.wikis).toHaveLength(0);
+    expect(fake.shares).toHaveLength(0);
+    // The brief stays in the Client Projects collective.
+    expect(fake.files.get(HUB_FILE)?.startsWith("# Project Brief\n")).toBe(true);
+    expect(await sub(5)).toMatchObject({
+      teamId: null,
+      teamMembersAt: null,
+      collectiveId: null,
+      collectiveContentAt: null,
+      folderShareId: null,
+    });
+  });
+
+  it("flag set to anything but true keeps it off", async () => {
+    await setup();
+    const off = onboardingEnv({ CLIENT_ONBOARDING_PROJECT_TEAMS: "yes" });
+    expect(await cycle(off)).toMatchObject({ completed: 1 });
+    expect(teamCalls()).toHaveLength(0);
+  });
+
+  it("flag on: team, wiki with the brief, folder share and a hub page, in order", async () => {
+    await setup();
+    expect(await teamsCycle()).toMatchObject({ status: "ok", completed: 1 });
+    const done = await sub(5);
+
+    // Team: exact name, no team folder, admins at level 8, submitter a plain member.
+    const team = fake.team(TEAM);
+    expect(team).toBeDefined();
+    const create = fake.requests.find((r) => r.method === "POST" && r.path.endsWith("/circles"));
+    expect(JSON.parse(create?.body ?? "{}")).toEqual({
+      name: TEAM,
+      personal: false,
+      local: false,
+      createTeamFolder: false,
+    });
+    expect(members()).toEqual({
+      "dfwsc-admin": 9,
+      "ops-lead": 8,
+      "Jane Doe": 8,
+      messyginger0804: 1,
+    });
+    expect(done.teamId).toBe(team?.id);
+    expect(done.teamMembersAt).toBeInstanceOf(Date);
+
+    // Wiki: same name, on the same team, Project Brief on its landing page.
+    const wiki = fake.wiki(TEAM);
+    expect(wiki?.circleId).toBe(team?.id);
+    expect(fake.teams).toHaveLength(1);
+    expect(done.collectiveId).toBe(wiki?.id);
+    const brief = fake.files.get(fake.wikiLandingFile(TEAM)) ?? "";
+    expect(brief.startsWith("# Project Brief\n")).toBe(true);
+    expect(brief).toContain("| Project code | CP-003 |");
+    expect(done.collectiveContentAt).toBeInstanceOf(Date);
+
+    // Folder share: type 7 with the team, read/update/create/delete.
+    expect(fake.shares).toHaveLength(1);
+    expect(fake.shares[0]).toMatchObject({
+      path: FOLDER_PATH,
+      shareType: 7,
+      shareWith: team?.id,
+      permissions: 15,
+    });
+    expect(done.folderShareId).toBe(fake.shares[0].id);
+
+    // Hub page in collective 1 instead of the brief.
+    const hub = fake.files.get(HUB_FILE) ?? "";
+    expect(hub.startsWith("# Project hub\n")).toBe(true);
+    expect(hub).not.toContain("# Project Brief");
+    expect(hub).toContain("| Project code | CP-003 |");
+    expect(hub).toContain(
+      `(https://cloud.test/index.php/apps/collectives/CP-003-Warehouse-Portal-${wiki?.id})`
+    );
+    expect(hub).toContain(`(https://cloud.test/index.php/f/${done.folderFileId})`);
+    expect(hub).toContain("/apps/tables/#/table/6/row/");
+    expect(hub).toContain(`/apps/contacts/circle/${team?.id}`);
+
+    // Order: row, team, wiki, share, page, lead.
+    const at = (match: (r: { method: string; path: string }) => boolean) =>
+      fake.requests.findIndex(match);
+    const order = [
+      at((r) => r.method === "POST" && r.path.includes("/tables/6/rows")),
+      at((r) => r.method === "POST" && r.path.endsWith("/circles")),
+      at((r) => r.method === "POST" && r.path.endsWith("/collectives")),
+      at((r) => r.method === "POST" && r.path.endsWith("/shares")),
+      at((r) => r.method === "POST" && r.path.includes("/collectives/1/pages/")),
+      at((r) => r.method === "PUT" && r.path.includes("/api/1/rows/")),
+    ];
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(done).toMatchObject({ status: "completed", leadStatus: "won" });
+  });
+
+  it("is idempotent: later cycles make no further writes", async () => {
+    await setup();
+    await teamsCycle();
+    const before = fake.writes().length;
+    for (let i = 0; i < 3; i++) await teamsCycle();
+    expect(fake.writes()).toHaveLength(before);
+    expect(fake.teams).toHaveLength(1);
+    expect(fake.wikis).toHaveLength(1);
+    expect(fake.shares).toHaveLength(1);
+  });
+
+  it("doesn't add a submitter who is dfwsc-admin, and doesn't demote one who is a team admin", async () => {
+    await setup(FULL, "dfwsc-admin");
+    await teamsCycle();
+    expect(members()).toEqual({ "dfwsc-admin": 9, "ops-lead": 8, "Jane Doe": 8 });
+
+    fake.submissions.delete(5);
+    fake.addSubmission(6, { ...FULL, company: "Second Co", project_name: "Second" }, "Jane Doe");
+    expect(await teamsCycle()).toMatchObject({ completed: 1 });
+    const second = fake.team("CP-004 Second");
+    expect(second?.members.filter((m) => m.userId === "Jane Doe")).toHaveLength(1);
+    expect(second?.members.find((m) => m.userId === "Jane Doe")?.level).toBe(8);
+  });
+
+  it("anonymous submitters are not added", async () => {
+    await setup(FULL, "anon-user-abc123");
+    await teamsCycle();
+    expect(members()).toEqual({ "dfwsc-admin": 9, "ops-lead": 8, "Jane Doe": 8 });
+  });
+
+  describe("reuse", () => {
+    it("reuses a team of that name that dfwsc-admin owns, without a duplicate member", async () => {
+      await setup();
+      const existing = fake.addTeam(TEAM);
+      existing.members.push({ id: "pre", userId: "ops-lead", level: 1 });
+      expect(await teamsCycle()).toMatchObject({ completed: 1 });
+      expect(fake.teams).toHaveLength(1);
+      expect(
+        fake.requests.filter((r) => r.method === "POST" && r.path.endsWith("/circles"))
+      ).toHaveLength(0);
+      expect(existing.members.filter((m) => m.userId === "ops-lead")).toHaveLength(1);
+      expect(members()["ops-lead"]).toBe(8);
+      expect(fake.wiki(TEAM)?.circleId).toBe(existing.id);
+    });
+
+    it("reuses a team where dfwsc-admin is an admin (level 8)", async () => {
+      await setup();
+      const existing = fake.addTeam(TEAM, 8);
+      expect(await teamsCycle()).toMatchObject({ completed: 1 });
+      expect(fake.teams).toHaveLength(1);
+      expect((await sub(5)).teamId).toBe(existing.id);
+    });
+
+    it("fails for good when a team of that name exists and dfwsc-admin is not its admin", async () => {
+      await setup();
+      fake.addTeam(TEAM, 1);
+      expect(await teamsCycle()).toMatchObject({ failed: 1 });
+      expect(await sub(5)).toMatchObject({ status: "failed", lastErrorCode: "team_name_taken" });
+      expect(
+        fake.requests.filter((r) => r.method === "POST" && r.path.endsWith("/circles"))
+      ).toHaveLength(0);
+    });
+
+    it("reuses the team, collective and share when only the saved ids are gone", async () => {
+      await setup();
+      await teamsCycle();
+      const team = fake.team(TEAM);
+      const wiki = fake.wiki(TEAM);
+      const share = fake.shares[0];
+      const brief = fake.files.get(fake.wikiLandingFile(TEAM));
+      const addedMembers = fake.count("POST", "/members");
+      await resetTeamColumns();
+      expect(await teamsCycle()).toMatchObject({ completed: 1 });
+      expect(fake.teams).toHaveLength(1);
+      expect(fake.wikis).toHaveLength(1);
+      expect(fake.shares).toHaveLength(1);
+      expect(fake.count("POST", "/members")).toBe(addedMembers);
+      expect(await sub(5)).toMatchObject({
+        teamId: team?.id,
+        collectiveId: wiki?.id,
+        folderShareId: share.id,
+      });
+      expect(fake.files.get(fake.wikiLandingFile(TEAM))).toBe(brief);
+    });
+
+    it("replaces Collectives' default welcome text with the brief", async () => {
+      await setup();
+      fake.wikiLandingSeed = WELCOME_TEXT;
+      await teamsCycle();
+      expect(fake.files.get(fake.wikiLandingFile(TEAM))?.startsWith("# Project Brief")).toBe(true);
+    });
+
+    it("skips a landing page whose welcome text was edited", async () => {
+      await setup();
+      fake.wikiLandingSeed = `${WELCOME_TEXT}\nOur own notes.`.replace(
+        "Add pages with the",
+        "Add pages by the"
+      );
+      expect(await teamsCycle()).toMatchObject({ completed: 1 });
+      expect(fake.files.get(fake.wikiLandingFile(TEAM))).toBe(fake.wikiLandingSeed);
+    });
+
+    it("raises a member already in the team at level 1, and counts an invited one as present", async () => {
+      await setup();
+      const existing = fake.addTeam(TEAM);
+      existing.members.push({ id: "a", userId: "ops-lead", level: 1 });
+      existing.members.push({ id: "b", userId: "Jane Doe", level: 1, status: "Invited" });
+      await teamsCycle();
+      expect(members()["ops-lead"]).toBe(8);
+      expect(members()["Jane Doe"]).toBe(8);
+      expect(existing.members.filter((m) => m.userId === "Jane Doe")).toHaveLength(1);
+    });
+
+    it("keeps the hub untouched and the existing page when the flag is switched on mid-flight", async () => {
+      await setup();
+      expect(await cycle()).toMatchObject({ completed: 1 });
+      const brief = fake.files.get(HUB_FILE);
+      await resetTeamColumns();
+      await db
+        .update(clientOnboardingSubmissions)
+        .set({ pageContentAt: new Date() })
+        .where(eq(clientOnboardingSubmissions.submissionId, 5));
+      expect(await teamsCycle()).toMatchObject({ completed: 1 });
+      expect(fake.files.get(HUB_FILE)).toBe(brief);
+      expect(fake.team(TEAM)).toBeDefined();
+    });
+
+    it("never overwrites a landing page that already has content", async () => {
+      await setup();
+      fake.wikiLandingSeed = "# Welcome to your new collective\n\nSome text.";
+      expect(await teamsCycle()).toMatchObject({ completed: 1 });
+      expect(fake.files.get(fake.wikiLandingFile(TEAM))).toBe(fake.wikiLandingSeed);
+      expect((await sub(5)).collectiveContentAt).toBeInstanceOf(Date);
+    });
+
+    it("writes the brief over a title-only landing page", async () => {
+      await setup();
+      fake.wikiLandingSeed = `# ${TEAM}`;
+      await teamsCycle();
+      expect(fake.files.get(fake.wikiLandingFile(TEAM))?.startsWith("# Project Brief")).toBe(true);
+    });
+
+    it("does not overwrite a human edit of the hub page", async () => {
+      await setup();
+      fake.seedPageFile = "# CP-003 — Warehouse Portal\n\nEdited by hand.";
+      await teamsCycle();
+      expect(fake.files.get(HUB_FILE)).toContain("Edited by hand.");
+    });
+  });
+
+  describe("resume after a failure", () => {
+    const cases: [string, (r: { method: string; path: string }) => boolean, string][] = [
+      [
+        "team create",
+        (r) => r.method === "POST" && r.path.endsWith("/circles"),
+        "circles.create:500",
+      ],
+      [
+        "adding a member",
+        (r) => r.method === "POST" && r.path.endsWith("/members"),
+        "circles.add_member:500",
+      ],
+      [
+        "raising a member to admin",
+        (r) => r.method === "PUT" && r.path.endsWith("/level"),
+        "circles.set_level:500",
+      ],
+      [
+        "wiki create",
+        (r) => r.method === "POST" && r.path.endsWith("/collectives"),
+        "collectives.create:500",
+      ],
+      [
+        "wiki landing page write",
+        (r) =>
+          r.method === "PUT" &&
+          r.path === `/remote.php/dav/files/dfwsc-admin/.Collectives/${TEAM}/Readme.md`,
+        "webdav.put_page:500",
+      ],
+      [
+        "folder share",
+        (r) => r.method === "POST" && r.path.endsWith("/shares"),
+        "files_sharing.create:500",
+      ],
+    ];
+
+    it.each(cases)("resumes after a failed %s", async (_name, match, code) => {
+      await setup();
+      fake.fail({ match, status: 500 });
+      expect(await teamsCycle()).toMatchObject({ retried: 1 });
+      const failed = await sub(5);
+      expect(failed).toMatchObject({ status: "pending", attempts: 1, lastErrorCode: code });
+      expect(failed.folderFileId).not.toBeNull();
+      expect(failed.tableRowId).not.toBeNull();
+      expect(failed.pageId).toBeNull();
+      const rows = newProjectRows().length;
+
+      await makeDue(5);
+      expect(await teamsCycle()).toMatchObject({ completed: 1 });
+      expect(newProjectRows()).toHaveLength(rows);
+      expect(fake.teams).toHaveLength(1);
+      expect(fake.wikis).toHaveLength(1);
+      expect(fake.shares).toHaveLength(1);
+      expect(members()).toEqual({
+        "dfwsc-admin": 9,
+        "ops-lead": 8,
+        "Jane Doe": 8,
+        messyginger0804: 1,
+      });
+      expect(fake.files.get(fake.wikiLandingFile(TEAM))?.startsWith("# Project Brief")).toBe(true);
+      expect(fake.files.get(HUB_FILE)?.startsWith("# Project hub")).toBe(true);
+    });
+
+    it.each([
+      [
+        "team",
+        (r: { method: string; path: string }) => r.method === "POST" && r.path.endsWith("/circles"),
+      ],
+      [
+        "wiki",
+        (r: { method: string; path: string }) =>
+          r.method === "POST" && r.path.endsWith("/collectives"),
+      ],
+      [
+        "share",
+        (r: { method: string; path: string }) => r.method === "POST" && r.path.endsWith("/shares"),
+      ],
+    ])("adopts the %s when the create response was lost", async (_name, match) => {
+      await setup();
+      fake.fail({ match, timeout: true, afterApply: true });
+      expect(await teamsCycle()).toMatchObject({ retried: 1 });
+      await makeDue(5);
+      expect(await teamsCycle()).toMatchObject({ completed: 1 });
+      expect(fake.teams).toHaveLength(1);
+      expect(fake.wikis).toHaveLength(1);
+      expect(fake.shares).toHaveLength(1);
+    });
+
+    it("does not redo the earlier steps when a later one fails", async () => {
+      await setup();
+      fake.fail({ match: (r) => r.method === "POST" && r.path.endsWith("/shares"), status: 500 });
+      await teamsCycle();
+      const isTeamCreate = (r: { method: string; path: string }) =>
+        r.method === "POST" && r.path.endsWith("/circles");
+      const teamCreates = fake.requests.filter(isTeamCreate).length;
+      const wikiCreates = fake.requests.filter(
+        (r) => r.method === "POST" && r.path.endsWith("/collectives")
+      ).length;
+      const wikiWrites = fake.requests.filter(
+        (r) => r.method === "PUT" && r.path.includes(`/.Collectives/${TEAM}/`)
+      ).length;
+      await makeDue(5);
+      await teamsCycle();
+      expect(fake.requests.filter(isTeamCreate)).toHaveLength(teamCreates);
+      expect(
+        fake.requests.filter((r) => r.method === "POST" && r.path.endsWith("/collectives"))
+      ).toHaveLength(wikiCreates);
+      expect(
+        fake.requests.filter((r) => r.method === "PUT" && r.path.includes(`/.Collectives/${TEAM}/`))
+      ).toHaveLength(wikiWrites);
+    });
+  });
+
+  describe("refusals", () => {
+    it("team create 403 fails at once with a clear reason and logs what to change", async () => {
+      await setup();
+      fake.fail({
+        match: (r) => r.method === "POST" && r.path.endsWith("/circles"),
+        status: 403,
+        times: 5,
+      });
+      expect(await teamsCycle()).toMatchObject({ failed: 1, retried: 0 });
+      expect(await sub(5)).toMatchObject({
+        status: "failed",
+        attempts: 1,
+        lastErrorCode: "circles.create_forbidden",
+        teamId: null,
+      });
+      const text = log.lines
+        .filter((l) => l.level === "error")
+        .map((l) => l.text)
+        .join("\n");
+      expect(text).toContain("allow it to create Teams");
+      expect(fake.wikis).toHaveLength(0);
+      expect(fake.shares).toHaveLength(0);
+      expect(
+        fake.requests.filter((r) => r.method === "POST" && r.path.endsWith("/circles"))
+      ).toHaveLength(1);
+    });
+
+    it("share 403 fails at once and asks for reshare rights", async () => {
+      await setup();
+      fake.shareForbidden = true;
+      expect(await teamsCycle()).toMatchObject({ failed: 1 });
+      expect(await sub(5)).toMatchObject({
+        status: "failed",
+        lastErrorCode: "files_sharing.create_forbidden",
+      });
+      const text = log.lines
+        .filter((l) => l.level === "error")
+        .map((l) => l.text)
+        .join("\n");
+      expect(text).toContain("share rights");
+    });
+
+    it("fails a team admin that cannot be added, with an actionable log", async () => {
+      await setup();
+      fake.fail({
+        match: (r) =>
+          r.method === "POST" && r.path.endsWith("/members") && r.body.includes("Jane Doe"),
+        status: 404,
+        times: 5,
+      });
+      expect(await teamsCycle()).toMatchObject({ failed: 1, retried: 0 });
+      expect(await sub(5)).toMatchObject({
+        status: "failed",
+        lastErrorCode: "team_admin_add_failed",
+      });
+      const text = log.lines
+        .filter((l) => l.level === "error")
+        .map((l) => l.text)
+        .join("\n");
+      expect(text).toContain("CLIENT_ONBOARDING_TEAM_ADMINS");
+      expect(text).not.toContain("Jane Doe");
+    });
+
+    it("continues when the submitter cannot be added", async () => {
+      await setup();
+      fake.fail({
+        match: (r) =>
+          r.method === "POST" && r.path.endsWith("/members") && r.body.includes("messyginger0804"),
+        status: 404,
+        times: 5,
+      });
+      expect(await teamsCycle()).toMatchObject({ completed: 1 });
+      expect(members()["messyginger0804"]).toBeUndefined();
+      expect(log.lines.some((l) => l.level === "warn" && l.text.includes("Form submitter"))).toBe(
+        true
+      );
+    });
+
+    it("fails when Collectives builds the wiki on another team", async () => {
+      await setup();
+      fake.wikiIgnoresTeam = true;
+      expect(await teamsCycle()).toMatchObject({ failed: 1 });
+      expect(await sub(5)).toMatchObject({
+        status: "failed",
+        lastErrorCode: "collective_team_mismatch",
+        collectiveId: fake.wikis[0].id,
+      });
+    });
+  });
+
+  describe("config", () => {
+    it.each([
+      ["unset", undefined],
+      ["blank", " , "],
+    ])("flag on with team admins %s is an invalid config and calls nothing", async (_n, admins) => {
+      const bad = onboardingTeamsEnv({ CLIENT_ONBOARDING_TEAM_ADMINS: admins });
+      expect((await cycle(bad)).status).toBe("invalid_config");
+      expect(startClientOnboarding(log.logger, bad)).toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(log.lines[0].text).toContain("CLIENT_ONBOARDING_TEAM_ADMINS");
+    });
+
+    it("flag off does not need team admins, and ignores them", async () => {
+      await setup();
+      const off = onboardingEnv({ CLIENT_ONBOARDING_TEAM_ADMINS: undefined });
+      expect(await cycle(off)).toMatchObject({ status: "ok", completed: 1 });
+    });
+
+    it("keeps spaces inside a user id, trims the ends and ignores duplicates", async () => {
+      await setup();
+      const env2 = onboardingTeamsEnv({
+        CLIENT_ONBOARDING_TEAM_ADMINS: "  Jane Doe ,,Jane Doe, dfwsc-admin ",
+      });
+      expect(await cycle(env2)).toMatchObject({ completed: 1 });
+      expect(members()).toEqual({ "dfwsc-admin": 9, "Jane Doe": 8, messyginger0804: 1 });
+      expect(ONB_TEAM_ADMINS).toContain("Jane Doe");
+    });
+  });
+
+  it("never logs project, user or team names", async () => {
+    await setup();
+    fake.fail({ match: (r) => r.method === "POST" && r.path.endsWith("/shares"), status: 500 });
+    await teamsCycle();
+    await makeDue(5);
+    await teamsCycle();
+    const all = log.lines.map((l) => l.text).join("\n");
+    for (const secret of ["Warehouse", "Zephyrine", "Jane Doe", "ops-lead"]) {
+      expect(all).not.toContain(secret);
+    }
   });
 });

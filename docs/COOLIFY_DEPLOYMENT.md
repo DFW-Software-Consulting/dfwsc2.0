@@ -69,6 +69,9 @@ All resources can be deployed independently on Coolify while sharing the same mo
   CLIENT_ONBOARDING_COLLECTIVE_ID=1
   CLIENT_ONBOARDING_WEBHOOK_SECRET=at_least_32_random_characters
   CLIENT_ONBOARDING_POLL_INTERVAL_MS=300000
+  # Optional: per-project Nextcloud Teams, wikis and folder shares (docs/BACKEND.md section 10); off by default
+  CLIENT_ONBOARDING_PROJECT_TEAMS=false
+  CLIENT_ONBOARDING_TEAM_ADMINS=user-id-one,user-id-two
   ```
 - **First admin (first deploy only)**: the first admin is created at startup from `ADMIN_USERNAME` and `ADMIN_PASSWORD`, only when the `admins` table is empty (a leftover `ADMIN_PASSWORD` is ignored later, with a startup warning). `ADMIN_PASSWORD` is plaintext (at least 12 characters in production) and is hashed by the server — never supply a bcrypt hash, because the hash string itself would become the password. With `ALLOW_ADMIN_SETUP=true` the admin is created unconfirmed: log in at `/admin`, confirm permanent credentials, then **remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment** and set `ALLOW_ADMIN_SETUP=false`. `docker-compose.prod.yml` does not currently pass `ADMIN_USERNAME` or `ADMIN_PASSWORD` to the `api` container, so they only reach it if you add them to that service's `environment` for the first deploy (and remove them again afterwards).
 - **Startup Command**: `node dist/index.js` (handled by Dockerfile). DB migrations run automatically on each deploy via the `migrator` service above — no separate manual migration step is needed.
