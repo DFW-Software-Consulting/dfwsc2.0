@@ -107,7 +107,7 @@ export function addressbookCollection(nc: NextcloudConfig, addressbook: string):
   return `${addressbookHome(nc)}${encodePathSegments([addressbook])}/`;
 }
 
-interface AddressbookInfo {
+export interface AddressbookInfo {
   name: string;
   readOnly: boolean;
 }
@@ -118,7 +118,7 @@ interface AddressbookInfo {
  * configured book is always included, so a listing that omits it still searches it.
  * A book whose privilege set lacks write access is marked read-only.
  */
-async function listAddressbooks(
+export async function listAddressbooks(
   nc: NextcloudConfig,
   configuredAddressbook: string
 ): Promise<AddressbookInfo[]> {
@@ -197,6 +197,106 @@ async function listCards(
     });
   }
   return cards;
+}
+
+// ── CardDAV sync (RFC 6578) ──────────────────────────────────────────────────
+
+/** The server no longer knows the stored sync-token; a full scan is needed. */
+export class SyncTokenRejectedError extends Error {
+  constructor() {
+    super("The CardDAV sync-token was rejected");
+    this.name = "SyncTokenRejectedError";
+  }
+}
+
+// RFC 6578 answers an unusable token with 403 (DAV:valid-sync-token); servers also use 400,
+// 409, 410 and 412 for a token they have dropped.
+const SYNC_TOKEN_REJECTED_STATUSES = new Set([400, 403, 409, 410, 412]);
+
+export interface AddressbookDelta {
+  /** The token to store for the next call; null when the server sent none. */
+  token: string | null;
+  /** Cards added or changed since the token (every card, when no token was given). */
+  cards: StoredCard[];
+  /** Hrefs of cards removed since the token. */
+  removed: string[];
+}
+
+function syncCollectionBody(token: string | null): string {
+  return `<?xml version="1.0"?><d:sync-collection xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"><d:sync-token>${token ? xmlEscape(token) : ""}</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/><c:address-data/></d:prop></d:sync-collection>`;
+}
+
+function xmlEscape(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Cards changed since `token` (all cards when it is null) in one address book, with the
+ * new token. A token the server refuses throws SyncTokenRejectedError so the caller can
+ * fall back to a full scan.
+ */
+export async function syncAddressbook(
+  nc: NextcloudConfig,
+  addressbook: string,
+  token: string | null,
+  readOnly: boolean
+): Promise<AddressbookDelta> {
+  const collection = addressbookCollection(nc, addressbook);
+  let res: Awaited<ReturnType<typeof nextcloudRequest>>;
+  try {
+    res = await nextcloudRequest(nc, {
+      method: "REPORT",
+      label: "carddav.sync",
+      path: collection,
+      headers: { depth: "0", "content-type": "application/xml; charset=utf-8" },
+      body: syncCollectionBody(token),
+    });
+  } catch (error) {
+    if (
+      token !== null &&
+      error instanceof NextcloudHttpError &&
+      SYNC_TOKEN_REJECTED_STATUSES.has(error.status)
+    ) {
+      throw new SyncTokenRejectedError();
+    }
+    throw error;
+  }
+  const cards: StoredCard[] = [];
+  const removed: string[] = [];
+  const responses = res.body.match(
+    /<(?:[\w-]+:)?response\b[^>]*>[\s\S]*?<\/(?:[\w-]+:)?response>/g
+  );
+  for (const block of responses ?? []) {
+    const href = xmlElement(block, "href")?.trim();
+    if (!href) continue;
+    if (!href.startsWith(collection) || href.includes("/../")) {
+      // The collection's own entry (e.g. a truncation marker) is not a card.
+      if (href.replace(/\/+$/, "") === collection.replace(/\/+$/, "")) continue;
+      throw new AddressbookDiscoveryError();
+    }
+    const withoutProps = block.replace(
+      /<(?:[\w-]+:)?propstat\b[^>]*>[\s\S]*?<\/(?:[\w-]+:)?propstat>/g,
+      ""
+    );
+    if (/\b404\b/.test(xmlElement(withoutProps, "status") ?? "")) {
+      removed.push(href);
+      continue;
+    }
+    const data = xmlElement(block, "address-data");
+    if (!data) continue;
+    cards.push({
+      addressbook,
+      href,
+      etag: xmlElement(block, "getetag")?.trim() || null,
+      data,
+      readOnly,
+    });
+  }
+  const newToken = xmlElement(
+    res.body.replace(/<(?:[\w-]+:)?response\b[\s\S]*?<\/(?:[\w-]+:)?response>/g, ""),
+    "sync-token"
+  )?.trim();
+  return { token: newToken || null, cards, removed };
 }
 
 /** Overwrites a card only if it is unchanged since it was read. */
@@ -300,6 +400,73 @@ export function createContactDirectory(
 
 // ── vCard ────────────────────────────────────────────────────────────────────
 
+// ── Labelled entries ─────────────────────────────────────────────────────────
+// The billing sync reads these labels from a client's card; users add them in Nextcloud
+// Contacts with "Add label > Custom". Contacts stores a custom label as an Apple-style group:
+//   item1.EMAIL:billing@example.com
+//   item1.X-ABLabel:Account email
+// A TYPE parameter holding the same text is read too.
+export const ACCOUNT_EMAIL_LABEL = "Account email";
+export const ACCOUNT_PHONE_LABEL = "Account phone";
+export const BILLING_ADDRESS_LABEL = "Billing address";
+
+const normalizeLabel = (value: string) =>
+  value
+    .replace(/^_\$!<(.*)>!\$_$/, "$1")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("en-US");
+
+/** The "group" of a line: the prefix before the dot in "item1.EMAIL", or null. */
+function lineGroup(raw: string): string | null {
+  const colon = raw.indexOf(":");
+  const head = (colon === -1 ? raw : raw.slice(0, colon)).split(";")[0];
+  const dot = head.lastIndexOf(".");
+  return dot === -1 ? null : head.slice(0, dot).toLowerCase();
+}
+
+/** TYPE parameter values (and bare vCard 2.1 parameters) of a line, unquoted. */
+function lineTypes(raw: string): string[] {
+  const colon = raw.indexOf(":");
+  const params = (colon === -1 ? raw : raw.slice(0, colon)).split(";").slice(1);
+  const out: string[] = [];
+  for (const param of params) {
+    const eq = param.indexOf("=");
+    const key = eq === -1 ? "TYPE" : param.slice(0, eq).toUpperCase();
+    if (key !== "TYPE") continue;
+    const value = eq === -1 ? param : param.slice(eq + 1);
+    for (const part of value.split(",")) out.push(part.replace(/^"|"$/g, ""));
+  }
+  return out;
+}
+
+/** Whether a property line carries `label` (case-insensitive) as TYPE or via X-ABLabel. */
+export function hasLabel(lines: VCardLine[], line: VCardLine, label: string): boolean {
+  const wanted = normalizeLabel(label);
+  if (lineTypes(line.raw).some((t) => normalizeLabel(t) === wanted)) return true;
+  const group = lineGroup(line.raw);
+  if (group === null) return false;
+  return lines.some(
+    (l) =>
+      l.name === "X-ABLABEL" &&
+      lineGroup(l.raw) === group &&
+      normalizeLabel(unescapeVCardText(l.value)) === wanted
+  );
+}
+
+/** The next unused item group ("item1", "item2", ...) on a card. */
+function nextGroup(lines: VCardLine[]): string {
+  const used = new Set(lines.map((l) => lineGroup(l.raw)).filter((g): g is string => g !== null));
+  let n = 1;
+  while (used.has(`item${n}`)) n++;
+  return `item${n}`;
+}
+
+/** The two lines of an EMAIL entry labelled "Account email". */
+export function accountEmailLines(email: string, group: string): string[] {
+  return [`${group}.EMAIL:${escapeVCardText(email)}`, `${group}.X-ABLabel:${ACCOUNT_EMAIL_LABEL}`];
+}
+
 /** Case-insensitive, whitespace-collapsed, NFC form used for "exact" name matches. */
 export function normalizeName(value: string): string {
   return value.normalize("NFC").replace(/\s+/g, " ").trim().toLocaleLowerCase("en-US");
@@ -322,18 +489,18 @@ export function nameParts(contactName: string): { family: string; given: string 
   return { family, given: parts.join(" ") };
 }
 
-interface VCardLine {
+export interface VCardLine {
   /** Property name without group, upper-case ("EMAIL"). */
   name: string;
   raw: string;
   value: string;
 }
 
-function unescapeVCardText(value: string): string {
+export function unescapeVCardText(value: string): string {
   return value.replace(/\\([\\,;nN])/g, (_, c: string) => (c === "n" || c === "N" ? "\n" : c));
 }
 
-function parseLines(card: string): VCardLine[] {
+export function parseLines(card: string): VCardLine[] {
   return card
     .replace(/\r?\n[ \t]/g, "")
     .split(/\r?\n/)
@@ -353,7 +520,7 @@ function textValues(lines: VCardLine[], name: string): string[] {
 const digits = (value: string) => value.replace(/\D/g, "");
 
 /** The organization name: ORG's first component, split before unescaping. */
-function orgName(lines: VCardLine[]): string | undefined {
+export function orgName(lines: VCardLine[]): string | undefined {
   const line = lines.find((l) => l.name === "ORG");
   return line ? unescapeVCardText(line.value.split(/(?<!\\);/)[0]) : undefined;
 }
@@ -394,7 +561,7 @@ export function mergeContactVCard(
   card: string,
   person: ContactPerson,
   now: Date = new Date(),
-  options: { additive?: boolean; category?: string } = {}
+  options: { additive?: boolean; category?: string; accountEmail?: string } = {}
 ): string | null {
   let lines = parseLines(card).filter((l) => l.name !== "END");
   let changed = false;
@@ -423,6 +590,16 @@ export function mergeContactVCard(
     const wanted = person.email.trim().toLowerCase();
     if (!textValues(lines, "EMAIL").some((e) => e.trim().toLowerCase() === wanted)) {
       insert(`EMAIL;TYPE=WORK:${escapeVCardText(person.email)}`);
+    }
+  }
+  if (options.accountEmail) {
+    // The email the billing Customer is kept in sync with. A card that already has an entry
+    // labelled "Account email" is left as it is: whoever set it wins.
+    const hasAccountEmail = lines.some(
+      (l) => l.name === "EMAIL" && hasLabel(lines, l, ACCOUNT_EMAIL_LABEL)
+    );
+    if (!hasAccountEmail) {
+      for (const raw of accountEmailLines(options.accountEmail, nextGroup(lines))) insert(raw);
     }
   }
   if (person.phone && digits(person.phone)) {

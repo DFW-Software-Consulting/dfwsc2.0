@@ -110,6 +110,20 @@ describe("verifyDatabaseSchema", () => {
             // sales_lead_sync_state columns
             { column_name: "baseline_submission_id" },
             { column_name: "baselined_at" },
+            // contact_stripe_sync_* columns
+            { column_name: "addressbook" },
+            { column_name: "sync_token" },
+            { column_name: "synced_at" },
+            { column_name: "contact_uid" },
+            { column_name: "client_code" },
+            { column_name: "href" },
+            { column_name: "etag" },
+            { column_name: "last_hash" },
+            { column_name: "field_hashes" },
+            { column_name: "baseline_at" },
+            { column_name: "last_pushed_at" },
+            { column_name: "last_error" },
+            { column_name: "last_error_hash" },
             // client_onboarding_submissions columns (others are listed above)
             { column_name: "contact_status" },
             { column_name: "project_number" },
@@ -132,7 +146,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(12);
+    expect(mockDb.execute).toHaveBeenCalledTimes(14);
   });
 
   it("throws when a table is missing required columns", async () => {

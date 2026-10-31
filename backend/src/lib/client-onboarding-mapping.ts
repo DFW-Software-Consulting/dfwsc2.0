@@ -6,7 +6,13 @@
 // by exact title. A missing name or title stops the automation with one error log
 // instead of writing into the wrong cells.
 
-import { mergeContactVCard, nameParts, revStamp, serialize } from "./nextcloud-contacts";
+import {
+  accountEmailLines,
+  mergeContactVCard,
+  nameParts,
+  revStamp,
+  serialize,
+} from "./nextcloud-contacts";
 import {
   escapeVCardText,
   findOptionId,
@@ -294,7 +300,12 @@ export function clientContactUid(formId: number, submissionId: number): string {
 }
 
 /** A new card with only the fields the submission gave; ORG is always the company. */
-export function buildClientVCard(intake: Intake, uid: string, now: Date = new Date()): string {
+export function buildClientVCard(
+  intake: Intake,
+  uid: string,
+  now: Date = new Date(),
+  accountEmail?: string
+): string {
   const fn = intake.contactName ?? intake.company;
   const { family, given } = nameParts(intake.contactName ?? "");
   const lines = [
@@ -306,7 +317,14 @@ export function buildClientVCard(intake: Intake, uid: string, now: Date = new Da
     `N:${escapeVCardText(family)};${escapeVCardText(given)};;;`,
     `ORG:${escapeVCardText(intake.company)}`,
   ];
-  if (intake.email) lines.push(`EMAIL;TYPE=WORK:${escapeVCardText(intake.email)}`);
+  // The email the billing Customer follows is labelled "Account email"; when it is the contact
+  // email as well, that one entry carries the label instead of a second, identical one.
+  const sameEmail =
+    accountEmail !== undefined &&
+    intake.email !== undefined &&
+    accountEmail.trim().toLowerCase() === intake.email.trim().toLowerCase();
+  if (intake.email && !sameEmail) lines.push(`EMAIL;TYPE=WORK:${escapeVCardText(intake.email)}`);
+  if (accountEmail) lines.push(...accountEmailLines(accountEmail, "item1"));
   if (intake.phone) lines.push(`TEL;TYPE=WORK:${escapeVCardText(intake.phone)}`);
   lines.push("CATEGORIES:Client", `REV:${revStamp(now)}`, "END:VCARD");
   return serialize(lines);

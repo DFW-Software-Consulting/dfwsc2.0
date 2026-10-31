@@ -556,6 +556,10 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
   const { api } = ctx;
   const ids = { formId: ctx.formId, submissionId: row.submissionId };
   const uid = clientContactUid(ctx.formId, row.submissionId);
+  // A valid billing email is also written to the card as "Account email", which the contact ->
+  // billing Customer sync (lib/contact-stripe-sync.ts) reads.
+  const billing = intake.billingEmail?.trim();
+  const accountEmail = billing && isValidEmail(billing) ? billing : undefined;
   const { own, matches } = await ctx.contacts.find(intake, uid);
   if (own) {
     // Created by an earlier attempt of this submission whose result was not saved.
@@ -584,6 +588,7 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
     const merged = mergeContactVCard(card.data, intake, new Date(), {
       additive: true,
       category: "Client",
+      accountEmail,
     });
     const contactUid = vCardUid(card.data);
     try {
@@ -612,7 +617,7 @@ async function contactStep(row: SubmissionRow, intake: Intake, ctx: ProcessingCo
     );
     return;
   }
-  await api.createCard(uid, buildClientVCard(intake, uid));
+  await api.createCard(uid, buildClientVCard(intake, uid, new Date(), accountEmail));
   ctx.contacts.invalidate(api.targets.addressbookPath);
   await saveUnderClaim(row, { contactStatus: "created", contactUid: uid });
   ctx.logger.info(
