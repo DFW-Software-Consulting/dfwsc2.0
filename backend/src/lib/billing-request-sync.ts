@@ -521,8 +521,9 @@ async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<voi
   const tooOld =
     row.submittedAt !== null &&
     Date.now() - row.submittedAt.getTime() > ctx.settings.maxAgeHours * 3_600_000;
-  const hasSavedId =
-    row.stripeInvoiceId !== null || row.stripeProductId !== null || row.stripeScheduleId !== null;
+  // Only a billing object counts as found: an invoice or a schedule. A saved Product is an orphan
+  // that bills nothing and does not rescue an old request.
+  const hasSavedId = row.stripeInvoiceId !== null || row.stripeScheduleId !== null;
   if (tooOld && row.stripeStartedAt === null && !hasSavedId) {
     throw new BillingRequestInvalidError("request_expired");
   }

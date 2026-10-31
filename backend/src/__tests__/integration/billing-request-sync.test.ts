@@ -1466,6 +1466,24 @@ describe("the age limit holds unless an object is actually found", () => {
     expect(cell(resultRows()[0], "Status")).toBe("Expired");
   });
 
+  it("does not let a saved Product alone rescue an old plan", async () => {
+    stripe.fail("subscriptionSchedules.create", apiError(503));
+    await submit(186, recurring());
+    expect(await sub(186)).toMatchObject({
+      status: "pending",
+      stripeProductId: expect.stringMatching(/^prod_/),
+      stripeScheduleId: null,
+    });
+    await ageBy(186, 4);
+    await makeDue(186);
+    await cycle();
+    expect(await sub(186)).toMatchObject({ status: "failed", lastErrorCode: "request_expired" });
+    expect(stripe.callsTo("subscriptionSchedules.list").length).toBeGreaterThan(0);
+    expect(stripe.callsTo("subscriptionSchedules.create")).toHaveLength(1); // the failed first one only
+    expect(stripe.created("subscriptionSchedules.create")).toHaveLength(0);
+    expect(cell(resultRows()[0], "Status")).toBe("Expired");
+  });
+
   it("still adopts an object that exists, at any age: a one-off invoice", async () => {
     stripe.fail("invoices.create", connectionError(), 1, true);
     await submit(183, ONE_OFF);
