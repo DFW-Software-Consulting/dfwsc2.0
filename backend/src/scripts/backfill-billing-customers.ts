@@ -102,17 +102,29 @@ export function describeFailure(error: unknown): string {
     }
     return reasonForStatus(error.statusCode ?? error.type);
   }
-  // BillingCustomerStripeError (from linkPinnedBillingCustomer): code "stripe.customer:<status>".
+  // BillingCustomerStripeError (from linkPinnedBillingCustomer): code "stripe.customer:<status|type>".
+  // A numeric or "deleted" suffix says what happened; otherwise (connection error, internal
+  // error) the retryable flag tells a transient failure from a permanent one.
   if (error instanceof Error && error.name === "BillingCustomerStripeError") {
     const suffix = error.message.split(":").pop() ?? "";
-    return reasonForStatus(/^\d+$/.test(suffix) ? Number(suffix) : suffix);
+    if (/^\d+$/.test(suffix)) return reasonForStatus(Number(suffix));
+    if (suffix === "deleted") return reasonForStatus("deleted");
+    if ((error as { retryable?: boolean }).retryable) return reasonForStatus(503);
+    return reasonForStatus(suffix);
   }
   return "unexpected error";
 }
 
+/** Reads all of stdin as a stream (readFileSync(0) can fail with EAGAIN on a pipe). */
+async function readStdinStream(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export interface RunOptions {
   /** Reads the CSV from stdin when --csv is "-". */
-  readStdin?: () => string;
+  readStdin?: () => string | Promise<string>;
 }
 
 export async function run(args: string[], options: RunOptions = {}): Promise<number> {
@@ -127,8 +139,13 @@ export async function run(args: string[], options: RunOptions = {}): Promise<num
     out(helpText());
     return 1;
   }
-  const readStdin = options.readStdin ?? (() => readFileSync(0, "utf8"));
-  const entries = parseCsv(csvPath === "-" ? readStdin() : readFileSync(csvPath, "utf8"));
+  const readStdin = options.readStdin ?? readStdinStream;
+  const fromStdin = csvPath === "-";
+  const entries = parseCsv(fromStdin ? await readStdin() : readFileSync(csvPath, "utf8"));
+  if (fromStdin && entries.size === 0) {
+    out("no CSV rows on stdin; did you pass -i to docker exec?");
+    return 1;
+  }
 
   const [{ db }, { billingCustomers, clientOnboardingSubmissions }, billing, { stripe }] =
     await Promise.all([

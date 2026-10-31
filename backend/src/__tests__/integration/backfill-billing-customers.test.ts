@@ -63,6 +63,22 @@ describe("backfill script: arguments", () => {
     expect(list).not.toHaveBeenCalled();
   });
 
+  it("exits non-zero with a hint when stdin has no CSV rows", async () => {
+    expect(await run(["--csv", "-"], csv(" \n"))).toBe(1);
+    expect(output()).toContain("no CSV rows on stdin; did you pass -i to docker exec?");
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("reads the CSV from the process stdin stream by default", async () => {
+    const { Readable } = await import("node:stream");
+    const stream = Readable.from([Buffer.from("CP-004,a@b.co\n"), Buffer.from("CP-005,c@d.co\n")]);
+    const spy = vi.spyOn(process, "stdin", "get").mockReturnValue(stream as never);
+    await seed("CP-004", 4, "Folder");
+    expect(await run(["--csv", "-"])).toBe(0);
+    expect(output()).toContain("CP-004: would create a Customer");
+    spy.mockRestore();
+  });
+
   it("prints help and exits 1 when --csv is missing", async () => {
     expect(await run([])).toBe(1);
     expect(output()).toContain("Usage:");
@@ -201,6 +217,19 @@ describe("backfill script: pinned Customer in a dry run", () => {
     );
     await run(["--csv", "-"], csv(pinned));
     expect(output()).toContain("unreachable or busy");
+  });
+
+  it("reports a network failure on a pinned Customer under --apply as unreachable", async () => {
+    await seed("CP-004", 4, "Folder");
+    retrieve.mockRejectedValue(
+      new Stripe.errors.StripeConnectionError({
+        type: "api_error",
+        message: "socket hang up",
+      } as never)
+    );
+    expect(await run(["--csv", "-", "--apply"], csv(pinned))).toBe(1);
+    expect(output()).toContain("unreachable or busy");
+    expect(output()).not.toContain("Stripe error");
   });
 
   it("describes unknown errors without leaking details", () => {
