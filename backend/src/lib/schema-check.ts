@@ -83,6 +83,31 @@ const REQUIRED_TABLES: TableColumns[] = [
       "updated_at",
     ],
   },
+  {
+    table: "sales_lead_submissions",
+    columns: [
+      "form_id",
+      "submission_id",
+      "status",
+      "attempts",
+      "next_attempt_at",
+      "claimed_at",
+      "claim_token",
+      "last_error_code",
+      "table_row_id",
+      "contact_uid",
+      "folder_name",
+      "folder_file_id",
+      "links_backfilled_at",
+      "completed_at",
+      "created_at",
+      "updated_at",
+    ],
+  },
+  {
+    table: "sales_lead_sync_state",
+    columns: ["form_id", "baseline_submission_id", "baselined_at"],
+  },
 ];
 
 export async function verifyDatabaseSchema(): Promise<void> {

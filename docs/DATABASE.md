@@ -60,6 +60,18 @@ Key-value store for system-wide configuration.
 - **Fields**: `key` (PK), `value`, `updatedAt`.
 - Example key: `company_name` (used in onboarding emails).
 
+### `sales_lead_submissions`
+Progress of the Nextcloud New Lead automation, one row per Forms submission (see [BACKEND.md](./BACKEND.md), "Sales Lead Automation").
+
+- **PK**: (`formId`, `submissionId`).
+- **Statuses**: `pending` → `completed`, or `failed` (permanent error, or 10 attempts used).
+- **Step outputs**: `tableRowId`, `contactUid`, `folderName`, `folderFileId`, `linksBackfilledAt`, each saved as its step succeeds so retries resume.
+- **Retry/lease**: `attempts`, `nextAttemptAt`, `lastErrorCode` (PII-free), `claimedAt` + `claimToken`.
+- Stores no form answers.
+
+### `sales_lead_sync_state`
+Per-form baseline: `baselineSubmissionId` is the highest submission id when the automation first ran; earlier submissions are never processed.
+
 ## 3. Tooling & Migrations
 - **Schema Changes**: Edit `backend/src/db/schema.ts`.
 - **Generate**: `npm run db:generate` — creates SQL migration files in `backend/drizzle/`.
