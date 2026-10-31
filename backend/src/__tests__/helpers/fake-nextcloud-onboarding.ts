@@ -1,0 +1,513 @@
+// In-memory stand-in for the Nextcloud APIs the client onboarding calls: Forms v3,
+// Tables v1, CardDAV, WebDAV and Collectives. Column ids, option ids and the
+// existing CP-001/CP-002 rows mirror the live instance (Tables 2.4, read
+// 2026-10-31). Install it with vi.stubGlobal("fetch", fake.fetch).
+
+export const ONB_NC_BASE = "https://cloud.test";
+export const ONB_NC_USER = "dfwsc-admin";
+export const ONB_FORM_ID = 2;
+export const ONB_FORM_HASH = "9KaxpC5GXeGoWY44";
+export const ONB_PROJECTS_TABLE = 6;
+export const ONB_PIPELINE_TABLE = 8;
+export const ONB_ADDRESSBOOK = "dfwsc-sales_shared_by_messyginger0804";
+export const ONB_CLIENTS_FOLDER = "clients";
+export const ONB_COLLECTIVE_ID = 1;
+export const ONB_PROJECTS_PAGE_ID = 4562;
+export const ONB_WEBHOOK_SECRET = "s3cret-for-tests-0123456789abcdefghij";
+
+export const onboardingEnv = (overrides: Record<string, string | undefined> = {}) =>
+  ({
+    CLIENT_ONBOARDING_ENABLED: "true",
+    NEXTCLOUD_BASE_URL: ONB_NC_BASE,
+    NEXTCLOUD_USERNAME: ONB_NC_USER,
+    NEXTCLOUD_APP_PASSWORD: "app-password-for-tests",
+    CLIENT_ONBOARDING_FORM_ID: String(ONB_FORM_ID),
+    CLIENT_ONBOARDING_PROJECTS_TABLE_ID: String(ONB_PROJECTS_TABLE),
+    CLIENT_ONBOARDING_PIPELINE_TABLE_ID: String(ONB_PIPELINE_TABLE),
+    CLIENT_ONBOARDING_ADDRESSBOOK_PATH: ONB_ADDRESSBOOK,
+    CLIENT_ONBOARDING_CLIENTS_FOLDER: ONB_CLIENTS_FOLDER,
+    CLIENT_ONBOARDING_COLLECTIVE_ID: String(ONB_COLLECTIVE_ID),
+    CLIENT_ONBOARDING_WEBHOOK_SECRET: ONB_WEBHOOK_SECRET,
+    ...overrides,
+  }) as NodeJS.ProcessEnv;
+
+export const INTAKE_QUESTIONS = {
+  company: 201,
+  contact_name: 202,
+  email: 203,
+  phone: 204,
+  project_name: 205,
+  start_date: 206,
+  target_date: 207,
+  summary: 208,
+  lead_link: 209,
+} as const;
+
+export type IntakeAnswers = Partial<Record<keyof typeof INTAKE_QUESTIONS, string>>;
+
+export const PROJECT_COLUMNS = {
+  "Project Code": 26,
+  "Project Name": 27,
+  Status: 28,
+  Owner: 29,
+  "Start Date": 30,
+  "Target Date": 31,
+  "Project Folder": 32,
+  "Project Page": 33,
+  "Intake Submission": 34,
+  Summary: 35,
+} as const;
+
+export const PIPELINE_COLUMNS = {
+  Company: 46,
+  "Contact Name": 47,
+  Stage: 49,
+  "Cerebo Project": 57,
+  "Lead Ref": 59,
+} as const;
+
+export function projectColumns() {
+  return [
+    { id: 26, title: "Project Code", type: "text", subtype: "line" },
+    { id: 27, title: "Project Name", type: "text", subtype: "line" },
+    {
+      id: 28,
+      title: "Status",
+      type: "selection",
+      subtype: "",
+      selectionOptions: ["Intake", "Active", "Blocked", "Complete", "Archived"].map(
+        (label, id) => ({ id, label })
+      ),
+    },
+    { id: 29, title: "Owner", type: "usergroup", subtype: "" },
+    { id: 30, title: "Start Date", type: "datetime", subtype: "date" },
+    { id: 31, title: "Target Date", type: "datetime", subtype: "date" },
+    { id: 32, title: "Project Folder", type: "text", subtype: "link" },
+    { id: 33, title: "Project Page", type: "text", subtype: "link" },
+    { id: 34, title: "Intake Submission", type: "text", subtype: "link" },
+    { id: 35, title: "Summary", type: "text", subtype: "rich" },
+  ];
+}
+
+export function pipelineColumns() {
+  return [
+    { id: 59, title: "Lead Ref", type: "text", subtype: "line" },
+    { id: 46, title: "Company", type: "text", subtype: "line" },
+    { id: 47, title: "Contact Name", type: "text", subtype: "line" },
+    {
+      id: 49,
+      title: "Stage",
+      type: "selection",
+      subtype: "",
+      selectionOptions: [
+        "New Lead",
+        "Contacted",
+        "Qualified",
+        "Proposal Sent",
+        "Won",
+        "Lost",
+        "Nurture",
+      ].map((label, id) => ({ id, label })),
+    },
+    { id: 57, title: "Cerebo Project", type: "text", subtype: "link" },
+  ];
+}
+
+interface RecordedRequest {
+  method: string;
+  /** Decoded path, without the query string. */
+  path: string;
+  body: string;
+  headers: Record<string, string>;
+}
+
+interface Fault {
+  match: (req: RecordedRequest) => boolean;
+  status?: number;
+  timeout?: boolean;
+  /** With `timeout`: the request takes effect first (a lost response). */
+  afterApply?: boolean;
+  times: number;
+}
+
+interface Row {
+  id: number;
+  tableId: number;
+  data: Map<number, unknown>;
+}
+
+interface Card {
+  data: string;
+  etag: number;
+}
+
+interface Page {
+  id: number;
+  parentId: number;
+  title: string;
+  fileName: string;
+  filePath: string;
+}
+
+interface Submission {
+  userId: string;
+  answers: IntakeAnswers;
+}
+
+const FORMS = `/ocs/v2.php/apps/forms/api/v3/forms/${ONB_FORM_ID}`;
+const TABLES = "/index.php/apps/tables/api/1";
+const CARDS = `/remote.php/dav/addressbooks/users/${ONB_NC_USER}/${ONB_ADDRESSBOOK}/`;
+const FILES = `/remote.php/dav/files/${ONB_NC_USER}/`;
+const COLLECTIVES = "/ocs/v2.php/apps/collectives/api/v1.0/collectives";
+/** Where the collective is mounted in the service account's files. */
+export const ONB_COLLECTIVE_PATH = "Collectives/Cerebo Pilot";
+
+function xmlEscape(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\r/g, "&#13;");
+}
+
+export class FakeOnboardingNextcloud {
+  readonly requests: RecordedRequest[] = [];
+  submissions = new Map<number, Submission>();
+  questions: { id: number; name: string; text: string }[] = Object.entries(INTAKE_QUESTIONS).map(
+    ([name, id]) => ({ id, name, text: name })
+  );
+  columns: Record<number, Record<string, unknown>[]> = {
+    [ONB_PROJECTS_TABLE]: projectColumns(),
+    [ONB_PIPELINE_TABLE]: pipelineColumns(),
+  };
+  rows: Row[] = [
+    {
+      id: 27,
+      tableId: ONB_PROJECTS_TABLE,
+      data: new Map<number, unknown>([
+        [26, "CP-001"],
+        [27, "Pilot Workspace Validation"],
+        [28, 1],
+      ]),
+    },
+    {
+      id: 28,
+      tableId: ONB_PROJECTS_TABLE,
+      data: new Map<number, unknown>([
+        [26, "CP-002"],
+        [27, "Internal Knowledge Cleanup"],
+        [28, 0],
+      ]),
+    },
+  ];
+  cards = new Map<string, Card>();
+  folders = new Map<string, number>([[ONB_CLIENTS_FOLDER, 700]]);
+  files = new Map<string, string>();
+  collectiveSlug: string | null = "Cerebo-Pilot";
+  /** Page JSON leaves out collectivePath when false (collective not mounted). */
+  collectiveMounted = true;
+  pages: Page[] = [
+    { id: 4558, parentId: 0, title: "Landing page", fileName: "Readme.md", filePath: "" },
+    { id: 4562, parentId: 4558, title: "Projects", fileName: "Readme.md", filePath: "Projects" },
+    {
+      id: 4565,
+      parentId: 4562,
+      title: "CP-001 — Pilot Workspace Validation",
+      fileName: "CP-001 — Pilot Workspace Validation.md",
+      filePath: "Projects",
+    },
+  ];
+  latencyMs = 0;
+  /** Row updates still to answer 200 without storing anything. */
+  droppedRowUpdates = 0;
+  private faults: Fault[] = [];
+  private nextRowId = 1000;
+  private nextFileId = 900;
+  private nextPageId = 5000;
+  private nextEtag = 1;
+
+  addSubmission(id: number, answers: IntakeAnswers, userId = "messyginger0804") {
+    this.submissions.set(id, { userId, answers });
+  }
+
+  addLead(id: number, company: string, extra: Record<number, unknown> = {}) {
+    this.rows.push({
+      id,
+      tableId: ONB_PIPELINE_TABLE,
+      data: new Map<number, unknown>([
+        [46, company],
+        [49, 0],
+        ...Object.entries(extra).map(([k, v]) => [Number(k), v] as [number, unknown]),
+      ]),
+    });
+  }
+
+  addCard(name: string, data: string) {
+    this.cards.set(name, { data, etag: this.nextEtag++ });
+  }
+
+  fail(fault: Omit<Fault, "times"> & { times?: number }) {
+    this.faults.push({ times: 1, ...fault });
+  }
+
+  row(id: number): Row | undefined {
+    return this.rows.find((r) => r.id === id);
+  }
+
+  projectRows(): Row[] {
+    return this.rows.filter((r) => r.tableId === ONB_PROJECTS_TABLE);
+  }
+
+  rowCell(rowId: number, columnId: number): unknown {
+    return this.row(rowId)?.data.get(columnId);
+  }
+
+  /** URL stored in a link cell, or undefined. */
+  linkUrl(rowId: number, columnId: number): string | undefined {
+    const raw = this.rowCell(rowId, columnId);
+    return typeof raw === "string" ? (JSON.parse(raw) as { value: string }).value : undefined;
+  }
+
+  writes(): RecordedRequest[] {
+    return this.requests.filter((r) => !["GET", "PROPFIND", "REPORT"].includes(r.method));
+  }
+
+  count(method: string, pathPart: string): number {
+    return this.requests.filter((r) => r.method === method && r.path.includes(pathPart)).length;
+  }
+
+  fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
+    const url = new URL(String(input));
+    const req: RecordedRequest = {
+      method: init.method ?? "GET",
+      path: decodeURIComponent(url.pathname),
+      body: typeof init.body === "string" ? init.body : "",
+      headers: Object.fromEntries(
+        Object.entries((init.headers ?? {}) as Record<string, string>).map(([k, v]) => [
+          k.toLowerCase(),
+          v,
+        ])
+      ),
+    };
+    this.requests.push(req);
+    if (this.latencyMs) await new Promise((resolve) => setTimeout(resolve, this.latencyMs));
+
+    const fault = this.faults.find((f) => f.times > 0 && f.match(req));
+    if (fault) {
+      fault.times--;
+      if (fault.timeout) {
+        if (fault.afterApply) this.handle(req, url);
+        throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      }
+      return new Response("", { status: fault.status ?? 500 });
+    }
+    return this.handle(req, url);
+  };
+
+  private json(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  private ocs(data: unknown) {
+    return this.json({ ocs: { meta: { status: "ok" }, data } });
+  }
+
+  private isLinkColumn(tableId: number, columnId: number): boolean {
+    return this.columns[tableId]?.some((c) => c.id === columnId && c.subtype === "link") ?? false;
+  }
+
+  private storedValue(tableId: number, columnId: number, value: unknown): unknown {
+    const link = typeof value === "string" ? /^(.*) \((\S+)\)$/.exec(value) : null;
+    if (!this.isLinkColumn(tableId, columnId) || !link) return value;
+    return JSON.stringify({ title: link[1], value: link[2], providerId: "url" }).replace(
+      /\//g,
+      "\\/"
+    );
+  }
+
+  private submissionData(id: number) {
+    const sub = this.submissions.get(id) as Submission;
+    const answers = Object.entries(sub.answers).map(([name, text], i) => ({
+      id: id * 100 + i,
+      submissionId: id,
+      questionId: INTAKE_QUESTIONS[name as keyof typeof INTAKE_QUESTIONS],
+      text,
+    }));
+    return { id, formId: ONB_FORM_ID, userId: sub.userId, timestamp: id, answers };
+  }
+
+  private pageJson(p: Page) {
+    return {
+      ...p,
+      slug: p.title.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, ""),
+      collectivePath: this.collectiveMounted ? ONB_COLLECTIVE_PATH : null,
+    };
+  }
+
+  private rowJson(r: Row) {
+    return {
+      id: r.id,
+      tableId: r.tableId,
+      data: [...r.data]
+        .filter(([, value]) => value !== null && value !== undefined && value !== "")
+        .map(([columnId, value]) => ({ columnId, value })),
+    };
+  }
+
+  private handle(req: RecordedRequest, url: URL): Response {
+    const { method, path } = req;
+    const limit = Number(url.searchParams.get("limit") ?? 50);
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+
+    // Forms
+    if (method === "GET" && path === `${FORMS}/submissions`) {
+      const ids = [...this.submissions.keys()].sort((a, b) => b - a).slice(offset, offset + limit);
+      return this.ocs({ submissions: ids.map((id) => this.submissionData(id)) });
+    }
+    const single = new RegExp(`^${FORMS}/submissions/(\\d+)$`).exec(path);
+    if (method === "GET" && single) {
+      const id = Number(single[1]);
+      if (!this.submissions.has(id)) return this.json({ ocs: { meta: {}, data: [] } }, 404);
+      return this.ocs(this.submissionData(id));
+    }
+    if (method === "GET" && path === FORMS) {
+      return this.ocs({ id: ONB_FORM_ID, hash: ONB_FORM_HASH, questions: this.questions });
+    }
+
+    // Tables
+    const columns = new RegExp(`^${TABLES}/tables/(\\d+)/columns$`).exec(path);
+    if (method === "GET" && columns) {
+      const cols = this.columns[Number(columns[1])];
+      return cols ? this.json(cols) : this.json({ message: "not found" }, 404);
+    }
+    const tableRows = new RegExp(`^${TABLES}/tables/(\\d+)/rows$`).exec(path);
+    if (tableRows) {
+      const tableId = Number(tableRows[1]);
+      if (method === "GET") {
+        return this.json(
+          this.rows
+            .filter((r) => r.tableId === tableId)
+            .slice(offset, offset + limit)
+            .map((r) => this.rowJson(r))
+        );
+      }
+      if (method === "POST") {
+        const { data } = JSON.parse(req.body) as { data: Record<string, unknown> };
+        const row: Row = {
+          id: this.nextRowId++,
+          tableId,
+          data: new Map(Object.entries(data).map(([k, v]) => [Number(k), v])),
+        };
+        this.rows.push(row);
+        return this.json({ id: row.id, tableId });
+      }
+    }
+    const oneRow = new RegExp(`^${TABLES}/rows/(\\d+)$`).exec(path);
+    if (oneRow) {
+      const row = this.row(Number(oneRow[1]));
+      if (!row) return this.json({ message: "not found" }, 404);
+      if (method === "GET") return this.json(this.rowJson(row));
+      if (method === "PUT") {
+        const { data } = JSON.parse(req.body) as { data: Record<string, unknown> };
+        // Like Tables 2.4: a JSON link value gets a 200 and nothing is stored.
+        const jsonLink = Object.entries(data).some(
+          ([k, v]) =>
+            this.isLinkColumn(row.tableId, Number(k)) &&
+            typeof v === "string" &&
+            v.trim().startsWith("{")
+        );
+        if (this.droppedRowUpdates > 0 || jsonLink) {
+          this.droppedRowUpdates = Math.max(this.droppedRowUpdates - 1, 0);
+          return this.json({ id: row.id });
+        }
+        for (const [k, v] of Object.entries(data)) {
+          row.data.set(Number(k), this.storedValue(row.tableId, Number(k), v));
+        }
+        return this.json({ id: row.id });
+      }
+    }
+
+    // CardDAV
+    if (method === "REPORT" && path === CARDS) {
+      const responses = [...this.cards].map(
+        ([name, card]) =>
+          `<d:response><d:href>${CARDS}${encodeURIComponent(name)}</d:href><d:propstat><d:prop><d:getetag>&quot;${card.etag}&quot;</d:getetag><card:address-data>${xmlEscape(card.data)}</card:address-data></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>`
+      );
+      return new Response(
+        `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">${responses.join("")}</d:multistatus>`,
+        { status: 207 }
+      );
+    }
+    if (method === "PUT" && path.startsWith(CARDS)) {
+      const name = path.slice(CARDS.length);
+      const existing = this.cards.get(name);
+      if (existing && req.headers["if-none-match"] === "*")
+        return new Response("", { status: 412 });
+      const ifMatch = req.headers["if-match"];
+      if (ifMatch && (!existing || ifMatch !== `"${existing.etag}"`)) {
+        return new Response("", { status: 412 });
+      }
+      this.cards.set(name, { data: req.body, etag: this.nextEtag++ });
+      return new Response(null, { status: existing ? 204 : 201 });
+    }
+
+    // WebDAV
+    if (path.startsWith(FILES)) {
+      const rel = path.slice(FILES.length).replace(/\/+$/, "");
+      if (method === "PROPFIND") {
+        const fileId = this.folders.get(rel);
+        if (fileId === undefined) return new Response("", { status: 404 });
+        return new Response(
+          `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:response><d:propstat><d:prop><oc:fileid>${fileId}</oc:fileid></d:prop></d:propstat></d:response></d:multistatus>`,
+          { status: 207 }
+        );
+      }
+      if (method === "MKCOL") {
+        if (this.folders.has(rel)) return new Response("", { status: 405 });
+        const parent = rel.split("/").slice(0, -1).join("/");
+        if (!this.folders.has(parent)) return new Response("", { status: 409 });
+        this.folders.set(rel, this.nextFileId++);
+        return new Response("", { status: 201 });
+      }
+      if (method === "PUT") {
+        this.files.set(rel, req.body);
+        return new Response(null, { status: 204 });
+      }
+    }
+
+    // Collectives
+    if (method === "GET" && path === COLLECTIVES) {
+      return this.ocs({
+        collectives: [{ id: ONB_COLLECTIVE_ID, name: "Cerebo Pilot", slug: this.collectiveSlug }],
+      });
+    }
+    if (method === "GET" && path === `${COLLECTIVES}/${ONB_COLLECTIVE_ID}/pages`) {
+      return this.ocs({ pages: this.pages.map((p) => this.pageJson(p)) });
+    }
+    const page = new RegExp(`^${COLLECTIVES}/${ONB_COLLECTIVE_ID}/pages/(\\d+)$`).exec(path);
+    if (page && method === "GET") {
+      const found = this.pages.find((p) => p.id === Number(page[1]));
+      return found ? this.ocs({ page: this.pageJson(found) }) : this.json({}, 404);
+    }
+    if (page && method === "POST") {
+      const parent = this.pages.find((p) => p.id === Number(page[1]));
+      if (!parent) return this.json({}, 404);
+      const { title } = JSON.parse(req.body) as { title: string };
+      const created: Page = {
+        id: this.nextPageId++,
+        parentId: parent.id,
+        title,
+        fileName: `${title}.md`,
+        filePath: parent.filePath,
+      };
+      this.pages.push(created);
+      this.files.set(`${ONB_COLLECTIVE_PATH}/${created.filePath}/${created.fileName}`, "");
+      return this.ocs({ page: this.pageJson(created) });
+    }
+
+    return new Response("", { status: 501 });
+  }
+}
