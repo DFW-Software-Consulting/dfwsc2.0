@@ -24,6 +24,7 @@ import {
   resolveDefaultPaymentSuccessUrl,
   resolveFrontendOrigin,
 } from "../lib/config";
+import { getChargeableAccountId } from "../lib/connected-account";
 import {
   PAYMENT_CREATE_BUCKET_CAPACITY,
   PAYMENT_CREATE_REFILL_PER_MINUTE,
@@ -44,6 +45,12 @@ import {
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
 import { mapStripeError } from "../lib/stripe-errors";
+import {
+  CURRENCY_REGEX,
+  lineItemSchema,
+  MAX_SAFE_AMOUNT,
+  validateStripeMetadata,
+} from "../lib/stripe-input";
 import { parseBody, validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
 import { applyCheckoutSessionOutcome } from "./webhooks";
 
@@ -310,67 +317,6 @@ const STRIPE_CIRCUIT_OPEN_ERROR = {
   code: "STRIPE_CIRCUIT_OPEN",
 };
 
-// ── Strict line-item schema ────────────────────────────────────────────────────
-// Only inline price_data is accepted. Stripe price IDs (platform-scoped) are
-// incompatible with connected-account Checkout sessions and are rejected.
-const CURRENCY_REGEX = /^[a-z]{3}$/;
-const MAX_SAFE_AMOUNT = 99_999_999; // Stripe max for most currencies is 99999999
-
-const lineItemSchema = z.object({
-  price_data: z.object({
-    currency: z
-      .string()
-      .transform((v) => v.toLowerCase())
-      .refine((v) => CURRENCY_REGEX.test(v), {
-        message: "currency must be a 3-letter ISO code (e.g. 'usd').",
-      }),
-    product_data: z.object({
-      name: z.string().min(1, "product name is required.").max(200),
-      description: z.string().max(1000).optional(),
-    }),
-    unit_amount: z
-      .number()
-      .int("unit_amount must be an integer.")
-      .positive("unit_amount must be positive.")
-      .max(MAX_SAFE_AMOUNT, `unit_amount must not exceed ${MAX_SAFE_AMOUNT}.`),
-  }),
-  quantity: z
-    .number()
-    .int("quantity must be an integer.")
-    .positive("quantity must be positive.")
-    .max(999_999)
-    .default(1),
-});
-
-// ── Metadata validation ────────────────────────────────────────────────────────
-// Stripe allows max 50 metadata keys, each key max 40 chars, each value max 500 chars.
-const STRIPE_METADATA_MAX_KEYS = 50;
-const STRIPE_METADATA_MAX_KEY_LENGTH = 40;
-const STRIPE_METADATA_MAX_VALUE_LENGTH = 500;
-
-function validateStripeMetadata(
-  metadata: Record<string, string> | undefined
-): Record<string, string> {
-  if (!metadata) return {};
-  const keys = Object.keys(metadata);
-  if (keys.length > STRIPE_METADATA_MAX_KEYS) {
-    throw errors.badRequest(`metadata must not exceed ${STRIPE_METADATA_MAX_KEYS} keys.`);
-  }
-  for (const key of keys) {
-    if (key.length > STRIPE_METADATA_MAX_KEY_LENGTH) {
-      throw errors.badRequest(
-        `metadata key '${key.slice(0, 20)}...' exceeds ${STRIPE_METADATA_MAX_KEY_LENGTH} characters.`
-      );
-    }
-    if (metadata[key].length > STRIPE_METADATA_MAX_VALUE_LENGTH) {
-      throw errors.badRequest(
-        `metadata value for '${key}' exceeds ${STRIPE_METADATA_MAX_VALUE_LENGTH} characters.`
-      );
-    }
-  }
-  return metadata;
-}
-
 const paymentCreateBodySchema = z.object({
   amount: z.number().optional(),
   currency: z
@@ -490,7 +436,8 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         throw errors.notFound("Client");
       }
 
-      if (!client.stripeAccountId || !client.chargesEnabled) {
+      const stripeAccountId = getChargeableAccountId(client);
+      if (!stripeAccountId) {
         return reply.code(409).send({
           error: "Client Stripe account is not connected or cannot accept charges.",
           code: "ACCOUNT_NOT_CONNECTED",
@@ -504,7 +451,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
 
       const clientId = client.id;
-      const stripeAccountId = client.stripeAccountId;
 
       // Keys are scoped per client: namespace the key sent to Stripe so two
       // clients using the same key never collide on the platform. Stripe limits
