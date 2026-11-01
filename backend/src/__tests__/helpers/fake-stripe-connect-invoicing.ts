@@ -25,6 +25,17 @@ export const ALLOWED_CONNECT_CALLS = new Set([
   "invoices.list",
   "invoiceItems.create",
   "invoiceItems.list",
+  "invoices.finalizeInvoice",
+  "invoices.sendInvoice",
+  "invoices.voidInvoice",
+  "invoices.del",
+]);
+
+const LIFECYCLE_CALLS = new Set([
+  "invoices.finalizeInvoice",
+  "invoices.sendInvoice",
+  "invoices.voidInvoice",
+  "invoices.del",
 ]);
 
 /** Calls whose arguments are (params, options); the others take (id, params, options). */
@@ -320,6 +331,10 @@ export class FakeConnectInvoicingStripe {
       return { object: "list", data: data.slice(0, limit), has_more: data.length > limit };
     }
 
+    if (LIFECYCLE_CALLS.has(call)) {
+      return this.lifecycleCall(call, account, id as string, params, options, failure);
+    }
+
     // creates
     if (call === "invoices.create" && this.invoiceCreateGate) await this.invoiceCreateGate;
     const stored = key ? this.byKey.get(`${account}:${call}:${key}`) : undefined;
@@ -391,6 +406,75 @@ export class FakeConnectInvoicingStripe {
     if (key) this.byKey.set(`${account}:${call}:${key}`, { params: sent, result: created });
     if (failure?.mode === "lost_response") throw failure.error;
     return created;
+  }
+
+  /** finalizeInvoice, sendInvoice, voidInvoice and del, with Stripe's state rules. */
+  private lifecycleCall(
+    call: string,
+    account: string,
+    id: string,
+    params: Record<string, any> | undefined,
+    options: Record<string, any> | undefined,
+    failure: Failure | undefined
+  ): unknown {
+    const invoices = this.bucketOf(this.invoices, account);
+    const key = options?.idempotencyKey as string | undefined;
+    const sent = JSON.stringify(params);
+    const stored = key ? this.byKey.get(`${account}:${call}:${key}`) : undefined;
+    if (stored) {
+      this.assertSameParams(stored.params, sent);
+      if (stored.error) throw stored.error;
+      return stored.result;
+    }
+    const invoice = invoices.get(id);
+    if (!invoice) throw this.missing(id, "invoice");
+    if (failure?.mode === "stored_error") {
+      if (key) this.byKey.set(`${account}:${call}:${key}`, { params: sent, error: failure.error });
+      throw failure.error;
+    }
+    const now = Math.floor(Date.now() / 1000);
+    let result: Record<string, any>;
+    if (call === "invoices.finalizeInvoice") {
+      if (invoice.status !== "draft") throw this.invalidRequest("invoice is not a draft");
+      this.recompute(account, invoice);
+      this.counter += 1;
+      Object.assign(invoice, {
+        status: "open",
+        number: `FAKE-${String(this.counter).padStart(4, "0")}`,
+        due_date: now + (invoice.days_until_due ?? 30) * 86400,
+        hosted_invoice_url: `https://invoice.example/${invoice.id}`,
+        invoice_pdf: `https://invoice.example/${invoice.id}/pdf`,
+      });
+      invoice.status_transitions = { ...invoice.status_transitions, finalized_at: now };
+      result = { ...invoice };
+    } else if (call === "invoices.sendInvoice") {
+      if (invoice.status !== "open") throw this.invalidRequest("invoice is not open");
+      invoice.emailsSent = (invoice.emailsSent ?? 0) + 1;
+      result = { ...invoice };
+    } else if (call === "invoices.voidInvoice") {
+      if (invoice.status !== "open" && invoice.status !== "uncollectible") {
+        throw this.invalidRequest("invoice cannot be voided");
+      }
+      invoice.status = "void";
+      invoice.amount_remaining = 0;
+      invoice.status_transitions = { ...invoice.status_transitions, voided_at: now };
+      result = { ...invoice };
+    } else {
+      if (invoice.status !== "draft") throw this.invalidRequest("only drafts can be deleted");
+      invoices.delete(id);
+      for (const [itemId, item] of this.bucketOf(this.items, account)) {
+        if (item.invoice === id) this.bucketOf(this.items, account).delete(itemId);
+      }
+      result = { id, object: "invoice", deleted: true };
+    }
+    if (key) this.byKey.set(`${account}:${call}:${key}`, { params: sent, result });
+    if (failure?.mode === "lost_response") throw failure.error;
+    return result;
+  }
+
+  /** How many emails Stripe would have sent for an invoice. */
+  emailsSent(account: string, invoiceId: string): number {
+    return this.invoices.get(account)?.get(invoiceId)?.emailsSent ?? 0;
   }
 
   /** Stands in for lib/stripe's `stripe`: any resource, any method. */

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type Stripe from "stripe";
 import { z } from "zod";
 import type { connectInvoices } from "../db/schema";
 import { INVOICE_MAX_AMOUNT_CENTS, INVOICE_MAX_LINES } from "./constants";
@@ -11,9 +12,60 @@ import { MAX_SAFE_AMOUNT } from "./stripe-input";
 
 export type InvoiceRow = typeof connectInvoices.$inferSelect;
 
-/** Statuses after which nothing more can happen to an invoice, so it is never re-checked. */
-export const TERMINAL_INVOICE_STATUSES = ["paid", "void", "uncollectible", "deleted"] as const;
+/**
+ * Statuses after which nothing more can happen to an invoice, so it is never re-checked.
+ * `uncollectible` is not one: Stripe can still move it to paid or void.
+ */
+export const TERMINAL_INVOICE_STATUSES = ["paid", "void", "deleted"] as const;
 const INVOICE_STATUSES = ["draft", "open", "paid", "void", "uncollectible", "deleted"] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+/**
+ * For each status, the stored statuses it may overwrite. A row only ever moves forward (draft ->
+ * open -> uncollectible -> paid or void), so a late or replayed answer (an `open` read after the
+ * invoice was paid) can never move it back. Same status is allowed (amounts and URLs refresh).
+ */
+export const INVOICE_STATUS_PRIORS: Record<InvoiceStatus, readonly InvoiceStatus[]> = {
+  draft: ["draft"],
+  open: ["draft", "open"],
+  uncollectible: ["draft", "open", "uncollectible"],
+  paid: ["draft", "open", "uncollectible", "paid"],
+  void: ["draft", "open", "uncollectible", "void"],
+  deleted: ["draft", "deleted"],
+};
+
+const RESERVED_METADATA_PREFIX = "dfwsc_";
+
+/**
+ * The row columns that mirror a Stripe invoice. Used by every path that reads an invoice back from
+ * Stripe (lifecycle writes, the GET re-check). Returns null for an invoice without a status.
+ * `metadata` is the caller's own (the `dfwsc_` bookkeeping keys are not exposed).
+ */
+export function invoicePatchFromStripe(invoice: Stripe.Invoice) {
+  const status = invoice.status;
+  if (!status) return null;
+  const at = (s: number | null | undefined) => (s ? new Date(s * 1000) : undefined);
+  const t = invoice.status_transitions;
+  const metadata = Object.fromEntries(
+    Object.entries(invoice.metadata ?? {}).filter(([k]) => !k.startsWith(RESERVED_METADATA_PREFIX))
+  );
+  return {
+    status,
+    totalCents: invoice.total,
+    amountPaidCents: invoice.amount_paid,
+    amountRemainingCents: invoice.amount_remaining,
+    number: invoice.number ?? null,
+    dueDate: invoice.due_date ? new Date(invoice.due_date * 1000) : null,
+    hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+    invoicePdf: invoice.invoice_pdf ?? null,
+    description: invoice.description ?? null,
+    metadata,
+    ...(at(t?.finalized_at) ? { finalizedAt: at(t?.finalized_at) } : {}),
+    ...(at(t?.paid_at) ? { paidAt: at(t?.paid_at) } : {}),
+    ...(at(t?.voided_at) ? { voidedAt: at(t?.voided_at) } : {}),
+    lastSyncedAt: new Date(),
+  };
+}
 
 export const PROCESSING_FEE_DESCRIPTION = "Processing Fee";
 
@@ -180,6 +232,8 @@ export function serializeInvoice(row: InvoiceRow) {
     dueDate: iso(row.dueDate),
     hostedInvoiceUrl: row.hostedInvoiceUrl ?? null,
     invoicePdf: row.invoicePdf ?? null,
+    description: row.description ?? null,
+    metadata: (row.metadata as Record<string, string> | null) ?? {},
     createdAt: row.createdAt.toISOString(),
     finalizedAt: iso(row.finalizedAt),
     paidAt: iso(row.paidAt),
@@ -206,4 +260,24 @@ export function decodeCursor(cursor: string): { createdAt: Date; id: string } | 
   } catch {
     return null;
   }
+}
+
+/**
+ * How a failed `sendInvoice` call must be treated.
+ * - `rejected`: Stripe refused it for good (a 4xx that is not "retry shortly"): nothing was
+ *   emailed, so the attempt does not count towards the send cap.
+ * - `in_progress`: Stripe is still running the first request with this key (409): wait.
+ * - `unknown`: the email may or may not have gone out (429, 5xx, connection or timeout errors, an
+ *   open circuit, a busy limiter): the attempt stays pending and counts.
+ */
+export type SendErrorClass = "rejected" | "in_progress" | "unknown";
+
+export function classifySendError(err: unknown): SendErrorClass {
+  const e = err as { code?: unknown; statusCode?: unknown } | null;
+  if (e?.code === "idempotency_key_in_use" || e?.statusCode === 409) return "in_progress";
+  const status = e?.statusCode;
+  if (typeof status === "number" && status >= 400 && status < 500 && status !== 429) {
+    return "rejected";
+  }
+  return "unknown";
 }
