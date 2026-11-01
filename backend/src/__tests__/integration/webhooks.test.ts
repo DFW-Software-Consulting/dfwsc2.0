@@ -573,6 +573,97 @@ describe("POST /api/v1/webhooks/stripe", () => {
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
+  describe("error logs never carry database or customer values", () => {
+    const URL_SECRET = "https://invoice.stripe.com/i/acct_1/live_secret";
+    const EMAIL = "jane@customer.example";
+
+    function loggedText(spy: ReturnType<typeof vi.spyOn>) {
+      return JSON.stringify(spy.mock.calls);
+    }
+
+    it("logs only SQLSTATE and constraint for a non-retryable unique violation", async () => {
+      const pg = Object.assign(new Error(`duplicate key (${EMAIL})`), {
+        code: "23505",
+        severity: "ERROR",
+        detail: `Key (email)=(${EMAIL}) already exists.`,
+        constraint: "uq_email",
+        table: "connect_invoices",
+      });
+      const drizzleErr = new Error(`Failed query: insert ... params: ${URL_SECRET},${EMAIL}`, {
+        cause: pg,
+      });
+      drizzleErr.name = "DrizzleQueryError";
+      const retrieveMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+      retrieveMock.mockReset();
+      retrieveMock.mockRejectedValueOnce(drizzleErr);
+      const errorSpy = vi.spyOn(app.log, "error");
+      const event = makeStripeEvent("charge.dispute.created", {
+        id: "dp_unique_log",
+        charge: "ch_unique_log",
+      });
+      mockConstructEvent.mockReturnValueOnce(event);
+
+      const res = await sendWebhook(app, event);
+      expect(res.statusCode).toBe(200);
+
+      const call = errorSpy.mock.calls.find((c) => String(c[1]).includes("non-retryable"));
+      expect(call).toBeDefined();
+      expect(call?.[0]).toMatchObject({ errCode: "23505", errConstraint: "uq_email" });
+      const text = loggedText(errorSpy);
+      expect(text).not.toContain(EMAIL);
+      expect(text).not.toContain(URL_SECRET);
+      expect(text).not.toContain("Failed query");
+      expect(text).not.toContain("already exists");
+      errorSpy.mockRestore();
+      await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    });
+
+    it("logs only identifiers when signature verification fails", async () => {
+      const errorSpy = vi.spyOn(app.log, "error");
+      mockConstructEvent.mockImplementationOnce(() => {
+        throw Object.assign(new Error(`bad signature for ${EMAIL}`), {
+          type: "StripeSignatureVerificationError",
+        });
+      });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/webhooks/stripe",
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json", "stripe-signature": "bad" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(errorSpy.mock.calls[0][0]).toMatchObject({
+        errType: "StripeSignatureVerificationError",
+      });
+      expect(loggedText(errorSpy)).not.toContain(EMAIL);
+      errorSpy.mockRestore();
+    });
+
+    it("logs only identifiers when the account state retrieve fails", async () => {
+      const warnSpy = vi.spyOn(app.log, "warn");
+      const accountsRetrieveMock = stripe.accounts.retrieve as ReturnType<typeof vi.fn>;
+      accountsRetrieveMock.mockRejectedValueOnce(
+        Object.assign(new Error(`No such account for ${EMAIL}`), {
+          type: "StripeInvalidRequestError",
+          code: "resource_missing",
+        })
+      );
+      const event = makeStripeEvent("account.updated", { id: "acct_log_retrieve" });
+      mockConstructEvent.mockReturnValueOnce(event);
+
+      const res = await sendWebhook(app, event);
+      expect(res.statusCode).toBe(200);
+      const call = warnSpy.mock.calls.find((c) => String(c[1]).includes("skipping sync"));
+      expect(call?.[0]).toMatchObject({
+        errCode: "resource_missing",
+        accountId: "acct_log_retrieve",
+      });
+      expect(loggedText(warnSpy)).not.toContain(EMAIL);
+      warnSpy.mockRestore();
+      await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    });
+  });
+
   it("releases the claim on a retryable failure so Stripe's retry re-processes the event", async () => {
     const scheduleUpdateMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
     scheduleUpdateMock.mockReset();

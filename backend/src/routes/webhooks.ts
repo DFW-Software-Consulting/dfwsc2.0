@@ -6,6 +6,7 @@ import { clients, paymentLedger } from "../db/schema";
 import { isCircuitOpenError, isStripeBusyError, withStripeCircuit } from "../lib/circuit-breakers";
 import { syncConnectInvoice } from "../lib/connect-invoice-sync";
 import { isUniqueViolation } from "../lib/errors";
+import { dbErrorFields, retryErrorFields, safeErrorFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import { mapStripeError } from "../lib/stripe-errors";
 import {
@@ -19,75 +20,6 @@ import {
 // Stripe's retry queue, so we mark the event processed instead of returning 500.
 function isNonRetryableDbError(err: unknown): boolean {
   return isUniqueViolation(err);
-}
-
-function isStripeError(err: unknown): boolean {
-  const type = (err as { type?: unknown } | null)?.type;
-  return typeof type === "string" && type.startsWith("Stripe");
-}
-
-const SQLSTATE = /^[0-9A-Z]{5}$/;
-
-// A pg error, or the Drizzle wrapper around one. Their message and stack quote the failed query's
-// parameters (hosted URLs, descriptions, metadata) and `detail` quotes row values.
-function dbCauseOf(err: unknown): Record<string, unknown> | undefined {
-  for (let e: unknown = err, depth = 0; e != null && depth < 4; depth++) {
-    const o = e as Record<string, unknown>;
-    if (
-      typeof o.code === "string" &&
-      SQLSTATE.test(o.code) &&
-      ("severity" in o || "routine" in o)
-    ) {
-      return o;
-    }
-    e = o.cause;
-  }
-  return undefined;
-}
-
-function isDbError(err: unknown): boolean {
-  const e = err as { name?: unknown; message?: unknown } | null;
-  return (
-    e?.name === "DrizzleQueryError" ||
-    (typeof e?.message === "string" && e.message.startsWith("Failed query")) ||
-    dbCauseOf(err) !== undefined
-  );
-}
-
-// Retry-path log fields. Stripe errors: identifiers only (their message can quote emails and
-// hosted URLs). DB errors: SQLSTATE and schema names only, never message, detail, params or stack.
-// Anything else is our own bug, whose message and stack are the only way to find it.
-function retryErrorFields(err: unknown) {
-  if (isStripeError(err) || !(err instanceof Error)) return safeErrorFields(err);
-  if (isDbError(err)) {
-    const c = dbCauseOf(err);
-    return {
-      errName: err.name,
-      errCode: c?.code,
-      errConstraint: c?.constraint,
-      errTable: c?.table,
-      errColumn: c?.column,
-      errRoutine: c?.routine,
-    };
-  }
-  return { ...safeErrorFields(err), errMessage: err.message, errStack: err.stack };
-}
-
-// Only identifiers: a Stripe error message can quote customer data (emails, hosted URLs).
-function safeErrorFields(err: unknown) {
-  const e = err as {
-    type?: unknown;
-    code?: unknown;
-    statusCode?: unknown;
-    requestId?: unknown;
-    name?: unknown;
-  } | null;
-  return {
-    errType: e?.type ?? e?.name,
-    errCode: e?.code,
-    errStatusCode: e?.statusCode,
-    errRequestId: e?.requestId,
-  };
 }
 
 const CIRCUIT_OPEN_ERROR = { error: "Stripe service temporarily unavailable" };
@@ -327,7 +259,7 @@ async function syncAccountFromStripe(accountId: string, logger: FastifyBaseLogge
       throw err;
     }
     logger.warn(
-      { err, accountId },
+      { ...retryErrorFields(err), accountId },
       "Failed to retrieve current account state from Stripe; skipping sync"
     );
     return;
@@ -551,7 +483,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         resolvedWebhookSecret
       );
     } catch (err: unknown) {
-      fastify.log.error({ err }, "Failed to verify Stripe webhook signature.");
+      fastify.log.error(safeErrorFields(err), "Failed to verify Stripe webhook signature.");
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(400).send({ error: `Webhook Error: ${message}` });
     }
@@ -575,7 +507,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         // Log it and still mark the event processed so a single bad event
         // can't wedge the retry queue for every subsequent delivery.
         fastify.log.error(
-          { err, eventId: event.id, eventType: event.type },
+          { ...dbErrorFields(err), eventId: event.id, eventType: event.type },
           "Webhook event hit a non-retryable DB error; marking processed anyway"
         );
       } else {
