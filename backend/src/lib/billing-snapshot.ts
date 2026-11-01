@@ -9,7 +9,6 @@ import {
   type BillingSubscriptionInput,
   type BillingValues,
   deriveBilling,
-  latestPaymentIntent,
 } from "./billing-status";
 import { isCircuitOpenError, isStripeBusyError, withStripeCircuit } from "./circuit-breakers";
 import { type MirrorLogger, withMirrorLock } from "./mirror-table";
@@ -44,45 +43,89 @@ async function listAll<T extends { id: string }>(
   throw new Error("billing snapshot: too many Stripe objects to list");
 }
 
-// Per refresh and Customer, at most this many PaymentIntent retrieves; past it, an attempted
-// charge_automatically invoice keeps the conservative "failed" reading.
-const MAX_PI_RETRIEVES = 10;
+// Per refresh and Customer, at most this many invoices get their payment looked up; past it, an
+// attempted charge_automatically invoice keeps the conservative "failed" reading.
+const MAX_PAYMENT_LOOKUPS = 10;
+
+const isTransient = (error: unknown) =>
+  isCircuitOpenError(error) || isStripeBusyError(error) || isRateLimited(error);
 
 /**
- * Statuses of the latest PaymentIntent of each open, attempted charge_automatically invoice (the
- * only ones whose overdue state depends on it). No call at all when none qualifies; an already
- * expanded PaymentIntent is used as is.
+ * For each open, attempted charge_automatically invoice (the only ones whose overdue state
+ * depends on it) looks up its latest InvoicePayment (invoicePayments.list) and that payment's
+ * PaymentIntent (retrieve, unless already an object), and returns the invoice with only that
+ * payment attached. Other invoices are untouched; no call at all when none qualifies. A
+ * non-transient failure leaves the invoice without payment data (read as failed) and warns;
+ * circuit-open, busy and rate-limit errors propagate to the refresh's backoff.
  */
-async function resolvePaymentIntents(
+async function attachLatestPayments(
+  customerId: string,
   invoices: Stripe.Invoice[],
   logger: MirrorLogger
-): Promise<{ id: string; status: string }[]> {
-  const out: { id: string; status: string }[] = [];
-  let retrieves = 0;
+): Promise<Stripe.Invoice[]> {
+  let lookups = 0;
   let skipped = 0;
+  const out: Stripe.Invoice[] = [];
   for (const invoice of invoices) {
-    if (
-      invoice.status !== "open" ||
-      invoice.amount_remaining <= 0 ||
-      invoice.collection_method !== "charge_automatically" ||
-      (invoice.attempt_count ?? 0) === 0
-    )
-      continue;
-    const pi = latestPaymentIntent(invoice as unknown as BillingInvoiceInput);
-    if (!pi || (typeof pi !== "string" && pi.status)) continue;
-    const id = typeof pi === "string" ? pi : pi.id;
-    if (retrieves >= MAX_PI_RETRIEVES) {
-      skipped += 1;
+    const qualifies =
+      invoice.status === "open" &&
+      invoice.amount_remaining > 0 &&
+      invoice.collection_method === "charge_automatically" &&
+      (invoice.attempt_count ?? 0) > 0 &&
+      invoice.id;
+    if (!qualifies) {
+      out.push(invoice);
       continue;
     }
-    retrieves += 1;
-    const fetched = await withStripeCircuit(() => stripe.paymentIntents.retrieve(id));
-    out.push({ id, status: fetched.status });
+    if (lookups >= MAX_PAYMENT_LOOKUPS) {
+      skipped += 1;
+      out.push(invoice);
+      continue;
+    }
+    lookups += 1;
+    try {
+      const id = invoice.id as string;
+      const payments = await withStripeCircuit(() =>
+        stripe.invoicePayments.list({ invoice: id, limit: 10 })
+      );
+      const latest = payments.data.reduce<Stripe.InvoicePayment | null>(
+        (best, p) => (best === null || p.created > best.created ? p : best),
+        null
+      );
+      if (!latest) {
+        out.push(invoice);
+        continue;
+      }
+      let pi = latest.payment?.payment_intent;
+      if (typeof pi === "string") {
+        const piId = pi;
+        pi = await withStripeCircuit(() => stripe.paymentIntents.retrieve(piId));
+      }
+      const payment = {
+        ...latest.payment,
+        payment_intent: pi ? { id: pi.id, status: pi.status } : null,
+      };
+      out.push({
+        ...invoice,
+        payments: { data: [{ ...latest, payment }] },
+      } as unknown as Stripe.Invoice);
+    } catch (error) {
+      if (isTransient(error)) throw error;
+      logger.warn(
+        {
+          customerId,
+          invoiceId: invoice.id,
+          errorCode: (error as { code?: string })?.code ?? (error as Error)?.name,
+        },
+        "Billing snapshot: payment lookup failed for an invoice; it reads as failed."
+      );
+      out.push(invoice);
+    }
   }
   if (skipped)
     logger.warn(
-      { skipped, cap: MAX_PI_RETRIEVES },
-      "Billing snapshot: PaymentIntent retrieve cap reached; remaining attempted invoices read as failed."
+      { customerId, skipped, cap: MAX_PAYMENT_LOOKUPS },
+      "Billing snapshot: payment lookup cap reached; remaining attempted invoices read as failed."
     );
   return out;
 }
@@ -115,18 +158,15 @@ async function fetchBillingInput(
     stripe.invoices.list({
       customer: customerId,
       limit: PAGE_SIZE,
-      // API 2025-09-30.clover has no invoice.payment_intent; `payments` lists the InvoicePayments
-      // (payment.payment_intent is an id). One level, well inside Stripe's expand-depth limit.
-      expand: ["data.payments"],
       ...(startingAfter ? { starting_after: startingAfter } : {}),
     })
   );
-  const paymentIntents = await resolvePaymentIntents(invoices, logger);
+  // API 2025-09-30.clover has no invoice.payment_intent: payments come from invoicePayments.list.
+  const withPayments = await attachLatestPayments(customerId, invoices, logger);
   return {
     subscriptions: subscriptions as unknown as BillingSubscriptionInput[],
     schedules: schedules as unknown as BillingScheduleInput[],
-    invoices: invoices as unknown as BillingInvoiceInput[],
-    paymentIntents: paymentIntents.map((p) => ({ id: p.id, status: p.status })),
+    invoices: withPayments as unknown as BillingInvoiceInput[],
     now,
   };
 }

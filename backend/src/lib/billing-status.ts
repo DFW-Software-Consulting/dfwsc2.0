@@ -140,24 +140,25 @@ const subscriptionIdOf = (invoice: BillingInvoiceInput): string | null => {
   return typeof raw === "string" ? raw : (raw?.id ?? null);
 };
 
-/** The most recent InvoicePayment's PaymentIntent: an id or an expanded object, else null. */
-export function latestPaymentIntent(
+/**
+ * The PaymentIntent of the most recent InvoicePayment (highest created): an id or an object.
+ * Null when there are no payments or the latest one has no PaymentIntent; an older payment's
+ * PaymentIntent is never used instead.
+ */
+function latestPaymentIntent(
   invoice: BillingInvoiceInput
 ): string | { id: string; status?: string } | null {
-  const entries = (invoice.payments?.data ?? []).filter((e) => e.payment?.payment_intent);
-  const latest = entries.reduce<(typeof entries)[number] | null>(
-    (best, e) => (best === null || (e.created ?? 0) > (best.created ?? 0) ? e : best),
-    null
-  );
+  const latest = (invoice.payments?.data ?? []).reduce<
+    NonNullable<BillingInvoiceInput["payments"]>["data"][number] | null
+  >((best, e) => (best === null || (e.created ?? 0) > (best.created ?? 0) ? e : best), null);
   return latest?.payment?.payment_intent ?? null;
 }
 
-/** Status of the latest PaymentIntent of an invoice, as a list (empty when unknown). */
-function paymentStatusesOf(invoice: BillingInvoiceInput, known: Map<string, string>): string[] {
+/** Status of the latest PaymentIntent of an invoice, or null when unknown. */
+function paymentStatusOf(invoice: BillingInvoiceInput, known: Map<string, string>): string | null {
   const pi = latestPaymentIntent(invoice);
-  if (!pi) return [];
-  const status = typeof pi === "string" ? known.get(pi) : (pi.status ?? known.get(pi.id));
-  return status ? [status] : [];
+  if (!pi) return null;
+  return (typeof pi === "string" ? known.get(pi) : (pi.status ?? known.get(pi.id))) ?? null;
 }
 
 const utcDay = (ms: number) => Math.floor(ms / 86_400_000);
@@ -236,25 +237,21 @@ export function deriveBilling(input: BillingInput): BillingValues {
 
   const open = invoices.filter((i) => i.status === "open" && i.amount_remaining > 0);
   const known = new Map((input.paymentIntents ?? []).map((p) => [p.id, p.status]));
-  const processing = open.filter(
-    (i) =>
-      i.collection_method === "charge_automatically" &&
-      paymentStatusesOf(i, known).includes("processing")
-  );
-  const failedAttempt = (i: BillingInvoiceInput) => {
-    if (i.collection_method !== "charge_automatically" || (i.attempt_count ?? 0) === 0)
-      return false;
-    const statuses = paymentStatusesOf(i, known);
-    if (statuses.includes("processing")) return false;
-    return statuses.length
-      ? statuses.some((s) => s === "requires_payment_method" || s === "canceled")
-      : true; // attempted, and no PaymentIntent to say otherwise: treated as failed
+  const isAuto = (i: BillingInvoiceInput) => i.collection_method === "charge_automatically";
+  const dueBeforeToday = (i: BillingInvoiceInput) =>
+    i.due_date != null && utcDay(i.due_date * 1000) < utcDay(nowMs);
+  // The payment is in flight (succeeded is a transient state of a still-open invoice).
+  const inFlight = (i: BillingInvoiceInput) => {
+    const status = paymentStatusOf(i, known);
+    return isAuto(i) && (status === "processing" || status === "succeeded");
   };
-  const pastDue = open.filter((i) =>
-    i.collection_method === "charge_automatically"
-      ? failedAttempt(i)
-      : i.due_date != null && utcDay(i.due_date * 1000) < utcDay(nowMs)
-  );
+  const processing = open.filter(inFlight);
+  const pastDue = open.filter((i) => {
+    if (!isAuto(i)) return dueBeforeToday(i);
+    if (inFlight(i)) return false;
+    // Attempted and not in flight (failed, needs action, or no PaymentIntent data), or past due.
+    return (i.attempt_count ?? 0) > 0 || dueBeforeToday(i);
+  });
   const uncollectible = invoices.filter((i) => i.status === "uncollectible");
   const overdueInvoices = [...pastDue, ...uncollectible];
 

@@ -123,6 +123,7 @@ describe("billing mirror is read-only toward Stripe", () => {
           "subscriptions.list",
           "subscriptionSchedules.list",
           "invoices.list",
+          "invoicePayments.list",
           "paymentIntents.retrieve",
           "webhooks.constructEvent",
         ]).toContain(call);
