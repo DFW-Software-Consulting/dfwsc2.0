@@ -41,7 +41,7 @@ export function retryErrorFields(err: unknown) {
 }
 
 // Only identifiers: a Stripe error message can quote customer data (emails, hosted URLs).
-function safeErrorFields(err: unknown) {
+export function safeErrorFields(err: unknown) {
   const e = err as {
     type?: unknown;
     code?: unknown;
