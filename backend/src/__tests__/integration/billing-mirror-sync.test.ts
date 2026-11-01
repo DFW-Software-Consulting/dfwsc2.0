@@ -225,6 +225,33 @@ describe("rows", () => {
     expect(rowWrites()).toHaveLength(1);
   });
 
+  it("moves Last Checked on a refresh that finds no content change, leaving Updated alone", async () => {
+    await seedOne();
+    await cycle();
+    const before = rowOf("CP-001");
+    const lastChecked = fake.cell(before, "Last Checked");
+    const updated = fake.cell(before, "Updated");
+    const [snapshotBefore] = await db.select().from(billingSnapshots);
+
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 60 * 60 * 1000 });
+    try {
+      await refreshAll();
+      const [snapshotAfter] = await db.select().from(billingSnapshots);
+      expect(snapshotAfter.contentHash).toBe(snapshotBefore.contentHash);
+      expect(snapshotAfter.updatedAt).toEqual(snapshotBefore.updatedAt);
+      expect(snapshotAfter.refreshedAt?.getTime()).toBeGreaterThan(
+        snapshotBefore.refreshedAt?.getTime() ?? 0
+      );
+      fake.calls = [];
+      expect((await cycle()).updated).toBe(1);
+      expect(rowWrites()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(fake.cell(rowOf("CP-001"), "Last Checked")).not.toBe(lastChecked);
+    expect(fake.cell(rowOf("CP-001"), "Updated")).toBe(updated);
+  });
+
   it("gives every client code of a shared Customer the same data plus a note", async () => {
     await addCustomer("CP-001", "cus_1", "Acme");
     await addCustomer("CP-002", "cus_1", "Acme");

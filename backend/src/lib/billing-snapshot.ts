@@ -43,8 +43,102 @@ async function listAll<T extends { id: string }>(
   throw new Error("billing snapshot: too many Stripe objects to list");
 }
 
+// Per refresh and Customer, at most this many invoices get their payment looked up; past it, an
+// attempted charge_automatically invoice keeps the conservative "failed" reading.
+const MAX_PAYMENT_LOOKUPS = 10;
+
+// Only a permanent client error (4xx such as 404, or an unexpected object shape) makes one invoice
+// read as failed. Everything else (connection, timeout, 5xx, 429, circuit open, busy) propagates,
+// so the refresh backs off and the previous snapshot stays.
+const isPermanentLookupError = (error: unknown) =>
+  error instanceof Stripe.errors.StripeInvalidRequestError || error instanceof TypeError;
+
+/**
+ * For each open, attempted charge_automatically invoice (the only ones whose overdue state
+ * depends on it) looks up its latest InvoicePayment (invoicePayments.list) and that payment's
+ * PaymentIntent (retrieve, unless already an object), and returns the invoice with only that
+ * payment attached. Other invoices are untouched; no call at all when none qualifies. A
+ * non-transient failure leaves the invoice without payment data (read as failed) and warns;
+ * every other error (connection, timeout, 5xx, rate limit, circuit open, busy) propagates to the refresh's backoff.
+ */
+async function attachLatestPayments(
+  customerId: string,
+  invoices: Stripe.Invoice[],
+  logger: MirrorLogger
+): Promise<Stripe.Invoice[]> {
+  let lookups = 0;
+  let skipped = 0;
+  const out: Stripe.Invoice[] = [];
+  for (const invoice of invoices) {
+    const qualifies =
+      invoice.status === "open" &&
+      invoice.amount_remaining > 0 &&
+      invoice.collection_method === "charge_automatically" &&
+      (invoice.attempt_count ?? 0) > 0 &&
+      invoice.id;
+    if (!qualifies) {
+      out.push(invoice);
+      continue;
+    }
+    if (lookups >= MAX_PAYMENT_LOOKUPS) {
+      skipped += 1;
+      out.push(invoice);
+      continue;
+    }
+    lookups += 1;
+    try {
+      const id = invoice.id as string;
+      const payments = await withStripeCircuit(() =>
+        stripe.invoicePayments.list({ invoice: id, limit: 10 })
+      );
+      const latest = payments.data.reduce<Stripe.InvoicePayment | null>(
+        (best, p) => (best === null || p.created > best.created ? p : best),
+        null
+      );
+      if (!latest) {
+        out.push(invoice);
+        continue;
+      }
+      let pi = latest.payment?.payment_intent;
+      if (typeof pi === "string") {
+        const piId = pi;
+        pi = await withStripeCircuit(() => stripe.paymentIntents.retrieve(piId));
+      }
+      const payment = {
+        ...latest.payment,
+        payment_intent: pi ? { id: pi.id, status: pi.status } : null,
+      };
+      out.push({
+        ...invoice,
+        payments: { data: [{ ...latest, payment }] },
+      } as unknown as Stripe.Invoice);
+    } catch (error) {
+      if (!isPermanentLookupError(error)) throw error;
+      logger.warn(
+        {
+          customerId,
+          invoiceId: invoice.id,
+          errorCode: (error as { code?: string })?.code ?? (error as Error)?.name,
+        },
+        "Billing snapshot: payment lookup failed for an invoice; it reads as failed."
+      );
+      out.push(invoice);
+    }
+  }
+  if (skipped)
+    logger.warn(
+      { customerId, skipped, cap: MAX_PAYMENT_LOOKUPS },
+      "Billing snapshot: payment lookup cap reached; remaining attempted invoices read as failed."
+    );
+  return out;
+}
+
 /** The only Stripe calls of the billing snapshot. All are reads. */
-async function fetchBillingInput(customerId: string, now: Date): Promise<BillingInput> {
+async function fetchBillingInput(
+  customerId: string,
+  now: Date,
+  logger: MirrorLogger
+): Promise<BillingInput> {
   const subscriptions = await listAll((startingAfter) =>
     stripe.subscriptions.list({
       customer: customerId,
@@ -70,10 +164,12 @@ async function fetchBillingInput(customerId: string, now: Date): Promise<Billing
       ...(startingAfter ? { starting_after: startingAfter } : {}),
     })
   );
+  // API 2025-09-30.clover has no invoice.payment_intent: payments come from invoicePayments.list.
+  const withPayments = await attachLatestPayments(customerId, invoices, logger);
   return {
     subscriptions: subscriptions as unknown as BillingSubscriptionInput[],
     schedules: schedules as unknown as BillingScheduleInput[],
-    invoices: invoices as unknown as BillingInvoiceInput[],
+    invoices: withPayments as unknown as BillingInvoiceInput[],
     now,
   };
 }
@@ -86,14 +182,20 @@ async function fetchBillingInput(customerId: string, now: Date): Promise<Billing
  * marked it after `startedAt` (the database clock when this refresh began).
  * Returns the number of snapshots whose content changed.
  */
-async function refreshCustomer(customerId: string, startedAt: Date): Promise<number> {
+async function refreshCustomer(
+  customerId: string,
+  startedAt: Date,
+  logger: MirrorLogger
+): Promise<number> {
   const codes = await db
     .select({ clientCode: billingCustomers.clientCode })
     .from(billingCustomers)
     .where(eq(billingCustomers.stripeCustomerId, customerId));
   if (!codes.length) return 0;
 
-  const values: BillingValues = deriveBilling(await fetchBillingInput(customerId, startedAt));
+  const values: BillingValues = deriveBilling(
+    await fetchBillingInput(customerId, startedAt, logger)
+  );
   const hash = contentHash({ ...values, nonUsd: String(values.nonUsd) });
   const existing = new Map(
     (
@@ -249,7 +351,7 @@ export async function runBillingRefresh(options: {
         if (!first && gapMs > 0) await new Promise((resolve) => setTimeout(resolve, gapMs));
         first = false;
         try {
-          out.changed += await refreshCustomer(customerId, startedAt);
+          out.changed += await refreshCustomer(customerId, startedAt, logger);
           out.refreshed += 1;
           backoff.delete(customerId);
         } catch (error) {
