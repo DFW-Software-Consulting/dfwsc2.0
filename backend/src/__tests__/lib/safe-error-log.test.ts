@@ -71,7 +71,8 @@ describe("safe-error-log", () => {
   });
 
   it("keeps message and stack for an application error", () => {
-    const fields = retryErrorFields(new Error("boom"));
+    // The return type is a union over the error kinds; an application error carries the extra fields.
+    const fields = retryErrorFields(new Error("boom")) as Record<string, unknown>;
     expect(fields.errMessage).toBe("boom");
     expect(fields.errStack).toContain("boom");
   });

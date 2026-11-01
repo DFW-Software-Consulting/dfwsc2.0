@@ -363,7 +363,12 @@ describe("POST /api/v1/payments/create — fee waiver and connected-account guar
     });
 
     expect(response.statusCode).toBe(201);
-    const createCall = vi.mocked(stripe.checkout.sessions.create).mock.calls[0][0];
+    // `create` is overloaded; the mock's recorded args are (params, options).
+    const createCall = (
+      vi.mocked(stripe.checkout.sessions.create).mock.calls as unknown as [
+        Stripe.Checkout.SessionCreateParams,
+      ][]
+    )[0][0];
     // The fee is still routed to the platform via application_fee_amount…
     expect(createCall.payment_intent_data?.application_fee_amount).toBe(1000);
     // …and still charged to the customer as the extra "Processing Fee" line item.

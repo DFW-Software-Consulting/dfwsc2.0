@@ -159,8 +159,8 @@ describe("Clients API Integration", () => {
           id,
           name: `Paged Client ${index}`,
           email: `paged-${index}@example.com`,
-          workspace,
-          status: "active",
+          workspace: workspace as "client_portal",
+          status: "active" as const,
         }))
       );
 

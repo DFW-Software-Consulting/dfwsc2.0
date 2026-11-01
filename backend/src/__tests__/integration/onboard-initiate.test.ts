@@ -128,10 +128,10 @@ describe("Onboard Initiate — API key via email link", () => {
       .where(eq(apiKeyRegenerationTokens.clientId, body.clientId));
     const pending = tokens.find((t: any) => t.status === "pending");
     expect(pending).toBeDefined();
-    expect(pending.email).toBe(email);
+    expect(pending?.email).toBe(email);
 
     const rawToken = mailCall.text.match(REGEN_LINK_REGEX)[1];
-    expect(pending.token).toBe(sha256(rawToken));
+    expect(pending?.token).toBe(sha256(rawToken));
     const [client] = await db.select().from(clients).where(eq(clients.id, body.clientId)).limit(1);
     expect(client.stripeAccountId).toMatch(/^acct_/);
     expect(client.chargesEnabled).toBe(false);

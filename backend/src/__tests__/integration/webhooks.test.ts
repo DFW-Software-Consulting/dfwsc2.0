@@ -552,7 +552,6 @@ describe("POST /api/v1/webhooks/stripe", () => {
       id: randomUUID(),
       stripeEventId: event.id,
       type: event.type,
-      payload: JSON.parse(JSON.stringify(event)) as Record<string, unknown>,
       processedAt: null,
       claimedAt: new Date(Date.now() - 60 * 60 * 1000),
     });

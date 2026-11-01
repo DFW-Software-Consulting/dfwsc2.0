@@ -136,8 +136,8 @@ describe("Groups API", () => {
         ids.map((id, index) => ({
           id,
           name: `Paged Group ${index}`,
-          workspace,
-          status: "active",
+          workspace: workspace as "client_portal",
+          status: "active" as const,
         }))
       );
 

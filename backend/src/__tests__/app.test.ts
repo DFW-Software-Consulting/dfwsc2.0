@@ -1612,7 +1612,8 @@ describe("client groups", () => {
     // original side effect (which populates dataStore.clientGroups), then
     // read the inserted row back for `.returning()`.
     const originalInsertImpl = dbMock.insert.getMockImplementation();
-    dbMock.insert.mockImplementationOnce((table: any) => {
+    // The wrapper widens the mock's inferred return shape (adds .returning off .values()).
+    dbMock.insert.mockImplementationOnce(((table: any) => {
       const original = originalInsertImpl?.(table);
       return {
         values: (payload: any) => {
@@ -1623,7 +1624,7 @@ describe("client groups", () => {
           };
         },
       };
-    });
+    }) as never);
 
     const response = await server.inject({
       method: "POST",

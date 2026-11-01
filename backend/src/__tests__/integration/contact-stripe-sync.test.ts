@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import type { PoolClient } from "pg";
 import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db, pool } from "../../db/client";
@@ -485,13 +486,13 @@ describe("cards sharing one Customer", () => {
     putCard(UID_A, withBase(["EMAIL", "EMAIL;TYPE=WORK:from-a@zephyrine.example"]), revA);
     putCard(UID_B, withBase(["EMAIL", "EMAIL;TYPE=WORK:from-b@zephyrine.example"]), revB);
     expect(await cycle()).toMatchObject({ pushed: 2 });
-    const emails = update.mock.calls.map((c) => (c[1] as { email: string }).email);
+    const emails = update.mock.calls.map((c: unknown[]) => (c[1] as { email: string }).email);
     expect(emails).toEqual(
       revA < revB
         ? ["from-a@zephyrine.example", "from-b@zephyrine.example"]
         : ["from-b@zephyrine.example", "from-a@zephyrine.example"]
     );
-    expect(update.mock.calls.every((c) => c[0] === "cus_shared")).toBe(true);
+    expect(update.mock.calls.every((c: unknown[]) => c[0] === "cus_shared")).toBe(true);
     const note = lines.find((l) => l.text.includes("REV order"));
     expect(note?.text).toContain("cus_shared");
     expect(note?.text).not.toMatch(/zephyrine\.example/);
@@ -568,10 +569,9 @@ describe("errors", () => {
     expect(await cycle()).toMatchObject({ pushed: 0, failed: 1 });
     expect(update).toHaveBeenCalledTimes(1);
     expect(await cycle()).toMatchObject({ pushed: 2 });
-    expect(update.mock.calls.slice(1).map((c) => (c[1] as { phone: string }).phone)).toEqual([
-      "+1 111 555 0000",
-      "+1 222 555 0000",
-    ]);
+    expect(
+      update.mock.calls.slice(1).map((c: unknown[]) => (c[1] as { phone: string }).phone)
+    ).toEqual(["+1 111 555 0000", "+1 222 555 0000"]);
   });
 
   it("reports Nextcloud being down without failing or losing state", async () => {
@@ -1050,9 +1050,7 @@ describe("onboarding rewrite windows", () => {
 describe("cycle lock release failure", () => {
   it("destroys a connection whose unlock fails, so the next cycle can take the lock", async () => {
     await baselined();
-    const realConnect = pool.connect.bind(pool) as () => Promise<
-      Awaited<ReturnType<typeof pool.connect>>
-    >;
+    const realConnect = pool.connect.bind(pool) as unknown as () => Promise<PoolClient>;
     const releases: unknown[] = [];
     vi.spyOn(pool, "connect").mockImplementationOnce((async () => {
       const client = await realConnect();

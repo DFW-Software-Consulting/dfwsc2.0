@@ -6,6 +6,7 @@ import {
   cellMatches,
   contentHash,
   effectiveFee,
+  type FeeDefaults,
   formatDateTime,
   onboardingState,
   renderAccount,
@@ -17,7 +18,7 @@ const spec = (key: string) => {
   if (!found) throw new Error(key);
   return found;
 };
-const defaults = { percent: null, cents: 0 };
+const defaults: FeeDefaults = { percent: null, cents: 0 };
 const baseClient = {
   id: "c1",
   workspace: "client_portal",

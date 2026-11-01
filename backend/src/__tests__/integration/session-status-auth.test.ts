@@ -31,7 +31,9 @@ describe("GET /payments/session/:sessionId authentication and limits", () => {
 
   type Building = { id: string; apiKey: string; sessionId: string };
 
-  async function seedBuilding(status = "active"): Promise<Building> {
+  async function seedBuilding(
+    status: typeof clients.$inferInsert.status = "active"
+  ): Promise<Building> {
     const id = randomUUID();
     const apiKey = `status_key_${randomUUID().replace(/-/g, "")}`;
     await db.insert(clients).values({
