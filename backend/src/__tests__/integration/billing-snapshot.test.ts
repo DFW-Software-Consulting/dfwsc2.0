@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/stripe", async () => {
@@ -86,7 +87,150 @@ describe("billing snapshot refresh", () => {
       customer: "cus_1",
       limit: 100,
     });
+    expect(fakeStripe.callsTo("invoices.list")[0].params.expand).toBeUndefined();
+    expect(fakeStripe.callsTo("invoicePayments.list")).toHaveLength(0); // nothing qualifies
+    expect(fakeStripe.callsTo("paymentIntents.retrieve")).toHaveLength(0);
     expect(fakeStripe.unexpected()).toEqual([]);
+  });
+
+  const attempted = (id: string) =>
+    invoice({
+      id,
+      status: "open",
+      amount_remaining: 1000,
+      collection_method: "charge_automatically",
+      attempt_count: 1,
+    });
+  const withPayments = (id: string, pi: string) => ({
+    [id]: [
+      {
+        id: `ipay_${id}_old`,
+        created: 1,
+        payment: { type: "payment_intent", payment_intent: `${pi}_old` },
+      },
+      { id: `ipay_${id}`, created: 2, payment: { type: "payment_intent", payment_intent: pi } },
+    ],
+  });
+  const invalidRequest = () =>
+    new Stripe.errors.StripeInvalidRequestError({
+      type: "invalid_request_error",
+      message: "No such invoice payment",
+      code: "resource_missing",
+    });
+
+  it("looks up the latest InvoicePayment and its PaymentIntent only for open attempted charge_automatically invoices", async () => {
+    await addCustomer("CP-001", "cus_1");
+    fakeStripe.set("cus_1", {
+      invoices: [attempted("in_1"), invoice({ id: "in_2", status: "open", amount_remaining: 500 })],
+      invoicePayments: withPayments("in_1", "pi_1"),
+      paymentIntents: [{ id: "pi_1", status: "processing" }],
+    });
+    await refresh();
+    expect(fakeStripe.callsTo("invoicePayments.list").map((c) => c.params)).toEqual([
+      { invoice: "in_1", limit: 10 },
+    ]);
+    expect(fakeStripe.callsTo("paymentIntents.retrieve").map((c) => c.params.id)).toEqual(["pi_1"]);
+    expect((await snapshot("CP-001")).rendered).toMatchObject({
+      status: "Payment processing",
+      overdue: 0,
+      openBalance: 15,
+    });
+    expect(fakeStripe.unexpected()).toEqual([]);
+  });
+
+  it("caps payment lookups per refresh at 10 and warns once with the Customer; the rest read as failed", async () => {
+    await addCustomer("CP-001", "cus_1");
+    const ids = Array.from({ length: 12 }, (_, i) => `in_${i}`);
+    fakeStripe.set("cus_1", {
+      invoices: ids.map(attempted),
+      invoicePayments: Object.assign({}, ...ids.map((id) => withPayments(id, `pi_${id}`))),
+      paymentIntents: ids.map((id) => ({ id: `pi_${id}`, status: "processing" })),
+    });
+    await refresh();
+    expect(fakeStripe.callsTo("invoicePayments.list")).toHaveLength(10);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][0]).toMatchObject({ customerId: "cus_1", skipped: 2 });
+    expect((await snapshot("CP-001")).rendered).toMatchObject({ status: "Late", overdue: 20 });
+  });
+
+  it("a non-transient lookup error reads that invoice as failed and warns with ids and code", async () => {
+    await addCustomer("CP-001", "cus_1");
+    fakeStripe.set("cus_1", {
+      invoices: [attempted("in_1")],
+      invoicePayments: withPayments("in_1", "pi_1"),
+    });
+    fakeStripe.failures.set("invoicePayments.list:in_1", invalidRequest());
+    const out = await refresh();
+    expect(out).toMatchObject({ status: "ok", refreshed: 1, failed: 0 });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn.mock.calls[0][0]).toEqual({
+      customerId: "cus_1",
+      invoiceId: "in_1",
+      errorCode: "resource_missing",
+    });
+    expect((await snapshot("CP-001")).rendered).toMatchObject({ status: "Late", overdue: 10 });
+  });
+
+  it("a failing PaymentIntent retrieve is handled the same way", async () => {
+    await addCustomer("CP-001", "cus_1");
+    fakeStripe.set("cus_1", {
+      invoices: [attempted("in_1")],
+      invoicePayments: withPayments("in_1", "pi_1"),
+    });
+    fakeStripe.failures.set("paymentIntents.retrieve", invalidRequest());
+    await refresh();
+    expect((await snapshot("CP-001")).rendered).toMatchObject({ status: "Late", overdue: 10 });
+  });
+
+  it.each([
+    [
+      "connection",
+      () => new Stripe.errors.StripeConnectionError({ type: "api_error", message: "reset" }),
+    ],
+    [
+      "5xx API",
+      () =>
+        new Stripe.errors.StripeAPIError({ type: "api_error", message: "oops", statusCode: 503 }),
+    ],
+  ])("a %s error on a payment lookup fails the refresh and keeps the previous snapshot, not Late", async (_name, make) => {
+    await addCustomer("CP-001", "cus_1");
+    const data = {
+      invoices: [attempted("in_1")],
+      invoicePayments: withPayments("in_1", "pi_1"),
+      paymentIntents: [{ id: "pi_1", status: "processing" }],
+    };
+    fakeStripe.set("cus_1", data);
+    await refresh();
+    const before = (await snapshot("CP-001")).rendered;
+    expect(before).toMatchObject({ status: "Payment processing" });
+    await db.update(billingSnapshots).set({ dirtyAt: sql`now()` });
+    resetBillingSnapshotStateForTests();
+    fakeStripe.failures.set("paymentIntents.retrieve", make());
+    const out = await refresh();
+    expect(out).toMatchObject({ failed: 1, changed: 0 });
+    expect((await snapshot("CP-001")).rendered).toEqual(before);
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ invoiceId: "in_1" }),
+      expect.anything()
+    );
+  });
+
+  it("a rate limit during a payment lookup stops the run, as before", async () => {
+    await addCustomer("CP-001", "cus_1");
+    fakeStripe.set("cus_1", {
+      invoices: [attempted("in_1")],
+      invoicePayments: withPayments("in_1", "pi_1"),
+    });
+    fakeStripe.failures.set(
+      "invoicePayments.list",
+      Object.assign(new Error("slow down"), { statusCode: 429 })
+    );
+    const out = await refresh();
+    expect(out.status).toBe("stopped");
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ invoiceId: "in_1" }),
+      expect.anything()
+    );
   });
 
   it("pages every list to the end", async () => {

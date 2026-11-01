@@ -13,6 +13,9 @@ export interface CustomerData {
   subscriptions: BillingSubscriptionInput[];
   schedules: BillingScheduleInput[];
   invoices: (BillingInvoiceInput & { created?: number })[];
+  paymentIntents: { id: string; status: string }[];
+  /** InvoicePayments by invoice id. */
+  invoicePayments: Record<string, { id: string; created: number; payment: unknown }[]>;
 }
 
 export interface StripeCall {
@@ -24,6 +27,8 @@ const READS = new Set([
   "subscriptions.list",
   "subscriptionSchedules.list",
   "invoices.list",
+  "invoicePayments.list",
+  "paymentIntents.retrieve",
   "webhooks.constructEvent",
 ]);
 
@@ -33,6 +38,8 @@ class FakeBillingStripe {
   pageSize = 100;
   /** Runs before each list answers; may throw to simulate a Stripe failure. */
   beforeList: ((customerId: string, call: string) => void | Promise<void>) | null = null;
+  /** Errors thrown by `call` (e.g. "invoicePayments.list") or `call:id`, for failure tests. */
+  failures = new Map<string, unknown>();
   goodSignature = "sig_good";
 
   reset() {
@@ -40,10 +47,17 @@ class FakeBillingStripe {
     this.customers.clear();
     this.pageSize = 100;
     this.beforeList = null;
+    this.failures.clear();
   }
 
   set(customerId: string, data: Partial<CustomerData>) {
-    this.customers.set(customerId, { subscriptions: [], schedules: [], invoices: [], ...data });
+    this.customers.set(customerId, {
+      subscriptions: [],
+      schedules: [],
+      invoices: [],
+      paymentIntents: [],
+      ...data,
+    });
   }
 
   callsTo(call: string) {
@@ -74,10 +88,33 @@ class FakeBillingStripe {
     async (...args: unknown[]) => {
       const call = `${resource}.${name}`;
       const params = (args[0] ?? {}) as Record<string, unknown>;
-      this.calls.push({ call, params });
+      this.calls.push({
+        call,
+        params: call === "paymentIntents.retrieve" ? { id: args[0] } : params,
+      });
+      const target = call === "paymentIntents.retrieve" ? String(args[0]) : String(params.invoice);
+      const failure = this.failures.get(`${call}:${target}`) ?? this.failures.get(call);
+      if (failure) throw failure;
+      if (call === "invoicePayments.list") {
+        const invoiceId = String(params.invoice);
+        for (const data of this.customers.values()) {
+          if (data.invoicePayments[invoiceId])
+            return this.page(data.invoicePayments[invoiceId], params);
+        }
+        return this.page([], params);
+      }
+      if (call === "paymentIntents.retrieve") {
+        const id = String(args[0]);
+        for (const data of this.customers.values()) {
+          const found = data.paymentIntents.find((p) => p.id === id);
+          if (found) return found;
+        }
+        throw new Error(`no such PaymentIntent ${id}`);
+      }
       if (call === "subscriptions.list") return this.list(call, "subscriptions", params);
       if (call === "subscriptionSchedules.list") return this.list(call, "schedules", params);
       if (call === "invoices.list") return this.list(call, "invoices", params);
+      if (call === "paymentIntents.retrieve") return this.list(call, "paymentIntents", params);
       throw new Error(`unexpected Stripe call ${call}`);
     };
 
