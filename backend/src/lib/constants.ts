@@ -44,6 +44,10 @@ export const INVOICE_CLAIM_LEASE_MS = 60_000;
 // Stripe forgets an idempotency key after 24 hours. Past this age (a margin under 24h) a resumed
 // create no longer trusts the key and looks the objects up by metadata before creating them.
 export const INVOICE_STRIPE_KEY_WINDOW_MS = 23 * 60 * 60 * 1000;
+// The metadata search that adopts an invoice a resumed create may already have made (past Stripe's
+// key window) reads at most this many pages of 100. If it still has more, the create is refused
+// (503) rather than risk a duplicate.
+export const INVOICE_ADOPTION_MAX_PAGES = 50;
 // A non-terminal invoice not synced for this long is re-checked against Stripe on GET /invoices/:id.
 export const INVOICE_RECONCILE_MIN_AGE_MS = 30_000;
 

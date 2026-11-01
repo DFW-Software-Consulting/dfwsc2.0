@@ -41,6 +41,13 @@ interface Failure {
   /** 1-based: the Nth call to `call` since the last reset fails. */
   nth: number;
   error: Error;
+  /**
+   * before: the call never reaches Stripe (nothing is created, no key recorded).
+   * stored_error: Stripe executes it, fails, and keeps the error under the idempotency key, so a
+   *   replay inside 24 hours returns the same error (a Stripe 5xx pins that key).
+   * lost_response: Stripe creates the object and records the key, but the answer never arrives.
+   */
+  mode: "before" | "stored_error" | "lost_response";
 }
 
 export const stripeApiError = (status: number) =>
@@ -68,12 +75,17 @@ export class FakeConnectInvoicingStripe {
   private invoices = new Map<string, Map<string, Record<string, any>>>();
   /** account -> invoice item id -> object */
   private items = new Map<string, Map<string, Record<string, any>>>();
-  private byKey = new Map<string, { params: string; result: Record<string, any> }>();
+  private byKey = new Map<
+    string,
+    { params: string; result?: Record<string, any>; error?: Error }
+  >();
   private counter = 0;
   /** Merged over an invoice on `invoices.retrieve`, by invoice id or "*" for all (to make Stripe disagree with our math). */
   retrieveOverrides: Record<string, Record<string, any>> = {};
   /** Blocks `customers.create` until released (to line up a race), when set. */
   createGate: Promise<void> | null = null;
+  /** Runs at the start of every call (after it is counted), e.g. to interleave another request. */
+  onCall: ((call: string, nth: number) => Promise<void>) | null = null;
   /** Blocks `invoices.create` until released (to line up a race), when set. */
   invoiceCreateGate: Promise<void> | null = null;
   /** Runs after `customers.create` made its customer but before it answers (to inject a race). */
@@ -91,12 +103,42 @@ export class FakeConnectInvoicingStripe {
     this.counter = 0;
     this.createGate = null;
     this.invoiceCreateGate = null;
+    this.onCall = null;
     this.afterCreate = null;
   }
 
   /** Make the Nth call (1-based, counted since the last reset) to `call` fail with `error`. */
   failNth(call: string, nth: number, error: Error) {
-    this.failures.push({ call, nth, error });
+    this.failures.push({ call, nth, error, mode: "before" });
+  }
+
+  /** Like failNth, but Stripe records the error under the call's idempotency key (replayed 24h). */
+  failNthStored(call: string, nth: number, error: Error) {
+    this.failures.push({ call, nth, error, mode: "stored_error" });
+  }
+
+  /** The Nth call to `call` is executed (object created, key recorded) but the response is lost. */
+  loseResponseNth(call: string, nth: number) {
+    this.failures.push({
+      call,
+      nth,
+      error: new Stripe.errors.StripeConnectionError({
+        type: "api_error",
+        message: "An error occurred with our connection to Stripe.",
+      } as never),
+      mode: "lost_response",
+    });
+  }
+
+  /** Put an invoice on an account without a recorded call (test setup). */
+  seedInvoice(account: string, invoice: Record<string, any>) {
+    this.bucketOf(this.invoices, account).set(invoice.id, {
+      object: "invoice",
+      status: "draft",
+      created: Math.floor(Date.now() / 1000),
+      metadata: {},
+      ...invoice,
+    });
   }
 
   callsTo(call: string) {
@@ -174,15 +216,16 @@ export class FakeConnectInvoicingStripe {
     if (!ALLOWED_CONNECT_CALLS.has(call)) throw new Error(`unexpected Stripe call: ${call}`);
     const count = (this.counts.get(call) ?? 0) + 1;
     this.counts.set(call, count);
+    if (this.onCall) await this.onCall(call, count);
     const failure = this.failures.find((f) => f.call === call && f.nth === count);
-    if (failure) throw failure.error;
+    if (failure?.mode === "before") throw failure.error;
 
     const account = options?.stripeAccount as string | undefined;
     if (!account) throw new Error(`Stripe call without stripeAccount: ${call}`);
     const bucket = this.bucketOf(this.customers, account);
 
     if (call.startsWith("invoice"))
-      return this.invoiceCall(call, account, id, params, options, bucket);
+      return this.invoiceCall(call, account, id, params, options, bucket, failure);
 
     if (call === "customers.create") {
       if (this.createGate) await this.createGate;
@@ -191,8 +234,10 @@ export class FakeConnectInvoicingStripe {
       const stored = key ? this.byKey.get(`${account}:${call}:${key}`) : undefined;
       if (stored) {
         this.assertSameParams(stored.params, sent);
+        if (stored.error) throw stored.error;
         return stored.result;
       }
+      if (failure) throw failure.error;
       this.counter += 1;
       const created = { object: "customer", id: `cus_fake${this.counter}`, ...params };
       bucket.set(created.id, created);
@@ -231,12 +276,15 @@ export class FakeConnectInvoicingStripe {
     id: string | undefined,
     params: Record<string, any> | undefined,
     options: Record<string, any> | undefined,
-    customers: Map<string, Record<string, any>>
+    customers: Map<string, Record<string, any>>,
+    failure: Failure | undefined
   ): Promise<unknown> {
     const invoices = this.bucketOf(this.invoices, account);
     const items = this.bucketOf(this.items, account);
     const key = options?.idempotencyKey as string | undefined;
     const sent = JSON.stringify(params);
+
+    if (failure && (call.endsWith(".retrieve") || call.endsWith(".list"))) throw failure.error;
 
     if (call === "invoices.retrieve") {
       const found = invoices.get(id as string);
@@ -268,7 +316,12 @@ export class FakeConnectInvoicingStripe {
     const stored = key ? this.byKey.get(`${account}:${call}:${key}`) : undefined;
     if (stored) {
       this.assertSameParams(stored.params, sent);
+      if (stored.error) throw stored.error;
       return stored.result;
+    }
+    if (failure?.mode === "stored_error") {
+      if (key) this.byKey.set(`${account}:${call}:${key}`, { params: sent, error: failure.error });
+      throw failure.error;
     }
     this.counter += 1;
     let created: Record<string, any>;
@@ -327,6 +380,7 @@ export class FakeConnectInvoicingStripe {
       this.recompute(account, invoice);
     }
     if (key) this.byKey.set(`${account}:${call}:${key}`, { params: sent, result: created });
+    if (failure?.mode === "lost_response") throw failure.error;
     return created;
   }
 

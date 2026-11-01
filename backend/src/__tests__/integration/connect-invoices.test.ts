@@ -6,7 +6,7 @@ vi.mock("../../lib/stripe", async () => {
   return { stripe: fakeConnectInvoicing.stripe };
 });
 
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import {
@@ -23,6 +23,7 @@ import {
   resetStripeConcurrencyForTests,
 } from "../../lib/circuit-breakers";
 import {
+  INVOICE_ADOPTION_MAX_PAGES,
   INVOICE_DAILY_CREATE_LIMIT,
   INVOICE_MAX_AMOUNT_CENTS,
   INVOICE_MAX_LINES,
@@ -766,10 +767,15 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
     it("hashes metadata and default fields canonically (order and spelling of defaults)", async () => {
       const c = await seedClient();
       const cust = await seedCustomer(c);
-      const a = body(cust, { metadata: { a: "1", b: "2" }, currency: "usd", daysUntilDue: 30 });
+      const a = body(cust, { metadata: { a: "1", b: "2" }, currency: "usd" });
       const b = body(cust, { metadata: { b: "2", a: "1" }, description: "" });
       expect((await post(c.apiKey, a, "canon")).statusCode).toBe(201);
       expect((await post(c.apiKey, b, "canon")).statusCode).toBe(200);
+      // An explicit daysUntilDue is a different request from an omitted one, even when equal to
+      // the client's default today (the default is not part of the hash).
+      expect(
+        (await post(c.apiKey, body(cust, { ...a, daysUntilDue: 30 }), "canon")).statusCode
+      ).toBe(409);
     });
 
     it("keeps keys separate per client", async () => {
@@ -853,10 +859,157 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
       expect(winner.statusCode).toBe(201);
       release();
       const loser = await slow;
-      // Its progress write finds the row no longer claimed by it (or already complete).
-      expect([200, 409]).toContain(loser.statusCode);
+      // Its progress write finds the row taken over and already complete: same answer, 200.
+      expect(loser.statusCode).toBe(200);
+      expect(loser.json().id).toBe(winner.json().id);
       expect(stripe.invoicesOn(c.account)).toHaveLength(1);
       expect(stripe.itemsOn(c.account)).toHaveLength(2);
+    });
+
+    it("renews the claim on every progress save, so a long create keeps its lease", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      const two = body(cust, {
+        lines: [
+          { description: "Rent", unitAmountCents: 1000 },
+          { description: "Parking", unitAmountCents: 500 },
+        ],
+      });
+      const seen: number[] = [];
+      stripe.onCall = async (call, nth) => {
+        if (call !== "invoiceItems.create") return;
+        await new Promise((r) => setTimeout(r, 15));
+        const [row] = await db
+          .select()
+          .from(connectInvoices)
+          .where(eq(connectInvoices.clientId, c.id));
+        seen[nth] = (row.claimedAt as Date).getTime();
+      };
+      expect((await post(c.apiKey, two, "renew")).statusCode).toBe(201);
+      // line 0 -> line 1 -> fee: each later call sees a later claim than the one before.
+      expect(seen[2]).toBeGreaterThan(seen[1]);
+      expect(seen[3]).toBeGreaterThan(seen[2]);
+    });
+
+    it("answers 200 with the finished invoice when the lease is lost mid-create and another request completes it", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      const two = body(cust, {
+        lines: [
+          { description: "Rent", unitAmountCents: 1000 },
+          { description: "Parking", unitAmountCents: 500 },
+        ],
+      });
+      let second: any;
+      stripe.onCall = async (call, nth) => {
+        if (call !== "invoiceItems.create" || nth !== 2) return;
+        stripe.onCall = null;
+        const id = (await rowIdByKey(c.id, "lost-lease")) as string;
+        await db
+          .update(connectInvoices)
+          .set({ claimedAt: new Date(Date.now() - 61_000) })
+          .where(eq(connectInvoices.id, id));
+        second = await post(c.apiKey, two, "lost-lease");
+      };
+      const first = await post(c.apiKey, two, "lost-lease");
+      expect(second.statusCode).toBe(201);
+      expect(first.statusCode).toBe(200);
+      expect(first.json()).toEqual(second.json());
+      expect(stripe.invoicesOn(c.account)).toHaveLength(1);
+      expect(stripe.itemsOn(c.account)).toHaveLength(3);
+    });
+
+    it("answers IN_USE when the lease is lost to a request that has not finished", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      stripe.onCall = async (call) => {
+        if (call !== "invoiceItems.create") return;
+        stripe.onCall = null;
+        // Another worker took the row over and is still working on it.
+        await db
+          .update(connectInvoices)
+          .set({ claimedAt: new Date(Date.now() + 1000) })
+          .where(eq(connectInvoices.clientId, c.id));
+      };
+      const res = await post(c.apiKey, body(cust), "still-busy");
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe("IDEMPOTENCY_KEY_IN_USE");
+    });
+
+    it("pins a resume to the row's account: 409 ACCOUNT_CHANGED and no Stripe call when it moved", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      stripe.failNth("invoices.create", 1, stripeApiError(500));
+      expect((await post(c.apiKey, body(cust), "moved")).statusCode).toBe(502);
+      stripe.calls.length = 0;
+      await db
+        .update(clients)
+        .set({ stripeAccountId: `${c.account}_new` })
+        .where(eq(clients.id, c.id));
+      const res = await post(c.apiKey, body(cust), "moved");
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe("ACCOUNT_CHANGED");
+      expect(stripe.calls).toHaveLength(0);
+      // A finished invoice is still replayed from Postgres whatever account the client has now.
+      const done = await seedClient();
+      const doneCust = await seedCustomer(done);
+      expect((await post(done.apiKey, body(doneCust), "fin")).statusCode).toBe(201);
+      await db
+        .update(clients)
+        .set({ stripeAccountId: `${done.account}_new` })
+        .where(eq(clients.id, done.id));
+      expect((await post(done.apiKey, body(doneCust), "fin")).statusCode).toBe(200);
+    });
+
+    it("re-checks on resume that the row's customer is still recorded for the client and account", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      stripe.failNth("invoices.create", 1, stripeApiError(500));
+      expect((await post(c.apiKey, body(cust), "gone")).statusCode).toBe(502);
+      stripe.calls.length = 0;
+      // The composite FK normally makes this impossible; lift it for the test only.
+      await db.execute(
+        sql`ALTER TABLE connect_invoices DROP CONSTRAINT connect_invoices_customer_fk`
+      );
+      try {
+        await db.delete(connectCustomers).where(eq(connectCustomers.stripeCustomerId, cust));
+        const res = await post(c.apiKey, body(cust), "gone");
+        expect(res.statusCode).toBe(404);
+        expect(stripe.calls).toHaveLength(0);
+      } finally {
+        await db.delete(connectInvoices).where(eq(connectInvoices.clientId, c.id));
+        await db.execute(sql`ALTER TABLE connect_invoices ADD CONSTRAINT connect_invoices_customer_fk
+          FOREIGN KEY (connected_account_id, stripe_customer_id)
+          REFERENCES connect_customers (connected_account_id, stripe_customer_id)`);
+      }
+    });
+
+    it("keeps an identical retry a replay when the client's default terms change", async () => {
+      const c = await seedClient({ defaultPaymentTermsDays: 15 });
+      const cust = await seedCustomer(c);
+      expect((await post(c.apiKey, body(cust), "terms-done")).statusCode).toBe(201);
+      await db.update(clients).set({ defaultPaymentTermsDays: 60 }).where(eq(clients.id, c.id));
+      const replay = await post(c.apiKey, body(cust), "terms-done");
+      expect(replay.statusCode).toBe(200);
+
+      // A create that never reached Stripe picks up the new default on its retry.
+      stripe.failNth("invoices.create", 2, stripeApiError(500));
+      expect((await post(c.apiKey, body(cust), "terms-retry")).statusCode).toBe(502);
+      await db.update(clients).set({ defaultPaymentTermsDays: 20 }).where(eq(clients.id, c.id));
+      expect((await post(c.apiKey, body(cust), "terms-retry")).statusCode).toBe(201);
+      expect(stripe.callsTo("invoices.create").at(-1)?.params?.days_until_due).toBe(20);
+    });
+
+    it("answers 409 (Stripe idempotency mismatch) when Stripe saw the create, the response was lost and the terms changed", async () => {
+      const c = await seedClient({ defaultPaymentTermsDays: 15 });
+      const cust = await seedCustomer(c);
+      stripe.loseResponseNth("invoices.create", 1);
+      expect((await post(c.apiKey, body(cust), "edge")).statusCode).toBe(502);
+      await db.update(clients).set({ defaultPaymentTermsDays: 45 }).where(eq(clients.id, c.id));
+      const res = await post(c.apiKey, body(cust), "edge");
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe("IDEMPOTENCY_KEY_REUSED");
+      expect(stripe.invoicesOn(c.account)).toHaveLength(1);
     });
 
     const stepFailures: Array<[string, string, number, "invoice_created" | "reserved"]> = [
@@ -908,6 +1061,79 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
       expect(done.lineItemIds).toHaveLength(2);
     });
 
+    const lostResponses: Array<[string, string, number]> = [
+      ["the invoice", "invoices.create", 1],
+      ["line 0", "invoiceItems.create", 1],
+      ["line 1", "invoiceItems.create", 2],
+      ["the fee item", "invoiceItems.create", 3],
+    ];
+    it.each(
+      lostResponses
+    )("resumes through key replay when Stripe made %s but the response was lost, with no duplicates", async (_name, call, nth) => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      const two = body(cust, {
+        lines: [
+          { description: "Rent", unitAmountCents: 100_000 },
+          { description: "Parking", unitAmountCents: 2500, quantity: 2 },
+        ],
+      });
+      stripe.loseResponseNth(call, nth);
+      const failed = await post(c.apiKey, two, "lost");
+      expect(failed.statusCode).toBe(502);
+      // Stripe has the object even though we never saw it.
+      expect(
+        stripe.invoicesOn(c.account).length + stripe.itemsOn(c.account).length
+      ).toBeGreaterThan(0);
+
+      const retried = await post(c.apiKey, two, "lost");
+      expect(retried.statusCode).toBe(201);
+      expect(retried.json()).toMatchObject({ totalCents: 105_250, feeAmountCents: 250 });
+      expect(stripe.invoicesOn(c.account)).toHaveLength(1);
+      expect(stripe.itemsOn(c.account).map((i) => i.description)).toEqual([
+        "Rent",
+        "Parking",
+        "Processing Fee",
+      ]);
+    });
+
+    it("keeps answering an error while Stripe replays a stored 5xx for the key, then recovers once it expires", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      stripe.failNthStored("invoiceItems.create", 1, stripeApiError(500));
+      expect((await post(c.apiKey, body(cust), "pinned")).statusCode).toBe(502);
+      // Same key, same parameters, inside 24h: Stripe returns the stored error again. The API
+      // surfaces it each time (no loop, nothing created).
+      for (let i = 0; i < 2; i++) {
+        expect((await post(c.apiKey, body(cust), "pinned")).statusCode).toBe(502);
+      }
+      expect(stripe.itemsOn(c.account)).toHaveLength(0);
+      expect(stripe.invoicesOn(c.account)).toHaveLength(1);
+
+      stripe.expireIdempotencyKeys();
+      const ok = await post(c.apiKey, body(cust), "pinned");
+      expect(ok.statusCode).toBe(201);
+      expect(stripe.invoicesOn(c.account)).toHaveLength(1);
+      expect(stripe.itemsOn(c.account)).toHaveLength(2);
+    });
+
+    it("refuses a reused Stripe key with other parameters (idempotency error) instead of creating", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      expect((await post(c.apiKey, body(cust), "mismatch-params")).statusCode).toBe(201);
+      // Same Stripe key reaching the account with different parameters: the fake, like Stripe,
+      // answers an idempotency error.
+      await expect(
+        (await import("../../lib/stripe")).stripe.invoices.create(
+          { customer: cust, currency: "usd", description: "different" },
+          {
+            stripeAccount: c.account,
+            idempotencyKey: `${c.id}:inv:${sha("mismatch-params")}:invoice`,
+          }
+        )
+      ).rejects.toMatchObject({ type: "StripeIdempotencyError" });
+    });
+
     it("keeps the stored fee when the fee setting changes between attempts", async () => {
       const c = await seedClient({ processingFeeCents: 250 });
       const cust = await seedCustomer(c);
@@ -932,7 +1158,6 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
       vi.restoreAllMocks();
       expect(stripe.invoicesOn(c.account)).toHaveLength(1);
       expect((await rowOf(c.id, "pg")).stripeInvoiceId).toBeNull();
-
       const retried = await post(c.apiKey, body(cust), "pg");
       expect(retried.statusCode).toBe(201);
       // Stripe replayed the same invoice for the same key: one object.
@@ -986,6 +1211,87 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
       expect(stripe.invoicesOn(c.account)).toHaveLength(2);
       expect(stripe.callsTo("invoices.list")).toHaveLength(1);
     });
+
+    async function ageRow(clientId: string, key: string) {
+      await db
+        .update(connectInvoices)
+        .set({ createdAt: new Date(Date.now() - 25 * HOUR) })
+        .where(eq(connectInvoices.id, (await rowIdByKey(clientId, key)) as string));
+    }
+
+    async function leaveOrphan(c: Seeded, cust: string, key: string) {
+      vi.spyOn(db, "update").mockImplementationOnce((() => {
+        throw new Error("db down");
+      }) as never);
+      expect((await post(c.apiKey, body(cust), key)).statusCode).toBe(503);
+      vi.restoreAllMocks();
+      const orphan = stripe.invoicesOn(c.account)[0];
+      stripe.expireIdempotencyKeys();
+      await ageRow(c.id, key);
+      return orphan;
+    }
+
+    const junk = (c: Seeded, cust: string, n: number) => {
+      for (let i = 0; i < n; i++) {
+        stripe.seedInvoice(c.account, {
+          id: `in_junk_${c.id.slice(0, 6)}_${i}`,
+          customer: cust,
+          metadata: { dfwsc_idem_key: sha(`other-${i}`), dfwsc_client_id: c.id },
+        });
+      }
+    };
+
+    it("adopts a match found beyond page 10 and creates nothing", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      const orphan = await leaveOrphan(c, cust, "deep");
+      junk(c, cust, 1050); // the orphan is now the oldest: page 11 of 100
+      const res = await post(c.apiKey, body(cust), "deep");
+      expect(res.statusCode).toBe(201);
+      expect(res.json().id).toBe(orphan.id);
+      expect(stripe.callsTo("invoices.list")).toHaveLength(11);
+      expect(stripe.callsTo("invoices.create")).toHaveLength(1);
+      for (const call of stripe.callsTo("invoices.list")) {
+        expect(call.options).toEqual({ stripeAccount: c.account });
+        expect(call.params).toMatchObject({ customer: cust, limit: 100 });
+      }
+    });
+
+    it("never adopts on client id alone or key alone", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      const orphan = await leaveOrphan(c, cust, "both");
+      // Same key hash but another client's id, and same client but another key: not ours.
+      stripe.seedInvoice(c.account, {
+        id: "in_wrong_client",
+        customer: cust,
+        metadata: { dfwsc_idem_key: sha("both"), dfwsc_client_id: "someone-else" },
+      });
+      stripe.seedInvoice(c.account, {
+        id: "in_wrong_key",
+        customer: cust,
+        metadata: { dfwsc_idem_key: sha("nope"), dfwsc_client_id: c.id },
+      });
+      const res = await post(c.apiKey, body(cust), "both");
+      expect(res.json().id).toBe(orphan.id);
+    });
+
+    it("answers 503 INVOICE_ADOPTION_INCOMPLETE and creates nothing when the search runs out of pages", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      await leaveOrphan(c, cust, "capped");
+      junk(c, cust, INVOICE_ADOPTION_MAX_PAGES * 100 + 20); // the match is beyond the page cap
+      const before = stripe.callsTo("invoices.create").length;
+      const res = await post(c.apiKey, body(cust), "capped");
+      expect(res.statusCode).toBe(503);
+      expect(res.json().code).toBe("INVOICE_ADOPTION_INCOMPLETE");
+      expect(stripe.callsTo("invoices.list")).toHaveLength(INVOICE_ADOPTION_MAX_PAGES);
+      expect(stripe.callsTo("invoices.create")).toHaveLength(before);
+      expect(stripe.callsTo("invoiceItems.create")).toHaveLength(0);
+      const row = await rowOf(c.id, "capped");
+      expect(row.creationState).toBe("reserved");
+      expect(row.claimedAt).toBeNull();
+    }, 60_000);
 
     it("adopts invoice items by metadata after the key window instead of duplicating them", async () => {
       const c = await seedClient();

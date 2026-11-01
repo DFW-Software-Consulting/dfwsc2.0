@@ -29,6 +29,7 @@ import {
 } from "../lib/connect-invoice";
 import { getChargeableAccountId } from "../lib/connected-account";
 import {
+  INVOICE_ADOPTION_MAX_PAGES,
   INVOICE_CLAIM_LEASE_MS,
   INVOICE_DAILY_CREATE_LIMIT,
   INVOICE_READ_RATE_LIMIT_MAX,
@@ -158,6 +159,14 @@ function requireInvoicingClient(mode: "read" | "write") {
       });
     }
   };
+}
+
+/** The client's default payment terms when they are a valid day count, else the platform's 30. */
+function defaultDaysUntilDue(client: ClientRow): number {
+  const terms = client.defaultPaymentTermsDays;
+  return terms !== null && Number.isInteger(terms) && terms >= 1 && terms <= 365
+    ? terms
+    : DEFAULT_DAYS_UNTIL_DUE;
 }
 
 const accountOf = (request: FastifyRequest): string =>
@@ -610,41 +619,53 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         .limit(1)
     )[0];
 
+  /** The claim this request holds on a row; `at` moves forward with every save. */
+  interface Claim {
+    at: Date;
+  }
+
   /**
-   * Writes progress on a row this request holds the claim on. A row that is no longer claimed by
-   * this request (the lease expired and another request took over) means stop: ClaimLostError.
-   * Any Postgres failure becomes a PersistenceError (503, retry with the same key).
+   * Writes progress on a row this request holds the claim on, and renews the claim (claimed_at =
+   * now) in the same guarded UPDATE, so a long create keeps its lease while it makes progress. A
+   * row no longer claimed by this request (the lease expired and another request took over) means
+   * stop: ClaimLostError. Any Postgres failure becomes a PersistenceError (503, same key retry).
    */
   async function saveProgress(
     row: InvoiceRow,
-    claimAt: Date,
+    claim: Claim,
     patch: Partial<typeof connectInvoices.$inferInsert>
   ): Promise<InvoiceRow> {
+    const renewedAt = new Date();
     let updated: InvoiceRow | undefined;
     try {
       [updated] = await db
         .update(connectInvoices)
-        .set(patch)
-        .where(and(eq(connectInvoices.id, row.id), eq(connectInvoices.claimedAt, claimAt)))
+        .set({ claimedAt: renewedAt, ...patch })
+        .where(and(eq(connectInvoices.id, row.id), eq(connectInvoices.claimedAt, claim.at)))
         .returning();
     } catch (err) {
       throw new PersistenceError("invoice progress not saved", { cause: err });
     }
     if (!updated) throw new ClaimLostError();
+    if (updated.claimedAt) claim.at = updated.claimedAt;
     return updated;
   }
 
   // Look-ups used only when a resumed create is older than Stripe's idempotency window, where the
   // per-step keys no longer protect against a duplicate. The objects carry our metadata.
+  // Returns the invoice, null when the search was COMPLETE and found none, or undefined after an
+  // error reply. A search that runs out of pages is never "not found": it answers 503 and the
+  // caller creates nothing.
   async function findAdoptableInvoice(
+    request: FastifyRequest,
+    reply: FastifyReply,
     step: Step,
-    stripeAccount: string,
     row: InvoiceRow,
     keyHash: string
   ): Promise<Stripe.Invoice | null | undefined> {
     const since = Math.floor(row.createdAt.getTime() / 1000) - 300;
     let startingAfter: string | undefined;
-    for (let page = 0; page < 10; page++) {
+    for (let page = 0; page < INVOICE_ADOPTION_MAX_PAGES; page++) {
       const list = await step("invoices.list", () =>
         stripe.invoices.list(
           {
@@ -653,7 +674,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
             limit: 100,
             ...(startingAfter ? { starting_after: startingAfter } : {}),
           },
-          { stripeAccount }
+          { stripeAccount: row.connectedAccountId }
         )
       );
       if (!list) return undefined;
@@ -666,7 +687,16 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       if (!list.has_more || !last) return null;
       startingAfter = last.id;
     }
-    return null;
+    request.log.error(
+      { clientId: row.clientId, invoiceRowId: row.id, pages: INVOICE_ADOPTION_MAX_PAGES },
+      "Invoice adoption search incomplete; refusing to create a possible duplicate"
+    );
+    reply.code(503).header("Retry-After", "60").send({
+      error:
+        "The invoice could not be looked up safely right now. Retry later with the same Idempotency-Key, or contact support.",
+      code: "INVOICE_ADOPTION_INCOMPLETE",
+    });
+    return undefined;
   }
 
   type Step = <T>(action: string, call: () => Promise<T>) => Promise<T | undefined>;
@@ -683,13 +713,14 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     request: FastifyRequest,
     reply: FastifyReply,
     initial: InvoiceRow,
-    claimAt: Date,
+    claim: Claim,
     req: InvoiceRequest,
     keyHash: string,
     resumed: boolean
   ): Promise<InvoiceRow | undefined> {
     const client = (request as RequestWithClient).client;
-    const stripeAccount = accountOf(request);
+    // Always the account the row was reserved on, never the client's current one.
+    const stripeAccount = initial.connectedAccountId;
     const idemBase = `${client.id}:inv:${keyHash}`;
 
     // Only a request that has not yet reached Stripe gives its write token back when refused.
@@ -712,7 +743,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     if (!cur.stripeInvoiceId) {
       let invoice: Stripe.Invoice | null | undefined = null;
       if (beyondKeyWindow) {
-        invoice = await findAdoptableInvoice(step, stripeAccount, cur, keyHash);
+        invoice = await findAdoptableInvoice(request, reply, step, cur, keyHash);
         if (invoice === undefined) return undefined;
       }
       if (!invoice) {
@@ -720,7 +751,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         const params: Stripe.InvoiceCreateParams = {
           customer: cur.stripeCustomerId,
           collection_method: "send_invoice",
-          days_until_due: req.daysUntilDue,
+          days_until_due: req.daysUntilDue ?? defaultDaysUntilDue(client),
           auto_advance: false,
           pending_invoice_items_behavior: "exclude",
           currency: "usd",
@@ -739,7 +770,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         );
         if (!invoice) return undefined;
       }
-      cur = await saveProgress(cur, claimAt, {
+      cur = await saveProgress(cur, claim, {
         stripeInvoiceId: invoice.id,
         creationState: "invoice_created",
       });
@@ -798,7 +829,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         const id = await createItem(String(i), req.lines[i]);
         if (!id) return undefined;
         ids.push(id);
-        cur = await saveProgress(cur, claimAt, { lineItemIds: [...ids] });
+        cur = await saveProgress(cur, claim, { lineItemIds: [...ids] });
       }
       if (wantFee && !cur.stripeFeeItemId) {
         const id = await createItem("fee", {
@@ -807,9 +838,9 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           unitAmountCents: cur.feeAmountCents,
         });
         if (!id) return undefined;
-        cur = await saveProgress(cur, claimAt, { stripeFeeItemId: id });
+        cur = await saveProgress(cur, claim, { stripeFeeItemId: id });
       }
-      cur = await saveProgress(cur, claimAt, { creationState: "lines_added" });
+      cur = await saveProgress(cur, claim, { creationState: "lines_added" });
     }
 
     // 3. Re-read the invoice, check Stripe agrees with our arithmetic, and complete.
@@ -850,7 +881,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       });
       return undefined;
     }
-    return saveProgress(cur, claimAt, {
+    return saveProgress(cur, claim, {
       creationState: "complete",
       status: "draft",
       // Lines before the fee; Stripe's own subtotal already includes the fee item.
@@ -904,12 +935,6 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     // Leaves room for the two keys this API adds.
     validateStripeMetadata({ ...userMetadata, dfwsc_client_id: clientId, dfwsc_idem_key: keyHash });
 
-    const terms = client.defaultPaymentTermsDays;
-    const daysUntilDue =
-      body.daysUntilDue ??
-      (terms !== null && Number.isInteger(terms) && terms >= 1 && terms <= 365
-        ? terms
-        : DEFAULT_DAYS_UNTIL_DUE);
     const baseCents = computeBaseCents(body.lines);
     const req: InvoiceRequest = {
       customerId: body.customerId,
@@ -919,7 +944,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         quantity: l.quantity,
       })),
       currency: "usd",
-      daysUntilDue,
+      // As sent: the default terms are resolved only when calling Stripe (and not hashed).
+      daysUntilDue: body.daysUntilDue ?? null,
       description: body.description ?? null,
       footer: body.footer ?? null,
       userMetadata,
@@ -929,7 +955,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     // Everything below that can answer 4xx runs before the first Stripe call.
     let tokenTaken = false;
     let row = await findInvoiceByKey(clientId, keyHash);
-    let claimAt = new Date();
+    const claimAt = new Date();
+    const claim: Claim = { at: claimAt };
     let claimed = false;
 
     if (!row) {
@@ -1039,19 +1066,42 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     }
 
     if (!claimed) {
+      // A resume stays on the account the row was reserved on. If the client has been moved to
+      // another account since, nothing is sent: the saved ids belong to the old one.
+      if (row.connectedAccountId !== stripeAccount) {
+        return reply.code(409).send({
+          error:
+            "The client's Stripe account changed since this Idempotency-Key was first used. Use a new key.",
+          code: "ACCOUNT_CHANGED",
+        });
+      }
+      const [stillThere] = await db
+        .select({ id: connectCustomers.id })
+        .from(connectCustomers)
+        .where(
+          and(
+            eq(connectCustomers.clientId, clientId),
+            eq(connectCustomers.connectedAccountId, row.connectedAccountId),
+            eq(connectCustomers.stripeCustomerId, row.stripeCustomerId)
+          )
+        )
+        .limit(1);
+      if (!stillThere) {
+        return reply.code(404).send({ error: "Customer not found.", code: "NOT_FOUND" });
+      }
       // Resume: take the claim unless another request holds a live one.
       if (!tokenTaken && !(await takeWriteToken(request, reply))) return;
-      claimAt = new Date();
+      claim.at = new Date();
       const [taken] = await db
         .update(connectInvoices)
-        .set({ claimedAt: claimAt })
+        .set({ claimedAt: claim.at })
         .where(
           and(
             eq(connectInvoices.id, row.id),
             ne(connectInvoices.creationState, "complete"),
             or(
               isNull(connectInvoices.claimedAt),
-              lt(connectInvoices.claimedAt, new Date(claimAt.getTime() - INVOICE_CLAIM_LEASE_MS))
+              lt(connectInvoices.claimedAt, new Date(claim.at.getTime() - INVOICE_CLAIM_LEASE_MS))
             )
           )
         )
@@ -1069,20 +1119,34 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
 
     // Give the claim back so an immediate retry resumes instead of waiting out the lease. A
     // finished row already cleared it. Best effort: the lease expires on its own.
-    const releaseClaim = async () => {
-      await db
+    // One shared promise: the handler's `finally` and the onSend hook both wait on the same
+    // release, and the response cannot leave before it is done. (The hook cannot be skipped by the
+    // handler returning first: it runs after the handler, so the entry must outlive it.)
+    let releasing: Promise<void> | undefined;
+    const releaseClaim = () => {
+      releasing ??= db
         .update(connectInvoices)
         .set({ claimedAt: null })
-        .where(and(eq(connectInvoices.id, row.id), eq(connectInvoices.claimedAt, claimAt)))
+        .where(and(eq(connectInvoices.id, row.id), eq(connectInvoices.claimedAt, claim.at)))
+        .then(() => undefined)
         .catch(() => undefined);
+      return releasing;
     };
     pendingRelease.set(request, releaseClaim);
 
     let done: InvoiceRow | undefined;
     try {
-      done = await driveCreate(request, reply, row, claimAt, req, keyHash, !claimed);
+      done = await driveCreate(request, reply, row, claim, req, keyHash, !claimed);
     } catch (err) {
-      if (err instanceof ClaimLostError) return invoiceKeyInUse(reply);
+      if (err instanceof ClaimLostError) {
+        // Another request took the row over (the lease ran out). If it finished the invoice,
+        // that is this request's answer too.
+        const latest = await findInvoiceByKey(clientId, keyHash);
+        if (latest?.creationState === "complete") {
+          return reply.code(200).send(serializeInvoice(latest));
+        }
+        return invoiceKeyInUse(reply);
+      }
       if (err instanceof PersistenceError) {
         // The driver error quotes the failed query's parameters (which can include a hosted
         // URL), so only its SQLSTATE is logged.
@@ -1099,7 +1163,6 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       }
       throw err;
     } finally {
-      pendingRelease.delete(request);
       await releaseClaim();
     }
     if (!done) return reply;

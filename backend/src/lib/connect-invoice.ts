@@ -129,7 +129,8 @@ export interface InvoiceRequest {
   customerId: string;
   lines: Array<{ description: string; unitAmountCents: number; quantity: number }>;
   currency: "usd";
-  daysUntilDue: number;
+  /** As the caller sent it (null when omitted): the client's default is resolved at send time. */
+  daysUntilDue: number | null;
   description: string | null;
   footer: string | null;
   userMetadata: Record<string, string>;
@@ -137,7 +138,8 @@ export interface InvoiceRequest {
 
 /**
  * sha256 of a canonical JSON of the validated request: fixed key order, metadata sorted by key,
- * defaults resolved (the days until due included). The same request always hashes the same; any
+ * `daysUntilDue` as the caller sent it (not the client's default terms, which can change between
+ * an attempt and its retry). The same request always hashes the same; any
  * change to a field, a line or the line order changes it.
  */
 export function hashInvoiceRequest(req: InvoiceRequest): string {
