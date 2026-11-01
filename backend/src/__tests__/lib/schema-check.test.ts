@@ -22,7 +22,7 @@ vi.mock("drizzle-orm", async (importOriginal) => {
 import { db } from "../../db/client";
 import { REQUIRED_TABLES, verifyDatabaseSchema } from "../../lib/schema-check";
 
-const mockDb = db as { execute: ReturnType<typeof vi.fn> };
+const mockDb = db as unknown as { execute: ReturnType<typeof vi.fn> };
 
 describe("verifyDatabaseSchema", () => {
   beforeEach(() => {

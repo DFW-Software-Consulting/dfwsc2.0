@@ -52,8 +52,11 @@ jobs:
       - name: Install backend deps
         run: npm ci
         working-directory: backend
-      - name: Backend type-check
+      - name: Backend type-check (build config)
         run: npx tsc --noEmit -p tsconfig.build.json
+        working-directory: backend
+      - name: Backend type-check (everything, including tests)
+        run: npx tsc --noEmit -p tsconfig.json
         working-directory: backend
       - name: Install frontend deps
         run: npm ci

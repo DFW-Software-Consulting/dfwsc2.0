@@ -687,6 +687,8 @@ describe("renderBillingRow", () => {
       sharedWith: ["B"],
       values,
       updatedAt: NOW,
+      failed: false,
+      refreshedAt: null,
     });
     const b = renderBillingRow({
       company: "Acme",
@@ -695,6 +697,8 @@ describe("renderBillingRow", () => {
       sharedWith: ["A"],
       values,
       updatedAt: NOW,
+      failed: false,
+      refreshedAt: null,
     });
     const { client: ca, clientCode: ka, ...restA } = a;
     const { client: cb, clientCode: kb, ...restB } = b;

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import type { FastifyRequest } from "fastify";
 import Redis from "ioredis";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, type Mock, vi } from "vitest";
 
 // Proves the Redis token-bucket Lua script (and the sliding window's Retry-After) against a
 // real Redis. Runs only when RATE_LIMIT_TEST_REDIS_URL points at one, for example:
@@ -26,7 +27,8 @@ function makeMocks(id: string) {
     headers: {},
     routeOptions: { url: "/live-test" },
     log: { error: vi.fn() },
-  };
+    // A partial stand-in: only the fields the guard reads exist, so it is not a full FastifyRequest.
+  } as unknown as FastifyRequest & { log: { error: Mock } };
   return { request, reply };
 }
 

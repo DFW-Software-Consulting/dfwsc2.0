@@ -112,10 +112,12 @@ export class FakeBillingRequestNextcloud extends FakeTablesNextcloud {
     answers: BillingAnswers,
     options: { userId?: string | null; timestamp?: number; extra?: [number, string][] } = {}
   ) {
-    const mapped = Object.entries(answers).map(([name, text]) => ({
-      questionId: BR_FORM_QUESTIONS[name as keyof typeof BR_FORM_QUESTIONS],
-      text: text as string,
-    }));
+    const mapped: { questionId: number; text: string }[] = Object.entries(answers).map(
+      ([name, text]) => ({
+        questionId: BR_FORM_QUESTIONS[name as keyof typeof BR_FORM_QUESTIONS],
+        text: text as string,
+      })
+    );
     for (const [questionId, text] of options.extra ?? []) mapped.push({ questionId, text });
     this.submissions.set(id, {
       userId: options.userId === undefined ? "alice" : options.userId,

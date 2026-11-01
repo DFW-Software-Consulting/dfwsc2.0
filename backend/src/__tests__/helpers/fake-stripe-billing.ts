@@ -12,7 +12,7 @@ import type {
 export interface CustomerData {
   subscriptions: BillingSubscriptionInput[];
   schedules: BillingScheduleInput[];
-  invoices: (BillingInvoiceInput & { created?: number })[];
+  invoices: BillingInvoiceInput[];
   paymentIntents: { id: string; status: string }[];
   /** InvoicePayments by invoice id. */
   invoicePayments: Record<string, { id: string; created: number; payment: unknown }[]>;
@@ -56,6 +56,7 @@ class FakeBillingStripe {
       schedules: [],
       invoices: [],
       paymentIntents: [],
+      invoicePayments: {},
       ...data,
     });
   }

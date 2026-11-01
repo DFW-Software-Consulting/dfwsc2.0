@@ -24,6 +24,13 @@ import { clients, paymentLedger } from "../../db/schema";
 import { hashApiKey, sha256Lookup } from "../../lib/auth";
 import { stripe } from "../../lib/stripe";
 
+// `checkout.sessions.create` is overloaded, so its recorded args are typed as just the options.
+const createCalls = () =>
+  vi.mocked(stripe.checkout.sessions.create).mock.calls as unknown as [
+    unknown,
+    { idempotencyKey: string },
+  ][];
+
 const payload = {
   lineItems: [
     {
@@ -133,9 +140,7 @@ describe("POST /api/v1/payments/create — idempotency keys are scoped per clien
     expect(resA.json().sessionId).toBe(sessionA);
     expect(resB.json().sessionId).toBe(sessionB);
 
-    const stripeKeys = vi
-      .mocked(stripe.checkout.sessions.create)
-      .mock.calls.map((call) => (call[1] as { idempotencyKey: string }).idempotencyKey);
+    const stripeKeys = createCalls().map((call) => call[1].idempotencyKey);
     expect(stripeKeys).toEqual([`${a.id}:invoice-1001`, `${b.id}:invoice-1001`]);
 
     const [rowA] = await db
@@ -227,11 +232,7 @@ describe("POST /api/v1/payments/create — idempotency keys are scoped per clien
     const res = await createPayment(a, key);
 
     expect(res.statusCode).toBe(201);
-    const stripeKey = (
-      vi.mocked(stripe.checkout.sessions.create).mock.calls[0]?.[1] as {
-        idempotencyKey: string;
-      }
-    ).idempotencyKey;
+    const stripeKey = createCalls()[0]?.[1].idempotencyKey;
     expect(stripeKey).toHaveLength(255);
   });
 

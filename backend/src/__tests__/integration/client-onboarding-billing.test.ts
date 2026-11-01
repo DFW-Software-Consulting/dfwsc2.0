@@ -344,7 +344,9 @@ describe("ensureBillingCustomer", () => {
     for (const r of results)
       expect(r).toMatchObject({ status: "linked", stripeCustomerId: "cus_new" });
     expect(await db.select().from(billingCustomers)).toHaveLength(1);
-    const keys = create.mock.calls.map((c) => (c[1] as { idempotencyKey: string }).idempotencyKey);
+    const keys = create.mock.calls.map(
+      (c: unknown[]) => (c[1] as { idempotencyKey: string }).idempotencyKey
+    );
     expect(new Set(keys).size).toBe(1);
   });
 
