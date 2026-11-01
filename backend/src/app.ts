@@ -163,7 +163,8 @@ export async function buildServer() {
       return;
     }
 
-    // A 5xx message can quote SQL or provider text, so only a fixed line is logged for those.
+    // Client errors (4xx) keep their message as the log line. A 5xx message can quote SQL or
+    // provider text, so those log a fixed line and errorLogFields supplies the diagnostics.
     const logMessage =
       statusCode < 500 ? fastifyError.message : "Request failed with a server error";
     request.log.error(errorLogFields(fastifyError), logMessage);

@@ -39,6 +39,7 @@ import { sendMail } from "../../lib/mailer";
 import { stripe } from "../../lib/stripe";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
+import { captureAppLogs, expectNoPlanted, plantedStripeError } from "../helpers/log-capture";
 
 describe("Onboard Resend + Connect Refresh", () => {
   let app: any;
@@ -498,16 +499,21 @@ describe("Onboard Resend + Connect Refresh", () => {
       const { clientId, state } = await seedRefreshPair("pending");
 
       (stripe.accounts.create as any).mockResolvedValueOnce({ id: "acct_test_502" });
-      (stripe.accountLinks.create as any).mockRejectedValueOnce(
-        new Error("Stripe API unavailable")
-      );
+      (stripe.accountLinks.create as any).mockRejectedValueOnce(plantedStripeError());
+      const logs = captureAppLogs(app);
 
       const response = await app.inject({
         method: "GET",
         url: `/api/v1/connect/refresh?client_id=${clientId}&state=${state}`,
       });
+      logs.restore();
 
       expect(response.statusCode).toBe(502);
+      expect(logs.find("Stripe accountLinks.create failed during refresh")?.fields).toMatchObject({
+        errType: "StripeInvalidRequestError",
+        errRequestId: "req_planted",
+      });
+      expectNoPlanted(logs.text());
     });
 
     it("does not create an account link when a legacy account ID cannot be persisted", async () => {

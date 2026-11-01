@@ -666,7 +666,7 @@ export async function runSalesLeadCycle(options: {
     if (error instanceof SalesLeadConfigError) {
       logProblemOnce(
         logger,
-        `config:${error.message}`,
+        `config:${error.code}:${JSON.stringify(error.detail)}`,
         { errorCode: error.code, titles: error.detail },
         "Sales lead form or table does not match the expected titles; nothing processed."
       );

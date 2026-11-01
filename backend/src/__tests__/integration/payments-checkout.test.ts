@@ -678,3 +678,80 @@ describe("GET /api/v1/reports/payments — sanitizes Stripe payment intents", ()
     expect(pi).not.toHaveProperty("amount_received");
   });
 });
+
+describe("GET /api/v1/reports/payments — Stripe list failures log identifiers only", () => {
+  let app: any;
+  let groupId: string;
+  const clientIds: string[] = [];
+
+  beforeAll(async () => {
+    ensureBaseEnv();
+    app = await buildServer();
+    groupId = `grp-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+    await db.insert(clientGroups).values({
+      id: groupId,
+      name: "Log Group",
+      status: "active",
+      workspace: "client_portal",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    for (let i = 0; i < 2; i++) {
+      const id = randomUUID();
+      clientIds.push(id);
+      await db.insert(clients).values({
+        id,
+        name: `Log Client ${i}`,
+        email: `log-client-${id}@example.com`,
+        status: "active",
+        groupId,
+        workspace: "client_portal",
+        stripeAccountId: `acct_log${id.replace(/-/g, "").slice(0, 12)}`,
+        chargesEnabled: true,
+      });
+    }
+  });
+
+  afterAll(async () => {
+    for (const id of clientIds) await db.delete(clients).where(eq(clients.id, id));
+    await db.delete(clientGroups).where(eq(clientGroups.id, groupId));
+    if (app) await app.close();
+  });
+
+  it("single client: the Stripe error message is not logged", async () => {
+    vi.mocked(stripe.paymentIntents.list).mockRejectedValueOnce(plantedStripeError());
+    const logs = captureAppLogs(app);
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/v1/reports/payments?clientId=${clientIds[0]}&workspace=client_portal`,
+      headers: { authorization: `Bearer ${makeAdminToken()}` },
+    });
+    logs.restore();
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+    expect(logs.find("Stripe PaymentIntent list failed")?.fields).toMatchObject({
+      errType: "StripeInvalidRequestError",
+      errCode: "resource_missing",
+      errRequestId: "req_planted",
+      clientId: clientIds[0],
+    });
+    expectNoPlanted(logs.text());
+  });
+
+  it("group report: a failing connected account is logged without the Stripe message", async () => {
+    vi.mocked(stripe.paymentIntents.list)
+      .mockRejectedValueOnce(plantedStripeError())
+      .mockResolvedValueOnce({ data: [], has_more: false } as never);
+    const logs = captureAppLogs(app);
+    await app.inject({
+      method: "GET",
+      url: `/api/v1/reports/payments?groupId=${groupId}&workspace=client_portal`,
+      headers: { authorization: `Bearer ${makeAdminToken()}` },
+    });
+    logs.restore();
+    expect(
+      logs.find("Failed to list payments for connected account; excluding from group report")
+        ?.fields
+    ).toMatchObject({ errType: "StripeInvalidRequestError", errRequestId: "req_planted" });
+    expectNoPlanted(logs.text());
+  });
+});
