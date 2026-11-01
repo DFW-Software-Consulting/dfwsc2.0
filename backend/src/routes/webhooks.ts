@@ -6,7 +6,7 @@ import { clients, paymentLedger } from "../db/schema";
 import { isCircuitOpenError, isStripeBusyError, withStripeCircuit } from "../lib/circuit-breakers";
 import { syncConnectInvoice } from "../lib/connect-invoice-sync";
 import { isUniqueViolation } from "../lib/errors";
-import { dbErrorFields, retryErrorFields } from "../lib/safe-error-log";
+import { dbErrorFields, retryErrorFields, safeErrorFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import { mapStripeError } from "../lib/stripe-errors";
 import {
@@ -483,7 +483,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         resolvedWebhookSecret
       );
     } catch (err: unknown) {
-      fastify.log.error(retryErrorFields(err), "Failed to verify Stripe webhook signature.");
+      fastify.log.error(safeErrorFields(err), "Failed to verify Stripe webhook signature.");
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(400).send({ error: `Webhook Error: ${message}` });
     }

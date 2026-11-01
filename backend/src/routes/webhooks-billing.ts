@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type Stripe from "stripe";
 import { markCustomerDirty } from "../lib/billing-snapshot";
-import { retryErrorFields } from "../lib/safe-error-log";
+import { retryErrorFields, safeErrorFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import {
   claimStripeEvent,
@@ -71,7 +71,7 @@ export default async function billingWebhookRoute(fastify: FastifyInstance) {
         event = stripe.webhooks.constructEvent(request.rawBody as string, signature, secret);
       } catch (err: unknown) {
         fastify.log.error(
-          retryErrorFields(err),
+          safeErrorFields(err),
           "Failed to verify Stripe billing webhook signature."
         );
         const message = err instanceof Error ? err.message : String(err);

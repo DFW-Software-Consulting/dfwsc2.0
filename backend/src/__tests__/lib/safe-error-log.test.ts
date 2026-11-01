@@ -70,4 +70,12 @@ describe("safe-error-log", () => {
     expect(fields.errMessage).toBe("boom");
     expect(fields.errStack).toContain("boom");
   });
+
+  it("emits only name and code for a non-DB, non-Stripe error", () => {
+    const e = Object.assign(new TypeError(`cannot read ${EMAIL}`), { code: "ERR_X" });
+    const fields = dbErrorFields(e);
+    expect(fields.errName).toBe("TypeError");
+    expect(fields.errCode).toBe("ERR_X");
+    expect(JSON.stringify(fields)).not.toContain(EMAIL);
+  });
 });

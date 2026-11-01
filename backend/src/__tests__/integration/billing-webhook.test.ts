@@ -124,6 +124,29 @@ describe("POST /api/v1/webhooks/stripe-billing", () => {
     expect(await dirtyCount()).toBe(0);
   });
 
+  it("logs only identifiers when signature verification fails", async () => {
+    const logSpy = vi.spyOn(app.log, "error");
+    const secretSig = "sig_leak_jane@customer.example";
+    const event = makeEvent("invoice.paid", {
+      customer: "cus_known",
+      email: "payload@leak.example",
+    });
+    try {
+      expect((await send(event, secretSig)).statusCode).toBe(400);
+      const call = logSpy.mock.calls.find((c) =>
+        String(c[1]).includes("billing webhook signature")
+      );
+      expect(call?.[0]).toHaveProperty("errType");
+      const text = JSON.stringify(logSpy.mock.calls);
+      expect(text).not.toContain("bad signature");
+      expect(text).not.toContain(secretSig);
+      expect(text).not.toContain("payload@leak.example");
+      expect(text).not.toContain("cus_known");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it("ignores an event of a connected account: 200, nothing claimed, no Stripe call, nothing dirty", async () => {
     const event = makeEvent(
       "invoice.paid",
