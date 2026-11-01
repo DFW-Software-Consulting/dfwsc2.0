@@ -37,12 +37,19 @@ CREATE TABLE "connect_invoices" (
 	"sent_at" timestamp with time zone,
 	"paid_at" timestamp with time zone,
 	"voided_at" timestamp with time zone,
-	"last_stripe_event_created_at" integer,
+	"last_stripe_event_created_at" bigint,
 	"last_synced_at" timestamp with time zone,
 	"claimed_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "connect_invoices_client_idempotency_key_uniq" UNIQUE("client_id","idempotency_key"),
+	CONSTRAINT "connect_invoices_subtotal_cents_check" CHECK ("connect_invoices"."subtotal_cents" >= 0),
+	CONSTRAINT "connect_invoices_fee_amount_cents_check" CHECK ("connect_invoices"."fee_amount_cents" >= 0),
+	CONSTRAINT "connect_invoices_total_cents_check" CHECK ("connect_invoices"."total_cents" >= 0),
+	CONSTRAINT "connect_invoices_amount_paid_cents_check" CHECK ("connect_invoices"."amount_paid_cents" >= 0),
+	CONSTRAINT "connect_invoices_amount_remaining_cents_check" CHECK ("connect_invoices"."amount_remaining_cents" >= 0),
+	CONSTRAINT "connect_invoices_send_count_check" CHECK ("connect_invoices"."send_count" >= 0),
+	CONSTRAINT "connect_invoices_currency_check" CHECK ("connect_invoices"."currency" ~ '^[a-z]{3}$'),
 	CONSTRAINT "connect_invoices_creation_state_check" CHECK ("connect_invoices"."creation_state" IN ('reserved', 'invoice_created', 'lines_added', 'complete')),
 	CONSTRAINT "connect_invoices_status_check" CHECK ("connect_invoices"."status" IN ('draft', 'open', 'paid', 'void', 'uncollectible', 'deleted'))
 );
@@ -50,6 +57,7 @@ CREATE TABLE "connect_invoices" (
 ALTER TABLE "clients" ADD COLUMN "invoicing_enabled" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "connect_customers" ADD CONSTRAINT "connect_customers_client_id_clients_id_fk" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "connect_invoices" ADD CONSTRAINT "connect_invoices_client_id_clients_id_fk" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "connect_invoices" ADD CONSTRAINT "connect_invoices_customer_fk" FOREIGN KEY ("connected_account_id","stripe_customer_id") REFERENCES "public"."connect_customers"("connected_account_id","stripe_customer_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "connect_customers_client_external_ref_uniq" ON "connect_customers" USING btree ("client_id","external_ref") WHERE "connect_customers"."external_ref" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "connect_invoices_stripe_invoice_id_uniq" ON "connect_invoices" USING btree ("stripe_invoice_id") WHERE "connect_invoices"."stripe_invoice_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "connect_invoices_client_created_idx" ON "connect_invoices" USING btree ("client_id","created_at" DESC,"id");--> statement-breakpoint

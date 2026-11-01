@@ -933,6 +933,19 @@ describe("Clients API Integration", () => {
       expect(row.invoicingEnabled).toBe(false);
     });
 
+    it("rejects an invalid bearer token with 401", async () => {
+      const clientId = await insertClient();
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId}`,
+        headers: { authorization: "Bearer not-a-real-token", "content-type": "application/json" },
+        payload: { invoicingEnabled: true },
+      });
+      expect(res.statusCode).toBe(401);
+      const [row] = await db.select().from(clients).where(eq(clients.id, clientId));
+      expect(row.invoicingEnabled).toBe(false);
+    });
+
     it("requires admin auth", async () => {
       const clientId = await insertClient();
       const res = await app.inject({

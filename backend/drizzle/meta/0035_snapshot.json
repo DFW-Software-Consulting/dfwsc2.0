@@ -1,5 +1,5 @@
 {
-  "id": "ffa58c2b-c672-4bb8-9bbd-6d41bde928f5",
+  "id": "b0e44de4-80bf-4f80-b9a8-e2c5da250c85",
   "prevId": "6b452743-e66d-449c-a9b0-58eae1b85c9b",
   "version": "7",
   "dialect": "postgresql",
@@ -1623,7 +1623,7 @@
         },
         "last_stripe_event_created_at": {
           "name": "last_stripe_event_created_at",
-          "type": "integer",
+          "type": "bigint",
           "primaryKey": false,
           "notNull": false
         },
@@ -1733,6 +1733,21 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "connect_invoices_customer_fk": {
+          "name": "connect_invoices_customer_fk",
+          "tableFrom": "connect_invoices",
+          "tableTo": "connect_customers",
+          "columnsFrom": [
+            "connected_account_id",
+            "stripe_customer_id"
+          ],
+          "columnsTo": [
+            "connected_account_id",
+            "stripe_customer_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1748,6 +1763,34 @@
       },
       "policies": {},
       "checkConstraints": {
+        "connect_invoices_subtotal_cents_check": {
+          "name": "connect_invoices_subtotal_cents_check",
+          "value": "\"connect_invoices\".\"subtotal_cents\" >= 0"
+        },
+        "connect_invoices_fee_amount_cents_check": {
+          "name": "connect_invoices_fee_amount_cents_check",
+          "value": "\"connect_invoices\".\"fee_amount_cents\" >= 0"
+        },
+        "connect_invoices_total_cents_check": {
+          "name": "connect_invoices_total_cents_check",
+          "value": "\"connect_invoices\".\"total_cents\" >= 0"
+        },
+        "connect_invoices_amount_paid_cents_check": {
+          "name": "connect_invoices_amount_paid_cents_check",
+          "value": "\"connect_invoices\".\"amount_paid_cents\" >= 0"
+        },
+        "connect_invoices_amount_remaining_cents_check": {
+          "name": "connect_invoices_amount_remaining_cents_check",
+          "value": "\"connect_invoices\".\"amount_remaining_cents\" >= 0"
+        },
+        "connect_invoices_send_count_check": {
+          "name": "connect_invoices_send_count_check",
+          "value": "\"connect_invoices\".\"send_count\" >= 0"
+        },
+        "connect_invoices_currency_check": {
+          "name": "connect_invoices_currency_check",
+          "value": "\"connect_invoices\".\"currency\" ~ '^[a-z]{3}$'"
+        },
         "connect_invoices_creation_state_check": {
           "name": "connect_invoices_creation_state_check",
           "value": "\"connect_invoices\".\"creation_state\" IN ('reserved', 'invoice_created', 'lines_added', 'complete')"

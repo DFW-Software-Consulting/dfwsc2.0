@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -721,7 +722,7 @@ export const connectInvoices = pgTable(
     paidAt: timestamp("paid_at", { withTimezone: true }),
     voidedAt: timestamp("voided_at", { withTimezone: true }),
     // Stripe event ordering can be out-of-order; ignore stale updates.
-    lastStripeEventCreatedAt: integer("last_stripe_event_created_at"),
+    lastStripeEventCreatedAt: bigint("last_stripe_event_created_at", { mode: "number" }),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -744,6 +745,32 @@ export const connectInvoices = pgTable(
       table.id
     ),
     clientStatusIdx: index("connect_invoices_client_status_idx").on(table.clientId, table.status),
+    // No ON DELETE action (NO ACTION): customers are never deleted in v1, and a client delete
+    // still cascades to both tables in one statement.
+    customerFk: foreignKey({
+      name: "connect_invoices_customer_fk",
+      columns: [table.connectedAccountId, table.stripeCustomerId],
+      foreignColumns: [connectCustomers.connectedAccountId, connectCustomers.stripeCustomerId],
+    }),
+    subtotalCentsCheck: check(
+      "connect_invoices_subtotal_cents_check",
+      sql`${table.subtotalCents} >= 0`
+    ),
+    feeAmountCentsCheck: check(
+      "connect_invoices_fee_amount_cents_check",
+      sql`${table.feeAmountCents} >= 0`
+    ),
+    totalCentsCheck: check("connect_invoices_total_cents_check", sql`${table.totalCents} >= 0`),
+    amountPaidCentsCheck: check(
+      "connect_invoices_amount_paid_cents_check",
+      sql`${table.amountPaidCents} >= 0`
+    ),
+    amountRemainingCentsCheck: check(
+      "connect_invoices_amount_remaining_cents_check",
+      sql`${table.amountRemainingCents} >= 0`
+    ),
+    sendCountCheck: check("connect_invoices_send_count_check", sql`${table.sendCount} >= 0`),
+    currencyCheck: check("connect_invoices_currency_check", sql`${table.currency} ~ '^[a-z]{3}$'`),
     creationStateCheck: check(
       "connect_invoices_creation_state_check",
       sql`${table.creationState} IN ('reserved', 'invoice_created', 'lines_added', 'complete')`
