@@ -716,6 +716,8 @@ export const connectInvoices = pgTable(
     dueDate: timestamp("due_date", { withTimezone: true }),
     hostedInvoiceUrl: text("hosted_invoice_url"),
     invoicePdf: text("invoice_pdf"),
+    description: text("description"),
+    metadata: jsonb("metadata"),
     sendCount: integer("send_count").notNull().default(0),
     finalizedAt: timestamp("finalized_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
@@ -778,6 +780,42 @@ export const connectInvoices = pgTable(
     statusCheck: check(
       "connect_invoices_status_check",
       sql`${table.status} IN ('draft', 'open', 'paid', 'void', 'uncollectible', 'deleted')`
+    ),
+  })
+);
+
+// One row per accepted POST /invoices/:id/send attempt (keyed by the hashed Idempotency-Key).
+// 'pending' and 'sent' rows count towards the per-invoice send cap; 'failed' (a definite Stripe 4xx)
+// does not.
+export const connectInvoiceSends = pgTable(
+  "connect_invoice_sends",
+  {
+    id: text("id").primaryKey(),
+    invoiceId: text("invoice_id")
+      .notNull()
+      .references(() => connectInvoices.id, { onDelete: "cascade" }),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    keyHash: text("key_hash").notNull(),
+    state: text("state", { enum: ["pending", "sent", "failed"] })
+      .notNull()
+      .default("pending"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    invoiceKeyUniq: unique("connect_invoice_sends_invoice_key_uniq").on(
+      table.invoiceId,
+      table.keyHash
+    ),
+    stateCheck: check(
+      "connect_invoice_sends_state_check",
+      sql`${table.state} IN ('pending', 'sent', 'failed')`
     ),
   })
 );

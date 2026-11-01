@@ -176,7 +176,14 @@ describe("verifyDatabaseSchema", () => {
               "due_date",
               "hosted_invoice_url",
               "invoice_pdf",
+              "description",
+              "metadata",
               "send_count",
+              // connect_invoice_sends
+              "invoice_id",
+              "key_hash",
+              "state",
+              "claimed_at",
               "finalized_at",
               "sent_at",
               "paid_at",
@@ -192,7 +199,7 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(18);
+    expect(mockDb.execute).toHaveBeenCalledTimes(19);
   });
 
   it("requires the connected-account invoicing tables and the clients flag", () => {
@@ -203,6 +210,13 @@ describe("verifyDatabaseSchema", () => {
     );
     expect(byTable.get("connect_invoices")).toEqual(
       expect.arrayContaining(["client_id", "stripe_invoice_id", "creation_state", "send_count"])
+    );
+  });
+
+  it("requires the connect_invoice_sends table", () => {
+    const byTable = new Map(REQUIRED_TABLES.map((t) => [t.table, t.columns]));
+    expect(byTable.get("connect_invoice_sends")).toEqual(
+      expect.arrayContaining(["invoice_id", "client_id", "key_hash", "state", "claimed_at"])
     );
   });
 

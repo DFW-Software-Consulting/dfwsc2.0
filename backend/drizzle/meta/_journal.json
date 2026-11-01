@@ -253,6 +253,13 @@
       "when": 1793496638055,
       "tag": "0035_connect_invoicing_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793537215090,
+      "tag": "0036_connect_invoice_lifecycle",
+      "breakpoints": true
     }
   ]
 }

@@ -38,6 +38,8 @@ export const INVOICE_READ_RATE_LIMIT_MAX = 600;
 export const INVOICE_MAX_AMOUNT_CENTS = 2_500_000;
 export const INVOICE_MAX_LINES = 50;
 export const INVOICE_DAILY_CREATE_LIMIT = 1000;
+/** Sends (pending or sent) allowed per invoice; each is a customer email. */
+export const INVOICE_MAX_SENDS = 3;
 // A create that is mid-flight holds a claim on its row for this long; after it, another request
 // with the same Idempotency-Key takes over and resumes from the saved Stripe ids.
 export const INVOICE_CLAIM_LEASE_MS = 60_000;

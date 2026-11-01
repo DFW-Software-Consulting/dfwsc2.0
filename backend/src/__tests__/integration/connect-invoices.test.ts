@@ -372,12 +372,14 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
           "createdAt",
           "customerId",
           "currency",
+          "description",
           "dueDate",
           "feeAmountCents",
           "finalizedAt",
           "hostedInvoiceUrl",
           "id",
           "invoicePdf",
+          "metadata",
           "number",
           "paidAt",
           "status",
@@ -397,6 +399,8 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
         amountPaidCents: 0,
         amountRemainingCents: 107_750,
         hostedInvoiceUrl: null,
+        description: "March",
+        metadata: { unit: "12" },
       });
 
       const [create] = stripe.callsTo("invoices.create");
@@ -1565,7 +1569,7 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
     it("never re-checks a terminal row", async () => {
       const c = await seedClient();
       const cust = await seedCustomer(c);
-      for (const status of ["paid", "void", "uncollectible", "deleted"] as const) {
+      for (const status of ["paid", "void", "deleted"] as const) {
         const rowId = await seedInvoiceRow(c, cust, {
           status,
           lastSyncedAt: new Date(Date.now() - 60 * 60_000),

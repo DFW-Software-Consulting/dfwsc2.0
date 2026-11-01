@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
-import { and, asc, count, desc, eq, gte, isNull, lt, min, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, min, ne, or, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
-import { clientGroups, type clients, connectCustomers, connectInvoices } from "../db/schema";
+import {
+  clientGroups,
+  type clients,
+  connectCustomers,
+  connectInvoiceSends,
+  connectInvoices,
+} from "../db/schema";
 import { requireApiKey } from "../lib/auth";
 import {
   getCircuitBreakerStates,
@@ -20,8 +26,10 @@ import {
   decodeCursor,
   encodeCursor,
   hashInvoiceRequest,
+  INVOICE_STATUS_PRIORS,
   type InvoiceRequest,
   type InvoiceRow,
+  invoicePatchFromStripe,
   listQuerySchema,
   PROCESSING_FEE_DESCRIPTION,
   serializeInvoice,
@@ -32,6 +40,7 @@ import {
   INVOICE_ADOPTION_MAX_PAGES,
   INVOICE_CLAIM_LEASE_MS,
   INVOICE_DAILY_CREATE_LIMIT,
+  INVOICE_MAX_SENDS,
   INVOICE_READ_RATE_LIMIT_MAX,
   INVOICE_RECONCILE_MIN_AGE_MS,
   INVOICE_STRIPE_KEY_WINDOW_MS,
@@ -895,6 +904,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       dueDate: fresh.due_date ? new Date(fresh.due_date * 1000) : null,
       hostedInvoiceUrl: fresh.hosted_invoice_url ?? null,
       invoicePdf: fresh.invoice_pdf ?? null,
+      description: req.description,
+      metadata: req.userMetadata,
       lastSyncedAt: new Date(),
       claimedAt: null,
     });
@@ -1039,6 +1050,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           feeAmountCents: feeCents,
           totalCents,
           amountRemainingCents: totalCents,
+          description: req.description,
+          metadata: req.userMetadata,
           claimedAt: claimAt,
           // Millisecond precision on purpose: the list cursor round-trips this value exactly.
           createdAt: claimAt,
@@ -1063,7 +1076,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         code: "IDEMPOTENCY_KEY_REUSED",
       });
     }
-    if (row.creationState === "complete") {
+    // A deleted draft stays deleted: a replay reports it and never resumes adding lines.
+    if (row.creationState === "complete" || row.status === "deleted") {
       return reply.code(200).send(serializeInvoice(row));
     }
 
@@ -1101,6 +1115,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           and(
             eq(connectInvoices.id, row.id),
             ne(connectInvoices.creationState, "complete"),
+            ne(connectInvoices.status, "deleted"),
             or(
               isNull(connectInvoices.claimedAt),
               lt(connectInvoices.claimedAt, new Date(claim.at.getTime() - INVOICE_CLAIM_LEASE_MS))
@@ -1110,7 +1125,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         .returning();
       if (!taken) {
         const latest = await findInvoiceByKey(clientId, keyHash);
-        if (latest?.creationState === "complete") {
+        if (latest?.creationState === "complete" || latest?.status === "deleted") {
           return reply.code(200).send(serializeInvoice(latest));
         }
         if (tokenTaken) await writeBucket.refund(request);
@@ -1144,7 +1159,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         // Another request took the row over (the lease ran out). If it finished the invoice,
         // that is this request's answer too.
         const latest = await findInvoiceByKey(clientId, keyHash);
-        if (latest?.creationState === "complete") {
+        if (latest?.creationState === "complete" || latest?.status === "deleted") {
           return reply.code(200).send(serializeInvoice(latest));
         }
         return invoiceKeyInUse(reply);
@@ -1170,6 +1185,45 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     if (!done) return reply;
     return reply.code(201).send(serializeInvoice(done));
   });
+
+  // Rows a caller may see: finished ones, and deleted drafts (even an orphan deleted before it
+  // finished creating). Anything else is still being created.
+  const visibleInvoice = or(
+    eq(connectInvoices.creationState, "complete"),
+    eq(connectInvoices.status, "deleted")
+  );
+
+  /**
+   * Writes what Stripe says about an invoice onto its row, never moving the status backward. When
+   * the guard refuses (the row is already further along) the stored row is returned unchanged.
+   * `extra` carries columns only the caller knows (send bookkeeping). Throws on a Postgres failure.
+   */
+  async function applyStripeInvoice(
+    exec: Pick<typeof db, "update" | "select">,
+    row: InvoiceRow,
+    invoice: Stripe.Invoice,
+    extra: Partial<typeof connectInvoices.$inferInsert> = {}
+  ): Promise<InvoiceRow> {
+    const patch = invoicePatchFromStripe(invoice);
+    if (!patch) return row;
+    const [updated] = await exec
+      .update(connectInvoices)
+      .set({ ...patch, ...extra })
+      .where(
+        and(
+          eq(connectInvoices.id, row.id),
+          inArray(connectInvoices.status, [...INVOICE_STATUS_PRIORS[patch.status]])
+        )
+      )
+      .returning();
+    if (updated) return updated;
+    const [current] = await exec
+      .select()
+      .from(connectInvoices)
+      .where(eq(connectInvoices.id, row.id))
+      .limit(1);
+    return current ?? row;
+  }
 
   // ── Stale re-check (GET /invoices/:id) ─────────────────────────────────────
   // At most one Stripe lookup per invoice per interval and a bounded map, in process (the same
@@ -1221,29 +1275,10 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           maxNetworkRetries: 0,
         }
       );
-      const status = invoice.status;
-      if (!status) return row;
-      const at = (s: number | null | undefined) => (s ? new Date(s * 1000) : undefined);
-      const transitions = invoice.status_transitions;
-      const [updated] = await db
-        .update(connectInvoices)
-        .set({
-          status,
-          totalCents: invoice.total,
-          amountPaidCents: invoice.amount_paid,
-          amountRemainingCents: invoice.amount_remaining,
-          number: invoice.number ?? null,
-          dueDate: invoice.due_date ? new Date(invoice.due_date * 1000) : null,
-          hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
-          invoicePdf: invoice.invoice_pdf ?? null,
-          ...(at(transitions?.finalized_at) ? { finalizedAt: at(transitions.finalized_at) } : {}),
-          ...(at(transitions?.paid_at) ? { paidAt: at(transitions.paid_at) } : {}),
-          ...(at(transitions?.voided_at) ? { voidedAt: at(transitions.voided_at) } : {}),
-          lastSyncedAt: new Date(),
-        })
-        .where(eq(connectInvoices.id, row.id))
-        .returning();
-      return updated ?? row;
+      const patch = invoicePatchFromStripe(invoice);
+      if (!patch) return row;
+      const updated = await applyStripeInvoice(db, row, invoice);
+      return updated;
     } catch (err) {
       // Codes only: a Stripe error message may quote customer data.
       request.log.warn(
@@ -1269,7 +1304,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         and(
           eq(connectInvoices.clientId, (request as RequestWithClient).client.id),
           eq(connectInvoices.stripeInvoiceId, params.id),
-          eq(connectInvoices.creationState, "complete")
+          visibleInvoice
         )
       )
       .limit(1);
@@ -1293,8 +1328,11 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       .where(
         and(
           eq(connectInvoices.clientId, (request as RequestWithClient).client.id),
-          eq(connectInvoices.creationState, "complete"),
-          query.status ? eq(connectInvoices.status, query.status) : undefined,
+          visibleInvoice,
+          // Deleted drafts are listed only when asked for.
+          query.status
+            ? eq(connectInvoices.status, query.status)
+            : ne(connectInvoices.status, "deleted"),
           query.customerId ? eq(connectInvoices.stripeCustomerId, query.customerId) : undefined,
           after
             ? or(
@@ -1315,5 +1353,539 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       data: page.map(serializeInvoice),
       nextCursor: rows.length > query.limit && last ? encodeCursor(last) : null,
     });
+  });
+
+  // ══ Invoice lifecycle: finalize, send, void, delete ════════════════════════
+  // Every call uses the account the ROW was created on. If the client has been moved to another
+  // account, nothing is sent (ACCOUNT_CHANGED). Results are written back with applyStripeInvoice,
+  // which never moves a status backward.
+
+  const lifecycleErr = (reply: FastifyReply, status: number, code: string, error: string) =>
+    reply.code(status).send({ error, code });
+
+  /** The caller's invoice (any creation state), or undefined after sending 404 / ACCOUNT_CHANGED. */
+  async function loadLifecycleRow(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    stripeInvoiceId: string
+  ): Promise<InvoiceRow | undefined> {
+    const client = (request as RequestWithClient).client;
+    const [row] = await db
+      .select()
+      .from(connectInvoices)
+      .where(
+        and(
+          eq(connectInvoices.clientId, client.id),
+          eq(connectInvoices.stripeInvoiceId, stripeInvoiceId)
+        )
+      )
+      .limit(1);
+    if (!row) {
+      reply.code(404).send(INVOICE_NOT_FOUND);
+      return undefined;
+    }
+    if (row.connectedAccountId !== client.stripeAccountId) {
+      lifecycleErr(
+        reply,
+        409,
+        "ACCOUNT_CHANGED",
+        "The client's Stripe account changed since this invoice was created. It cannot be changed from this API key."
+      );
+      return undefined;
+    }
+    return row;
+  }
+
+  /** Runs a Postgres write that follows a Stripe success; a failure is a 503 the caller retries. */
+  async function persistAfterStripe<T>(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    row: InvoiceRow,
+    write: () => Promise<T>,
+    // Runs before the 503 leaves, so a caller that retries at once finds the work released.
+    beforeReply?: () => Promise<unknown>
+  ): Promise<T | undefined> {
+    try {
+      return await write();
+    } catch (err) {
+      // SQLSTATE only: the driver error quotes the failed query's parameters (hosted URLs).
+      const dbCode = (err as { cause?: { code?: unknown }; code?: unknown } | null)?.cause?.code;
+      request.log.error(
+        { clientId: row.clientId, invoiceRowId: row.id, dbCode },
+        "Invoice change done on Stripe but not recorded; returning 503"
+      );
+      await beforeReply?.();
+      reply.code(503).send({
+        error: "The invoice was updated but confirmation failed. Please retry the same request.",
+        code: "LEDGER_PERSISTENCE_FAILED",
+      });
+      return undefined;
+    }
+  }
+
+  const invoiceIdParams = (request: FastifyRequest, reply: FastifyReply) =>
+    parseBody(idParamsSchema, request.params, reply);
+
+  // ── POST /invoices/:id/finalize ────────────────────────────────────────────
+  fastify.post("/invoices/:id/finalize", { preHandler: writeGuards }, async (request, reply) => {
+    const params = invoiceIdParams(request, reply);
+    if (!params) return;
+    const clientId = (request as RequestWithClient).client.id;
+    const row = await loadLifecycleRow(request, reply, params.id);
+    if (!row) return reply;
+    if (row.creationState !== "complete") {
+      return lifecycleErr(
+        reply,
+        409,
+        "INVOICE_INCOMPLETE",
+        "The invoice is still being created. Retry the create with its Idempotency-Key first."
+      );
+    }
+    if (row.status === "deleted") {
+      return lifecycleErr(reply, 409, "INVOICE_NOT_FINALIZABLE", "The invoice was deleted.");
+    }
+    if (!(await takeWriteToken(request, reply))) return reply;
+
+    const stripeAccount = row.connectedAccountId;
+    const invoiceId = row.stripeInvoiceId as string;
+    const fresh = await stripeCall(
+      request,
+      reply,
+      "invoices.retrieve",
+      () => stripe.invoices.retrieve(invoiceId, {}, { stripeAccount }),
+      { write: true, notFound: "Invoice not found." }
+    );
+    if (!fresh) return reply;
+
+    let result: Stripe.Invoice = fresh;
+    if (fresh.status === "draft") {
+      // The total is what the fee and the caller agreed to. If Stripe now disagrees, nothing is
+      // finalized: a finalized invoice can no longer be corrected.
+      if (fresh.total !== row.totalCents) {
+        request.log.error(
+          {
+            clientId,
+            stripeInvoiceId: invoiceId,
+            expectedTotalCents: row.totalCents,
+            stripeTotalCents: fresh.total,
+          },
+          "Stripe invoice total changed since creation; not finalizing"
+        );
+        return lifecycleErr(
+          reply,
+          502,
+          "INVOICE_TOTAL_MISMATCH",
+          "The invoice total no longer matches the amount computed at creation. It was not finalized."
+        );
+      }
+      const finalized = await stripeCall(
+        request,
+        reply,
+        "invoices.finalizeInvoice",
+        () =>
+          stripe.invoices.finalizeInvoice(
+            invoiceId,
+            { auto_advance: false },
+            { stripeAccount, idempotencyKey: `${clientId}:${invoiceId}:finalize` }
+          ),
+        { notFound: "Invoice not found." }
+      );
+      if (!finalized) return reply;
+      result = finalized;
+    }
+
+    const updated = await persistAfterStripe(request, reply, row, () =>
+      applyStripeInvoice(db, row, result)
+    );
+    if (!updated) return reply;
+    if (result.status !== "open") {
+      return lifecycleErr(
+        reply,
+        409,
+        "INVOICE_NOT_FINALIZABLE",
+        `The invoice is ${result.status} and cannot be finalized.`
+      );
+    }
+    return reply.code(200).send(serializeInvoice(updated));
+  });
+
+  // ── POST /invoices/:id/void ────────────────────────────────────────────────
+  // Allowed when charges are off: a client that lost its charges can still cancel what it sent.
+  const lifecycleOpenGuards = [requireInvoicingClient("read")];
+  fastify.post(
+    "/invoices/:id/void",
+    { preHandler: lifecycleOpenGuards },
+    async (request, reply) => {
+      const params = invoiceIdParams(request, reply);
+      if (!params) return;
+      const clientId = (request as RequestWithClient).client.id;
+      const row = await loadLifecycleRow(request, reply, params.id);
+      if (!row) return reply;
+      if (row.status === "void") return reply.code(200).send(serializeInvoice(row));
+      if (row.status === "paid" || row.status === "deleted") {
+        return lifecycleErr(
+          reply,
+          409,
+          "INVOICE_NOT_VOIDABLE",
+          `A ${row.status} invoice cannot be voided.`
+        );
+      }
+      if (!(await takeWriteToken(request, reply))) return reply;
+
+      const stripeAccount = row.connectedAccountId;
+      const invoiceId = row.stripeInvoiceId as string;
+      const fresh = await stripeCall(
+        request,
+        reply,
+        "invoices.retrieve",
+        () => stripe.invoices.retrieve(invoiceId, {}, { stripeAccount }),
+        { write: true, notFound: "Invoice not found." }
+      );
+      if (!fresh) return reply;
+
+      let result: Stripe.Invoice = fresh;
+      if (fresh.status === "open" || fresh.status === "uncollectible") {
+        const voided = await stripeCall(
+          request,
+          reply,
+          "invoices.voidInvoice",
+          () =>
+            stripe.invoices.voidInvoice(
+              invoiceId,
+              {},
+              { stripeAccount, idempotencyKey: `${clientId}:${invoiceId}:void` }
+            ),
+          { notFound: "Invoice not found." }
+        );
+        if (!voided) return reply;
+        result = voided;
+      }
+
+      const updated = await persistAfterStripe(request, reply, row, () =>
+        applyStripeInvoice(db, row, result)
+      );
+      if (!updated) return reply;
+      if (result.status === "void") return reply.code(200).send(serializeInvoice(updated));
+      return lifecycleErr(
+        reply,
+        409,
+        "INVOICE_NOT_VOIDABLE",
+        result.status === "draft"
+          ? "A draft invoice cannot be voided; delete it with DELETE /invoices/:id."
+          : `A ${result.status} invoice cannot be voided.`
+      );
+    }
+  );
+
+  // ── DELETE /invoices/:id ───────────────────────────────────────────────────
+  // Drafts only. The row is claimed first (the same lease a create holds), so a delete never
+  // races a create that is still adding lines, and a create that comes back afterwards finds the
+  // row deleted. An orphan whose create gave up (claim expired) can be deleted to clean up.
+  fastify.delete("/invoices/:id", { preHandler: lifecycleOpenGuards }, async (request, reply) => {
+    const params = invoiceIdParams(request, reply);
+    if (!params) return;
+    const row = await loadLifecycleRow(request, reply, params.id);
+    if (!row) return reply;
+    if (row.status === "deleted") return reply.code(200).send(serializeInvoice(row));
+    if (row.status !== "draft") {
+      return lifecycleErr(
+        reply,
+        409,
+        "INVOICE_NOT_DELETABLE",
+        `Only draft invoices can be deleted; this one is ${row.status}. Use void for an open invoice.`
+      );
+    }
+    if (!(await takeWriteToken(request, reply))) return reply;
+
+    const claimAt = new Date();
+    const [claimed] = await db
+      .update(connectInvoices)
+      .set({ claimedAt: claimAt })
+      .where(
+        and(
+          eq(connectInvoices.id, row.id),
+          eq(connectInvoices.status, "draft"),
+          or(
+            isNull(connectInvoices.claimedAt),
+            lt(connectInvoices.claimedAt, new Date(claimAt.getTime() - INVOICE_CLAIM_LEASE_MS))
+          )
+        )
+      )
+      .returning();
+    if (!claimed) {
+      await writeBucket.refund(request);
+      const [latest] = await db
+        .select()
+        .from(connectInvoices)
+        .where(eq(connectInvoices.id, row.id))
+        .limit(1);
+      if (latest?.status === "deleted") return reply.code(200).send(serializeInvoice(latest));
+      return lifecycleErr(
+        reply,
+        409,
+        "INVOICE_IN_USE",
+        "The invoice is being created or changed right now. Retry shortly."
+      );
+    }
+    const releaseClaim = () =>
+      db
+        .update(connectInvoices)
+        .set({ claimedAt: null })
+        .where(and(eq(connectInvoices.id, row.id), eq(connectInvoices.claimedAt, claimAt)))
+        .then(() => undefined)
+        .catch(() => undefined);
+    // Every error reply (stripeCall sends its own) gives the claim back before it leaves; a
+    // finished delete already cleared it.
+    pendingRelease.set(request, releaseClaim);
+
+    const stripeAccount = row.connectedAccountId;
+    const invoiceId = row.stripeInvoiceId as string;
+    // A 404 from Stripe means the draft is already gone: that is the outcome the caller wants.
+    let gone = false;
+    const out = await stripeCall(
+      request,
+      reply,
+      "invoices.del",
+      async () => {
+        try {
+          return await stripe.invoices.del(invoiceId, {}, { stripeAccount });
+        } catch (err) {
+          if (isResourceMissing(err)) {
+            gone = true;
+            return undefined;
+          }
+          throw err;
+        }
+      },
+      { write: true }
+    );
+    // `undefined` after a 404-as-success is not an error reply: told apart by `gone` / reply.sent.
+    if (!gone && (out === undefined || reply.sent)) return reply;
+
+    const updated = await persistAfterStripe(request, reply, row, async () => {
+      const [u] = await db
+        .update(connectInvoices)
+        .set({ status: "deleted", claimedAt: null, lastSyncedAt: new Date() })
+        .where(
+          and(
+            eq(connectInvoices.id, row.id),
+            inArray(connectInvoices.status, [...INVOICE_STATUS_PRIORS.deleted])
+          )
+        )
+        .returning();
+      return u ?? row;
+    });
+    if (!updated) return reply;
+    return reply.code(200).send(serializeInvoice(updated));
+  });
+
+  // ── POST /invoices/:id/send ────────────────────────────────────────────────
+  // Each accepted Idempotency-Key is a connect_invoice_sends row, taken in a transaction that
+  // holds a lock on the invoice, so the cap of INVOICE_MAX_SENDS counts exactly. 'pending' and
+  // 'sent' count; 'failed' (a definite Stripe 4xx: nothing was emailed) does not. A replay of a
+  // sent key answers from Postgres and never reaches Stripe or the count.
+  type SendDecision =
+    | { kind: "replay" }
+    | { kind: "in_use" }
+    | { kind: "limit" }
+    | { kind: "not_open"; status: string }
+    | { kind: "go"; sendId: string };
+
+  fastify.post("/invoices/:id/send", { preHandler: writeGuards }, async (request, reply) => {
+    const params = invoiceIdParams(request, reply);
+    if (!params) return;
+    const clientId = (request as RequestWithClient).client.id;
+    const keyHeader = extractIdempotencyKey(request);
+    if (!keyHeader || keyHeader.trim().length === 0) {
+      throw errors.badRequest("Idempotency-Key header is required.");
+    }
+    const rawKey = keyHeader.trim();
+    if (rawKey.length > 255) {
+      throw errors.badRequest("Idempotency-Key must not exceed 255 characters.");
+    }
+    const keyHash = createHash("sha256").update(rawKey).digest("hex");
+
+    const row = await loadLifecycleRow(request, reply, params.id);
+    if (!row) return reply;
+    if (row.creationState !== "complete") {
+      return lifecycleErr(reply, 409, "INVOICE_INCOMPLETE", "The invoice is still being created.");
+    }
+    if (!(await takeWriteToken(request, reply))) return reply;
+
+    const decision = await db.transaction(async (tx): Promise<SendDecision> => {
+      const [locked] = await tx
+        .select({ status: connectInvoices.status })
+        .from(connectInvoices)
+        .where(eq(connectInvoices.id, row.id))
+        .for("update");
+      const now = new Date();
+      const [existing] = await tx
+        .select()
+        .from(connectInvoiceSends)
+        .where(
+          and(eq(connectInvoiceSends.invoiceId, row.id), eq(connectInvoiceSends.keyHash, keyHash))
+        )
+        .limit(1);
+      const [counted] = await tx
+        .select({ n: count() })
+        .from(connectInvoiceSends)
+        .where(
+          and(
+            eq(connectInvoiceSends.invoiceId, row.id),
+            inArray(connectInvoiceSends.state, ["pending", "sent"]),
+            existing ? ne(connectInvoiceSends.id, existing.id) : undefined
+          )
+        );
+      if (existing) {
+        if (existing.state === "sent") return { kind: "replay" };
+        const live =
+          existing.state === "pending" &&
+          existing.claimedAt !== null &&
+          existing.claimedAt.getTime() > now.getTime() - INVOICE_CLAIM_LEASE_MS;
+        if (live) return { kind: "in_use" };
+        // A failed key being retried counts again, so it needs room under the cap.
+        if (existing.state === "failed" && counted.n >= INVOICE_MAX_SENDS) return { kind: "limit" };
+        await tx
+          .update(connectInvoiceSends)
+          .set({ state: "pending", claimedAt: now })
+          .where(eq(connectInvoiceSends.id, existing.id));
+        return { kind: "go", sendId: existing.id };
+      }
+      if (locked?.status !== "open")
+        return { kind: "not_open", status: locked?.status ?? "unknown" };
+      if (counted.n >= INVOICE_MAX_SENDS) return { kind: "limit" };
+      const sendId = uuidv4();
+      await tx.insert(connectInvoiceSends).values({
+        id: sendId,
+        invoiceId: row.id,
+        clientId,
+        keyHash,
+        state: "pending",
+        claimedAt: now,
+      });
+      return { kind: "go", sendId };
+    });
+
+    if (decision.kind !== "go") {
+      // Nothing goes to Stripe, so the token is given back.
+      await writeBucket.refund(request);
+      if (decision.kind === "replay") {
+        const [current] = await db
+          .select()
+          .from(connectInvoices)
+          .where(eq(connectInvoices.id, row.id))
+          .limit(1);
+        return reply.code(200).send(serializeInvoice(current ?? row));
+      }
+      if (decision.kind === "in_use") return invoiceKeyInUse(reply);
+      if (decision.kind === "limit") {
+        return lifecycleErr(
+          reply,
+          409,
+          "SEND_LIMIT_REACHED",
+          `An invoice can be sent at most ${INVOICE_MAX_SENDS} times.`
+        );
+      }
+      return lifecycleErr(
+        reply,
+        409,
+        "INVOICE_NOT_SENDABLE",
+        `Only open invoices can be sent; this one is ${decision.status}.`
+      );
+    }
+
+    const sendId = decision.sendId;
+    const setSend = (patch: Partial<typeof connectInvoiceSends.$inferInsert>) =>
+      db.update(connectInvoiceSends).set(patch).where(eq(connectInvoiceSends.id, sendId));
+    const stripeAccount = row.connectedAccountId;
+    const invoiceId = row.stripeInvoiceId as string;
+
+    let called = false;
+    let sent: Stripe.Invoice;
+    try {
+      sent = await withStripeCircuit(() => {
+        called = true;
+        return stripe.invoices.sendInvoice(
+          invoiceId,
+          {},
+          { stripeAccount, idempotencyKey: `${clientId}:${invoiceId}:send:${keyHash}` }
+        );
+      });
+    } catch (err) {
+      const e = err as { code?: unknown; type?: unknown } | null;
+      request.log.error(
+        { clientId, action: "invoices.sendInvoice", stripeCode: e?.code, stripeType: e?.type },
+        "Connected-account invoicing Stripe call failed"
+      );
+      if (isStripeBusyError(err) || (isCircuitOpenError(err) && !called)) {
+        await writeBucket.refund(request);
+      }
+      if (e?.code === "idempotency_key_in_use") {
+        // The first attempt with this key is still running at Stripe: it stays pending.
+        await setSend({ claimedAt: null }).catch(() => undefined);
+        return reply.code(409).send({
+          error:
+            "A request with this Idempotency-Key is still in progress. Retry shortly with the same key.",
+          code: "IDEMPOTENCY_KEY_IN_USE",
+        });
+      }
+      if (e?.type === "StripeInvalidRequestError") {
+        // Stripe refused it for good: nothing was emailed, so it does not use up a send.
+        await persistAfterStripe(request, reply, row, () =>
+          setSend({ state: "failed", claimedAt: null })
+        );
+        if (reply.sent) return reply;
+        if (isResourceMissing(err)) return reply.code(404).send(INVOICE_NOT_FOUND);
+        mapStripeError(err, reply, {
+          circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+          permanentErrors: true,
+        });
+        return reply;
+      }
+      // Unknown outcome (network, 5xx, rate limit, circuit): the email may have gone out. The row
+      // stays pending and counts; the same key retries it.
+      await setSend({ claimedAt: null }).catch(() => undefined);
+      if (
+        mapStripeError(err, reply, {
+          circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+        })
+      ) {
+        return reply;
+      }
+      return reply.code(503).header("Retry-After", "5").send({
+        error:
+          "The send could not be confirmed. Retry with the same Idempotency-Key; it will not be sent twice.",
+        code: "SEND_STATUS_UNKNOWN",
+      });
+    }
+
+    const updated = await persistAfterStripe(
+      request,
+      reply,
+      row,
+      () =>
+        db.transaction(async (tx) => {
+          // Same lock the cap check takes: concurrent sends record one at a time, so each count of
+          // 'sent' rows below includes every send that finished before it.
+          await tx
+            .select({ id: connectInvoices.id })
+            .from(connectInvoices)
+            .where(eq(connectInvoices.id, row.id))
+            .for("update");
+          await tx
+            .update(connectInvoiceSends)
+            .set({ state: "sent", claimedAt: null })
+            .where(eq(connectInvoiceSends.id, sendId));
+          return applyStripeInvoice(tx, row, sent, {
+            sentAt: new Date(),
+            sendCount:
+              sql`(select count(*)::int from ${connectInvoiceSends} where ${connectInvoiceSends.invoiceId} = ${row.id} and ${connectInvoiceSends.state} = 'sent')` as unknown as number,
+          });
+        }),
+      // Stripe has it; the same key retries the (idempotent) call and records it.
+      () => setSend({ claimedAt: null }).catch(() => undefined)
+    );
+    if (!updated) return reply;
+    return reply.code(200).send(serializeInvoice(updated));
   });
 }
