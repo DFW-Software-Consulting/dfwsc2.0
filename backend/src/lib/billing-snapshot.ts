@@ -47,8 +47,11 @@ async function listAll<T extends { id: string }>(
 // attempted charge_automatically invoice keeps the conservative "failed" reading.
 const MAX_PAYMENT_LOOKUPS = 10;
 
-const isTransient = (error: unknown) =>
-  isCircuitOpenError(error) || isStripeBusyError(error) || isRateLimited(error);
+// Only a permanent client error (4xx such as 404, or an unexpected object shape) makes one invoice
+// read as failed. Everything else (connection, timeout, 5xx, 429, circuit open, busy) propagates,
+// so the refresh backs off and the previous snapshot stays.
+const isPermanentLookupError = (error: unknown) =>
+  error instanceof Stripe.errors.StripeInvalidRequestError || error instanceof TypeError;
 
 /**
  * For each open, attempted charge_automatically invoice (the only ones whose overdue state
@@ -56,7 +59,7 @@ const isTransient = (error: unknown) =>
  * PaymentIntent (retrieve, unless already an object), and returns the invoice with only that
  * payment attached. Other invoices are untouched; no call at all when none qualifies. A
  * non-transient failure leaves the invoice without payment data (read as failed) and warns;
- * circuit-open, busy and rate-limit errors propagate to the refresh's backoff.
+ * every other error (connection, timeout, 5xx, rate limit, circuit open, busy) propagates to the refresh's backoff.
  */
 async function attachLatestPayments(
   customerId: string,
@@ -110,7 +113,7 @@ async function attachLatestPayments(
         payments: { data: [{ ...latest, payment }] },
       } as unknown as Stripe.Invoice);
     } catch (error) {
-      if (isTransient(error)) throw error;
+      if (!isPermanentLookupError(error)) throw error;
       logger.warn(
         {
           customerId,

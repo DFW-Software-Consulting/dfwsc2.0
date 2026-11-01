@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import Stripe from "stripe";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/stripe", async () => {
@@ -111,8 +112,9 @@ describe("billing snapshot refresh", () => {
     ],
   });
   const invalidRequest = () =>
-    Object.assign(new Error("No such invoice payment"), {
-      type: "StripeInvalidRequestError",
+    new Stripe.errors.StripeInvalidRequestError({
+      type: "invalid_request_error",
+      message: "No such invoice payment",
       code: "resource_missing",
     });
 
@@ -178,6 +180,39 @@ describe("billing snapshot refresh", () => {
     fakeStripe.failures.set("paymentIntents.retrieve", invalidRequest());
     await refresh();
     expect((await snapshot("CP-001")).rendered).toMatchObject({ status: "Late", overdue: 10 });
+  });
+
+  it.each([
+    [
+      "connection",
+      () => new Stripe.errors.StripeConnectionError({ type: "api_error", message: "reset" }),
+    ],
+    [
+      "5xx API",
+      () =>
+        new Stripe.errors.StripeAPIError({ type: "api_error", message: "oops", statusCode: 503 }),
+    ],
+  ])("a %s error on a payment lookup fails the refresh and keeps the previous snapshot, not Late", async (_name, make) => {
+    await addCustomer("CP-001", "cus_1");
+    const data = {
+      invoices: [attempted("in_1")],
+      invoicePayments: withPayments("in_1", "pi_1"),
+      paymentIntents: [{ id: "pi_1", status: "processing" }],
+    };
+    fakeStripe.set("cus_1", data);
+    await refresh();
+    const before = (await snapshot("CP-001")).rendered;
+    expect(before).toMatchObject({ status: "Payment processing" });
+    await db.update(billingSnapshots).set({ dirtyAt: sql`now()` });
+    resetBillingSnapshotStateForTests();
+    fakeStripe.failures.set("paymentIntents.retrieve", make());
+    const out = await refresh();
+    expect(out).toMatchObject({ failed: 1, changed: 0 });
+    expect((await snapshot("CP-001")).rendered).toEqual(before);
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ invoiceId: "in_1" }),
+      expect.anything()
+    );
   });
 
   it("a rate limit during a payment lookup stops the run, as before", async () => {
