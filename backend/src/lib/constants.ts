@@ -24,11 +24,32 @@ export const DEFAULT_DB_POOL_MAX = 10;
 export const PAYMENT_CREATE_BUCKET_CAPACITY = 200;
 export const PAYMENT_CREATE_REFILL_PER_MINUTE = 120;
 
-// Connected-account invoicing writes (customers, and later invoices) share one token bucket per
-// connected account, same shape as the payment bucket above. Reads use a 600/min sliding window.
+// Connected-account invoicing writes (customers, and later invoices) use a token bucket of the same
+// shape as the payment bucket above, one per route and connected account (the limiter namespaces
+// by route, so the routes do not share tokens). Reads use a 600/min sliding window.
 export const INVOICE_WRITE_BUCKET_CAPACITY = 300;
 export const INVOICE_WRITE_REFILL_PER_MINUTE = 120;
 export const INVOICE_READ_RATE_LIMIT_MAX = 600;
+
+// Connected-account invoice creation limits. The 2,500,000 cent ceiling (USD 25,000) applies to
+// base + processing fee. The daily ceiling counts rows created in connect_invoices in a rolling
+// 24 hours, whatever their state, and is the guard against a leaked key spamming a client's
+// customers with invoices.
+export const INVOICE_MAX_AMOUNT_CENTS = 2_500_000;
+export const INVOICE_MAX_LINES = 50;
+export const INVOICE_DAILY_CREATE_LIMIT = 1000;
+// A create that is mid-flight holds a claim on its row for this long; after it, another request
+// with the same Idempotency-Key takes over and resumes from the saved Stripe ids.
+export const INVOICE_CLAIM_LEASE_MS = 60_000;
+// Stripe forgets an idempotency key after 24 hours. Past this age (a margin under 24h) a resumed
+// create no longer trusts the key and looks the objects up by metadata before creating them.
+export const INVOICE_STRIPE_KEY_WINDOW_MS = 23 * 60 * 60 * 1000;
+// The metadata search that adopts an invoice a resumed create may already have made (past Stripe's
+// key window) reads at most this many pages of 100. If it still has more, the create is refused
+// (503) rather than risk a duplicate.
+export const INVOICE_ADOPTION_MAX_PAGES = 50;
+// A non-terminal invoice not synced for this long is re-checked against Stripe on GET /invoices/:id.
+export const INVOICE_RECONCILE_MIN_AGE_MS = 30_000;
 
 // Stripe calls made through withStripeCircuit share one in-process concurrency limit so a burst
 // queues for a slot instead of fanning out to Stripe all at once. Calls beyond MAX_CONCURRENT
