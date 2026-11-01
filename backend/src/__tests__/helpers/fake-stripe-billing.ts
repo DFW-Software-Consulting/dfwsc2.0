@@ -13,6 +13,7 @@ export interface CustomerData {
   subscriptions: BillingSubscriptionInput[];
   schedules: BillingScheduleInput[];
   invoices: (BillingInvoiceInput & { created?: number })[];
+  paymentIntents: { id: string; status: string }[];
 }
 
 export interface StripeCall {
@@ -24,6 +25,7 @@ const READS = new Set([
   "subscriptions.list",
   "subscriptionSchedules.list",
   "invoices.list",
+  "paymentIntents.retrieve",
   "webhooks.constructEvent",
 ]);
 
@@ -43,7 +45,13 @@ class FakeBillingStripe {
   }
 
   set(customerId: string, data: Partial<CustomerData>) {
-    this.customers.set(customerId, { subscriptions: [], schedules: [], invoices: [], ...data });
+    this.customers.set(customerId, {
+      subscriptions: [],
+      schedules: [],
+      invoices: [],
+      paymentIntents: [],
+      ...data,
+    });
   }
 
   callsTo(call: string) {
@@ -74,10 +82,22 @@ class FakeBillingStripe {
     async (...args: unknown[]) => {
       const call = `${resource}.${name}`;
       const params = (args[0] ?? {}) as Record<string, unknown>;
-      this.calls.push({ call, params });
+      this.calls.push({
+        call,
+        params: call === "paymentIntents.retrieve" ? { id: args[0] } : params,
+      });
+      if (call === "paymentIntents.retrieve") {
+        const id = String(args[0]);
+        for (const data of this.customers.values()) {
+          const found = data.paymentIntents.find((p) => p.id === id);
+          if (found) return found;
+        }
+        throw new Error(`no such PaymentIntent ${id}`);
+      }
       if (call === "subscriptions.list") return this.list(call, "subscriptions", params);
       if (call === "subscriptionSchedules.list") return this.list(call, "schedules", params);
       if (call === "invoices.list") return this.list(call, "invoices", params);
+      if (call === "paymentIntents.retrieve") return this.list(call, "paymentIntents", params);
       throw new Error(`unexpected Stripe call ${call}`);
     };
 

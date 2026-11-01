@@ -9,6 +9,7 @@ import {
   type BillingSubscriptionInput,
   type BillingValues,
   deriveBilling,
+  latestPaymentIntent,
 } from "./billing-status";
 import { isCircuitOpenError, isStripeBusyError, withStripeCircuit } from "./circuit-breakers";
 import { type MirrorLogger, withMirrorLock } from "./mirror-table";
@@ -43,8 +44,55 @@ async function listAll<T extends { id: string }>(
   throw new Error("billing snapshot: too many Stripe objects to list");
 }
 
+// Per refresh and Customer, at most this many PaymentIntent retrieves; past it, an attempted
+// charge_automatically invoice keeps the conservative "failed" reading.
+const MAX_PI_RETRIEVES = 10;
+
+/**
+ * Statuses of the latest PaymentIntent of each open, attempted charge_automatically invoice (the
+ * only ones whose overdue state depends on it). No call at all when none qualifies; an already
+ * expanded PaymentIntent is used as is.
+ */
+async function resolvePaymentIntents(
+  invoices: Stripe.Invoice[],
+  logger: MirrorLogger
+): Promise<{ id: string; status: string }[]> {
+  const out: { id: string; status: string }[] = [];
+  let retrieves = 0;
+  let skipped = 0;
+  for (const invoice of invoices) {
+    if (
+      invoice.status !== "open" ||
+      invoice.amount_remaining <= 0 ||
+      invoice.collection_method !== "charge_automatically" ||
+      (invoice.attempt_count ?? 0) === 0
+    )
+      continue;
+    const pi = latestPaymentIntent(invoice as unknown as BillingInvoiceInput);
+    if (!pi || (typeof pi !== "string" && pi.status)) continue;
+    const id = typeof pi === "string" ? pi : pi.id;
+    if (retrieves >= MAX_PI_RETRIEVES) {
+      skipped += 1;
+      continue;
+    }
+    retrieves += 1;
+    const fetched = await withStripeCircuit(() => stripe.paymentIntents.retrieve(id));
+    out.push({ id, status: fetched.status });
+  }
+  if (skipped)
+    logger.warn(
+      { skipped, cap: MAX_PI_RETRIEVES },
+      "Billing snapshot: PaymentIntent retrieve cap reached; remaining attempted invoices read as failed."
+    );
+  return out;
+}
+
 /** The only Stripe calls of the billing snapshot. All are reads. */
-async function fetchBillingInput(customerId: string, now: Date): Promise<BillingInput> {
+async function fetchBillingInput(
+  customerId: string,
+  now: Date,
+  logger: MirrorLogger
+): Promise<BillingInput> {
   const subscriptions = await listAll((startingAfter) =>
     stripe.subscriptions.list({
       customer: customerId,
@@ -67,13 +115,18 @@ async function fetchBillingInput(customerId: string, now: Date): Promise<Billing
     stripe.invoices.list({
       customer: customerId,
       limit: PAGE_SIZE,
+      // API 2025-09-30.clover has no invoice.payment_intent; `payments` lists the InvoicePayments
+      // (payment.payment_intent is an id). One level, well inside Stripe's expand-depth limit.
+      expand: ["data.payments"],
       ...(startingAfter ? { starting_after: startingAfter } : {}),
     })
   );
+  const paymentIntents = await resolvePaymentIntents(invoices, logger);
   return {
     subscriptions: subscriptions as unknown as BillingSubscriptionInput[],
     schedules: schedules as unknown as BillingScheduleInput[],
     invoices: invoices as unknown as BillingInvoiceInput[],
+    paymentIntents: paymentIntents.map((p) => ({ id: p.id, status: p.status })),
     now,
   };
 }
@@ -86,14 +139,20 @@ async function fetchBillingInput(customerId: string, now: Date): Promise<Billing
  * marked it after `startedAt` (the database clock when this refresh began).
  * Returns the number of snapshots whose content changed.
  */
-async function refreshCustomer(customerId: string, startedAt: Date): Promise<number> {
+async function refreshCustomer(
+  customerId: string,
+  startedAt: Date,
+  logger: MirrorLogger
+): Promise<number> {
   const codes = await db
     .select({ clientCode: billingCustomers.clientCode })
     .from(billingCustomers)
     .where(eq(billingCustomers.stripeCustomerId, customerId));
   if (!codes.length) return 0;
 
-  const values: BillingValues = deriveBilling(await fetchBillingInput(customerId, startedAt));
+  const values: BillingValues = deriveBilling(
+    await fetchBillingInput(customerId, startedAt, logger)
+  );
   const hash = contentHash({ ...values, nonUsd: String(values.nonUsd) });
   const existing = new Map(
     (
@@ -249,7 +308,7 @@ export async function runBillingRefresh(options: {
         if (!first && gapMs > 0) await new Promise((resolve) => setTimeout(resolve, gapMs));
         first = false;
         try {
-          out.changed += await refreshCustomer(customerId, startedAt);
+          out.changed += await refreshCustomer(customerId, startedAt, logger);
           out.refreshed += 1;
           backoff.delete(customerId);
         } catch (error) {

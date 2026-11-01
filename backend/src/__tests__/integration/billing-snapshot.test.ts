@@ -85,8 +85,54 @@ describe("billing snapshot refresh", () => {
     expect(fakeStripe.callsTo("invoices.list")[0].params).toMatchObject({
       customer: "cus_1",
       limit: 100,
+      expand: ["data.payments"],
+    });
+    expect(fakeStripe.callsTo("paymentIntents.retrieve")).toHaveLength(0); // nothing qualifies
+    expect(fakeStripe.unexpected()).toEqual([]);
+  });
+
+  const attempted = (id: string, pi: string) =>
+    invoice({
+      id,
+      status: "open",
+      amount_remaining: 1000,
+      collection_method: "charge_automatically",
+      attempt_count: 1,
+      payments: {
+        data: [
+          { created: 1, payment: { payment_intent: `${pi}_old` } },
+          { created: 2, payment: { payment_intent: pi } },
+        ],
+      },
+    });
+
+  it("retrieves only the latest PaymentIntent of an open attempted charge_automatically invoice", async () => {
+    await addCustomer("CP-001", "cus_1");
+    fakeStripe.set("cus_1", {
+      invoices: [attempted("in_1", "pi_1")],
+      paymentIntents: [{ id: "pi_1", status: "processing" }],
+    });
+    await refresh();
+    expect(fakeStripe.callsTo("paymentIntents.retrieve").map((c) => c.params.id)).toEqual(["pi_1"]);
+    expect((await snapshot("CP-001")).rendered).toMatchObject({
+      status: "Payment processing",
+      overdue: 0,
+      openBalance: 10,
     });
     expect(fakeStripe.unexpected()).toEqual([]);
+  });
+
+  it("caps PaymentIntent retrieves per refresh and warns once; the rest read as failed", async () => {
+    await addCustomer("CP-001", "cus_1");
+    const ids = Array.from({ length: 12 }, (_, i) => `pi_${i}`);
+    fakeStripe.set("cus_1", {
+      invoices: ids.map((pi, i) => attempted(`in_${i}`, pi)),
+      paymentIntents: ids.map((id) => ({ id, status: "processing" })),
+    });
+    await refresh();
+    expect(fakeStripe.callsTo("paymentIntents.retrieve")).toHaveLength(10);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect((await snapshot("CP-001")).rendered).toMatchObject({ status: "Late", overdue: 20 });
   });
 
   it("pages every list to the end", async () => {

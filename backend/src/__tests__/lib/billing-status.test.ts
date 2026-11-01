@@ -400,6 +400,117 @@ describe("deriveBilling status rules", () => {
   });
 });
 
+describe("charge_automatically payments in flight or failed", () => {
+  const autoInvoice = (id: string, cents: number, extra = {}) =>
+    invoice({
+      id,
+      status: "open",
+      amount_remaining: cents,
+      collection_method: "charge_automatically",
+      attempt_count: 1,
+      created: days(-1),
+      ...extra,
+    });
+  const payment = (pi: string) => ({
+    data: [{ payment: { type: "payment_intent", payment_intent: pi } }],
+  });
+  const overdueSendInvoice = invoice({
+    id: "in_0005",
+    status: "open",
+    amount_remaining: 100000,
+    due_date: days(-365),
+  });
+
+  it("a processing payment is open balance only, status Payment processing", () => {
+    const values = derive({
+      invoices: [autoInvoice("in_0031", 150000, { payments: payment("pi_1") })],
+      paymentIntents: [{ id: "pi_1", status: "processing" }],
+    });
+    expect(values.status).toBe("Payment processing");
+    expect(values.upToDate).toBe("Yes");
+    expect(values.openBalance).toBe(1500);
+    expect(values.overdue).toBe(0);
+    expect(values.nextDue).toBeNull();
+  });
+
+  it("an expanded PaymentIntent object works as well as an id", () => {
+    const values = derive({
+      invoices: [
+        autoInvoice("in_a", 5000, {
+          payments: {
+            data: [{ payment: { payment_intent: { id: "pi_x", status: "processing" } } }],
+          },
+        }),
+      ],
+    });
+    expect(values.status).toBe("Payment processing");
+  });
+
+  it("an open invoice not attempted yet is Active, not overdue", () => {
+    const values = derive({
+      invoices: [
+        autoInvoice("in_n", 5000, {
+          attempt_count: 0,
+          payments: payment("pi_n"),
+        }),
+      ],
+      paymentIntents: [{ id: "pi_n", status: "requires_payment_method" }],
+    });
+    expect(values.status).toBe("Active");
+    expect(values.overdue).toBe(0);
+    expect(values.openBalance).toBe(50);
+  });
+
+  it.each([
+    "requires_payment_method",
+    "canceled",
+  ])("a failed attempt (%s) is overdue and Late", (status) => {
+    const values = derive({
+      invoices: [autoInvoice("in_f", 150000, { payments: payment("pi_f") })],
+      paymentIntents: [{ id: "pi_f", status }],
+    });
+    expect(values.status).toBe("Late");
+    expect(values.upToDate).toBe("No");
+    expect(values.overdue).toBe(1500);
+    expect(values.openBalance).toBe(1500);
+  });
+
+  it("past-due send_invoice plus a processing charge: Late, overdue is only the send_invoice", () => {
+    const values = derive({
+      invoices: [overdueSendInvoice, autoInvoice("in_0031", 150000, { payments: payment("pi_1") })],
+      paymentIntents: [{ id: "pi_1", status: "processing" }],
+    });
+    expect(values.status).toBe("Late");
+    expect(values.upToDate).toBe("No");
+    expect(values.overdue).toBe(1000);
+    expect(values.openBalance).toBe(2500);
+  });
+
+  it("an attempted invoice with no PaymentIntent data keeps the old rule (overdue)", () => {
+    const values = derive({ invoices: [autoInvoice("in_o", 5000)] });
+    expect(values.status).toBe("Late");
+    expect(values.overdue).toBe(50);
+  });
+
+  it("renders the status label in the row", () => {
+    const values = derive({
+      invoices: [autoInvoice("in_p", 5000, { payments: payment("pi_p") })],
+      paymentIntents: [{ id: "pi_p", status: "processing" }],
+    });
+    const row = renderBillingRow({
+      company: "Acme",
+      clientCode: "CP-001",
+      stripeCustomerId: "cus_1",
+      sharedWith: [],
+      values,
+      failed: false,
+      updatedAt: NOW,
+      refreshedAt: NOW,
+    });
+    expect(row.status).toBe("Payment processing");
+  });
+});
+
 describe("non-USD invoices", () => {
   const eur = (id: string, overrides = {}) =>
     invoice({ id, status: "open", currency: "eur", amount_remaining: 90000, ...overrides });

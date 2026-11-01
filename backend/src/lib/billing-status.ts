@@ -6,13 +6,20 @@ import { formatDateTime } from "./portal-mirror-render";
 //
 // Status, first match wins:
 //   Late    a subscription is past_due or unpaid; an open invoice with a balance is past its due
-//           date (Late starts the UTC day after due_date, no grace period); a charge_automatically open invoice has a failed attempt; an
-//           invoice is uncollectible (counts as Late until it is voided).
+//           date (Late starts the UTC day after due_date, no grace period); a charge_automatically open invoice
+//           has a FAILED payment attempt (see below); an invoice is uncollectible (counts as Late
+//           until it is voided).
+//   Payment processing   not Late, and a charge_automatically open invoice has a PaymentIntent
+//           that is still processing (e.g. an ACH debit in flight).
 //   Active  a subscription is active, trialing or paused; a schedule is not_started or active; an
 //           open invoice is not yet due.
 //   Ended   a subscription or schedule was canceled or completed, or an invoice was paid, and
 //           nothing is live.
 //   None    nothing (draft, void and incomplete_expired are ignored everywhere).
+// A charge_automatically open invoice is never overdue just because an attempt was made: a payment
+// that is processing, or an invoice not attempted yet, counts in Open Balance only. It is overdue
+// when its latest attempt failed: a PaymentIntent in requires_payment_method or canceled after an
+// attempt, or an attempt was made and no PaymentIntent data is available.
 // Next Due: the earliest future date; failing that, the oldest overdue open invoice's due date.
 // Finished plans sort last: " (done)" when canceled, completed, or all payments of a finite plan are
 // paid with nothing open or past_due/unpaid; " (ended)" for a canceled open-ended plan.
@@ -62,6 +69,16 @@ export interface BillingInvoiceInput {
   attempt_count?: number | null;
   next_payment_attempt?: number | null;
   status_transitions?: { paid_at?: number | null } | null;
+  /** Expanded list (API 2025-09-30.clover: `invoice.payments`); each links to a PaymentIntent. */
+  payments?: {
+    data: {
+      created?: number;
+      payment?: {
+        type?: string;
+        payment_intent?: string | { id: string; status?: string } | null;
+      } | null;
+    }[];
+  } | null;
   parent?: {
     subscription_details?: { subscription?: string | { id: string } | null } | null;
   } | null;
@@ -72,10 +89,12 @@ export interface BillingInput {
   /** Schedules with no subscription yet (not_started). */
   schedules: BillingScheduleInput[];
   invoices: BillingInvoiceInput[];
+  /** Statuses of the PaymentIntents the snapshot retrieved, to resolve `invoices[].payments` ids. */
+  paymentIntents?: { id: string; status: string }[];
   now: Date;
 }
 
-export type BillingStatus = "Late" | "Active" | "Ended" | "None";
+export type BillingStatus = "Late" | "Payment processing" | "Active" | "Ended" | "None";
 
 /** The Stripe-derived columns of a Client Billing row, as stored in billing_snapshots.rendered. */
 export type BillingValues = {
@@ -120,6 +139,26 @@ const subscriptionIdOf = (invoice: BillingInvoiceInput): string | null => {
   const raw = invoice.parent?.subscription_details?.subscription;
   return typeof raw === "string" ? raw : (raw?.id ?? null);
 };
+
+/** The most recent InvoicePayment's PaymentIntent: an id or an expanded object, else null. */
+export function latestPaymentIntent(
+  invoice: BillingInvoiceInput
+): string | { id: string; status?: string } | null {
+  const entries = (invoice.payments?.data ?? []).filter((e) => e.payment?.payment_intent);
+  const latest = entries.reduce<(typeof entries)[number] | null>(
+    (best, e) => (best === null || (e.created ?? 0) > (best.created ?? 0) ? e : best),
+    null
+  );
+  return latest?.payment?.payment_intent ?? null;
+}
+
+/** Status of the latest PaymentIntent of an invoice, as a list (empty when unknown). */
+function paymentStatusesOf(invoice: BillingInvoiceInput, known: Map<string, string>): string[] {
+  const pi = latestPaymentIntent(invoice);
+  if (!pi) return [];
+  const status = typeof pi === "string" ? known.get(pi) : (pi.status ?? known.get(pi.id));
+  return status ? [status] : [];
+}
 
 const utcDay = (ms: number) => Math.floor(ms / 86_400_000);
 
@@ -196,10 +235,25 @@ export function deriveBilling(input: BillingInput): BillingValues {
   ];
 
   const open = invoices.filter((i) => i.status === "open" && i.amount_remaining > 0);
-  const pastDue = open.filter(
+  const known = new Map((input.paymentIntents ?? []).map((p) => [p.id, p.status]));
+  const processing = open.filter(
     (i) =>
-      (i.due_date != null && utcDay(i.due_date * 1000) < utcDay(nowMs)) ||
-      (i.collection_method === "charge_automatically" && (i.attempt_count ?? 0) > 0)
+      i.collection_method === "charge_automatically" &&
+      paymentStatusesOf(i, known).includes("processing")
+  );
+  const failedAttempt = (i: BillingInvoiceInput) => {
+    if (i.collection_method !== "charge_automatically" || (i.attempt_count ?? 0) === 0)
+      return false;
+    const statuses = paymentStatusesOf(i, known);
+    if (statuses.includes("processing")) return false;
+    return statuses.length
+      ? statuses.some((s) => s === "requires_payment_method" || s === "canceled")
+      : true; // attempted, and no PaymentIntent to say otherwise: treated as failed
+  };
+  const pastDue = open.filter((i) =>
+    i.collection_method === "charge_automatically"
+      ? failedAttempt(i)
+      : i.due_date != null && utcDay(i.due_date * 1000) < utcDay(nowMs)
   );
   const uncollectible = invoices.filter((i) => i.status === "uncollectible");
   const overdueInvoices = [...pastDue, ...uncollectible];
@@ -216,7 +270,15 @@ export function deriveBilling(input: BillingInput): BillingValues {
     schedules.some((s) => ENDED_SCHEDULE.has(s.status)) ||
     invoices.some((i) => i.status === "paid");
 
-  const status: BillingStatus = late ? "Late" : live ? "Active" : ended ? "Ended" : "None";
+  const status: BillingStatus = late
+    ? "Late"
+    : processing.length
+      ? "Payment processing"
+      : live
+        ? "Active"
+        : ended
+          ? "Ended"
+          : "None";
 
   const usd = <T extends { currency: string }>(items: T[]) =>
     items.filter((i) => isUsd(i.currency));
