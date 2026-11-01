@@ -1,12 +1,12 @@
 import Stripe from "stripe";
 
-// In-memory Stripe for the connected-account invoicing tests (customers today). Every call is
+// In-memory Stripe for the connected-account invoicing tests (customers, invoices, invoice items). Every call is
 // recorded as { call, params, options } so a guard test can assert that EVERY call carried the
 // client's `stripeAccount`. Only the methods the feature may use answer; anything else records
 // itself and throws, so an unexpected call can never go unnoticed.
 //
-// Customers are kept per connected account, like Stripe: an id created on one account does not
-// exist on another. Idempotency is simulated: the same key with the same parameters replays the
+// Customers, invoices and invoice items are kept per connected account, like Stripe: an id created
+// on one account does not exist on another. An invoice's total is the sum of its items. Idempotency is simulated: the same key with the same parameters replays the
 // first result, the same key with other parameters is a StripeIdempotencyError.
 
 export interface ConnectCall {
@@ -20,6 +20,20 @@ export const ALLOWED_CONNECT_CALLS = new Set([
   "customers.retrieve",
   "customers.update",
   "customers.del",
+  "invoices.create",
+  "invoices.retrieve",
+  "invoices.list",
+  "invoiceItems.create",
+  "invoiceItems.list",
+]);
+
+/** Calls whose arguments are (params, options); the others take (id, params, options). */
+const NO_ID_CALLS = new Set([
+  "customers.create",
+  "invoices.create",
+  "invoices.list",
+  "invoiceItems.create",
+  "invoiceItems.list",
 ]);
 
 interface Failure {
@@ -39,16 +53,29 @@ export const stripeApiError = (status: number) =>
           statusCode: status,
         } as never);
 
+// Stripe ids are unique across the whole platform, and connect_invoices keeps a unique index on the
+// invoice id, so these never repeat (not even across reset() or between test runs on one database).
+const RUN_ID = Math.random().toString(36).slice(2, 8);
+let objectSeq = 0;
+
 export class FakeConnectInvoicingStripe {
   calls: ConnectCall[] = [];
   private failures: Failure[] = [];
   private counts = new Map<string, number>();
   /** account -> customer id -> object */
   private customers = new Map<string, Map<string, Record<string, any>>>();
+  /** account -> invoice id -> object */
+  private invoices = new Map<string, Map<string, Record<string, any>>>();
+  /** account -> invoice item id -> object */
+  private items = new Map<string, Map<string, Record<string, any>>>();
   private byKey = new Map<string, { params: string; result: Record<string, any> }>();
   private counter = 0;
+  /** Merged over an invoice on `invoices.retrieve`, by invoice id or "*" for all (to make Stripe disagree with our math). */
+  retrieveOverrides: Record<string, Record<string, any>> = {};
   /** Blocks `customers.create` until released (to line up a race), when set. */
   createGate: Promise<void> | null = null;
+  /** Blocks `invoices.create` until released (to line up a race), when set. */
+  invoiceCreateGate: Promise<void> | null = null;
   /** Runs after `customers.create` made its customer but before it answers (to inject a race). */
   afterCreate: ((created: Record<string, any>) => Promise<void>) | null = null;
 
@@ -57,9 +84,13 @@ export class FakeConnectInvoicingStripe {
     this.failures = [];
     this.counts.clear();
     this.customers.clear();
+    this.invoices.clear();
+    this.items.clear();
     this.byKey.clear();
+    this.retrieveOverrides = {};
     this.counter = 0;
     this.createGate = null;
+    this.invoiceCreateGate = null;
     this.afterCreate = null;
   }
 
@@ -84,18 +115,57 @@ export class FakeConnectInvoicingStripe {
     bucket.set(customer.id, { object: "customer", ...customer });
   }
 
-  private missing(id: string) {
+  /** Invoices on an account, oldest first. */
+  invoicesOn(account: string) {
+    return [...(this.invoices.get(account)?.values() ?? [])];
+  }
+
+  /** Invoice items on an account, oldest first. */
+  itemsOn(account: string) {
+    return [...(this.items.get(account)?.values() ?? [])];
+  }
+
+  /** Forget every idempotency key (Stripe keeps them 24 hours). */
+  expireIdempotencyKeys() {
+    this.byKey.clear();
+  }
+
+  private missing(id: string, what = "customer") {
     const err = new Stripe.errors.StripeInvalidRequestError({
       type: "invalid_request_error",
       statusCode: 404,
       code: "resource_missing",
-      message: `No such customer: '${id}'`,
+      message: `No such ${what}: '${id}'`,
     } as never);
     return err;
   }
 
+  private invalidRequest(message: string) {
+    return new Stripe.errors.StripeInvalidRequestError({
+      type: "invalid_request_error",
+      statusCode: 400,
+      message,
+    } as never);
+  }
+
+  private bucketOf<T>(store: Map<string, Map<string, T>>, account: string) {
+    const bucket = store.get(account) ?? new Map<string, T>();
+    store.set(account, bucket);
+    return bucket;
+  }
+
+  private recompute(account: string, invoice: Record<string, any>) {
+    const total = [...this.bucketOf(this.items, account).values()]
+      .filter((it) => it.invoice === invoice.id)
+      .reduce((sum, it) => sum + it.amount, 0);
+    invoice.total = total;
+    invoice.subtotal = total;
+    invoice.amount_due = total;
+    invoice.amount_remaining = total - invoice.amount_paid;
+  }
+
   async invoke(call: string, args: unknown[]): Promise<unknown> {
-    const hasId = call !== "customers.create";
+    const hasId = !NO_ID_CALLS.has(call);
     const id = hasId ? (args[0] as string) : undefined;
     const params = (hasId ? args[1] : args[0]) as Record<string, any> | undefined;
     const options = (hasId ? args[2] : args[1]) as Record<string, any> | undefined;
@@ -109,28 +179,24 @@ export class FakeConnectInvoicingStripe {
 
     const account = options?.stripeAccount as string | undefined;
     if (!account) throw new Error(`Stripe call without stripeAccount: ${call}`);
-    const bucket = this.customers.get(account) ?? new Map<string, Record<string, any>>();
-    this.customers.set(account, bucket);
+    const bucket = this.bucketOf(this.customers, account);
+
+    if (call.startsWith("invoice"))
+      return this.invoiceCall(call, account, id, params, options, bucket);
 
     if (call === "customers.create") {
       if (this.createGate) await this.createGate;
       const key = options?.idempotencyKey as string | undefined;
       const sent = JSON.stringify(params);
-      const stored = key ? this.byKey.get(`${account}:${key}`) : undefined;
+      const stored = key ? this.byKey.get(`${account}:${call}:${key}`) : undefined;
       if (stored) {
-        if (stored.params !== sent) {
-          throw new Stripe.errors.StripeIdempotencyError({
-            type: "idempotency_error",
-            statusCode: 400,
-            message: "Keys for idempotent requests can only be used with the same parameters",
-          } as never);
-        }
+        this.assertSameParams(stored.params, sent);
         return stored.result;
       }
       this.counter += 1;
       const created = { object: "customer", id: `cus_fake${this.counter}`, ...params };
       bucket.set(created.id, created);
-      if (key) this.byKey.set(`${account}:${key}`, { params: sent, result: created });
+      if (key) this.byKey.set(`${account}:${call}:${key}`, { params: sent, result: created });
       if (this.afterCreate) await this.afterCreate(created);
       return created;
     }
@@ -147,6 +213,121 @@ export class FakeConnectInvoicingStripe {
     }
     found.deleted = true; // customers.del
     return { id, object: "customer", deleted: true };
+  }
+
+  private assertSameParams(stored: string, sent: string) {
+    if (stored !== sent) {
+      throw new Stripe.errors.StripeIdempotencyError({
+        type: "idempotency_error",
+        statusCode: 400,
+        message: "Keys for idempotent requests can only be used with the same parameters",
+      } as never);
+    }
+  }
+
+  private async invoiceCall(
+    call: string,
+    account: string,
+    id: string | undefined,
+    params: Record<string, any> | undefined,
+    options: Record<string, any> | undefined,
+    customers: Map<string, Record<string, any>>
+  ): Promise<unknown> {
+    const invoices = this.bucketOf(this.invoices, account);
+    const items = this.bucketOf(this.items, account);
+    const key = options?.idempotencyKey as string | undefined;
+    const sent = JSON.stringify(params);
+
+    if (call === "invoices.retrieve") {
+      const found = invoices.get(id as string);
+      if (!found) throw this.missing(id as string, "invoice");
+      return {
+        ...found,
+        ...(this.retrieveOverrides["*"] ?? {}),
+        ...(this.retrieveOverrides[found.id] ?? {}),
+      };
+    }
+
+    if (call === "invoices.list" || call === "invoiceItems.list") {
+      const store = call === "invoices.list" ? invoices : items;
+      let data = [...store.values()].reverse(); // newest first
+      if (params?.customer) data = data.filter((o) => o.customer === params.customer);
+      if (params?.invoice) data = data.filter((o) => o.invoice === params.invoice);
+      const gte = params?.created?.gte as number | undefined;
+      if (gte !== undefined) data = data.filter((o) => (o.created ?? Infinity) >= gte);
+      if (params?.starting_after) {
+        const at = data.findIndex((o) => o.id === params.starting_after);
+        data = at === -1 ? [] : data.slice(at + 1);
+      }
+      const limit = (params?.limit as number | undefined) ?? 10;
+      return { object: "list", data: data.slice(0, limit), has_more: data.length > limit };
+    }
+
+    // creates
+    if (call === "invoices.create" && this.invoiceCreateGate) await this.invoiceCreateGate;
+    const stored = key ? this.byKey.get(`${account}:${call}:${key}`) : undefined;
+    if (stored) {
+      this.assertSameParams(stored.params, sent);
+      return stored.result;
+    }
+    this.counter += 1;
+    let created: Record<string, any>;
+    if (call === "invoices.create") {
+      const customer = customers.get(params?.customer);
+      if (!customer || customer.deleted) throw this.missing(params?.customer, "customer");
+      created = {
+        object: "invoice",
+        id: `in_fake${RUN_ID}${++objectSeq}`,
+        customer: params?.customer,
+        status: "draft",
+        currency: params?.currency ?? "usd",
+        collection_method: params?.collection_method,
+        days_until_due: params?.days_until_due,
+        auto_advance: params?.auto_advance,
+        application_fee_amount: params?.application_fee_amount ?? null,
+        description: params?.description ?? null,
+        footer: params?.footer ?? null,
+        metadata: params?.metadata ?? {},
+        created: Math.floor(Date.now() / 1000),
+        number: null,
+        due_date: null,
+        hosted_invoice_url: null,
+        invoice_pdf: null,
+        amount_paid: 0,
+        status_transitions: {
+          finalized_at: null,
+          paid_at: null,
+          voided_at: null,
+          marked_uncollectible_at: null,
+        },
+      };
+      this.recompute(account, created);
+      invoices.set(created.id, created);
+    } else {
+      const invoice = invoices.get(params?.invoice);
+      if (!invoice) throw this.missing(params?.invoice, "invoice");
+      if (invoice.status !== "draft") throw this.invalidRequest("invoice is not a draft");
+      const quantity = params?.quantity ?? 1;
+      const amount =
+        params?.amount ?? Math.round(Number(params?.unit_amount_decimal ?? 0) * quantity);
+      created = {
+        object: "invoiceitem",
+        id: `ii_fake${RUN_ID}${++objectSeq}`,
+        customer: params?.customer,
+        invoice: params?.invoice,
+        currency: params?.currency ?? "usd",
+        description: params?.description,
+        quantity,
+        unit_amount_decimal: params?.unit_amount_decimal ?? null,
+        amount,
+        metadata: params?.metadata ?? {},
+        created: Math.floor(Date.now() / 1000),
+      };
+      items.set(created.id, created);
+      this.recompute(account, invoice);
+    }
+    if (key) this.byKey.set(`${account}:${call}:${key}`, { params: sent, result: created });
+    return created;
   }
 
   /** Stands in for lib/stripe's `stripe`: any resource, any method. */

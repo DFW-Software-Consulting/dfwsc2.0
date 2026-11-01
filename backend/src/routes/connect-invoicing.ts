@@ -1,16 +1,39 @@
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNull, lt, min, ne, or, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
-import { type clients, connectCustomers } from "../db/schema";
+import { clientGroups, type clients, connectCustomers, connectInvoices } from "../db/schema";
 import { requireApiKey } from "../lib/auth";
-import { isCircuitOpenError, isStripeBusyError, withStripeCircuit } from "../lib/circuit-breakers";
+import {
+  getCircuitBreakerStates,
+  isCircuitOpenError,
+  isStripeBusyError,
+  withStripeCircuit,
+} from "../lib/circuit-breakers";
+import {
+  assertTotalWithinCap,
+  computeBaseCents,
+  createInvoiceBodySchema,
+  decodeCursor,
+  encodeCursor,
+  hashInvoiceRequest,
+  type InvoiceRequest,
+  type InvoiceRow,
+  listQuerySchema,
+  PROCESSING_FEE_DESCRIPTION,
+  serializeInvoice,
+  TERMINAL_INVOICE_STATUSES,
+} from "../lib/connect-invoice";
 import { getChargeableAccountId } from "../lib/connected-account";
 import {
+  INVOICE_CLAIM_LEASE_MS,
+  INVOICE_DAILY_CREATE_LIMIT,
   INVOICE_READ_RATE_LIMIT_MAX,
+  INVOICE_RECONCILE_MIN_AGE_MS,
+  INVOICE_STRIPE_KEY_WINDOW_MS,
   INVOICE_WRITE_BUCKET_CAPACITY,
   INVOICE_WRITE_REFILL_PER_MINUTE,
   RATE_LIMIT_WINDOW_MS,
@@ -18,11 +41,12 @@ import {
 import { errors, isUniqueViolation } from "../lib/errors";
 import { rateLimit, tokenBucketRateLimit } from "../lib/rate-limit";
 import { stripe } from "../lib/stripe";
+import { resolveClientFee } from "../lib/stripe-billing";
 import { mapStripeError } from "../lib/stripe-errors";
 import { validateStripeMetadata } from "../lib/stripe-input";
-import { parseBody } from "../lib/validation";
+import { DEFAULT_DAYS_UNTIL_DUE, parseBody } from "../lib/validation";
 
-// Connected-account invoicing, customers only (invoices land in a later change). Every Stripe call
+// Connected-account invoicing: customers, and draft invoices with their reads. Every Stripe call
 // is a DIRECT call on the client's own Express account: `stripeAccount` is passed on every call,
 // and the platform's billing_customers are never involved. Postgres keeps ids and an opaque
 // externalRef only; email, name and phone live on Stripe and are never logged.
@@ -167,6 +191,18 @@ function replayMatches(row: CustomerRow, customer: Stripe.Customer, req: ReplayR
 }
 
 export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
+  // A create that gives its claim back must do so BEFORE the response leaves, or a caller that
+  // retries the moment it sees the error would find the row still claimed (IN_USE). Errors are
+  // sent from inside the handler, so the release is also run from onSend.
+  const pendingRelease = new WeakMap<FastifyRequest, () => Promise<void>>();
+  fastify.addHook("onSend", async (request) => {
+    const release = pendingRelease.get(request);
+    if (release) {
+      pendingRelease.delete(request);
+      await release();
+    }
+  });
+
   const writeBucket = tokenBucketRateLimit({
     capacity: INVOICE_WRITE_BUCKET_CAPACITY,
     refillPerMinute: INVOICE_WRITE_REFILL_PER_MINUTE,
@@ -198,7 +234,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     reply: FastifyReply,
     action: string,
     call: () => Promise<T>,
-    opts: { write?: boolean } = {}
+    opts: { write?: boolean; notFound?: string } = {}
   ): Promise<T | undefined> {
     let called = false;
     try {
@@ -218,10 +254,10 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           stripeCode: (err as { code?: unknown } | null)?.code,
           stripeType: (err as { type?: unknown } | null)?.type,
         },
-        "Connected-account customer Stripe call failed"
+        "Connected-account invoicing Stripe call failed"
       );
       if (isResourceMissing(err)) {
-        reply.code(404).send({ error: "Customer not found.", code: "NOT_FOUND" });
+        reply.code(404).send({ error: opts.notFound ?? "Customer not found.", code: "NOT_FOUND" });
         return undefined;
       }
       if (
@@ -544,5 +580,675 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     );
     if (!updated) return reply;
     return reply.code(200).send(sanitizeCustomer(row, updated));
+  });
+
+  // ══ Invoices ═══════════════════════════════════════════════════════════════
+  // Draft invoices on the client's connected account, plus reads. The row in connect_invoices is
+  // stored BEFORE any Stripe call and doubles as the idempotency record and the resume point.
+
+  const INVOICE_NOT_FOUND = { error: "Invoice not found.", code: "NOT_FOUND" };
+
+  /** The create lost its claim to another request (the lease ran out): the other one owns it now. */
+  class ClaimLostError extends Error {}
+  /** Postgres failed after Stripe had already done something: the caller retries with the same key. */
+  class PersistenceError extends Error {}
+
+  const invoiceKeyInUse = (reply: FastifyReply) =>
+    reply.code(409).send({
+      error: "A request with this Idempotency-Key is already being processed. Retry shortly.",
+      code: "IDEMPOTENCY_KEY_IN_USE",
+    });
+
+  const findInvoiceByKey = async (clientId: string, keyHash: string) =>
+    (
+      await db
+        .select()
+        .from(connectInvoices)
+        .where(
+          and(eq(connectInvoices.clientId, clientId), eq(connectInvoices.idempotencyKey, keyHash))
+        )
+        .limit(1)
+    )[0];
+
+  /**
+   * Writes progress on a row this request holds the claim on. A row that is no longer claimed by
+   * this request (the lease expired and another request took over) means stop: ClaimLostError.
+   * Any Postgres failure becomes a PersistenceError (503, retry with the same key).
+   */
+  async function saveProgress(
+    row: InvoiceRow,
+    claimAt: Date,
+    patch: Partial<typeof connectInvoices.$inferInsert>
+  ): Promise<InvoiceRow> {
+    let updated: InvoiceRow | undefined;
+    try {
+      [updated] = await db
+        .update(connectInvoices)
+        .set(patch)
+        .where(and(eq(connectInvoices.id, row.id), eq(connectInvoices.claimedAt, claimAt)))
+        .returning();
+    } catch (err) {
+      throw new PersistenceError("invoice progress not saved", { cause: err });
+    }
+    if (!updated) throw new ClaimLostError();
+    return updated;
+  }
+
+  // Look-ups used only when a resumed create is older than Stripe's idempotency window, where the
+  // per-step keys no longer protect against a duplicate. The objects carry our metadata.
+  async function findAdoptableInvoice(
+    step: Step,
+    stripeAccount: string,
+    row: InvoiceRow,
+    keyHash: string
+  ): Promise<Stripe.Invoice | null | undefined> {
+    const since = Math.floor(row.createdAt.getTime() / 1000) - 300;
+    let startingAfter: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const list = await step("invoices.list", () =>
+        stripe.invoices.list(
+          {
+            customer: row.stripeCustomerId,
+            created: { gte: since },
+            limit: 100,
+            ...(startingAfter ? { starting_after: startingAfter } : {}),
+          },
+          { stripeAccount }
+        )
+      );
+      if (!list) return undefined;
+      const hit = list.data.find(
+        (i) =>
+          i.metadata?.dfwsc_idem_key === keyHash && i.metadata?.dfwsc_client_id === row.clientId
+      );
+      if (hit) return hit;
+      const last = list.data[list.data.length - 1];
+      if (!list.has_more || !last) return null;
+      startingAfter = last.id;
+    }
+    return null;
+  }
+
+  type Step = <T>(action: string, call: () => Promise<T>) => Promise<T | undefined>;
+
+  /**
+   * Runs the create steps from wherever the row left off. Returns the completed row, or undefined
+   * after sending an error reply. Throws ClaimLostError / PersistenceError (handled by the caller).
+   *
+   * Steps, each with its own Stripe idempotency key and its Stripe id saved before the next one:
+   *   invoice ('invoice_created') -> one item per line, then the fee item ('lines_added') ->
+   *   retrieve, verify, complete.
+   */
+  async function driveCreate(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    initial: InvoiceRow,
+    claimAt: Date,
+    req: InvoiceRequest,
+    keyHash: string,
+    resumed: boolean
+  ): Promise<InvoiceRow | undefined> {
+    const client = (request as RequestWithClient).client;
+    const stripeAccount = accountOf(request);
+    const idemBase = `${client.id}:inv:${keyHash}`;
+
+    // Only a request that has not yet reached Stripe gives its write token back when refused.
+    let succeeded = 0;
+    const step: Step = async (action, call) => {
+      const out = await stripeCall(request, reply, action, call, {
+        write: succeeded === 0,
+        notFound: "Customer or invoice not found on the connected account.",
+      });
+      if (out !== undefined) succeeded += 1;
+      return out;
+    };
+
+    let cur = initial;
+    const beyondKeyWindow =
+      resumed && Date.now() - cur.createdAt.getTime() >= INVOICE_STRIPE_KEY_WINDOW_MS;
+    const baseMetadata = { dfwsc_client_id: client.id, dfwsc_idem_key: keyHash };
+
+    // 1. The invoice.
+    if (!cur.stripeInvoiceId) {
+      let invoice: Stripe.Invoice | null | undefined = null;
+      if (beyondKeyWindow) {
+        invoice = await findAdoptableInvoice(step, stripeAccount, cur, keyHash);
+        if (invoice === undefined) return undefined;
+      }
+      if (!invoice) {
+        const metadata = validateStripeMetadata({ ...req.userMetadata, ...baseMetadata });
+        const params: Stripe.InvoiceCreateParams = {
+          customer: cur.stripeCustomerId,
+          collection_method: "send_invoice",
+          days_until_due: req.daysUntilDue,
+          auto_advance: false,
+          pending_invoice_items_behavior: "exclude",
+          currency: "usd",
+          // The fee is the stored one: a retry after a fee-setting change must send what the
+          // first attempt did (Stripe refuses an idempotent call with other parameters).
+          ...(cur.feeAmountCents > 0 ? { application_fee_amount: cur.feeAmountCents } : {}),
+          ...(req.description ? { description: req.description } : {}),
+          ...(req.footer ? { footer: req.footer } : {}),
+          metadata,
+        };
+        invoice = await step("invoices.create", () =>
+          stripe.invoices.create(params, {
+            stripeAccount,
+            idempotencyKey: `${idemBase}:invoice`,
+          })
+        );
+        if (!invoice) return undefined;
+      }
+      cur = await saveProgress(cur, claimAt, {
+        stripeInvoiceId: invoice.id,
+        creationState: "invoice_created",
+      });
+    }
+    const invoiceId = cur.stripeInvoiceId as string;
+
+    // 2. One invoice item per line, then the fee item.
+    if (cur.creationState === "invoice_created") {
+      const ids: string[] = Array.isArray(cur.lineItemIds) ? (cur.lineItemIds as string[]) : [];
+      const wantFee = cur.feeAmountCents > 0;
+      const incomplete = ids.length < req.lines.length || (wantFee && !cur.stripeFeeItemId);
+      let known = new Map<string, string>();
+      if (beyondKeyWindow && incomplete) {
+        const list = await step("invoiceItems.list", () =>
+          stripe.invoiceItems.list({ invoice: invoiceId, limit: 100 }, { stripeAccount })
+        );
+        if (!list) return undefined;
+        known = new Map(
+          list.data.flatMap((it) =>
+            it.metadata?.dfwsc_idem_key === keyHash && typeof it.metadata.dfwsc_line === "string"
+              ? [[it.metadata.dfwsc_line, it.id] as [string, string]]
+              : []
+          )
+        );
+      }
+
+      const createItem = async (
+        tag: string,
+        item: { description: string; quantity: number; unitAmountCents: number }
+      ): Promise<string | undefined> => {
+        const adopted = known.get(tag);
+        if (adopted) return adopted;
+        // A line keeps its quantity and unit amount on the invoice: quantity plus
+        // unit_amount_decimal (price_data would need a Product).
+        const created = await step(`invoiceItems.create:${tag}`, () =>
+          stripe.invoiceItems.create(
+            {
+              customer: cur.stripeCustomerId,
+              invoice: invoiceId,
+              currency: "usd",
+              description: item.description,
+              quantity: item.quantity,
+              unit_amount_decimal: String(item.unitAmountCents),
+              metadata: { ...baseMetadata, dfwsc_line: tag },
+            },
+            {
+              stripeAccount,
+              idempotencyKey: `${idemBase}:${tag === "fee" ? "fee" : `line:${tag}`}`,
+            }
+          )
+        );
+        return created?.id;
+      };
+
+      for (let i = ids.length; i < req.lines.length; i++) {
+        const id = await createItem(String(i), req.lines[i]);
+        if (!id) return undefined;
+        ids.push(id);
+        cur = await saveProgress(cur, claimAt, { lineItemIds: [...ids] });
+      }
+      if (wantFee && !cur.stripeFeeItemId) {
+        const id = await createItem("fee", {
+          description: PROCESSING_FEE_DESCRIPTION,
+          quantity: 1,
+          unitAmountCents: cur.feeAmountCents,
+        });
+        if (!id) return undefined;
+        cur = await saveProgress(cur, claimAt, { stripeFeeItemId: id });
+      }
+      cur = await saveProgress(cur, claimAt, { creationState: "lines_added" });
+    }
+
+    // 3. Re-read the invoice, check Stripe agrees with our arithmetic, and complete.
+    const fresh = await step("invoices.retrieve", () =>
+      stripe.invoices.retrieve(invoiceId, {}, { stripeAccount })
+    );
+    if (!fresh) return undefined;
+    // `application_fee_amount` is not on the clover Invoice type, but is read when present.
+    const stripeFee = (fresh as unknown as { application_fee_amount?: number | null })
+      .application_fee_amount;
+    if (
+      fresh.total !== cur.totalCents ||
+      fresh.subtotal !== cur.totalCents ||
+      fresh.currency !== "usd" ||
+      fresh.status !== "draft" ||
+      cur.feeAmountCents > fresh.total ||
+      (typeof stripeFee === "number" && stripeFee !== cur.feeAmountCents)
+    ) {
+      // The draft stays on the connected account, unsent and uncollectable; the row stays at
+      // 'lines_added' (hidden from reads) so the next retry checks again.
+      request.log.error(
+        {
+          clientId: client.id,
+          stripeInvoiceId: invoiceId,
+          expectedTotalCents: cur.totalCents,
+          stripeTotalCents: fresh.total,
+          stripeSubtotalCents: fresh.subtotal,
+          expectedFeeCents: cur.feeAmountCents,
+          stripeFeeCents: stripeFee,
+          stripeStatus: fresh.status,
+        },
+        "Stripe invoice does not match the computed amounts; leaving the draft"
+      );
+      reply.code(502).send({
+        error:
+          "The invoice could not be verified against the computed amounts. It was left as an unsent draft.",
+        code: "INVOICE_TOTAL_MISMATCH",
+      });
+      return undefined;
+    }
+    return saveProgress(cur, claimAt, {
+      creationState: "complete",
+      status: "draft",
+      // Lines before the fee; Stripe's own subtotal already includes the fee item.
+      subtotalCents: fresh.subtotal - cur.feeAmountCents,
+      totalCents: fresh.total,
+      amountPaidCents: fresh.amount_paid,
+      amountRemainingCents: fresh.amount_remaining,
+      number: fresh.number ?? null,
+      dueDate: fresh.due_date ? new Date(fresh.due_date * 1000) : null,
+      hostedInvoiceUrl: fresh.hosted_invoice_url ?? null,
+      invoicePdf: fresh.invoice_pdf ?? null,
+      lastSyncedAt: new Date(),
+      claimedAt: null,
+    });
+  }
+
+  // ── POST /invoices ─────────────────────────────────────────────────────────
+  fastify.post("/invoices", { preHandler: writeGuards }, async (request, reply) => {
+    const client = (request as RequestWithClient).client;
+    const clientId = client.id;
+    const stripeAccount = accountOf(request);
+
+    const keyHeader = extractIdempotencyKey(request);
+    if (!keyHeader || keyHeader.trim().length === 0) {
+      throw errors.badRequest("Idempotency-Key header is required.");
+    }
+    const rawKey = keyHeader.trim();
+    if (rawKey.length > 255) {
+      throw errors.badRequest("Idempotency-Key must not exceed 255 characters.");
+    }
+    // Only a hash of the caller's key is stored and sent to Stripe (free text could carry PII).
+    const keyHash = createHash("sha256").update(rawKey).digest("hex");
+
+    // Finalizing and sending are separate steps for now. Refused, not ignored: a caller that
+    // sends `send: true` must not believe the invoice went out.
+    const raw = request.body;
+    if (raw && typeof raw === "object" && ("finalize" in raw || "send" in raw)) {
+      throw errors.badRequest(
+        "finalize and send are not supported when creating an invoice; the invoice is created as a draft."
+      );
+    }
+    const body = parseBody(createInvoiceBodySchema, request.body, reply);
+    if (!body) return;
+
+    const userMetadata = validateStripeMetadata(body.metadata);
+    if (Object.keys(userMetadata).some((k) => k.startsWith(USER_METADATA_RESERVED_PREFIX))) {
+      throw errors.badRequest(
+        `metadata keys starting with '${USER_METADATA_RESERVED_PREFIX}' are reserved.`
+      );
+    }
+    // Leaves room for the two keys this API adds.
+    validateStripeMetadata({ ...userMetadata, dfwsc_client_id: clientId, dfwsc_idem_key: keyHash });
+
+    const terms = client.defaultPaymentTermsDays;
+    const daysUntilDue =
+      body.daysUntilDue ??
+      (terms !== null && Number.isInteger(terms) && terms >= 1 && terms <= 365
+        ? terms
+        : DEFAULT_DAYS_UNTIL_DUE);
+    const baseCents = computeBaseCents(body.lines);
+    const req: InvoiceRequest = {
+      customerId: body.customerId,
+      lines: body.lines.map((l) => ({
+        description: l.description,
+        unitAmountCents: l.unitAmountCents,
+        quantity: l.quantity,
+      })),
+      currency: "usd",
+      daysUntilDue,
+      description: body.description ?? null,
+      footer: body.footer ?? null,
+      userMetadata,
+    };
+    const requestHash = hashInvoiceRequest(req);
+
+    // Everything below that can answer 4xx runs before the first Stripe call.
+    let tokenTaken = false;
+    let row = await findInvoiceByKey(clientId, keyHash);
+    let claimAt = new Date();
+    let claimed = false;
+
+    if (!row) {
+      const group = client.groupId
+        ? ((
+            await db.select().from(clientGroups).where(eq(clientGroups.id, client.groupId)).limit(1)
+          )[0] ?? null)
+        : null;
+      let feeCents: number;
+      try {
+        // API keys can never waive the fee: waiveFee is not part of the body.
+        feeCents = await resolveClientFee(client, group, baseCents);
+      } catch (e: unknown) {
+        throw errors.badRequest((e as Error).message);
+      }
+      if (!Number.isSafeInteger(feeCents) || feeCents < 0) {
+        throw errors.badRequest("Computed fee is invalid.");
+      }
+      const totalCents = baseCents + feeCents;
+      assertTotalWithinCap(totalCents);
+
+      // The customer must be this client's, on this client's connected account.
+      const [customer] = await db
+        .select({ id: connectCustomers.id })
+        .from(connectCustomers)
+        .where(
+          and(
+            eq(connectCustomers.clientId, clientId),
+            eq(connectCustomers.connectedAccountId, stripeAccount),
+            eq(connectCustomers.stripeCustomerId, req.customerId)
+          )
+        )
+        .limit(1);
+      if (!customer) {
+        return reply.code(404).send({ error: "Customer not found.", code: "NOT_FOUND" });
+      }
+
+      // Rolling 24 hour ceiling, counted from connect_invoices. Two requests racing the last slot
+      // can overshoot by one; the ceiling is a runaway guard, not an exact quota.
+      const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const [usage] = await db
+        .select({ n: count(), oldest: min(connectInvoices.createdAt) })
+        .from(connectInvoices)
+        .where(
+          and(eq(connectInvoices.clientId, clientId), gte(connectInvoices.createdAt, windowStart))
+        );
+      if (usage.n >= INVOICE_DAILY_CREATE_LIMIT) {
+        const retryMs = usage.oldest
+          ? usage.oldest.getTime() + 24 * 60 * 60 * 1000 - Date.now()
+          : 60_000;
+        return reply
+          .code(429)
+          .header("Retry-After", String(Math.max(1, Math.ceil(retryMs / 1000))))
+          .send({
+            error: `At most ${INVOICE_DAILY_CREATE_LIMIT} invoices can be created per day.`,
+            code: "INVOICE_DAILY_LIMIT",
+          });
+      }
+
+      if (!(await takeWriteToken(request, reply))) return;
+      tokenTaken = true;
+
+      // Store BEFORE Stripe. A concurrent request with the same key loses this insert and is
+      // handled as a replay below.
+      const [inserted] = await db
+        .insert(connectInvoices)
+        .values({
+          id: uuidv4(),
+          clientId,
+          connectedAccountId: stripeAccount,
+          stripeCustomerId: req.customerId,
+          idempotencyKey: keyHash,
+          requestHash,
+          creationState: "reserved",
+          status: "draft",
+          currency: "usd",
+          subtotalCents: baseCents,
+          feeAmountCents: feeCents,
+          totalCents,
+          amountRemainingCents: totalCents,
+          claimedAt: claimAt,
+          // Millisecond precision on purpose: the list cursor round-trips this value exactly.
+          createdAt: claimAt,
+        })
+        .onConflictDoNothing({
+          target: [connectInvoices.clientId, connectInvoices.idempotencyKey],
+        })
+        .returning();
+      if (inserted) {
+        row = inserted;
+        claimed = true;
+      } else {
+        row = await findInvoiceByKey(clientId, keyHash);
+        if (!row) throw errors.internal();
+      }
+    }
+
+    if (row.requestHash !== requestHash) {
+      return reply.code(409).send({
+        error:
+          "This Idempotency-Key was already used for a different invoice. Use a new unique key for each new invoice.",
+        code: "IDEMPOTENCY_KEY_REUSED",
+      });
+    }
+    if (row.creationState === "complete") {
+      return reply.code(200).send(serializeInvoice(row));
+    }
+
+    if (!claimed) {
+      // Resume: take the claim unless another request holds a live one.
+      if (!tokenTaken && !(await takeWriteToken(request, reply))) return;
+      claimAt = new Date();
+      const [taken] = await db
+        .update(connectInvoices)
+        .set({ claimedAt: claimAt })
+        .where(
+          and(
+            eq(connectInvoices.id, row.id),
+            ne(connectInvoices.creationState, "complete"),
+            or(
+              isNull(connectInvoices.claimedAt),
+              lt(connectInvoices.claimedAt, new Date(claimAt.getTime() - INVOICE_CLAIM_LEASE_MS))
+            )
+          )
+        )
+        .returning();
+      if (!taken) {
+        const latest = await findInvoiceByKey(clientId, keyHash);
+        if (latest?.creationState === "complete") {
+          return reply.code(200).send(serializeInvoice(latest));
+        }
+        if (tokenTaken) await writeBucket.refund(request);
+        return invoiceKeyInUse(reply);
+      }
+      row = taken;
+    }
+
+    // Give the claim back so an immediate retry resumes instead of waiting out the lease. A
+    // finished row already cleared it. Best effort: the lease expires on its own.
+    const releaseClaim = async () => {
+      await db
+        .update(connectInvoices)
+        .set({ claimedAt: null })
+        .where(and(eq(connectInvoices.id, row.id), eq(connectInvoices.claimedAt, claimAt)))
+        .catch(() => undefined);
+    };
+    pendingRelease.set(request, releaseClaim);
+
+    let done: InvoiceRow | undefined;
+    try {
+      done = await driveCreate(request, reply, row, claimAt, req, keyHash, !claimed);
+    } catch (err) {
+      if (err instanceof ClaimLostError) return invoiceKeyInUse(reply);
+      if (err instanceof PersistenceError) {
+        // The driver error quotes the failed query's parameters (which can include a hosted
+        // URL), so only its SQLSTATE is logged.
+        const dbCode = (err.cause as { cause?: { code?: unknown } } | undefined)?.cause?.code;
+        request.log.error(
+          { clientId, invoiceRowId: row.id, dbCode },
+          "Invoice step done on Stripe but not recorded; returning 503"
+        );
+        return reply.code(503).send({
+          error:
+            "Invoice created but confirmation failed. Please retry with the same Idempotency-Key.",
+          code: "LEDGER_PERSISTENCE_FAILED",
+        });
+      }
+      throw err;
+    } finally {
+      pendingRelease.delete(request);
+      await releaseClaim();
+    }
+    if (!done) return reply;
+    return reply.code(201).send(serializeInvoice(done));
+  });
+
+  // ── Stale re-check (GET /invoices/:id) ─────────────────────────────────────
+  // At most one Stripe lookup per invoice per interval and a bounded map, in process (the same
+  // shape as the payments status reconcile).
+  const lastInvoiceReconcile = new Map<string, number>();
+  const RECONCILE_MAX_TRACKED = 1000;
+  const RECONCILE_STRIPE_TIMEOUT_MS = 3000;
+
+  function shouldAttemptInvoiceReconcile(key: string, now: number): boolean {
+    const last = lastInvoiceReconcile.get(key);
+    if (last !== undefined && now - last < INVOICE_RECONCILE_MIN_AGE_MS) return false;
+    if (lastInvoiceReconcile.size >= RECONCILE_MAX_TRACKED) {
+      for (const [k, at] of lastInvoiceReconcile) {
+        if (now - at >= INVOICE_RECONCILE_MIN_AGE_MS) lastInvoiceReconcile.delete(k);
+      }
+      if (lastInvoiceReconcile.size >= RECONCILE_MAX_TRACKED) {
+        const oldest = lastInvoiceReconcile.keys().next().value;
+        if (oldest !== undefined) lastInvoiceReconcile.delete(oldest);
+      }
+    }
+    lastInvoiceReconcile.set(key, now);
+    return true;
+  }
+
+  /** Returns the row to report: refreshed from Stripe when stale, else as stored. Never throws. */
+  async function reconcileStaleInvoice(
+    row: InvoiceRow,
+    request: FastifyRequest
+  ): Promise<InvoiceRow> {
+    const invoiceId = row.stripeInvoiceId;
+    const now = Date.now();
+    if (!invoiceId || (TERMINAL_INVOICE_STATUSES as readonly string[]).includes(row.status)) {
+      return row;
+    }
+    const syncedAt = (row.lastSyncedAt ?? row.createdAt).getTime();
+    if (now - syncedAt < INVOICE_RECONCILE_MIN_AGE_MS) return row;
+    // Best effort on a read endpoint: honour an open breaker, but run the lookup outside it so
+    // its failures do not count towards the breaker that guards invoice writes.
+    if (getCircuitBreakerStates().stripe.open) return row;
+    if (!shouldAttemptInvoiceReconcile(`${row.connectedAccountId}:${invoiceId}`, now)) return row;
+
+    try {
+      const invoice = await stripe.invoices.retrieve(
+        invoiceId,
+        {},
+        {
+          stripeAccount: row.connectedAccountId,
+          timeout: RECONCILE_STRIPE_TIMEOUT_MS,
+          maxNetworkRetries: 0,
+        }
+      );
+      const status = invoice.status;
+      if (!status) return row;
+      const at = (s: number | null | undefined) => (s ? new Date(s * 1000) : undefined);
+      const transitions = invoice.status_transitions;
+      const [updated] = await db
+        .update(connectInvoices)
+        .set({
+          status,
+          totalCents: invoice.total,
+          amountPaidCents: invoice.amount_paid,
+          amountRemainingCents: invoice.amount_remaining,
+          number: invoice.number ?? null,
+          dueDate: invoice.due_date ? new Date(invoice.due_date * 1000) : null,
+          hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+          invoicePdf: invoice.invoice_pdf ?? null,
+          ...(at(transitions?.finalized_at) ? { finalizedAt: at(transitions.finalized_at) } : {}),
+          ...(at(transitions?.paid_at) ? { paidAt: at(transitions.paid_at) } : {}),
+          ...(at(transitions?.voided_at) ? { voidedAt: at(transitions.voided_at) } : {}),
+          lastSyncedAt: new Date(),
+        })
+        .where(eq(connectInvoices.id, row.id))
+        .returning();
+      return updated ?? row;
+    } catch (err) {
+      // Codes only: a Stripe error message may quote customer data.
+      request.log.warn(
+        {
+          clientId: row.clientId,
+          stripeInvoiceId: invoiceId,
+          stripeCode: (err as { code?: unknown } | null)?.code,
+        },
+        "Invoice status re-check with Stripe failed"
+      );
+      return row;
+    }
+  }
+
+  // ── GET /invoices/:id ──────────────────────────────────────────────────────
+  fastify.get("/invoices/:id", { preHandler: readGuards }, async (request, reply) => {
+    const params = parseBody(idParamsSchema, request.params, reply);
+    if (!params) return;
+    const [row] = await db
+      .select()
+      .from(connectInvoices)
+      .where(
+        and(
+          eq(connectInvoices.clientId, (request as RequestWithClient).client.id),
+          eq(connectInvoices.stripeInvoiceId, params.id),
+          eq(connectInvoices.creationState, "complete")
+        )
+      )
+      .limit(1);
+    if (!row) return reply.code(404).send(INVOICE_NOT_FOUND);
+    return reply.code(200).send(serializeInvoice(await reconcileStaleInvoice(row, request)));
+  });
+
+  // ── GET /invoices ──────────────────────────────────────────────────────────
+  // Postgres only, newest first, keyset-paged on (created_at desc, id asc).
+  fastify.get("/invoices", { preHandler: readGuards }, async (request, reply) => {
+    const query = parseBody(listQuerySchema, request.query, reply);
+    if (!query) return;
+    let after: { createdAt: Date; id: string } | null = null;
+    if (query.cursor) {
+      after = decodeCursor(query.cursor);
+      if (!after) throw errors.badRequest("cursor is invalid.");
+    }
+    const rows = await db
+      .select()
+      .from(connectInvoices)
+      .where(
+        and(
+          eq(connectInvoices.clientId, (request as RequestWithClient).client.id),
+          eq(connectInvoices.creationState, "complete"),
+          query.status ? eq(connectInvoices.status, query.status) : undefined,
+          query.customerId ? eq(connectInvoices.stripeCustomerId, query.customerId) : undefined,
+          after
+            ? or(
+                lt(connectInvoices.createdAt, after.createdAt),
+                and(
+                  eq(connectInvoices.createdAt, after.createdAt),
+                  sql`${connectInvoices.id} > ${after.id}`
+                )
+              )
+            : undefined
+        )
+      )
+      .orderBy(desc(connectInvoices.createdAt), asc(connectInvoices.id))
+      .limit(query.limit + 1);
+    const page = rows.slice(0, query.limit);
+    const last = page[page.length - 1];
+    return reply.code(200).send({
+      data: page.map(serializeInvoice),
+      nextCursor: rows.length > query.limit && last ? encodeCursor(last) : null,
+    });
   });
 }
