@@ -174,12 +174,13 @@ async function fetchBillingInput(
   };
 }
 
-// startedAt reached us as a JS Date (millisecond precision) while dirty_at has microseconds, hence
-// the extra millisecond: a mark set during that millisecond still predates every Stripe read.
 /**
  * Re-derives the snapshot of every client code on this Customer. `updated_at` moves only when the
- * content hash does, so the mirror sees real changes. `dirty_at` is cleared only if no webhook
- * marked it after `startedAt` (the database clock when this refresh began).
+ * content hash does, so the mirror sees real changes. `dirty_at` is cleared only for a snapshot
+ * whose mark is still the one seen before the Stripe reads (compare-and-clear on the exact
+ * microsecond value), so a webhook that marks it during the refresh is never lost, however
+ * close in time. `startedAt` (the database clock when the run began) is only the "now" for
+ * deriving overdue state.
  * Returns the number of snapshots whose content changed.
  */
 async function refreshCustomer(
@@ -188,8 +189,13 @@ async function refreshCustomer(
   logger: MirrorLogger
 ): Promise<number> {
   const codes = await db
-    .select({ clientCode: billingCustomers.clientCode })
+    .select({
+      clientCode: billingCustomers.clientCode,
+      // text, not a Date: a JS Date would drop the microseconds that make the compare exact
+      seenDirty: sql<string | null>`${billingSnapshots.dirtyAt}::text`,
+    })
     .from(billingCustomers)
+    .leftJoin(billingSnapshots, eq(billingSnapshots.clientCode, billingCustomers.clientCode))
     .where(eq(billingCustomers.stripeCustomerId, customerId));
   if (!codes.length) return 0;
 
@@ -212,13 +218,13 @@ async function refreshCustomer(
   );
 
   let changed = 0;
-  for (const { clientCode } of codes) {
+  for (const { clientCode, seenDirty } of codes) {
     const bookkeeping = {
       stripeCustomerId: customerId,
       refreshedAt: new Date(),
       attempts: 0,
       lastError: null,
-      dirtyAt: sql`CASE WHEN ${billingSnapshots.dirtyAt} < ${startedAt}::timestamptz + interval '1 millisecond' THEN NULL ELSE ${billingSnapshots.dirtyAt} END`,
+      dirtyAt: sql`CASE WHEN ${billingSnapshots.dirtyAt}::text IS NOT DISTINCT FROM ${seenDirty}::text THEN NULL ELSE ${billingSnapshots.dirtyAt} END`,
     };
     if (!existing.has(clientCode)) {
       await db
