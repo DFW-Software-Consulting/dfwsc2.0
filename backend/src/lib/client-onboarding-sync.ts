@@ -1328,7 +1328,7 @@ export async function runClientOnboardingCycle(options: {
     if (error instanceof OnboardingConfigError) {
       logProblemOnce(
         logger,
-        `config:${error.message}`,
+        `config:${error.code}:${JSON.stringify(error.detail)}`,
         { errorCode: error.code, names: error.detail },
         "Client onboarding form, tables or collective do not match what is expected; nothing processed."
       );

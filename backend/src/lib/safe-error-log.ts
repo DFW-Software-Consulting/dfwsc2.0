@@ -70,3 +70,29 @@ export function dbErrorFields(err: unknown) {
     errRoutine: c?.routine,
   };
 }
+
+// General-purpose fields for any `catch` whose error source is unknown (Stripe, Postgres or our
+// own code). Same policy as retryErrorFields, under a name that reads right at ordinary call sites.
+export function errorLogFields(err: unknown) {
+  return retryErrorFields(err);
+}
+
+// Outbound transports (SMTP, Nextcloud HTTP). The message and response text can quote recipient
+// addresses or a response body that holds rows and contact data, so only identifiers are kept:
+// nodemailer's code/responseCode/command and the HTTP status of our Nextcloud client errors.
+export function transportErrorFields(err: unknown) {
+  const e = err as {
+    name?: unknown;
+    code?: unknown;
+    responseCode?: unknown;
+    command?: unknown;
+    status?: unknown;
+  } | null;
+  return {
+    errName: e?.name,
+    errCode: typeof e?.code === "string" || typeof e?.code === "number" ? e.code : undefined,
+    errResponseCode: typeof e?.responseCode === "number" ? e.responseCode : undefined,
+    errCommand: typeof e?.command === "string" ? e.command : undefined,
+    errStatus: typeof e?.status === "number" ? e.status : undefined,
+  };
+}

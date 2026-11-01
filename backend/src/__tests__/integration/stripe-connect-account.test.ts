@@ -15,8 +15,10 @@ import { clients } from "../../db/schema";
 import { stripe } from "../../lib/stripe";
 import {
   createExpressAccountForClient,
+  deleteUnpersistedExpressAccount,
   ensureExpressAccountForClient,
 } from "../../lib/stripe-connect-account";
+import { dump, expectNoPlanted, plantedStripeError } from "../helpers/log-capture";
 
 const logger = { info: vi.fn(), error: vi.fn() };
 const createdClientIds: string[] = [];
@@ -130,6 +132,24 @@ describe("stripe-connect-account", () => {
     expect(stripe.accounts.del).toHaveBeenCalledWith("acct_loser");
   });
 
+  it("logs only identifiers when deleting an unpersisted account fails", async () => {
+    (stripe.accounts.del as any).mockRejectedValueOnce(plantedStripeError());
+    logger.error.mockClear();
+
+    await deleteUnpersistedExpressAccount("acct_orphan", "client-1", logger as never);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientId: "client-1",
+        stripeAccountId: "acct_orphan",
+        errType: "StripeInvalidRequestError",
+        errRequestId: "req_planted",
+      }),
+      expect.any(String)
+    );
+    expectNoPlanted(dump(logger.error.mock.calls));
+  });
+
   it("throws, without deleting, when the account ID cannot be persisted", async () => {
     const owner = await seedLegacyClient(`acct_taken_${randomUUID().slice(0, 8)}`);
     const client = await seedLegacyClient();
@@ -138,8 +158,14 @@ describe("stripe-connect-account", () => {
     await expect(ensureExpressAccountForClient(client, logger)).rejects.toThrow();
     expect(stripe.accounts.del).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ clientId: client.id, stripeAccountId: owner.stripeAccountId }),
+      expect.objectContaining({
+        clientId: client.id,
+        stripeAccountId: owner.stripeAccountId,
+        errCode: "23505",
+      }),
       expect.any(String)
     );
+    // The raw pg error quotes the colliding row ("Key (stripe_account_id)=(...)").
+    expect(dump(logger.error.mock.calls)).not.toMatch(/Key \(|duplicate key|Failed query/);
   });
 });

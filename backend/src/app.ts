@@ -6,6 +6,7 @@ import fastifyRawBody from "fastify-raw-body";
 import { logMaskedEnvSummary, validateEnv } from "./lib/env";
 import { AppError } from "./lib/errors";
 import { warnIfInMemoryRateLimit } from "./lib/rate-limit";
+import { errorLogFields } from "./lib/safe-error-log";
 import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
@@ -162,7 +163,11 @@ export async function buildServer() {
       return;
     }
 
-    request.log.error(fastifyError, fastifyError.message);
+    // Client errors (4xx) keep their message as the log line. A 5xx message can quote SQL or
+    // provider text, so those log a fixed line and errorLogFields supplies the diagnostics.
+    const logMessage =
+      statusCode < 500 ? fastifyError.message : "Request failed with a server error";
+    request.log.error(errorLogFields(fastifyError), logMessage);
 
     const safeMessage =
       statusCode < 500 && fastifyError.message ? fastifyError.message : "Internal Server Error";

@@ -20,6 +20,7 @@ import {
   resetCircuitBreakersForTests,
 } from "../../lib/circuit-breakers";
 import { stripe } from "../../lib/stripe";
+import { captureAppLogs, expectNoPlanted, plantedStripeError } from "../helpers/log-capture";
 
 const mockConstructEvent = stripe.webhooks.constructEvent as ReturnType<typeof vi.fn>;
 const mockRetrieve = stripe.checkout.sessions.retrieve as ReturnType<typeof vi.fn>;
@@ -320,6 +321,24 @@ describe("checkout ledger status accuracy", () => {
       expect(response.statusCode).toBe(200);
       expect(response.json().status).toBe("created");
       expect((await getRow(row.id)).status).toBe("created");
+    });
+
+    it("logs only identifiers when the Stripe lookup fails with customer data in the message", async () => {
+      const row = await seedRow({ createdAt: new Date(Date.now() - STALE_MS) });
+      mockRetrieve.mockRejectedValueOnce(plantedStripeError());
+      const logs = captureAppLogs(app);
+
+      const response = await getStatus(row.sessionId);
+      logs.restore();
+
+      expect(response.statusCode).toBe(200);
+      expect(logs.find("Checkout status reconciliation with Stripe failed")?.fields).toMatchObject({
+        errType: "StripeInvalidRequestError",
+        errCode: "resource_missing",
+        errRequestId: "req_planted",
+        sessionId: row.sessionId,
+      });
+      expectNoPlanted(logs.text());
     });
 
     it("degrades to the stored row when the Stripe lookup times out", async () => {

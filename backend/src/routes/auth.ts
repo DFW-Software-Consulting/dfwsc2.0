@@ -10,6 +10,7 @@ import {
 } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { failureRateLimit, rateLimit, sendRateLimited } from "../lib/rate-limit";
+import { errorLogFields } from "../lib/safe-error-log";
 import { parseBody } from "../lib/validation";
 
 interface LoginRequest {
@@ -86,7 +87,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
 
         return reply.code(200).send({ token, expiresIn });
       } catch (error) {
-        fastify.log.error({ error }, "Error generating JWT token");
+        fastify.log.error(errorLogFields(error), "Error generating JWT token");
         throw errors.internal("Authentication error");
       }
     }

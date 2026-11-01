@@ -3,6 +3,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
 import { withStripeCircuit } from "./circuit-breakers";
+import { errorLogFields } from "./safe-error-log";
 import { stripe } from "./stripe-billing";
 
 type ClientRecord = typeof clients.$inferSelect;
@@ -61,7 +62,7 @@ export async function deleteUnpersistedExpressAccount(
     logger.info({ clientId, stripeAccountId }, "Deleted unpersisted Stripe account");
   } catch (err) {
     logger.error(
-      { err, clientId, stripeAccountId },
+      { ...errorLogFields(err), clientId, stripeAccountId },
       "Failed to delete unpersisted Stripe account; manual reconciliation required"
     );
   }
@@ -107,7 +108,7 @@ export async function ensureExpressAccountForClient(
     }
   } catch (err) {
     logger.error(
-      { err, clientId: client.id, stripeAccountId: created.stripeAccountId },
+      { ...errorLogFields(err), clientId: client.id, stripeAccountId: created.stripeAccountId },
       "Failed to persist lazily created Stripe account"
     );
     throw err;
