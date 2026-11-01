@@ -59,6 +59,9 @@ sequenceDiagram
     A-->>C: Redirect to /onboarding-success
 ```
 
+### Connected-account invoicing (optional)
+Behind `CONNECT_INVOICING` and a per-client `invoicing_enabled` flag, an API-key client can invoice its own customers. The API makes direct Stripe calls on the client's connected account (customers, draft invoices, finalize, send, void, delete); Stripe emails the invoice and the customer pays on its hosted page. Postgres keeps ids, amounts and idempotency records (`connect_customers`, `connect_invoices`, `connect_invoice_sends`), and the Connect webhook plus a stale re-check on read keep statuses current. See [BACKEND.md](./BACKEND.md), [STRIPE.md](./STRIPE.md) and the integrator guide [CLIENT_INTEGRATION.md](../CLIENT_INTEGRATION.md).
+
 ## 5. Data Model (Drizzle/PostgreSQL)
 - **`clients`**: Primary entity. `workspace` is always `"client_portal"`. `status` is `active`, `inactive`, `pending`, or `failed`.
 - **`client_groups`**: Shared fee/URL configuration for multiple clients.

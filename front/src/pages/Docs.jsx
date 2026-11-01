@@ -13,6 +13,7 @@ const sidebarSections = [
   { id: "code-examples", label: "Code Examples" },
   { id: "error-handling", label: "Error Handling" },
   { id: "rules", label: "Rules" },
+  { id: "invoicing", label: "Invoicing (optional)" },
   { id: "need-help", label: "Need Help?" },
 ];
 
@@ -261,7 +262,7 @@ const ERROR_ROWS = [
   },
   {
     status: "409",
-    cause: 'The key was already used for a different payment (code "IDEMPOTENCY_KEY_REUSED")',
+    cause: 'The key was already used with a different request body (code "IDEMPOTENCY_KEY_REUSED")',
     retry: "No, not with this key. Generate a new Idempotency-Key for the new payment",
   },
   {
@@ -302,6 +303,40 @@ const ERROR_ROWS = [
     retry:
       "Yes. Retry the same request with the same key; the first usually clears within about 30 seconds. Do not generate a new key, and do not fulfil the order until Step 3 reports paid",
   },
+];
+
+const INVOICE_ROWS = [
+  {
+    endpoint: "POST /api/v1/customers",
+    desc: "Create a customer on your account. Needs an Idempotency-Key. externalRef is your own opaque id and must not contain personal data.",
+  },
+  {
+    endpoint: "GET /api/v1/customers/{id}",
+    desc: "Read a customer. GET /api/v1/customers?externalRef= looks one up by your reference.",
+  },
+  { endpoint: "PATCH /api/v1/customers/{id}", desc: "Change a customer's email, name or phone." },
+  {
+    endpoint: "POST /api/v1/invoices",
+    desc: "Create a draft invoice from customerId and lines (whole cents, USD, at most 50 lines, total at most 2,500,000 cents). Needs an Idempotency-Key.",
+  },
+  {
+    endpoint: "GET /api/v1/invoices/{id}",
+    desc: "Read an invoice and its status: draft, open, paid, void, uncollectible or deleted.",
+  },
+  {
+    endpoint: "GET /api/v1/invoices",
+    desc: "List invoices, newest first. Filters: status, customerId, limit, cursor. Deleted invoices are hidden unless status=deleted.",
+  },
+  {
+    endpoint: "POST /api/v1/invoices/{id}/finalize",
+    desc: "Turn a draft into an open invoice with a hosted payment page.",
+  },
+  {
+    endpoint: "POST /api/v1/invoices/{id}/send",
+    desc: "Email an open invoice to the customer. Needs an Idempotency-Key. At most 3 sends per invoice.",
+  },
+  { endpoint: "POST /api/v1/invoices/{id}/void", desc: "Cancel an open invoice." },
+  { endpoint: "DELETE /api/v1/invoices/{id}", desc: "Delete a draft invoice." },
 ];
 
 const STATUS_ROWS = [
@@ -593,8 +628,8 @@ export default function Docs() {
                 Checkout session, and starting again does not cancel the earlier one: it stays
                 payable until it expires (24 hours by default), so the customer can still pay in the
                 earlier tab. Add the new sessionId to the order's list and keep the earlier ones; do
-                not replace them. Step 3 explains how to check all of them. Sending a key again for
-                a different payment returns 409 IDEMPOTENCY_KEY_REUSED: use a new key.
+                not replace them. Step 3 explains how to check all of them. Sending a key again with
+                a different request body returns 409 IDEMPOTENCY_KEY_REUSED: use a new key.
               </p>
             </div>
 
@@ -1016,6 +1051,51 @@ window.location.href = url;`}</CodeBlock>
                   </p>
                 </div>
               ))}
+            </div>
+          </section>
+
+          {/* Invoicing */}
+          <section>
+            <SectionAnchor id="invoicing" />
+            <SectionBadge>Invoicing</SectionBadge>
+            <h2 className="mt-4 text-3xl font-bold text-fg transition-colors">
+              Invoicing your customers (optional)
+            </h2>
+            <p className="mt-4 text-lg text-slate-700 dark:text-slate-300 leading-relaxed transition-colors">
+              You can also invoice your own customers with the same API key. Invoicing is turned on
+              per account by DFWSC; until then these calls return 403 INVOICING_NOT_ENABLED. Create
+              a customer, create a draft invoice, finalize it, then send it: Stripe emails the
+              customer, who pays on a Stripe-hosted page. Read the invoice to see when it is paid.
+              Ask your DFWSC administrator for the full invoicing guide.
+            </p>
+            <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200 dark:border-white/5 bg-white dark:bg-white/[0.01] transition-colors shadow-sm">
+              <table className="w-full text-sm text-slate-700 dark:text-slate-300 transition-colors">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-white/[0.02]">
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
+                      Endpoint
+                    </th>
+                    <th className="px-6 py-4 text-left font-bold text-fg uppercase tracking-widest text-[10px] transition-colors">
+                      What it does
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {INVOICE_ROWS.map((row) => (
+                    <tr
+                      key={row.endpoint}
+                      className="border-b border-slate-100 dark:border-white/5 last:border-0 transition-colors hover:bg-slate-50 dark:hover:bg-white/[0.02]"
+                    >
+                      <td className="px-6 py-4 font-mono text-xs text-fg transition-colors">
+                        {row.endpoint}
+                      </td>
+                      <td className="px-6 py-4 text-slate-600 dark:text-slate-300 transition-colors">
+                        {row.desc}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </section>
 

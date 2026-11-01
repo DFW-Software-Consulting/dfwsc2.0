@@ -497,6 +497,68 @@ describe("Connect webhook sync of connected-account invoices", () => {
       expect(logged).toContain("500");
       expect(logged).not.toContain(EMAIL);
       expect(logged).not.toContain("invoice.example");
+      expect(logged).not.toContain("errMessage");
+      expect(logged).not.toContain("errStack");
+    });
+
+    it("the retry path logs the message and stack of a non-Stripe error", async () => {
+      const c = await seedClient();
+      const id = await seedInvoice(c);
+      stripe.failNth("invoices.retrieve", 1, new TypeError("our own bug in the sync"));
+      const errorLog = vi.spyOn(app.log, "error");
+      const event = makeEvent("invoice.paid", id, c.account);
+      expect((await post(event)).statusCode).toBeGreaterThanOrEqual(500);
+      const entry = errorLog.mock.calls
+        .map((call) => call[0] as Record<string, unknown>)
+        .find((o) => o?.eventId === event.id);
+      expect(entry?.errMessage).toBe("our own bug in the sync");
+      expect(String(entry?.errStack)).toContain("our own bug in the sync");
+      expect(String(entry?.errStack)).toContain("at ");
+    });
+
+    it("the retry path logs only the SQLSTATE of a Drizzle query error, never params or stack", async () => {
+      const c = await seedClient();
+      const id = await seedInvoice(c);
+      const pgErr = Object.assign(new Error(`duplicate for ${EMAIL}`), {
+        code: "40001",
+        severity: "ERROR",
+        routine: "serialize",
+        detail: `Key (url)=(${HOSTED}) ${EMAIL}`,
+      });
+      const drizzleErr = Object.assign(
+        new Error(`Failed query: update "connect_invoices" params: ${HOSTED},${EMAIL}`),
+        { name: "DrizzleQueryError", cause: pgErr }
+      );
+      stripe.failNth("invoices.retrieve", 1, drizzleErr);
+      const errorLog = vi.spyOn(app.log, "error");
+      const event = makeEvent("invoice.paid", id, c.account);
+      expect((await post(event)).statusCode).toBeGreaterThanOrEqual(500);
+      const logged = JSON.stringify(errorLog.mock.calls);
+      expect(logged).toContain(event.id);
+      expect(logged).toContain("40001");
+      expect(logged).toContain("serialize");
+      expect(logged).not.toContain(EMAIL);
+      expect(logged).not.toContain("invoice.example");
+      expect(logged).not.toContain("errStack");
+      expect(logged).not.toContain("errMessage");
+    });
+
+    it("the retry path never logs the detail of a raw pg error", async () => {
+      const c = await seedClient();
+      const id = await seedInvoice(c);
+      const pgErr = Object.assign(new Error(`pg says ${EMAIL}`), {
+        code: "57014",
+        severity: "ERROR",
+        detail: `Row (${HOSTED}, ${EMAIL})`,
+      });
+      stripe.failNth("invoices.retrieve", 1, pgErr);
+      const errorLog = vi.spyOn(app.log, "error");
+      const event = makeEvent("invoice.paid", id, c.account);
+      expect((await post(event)).statusCode).toBeGreaterThanOrEqual(500);
+      const logged = JSON.stringify(errorLog.mock.calls);
+      expect(logged).toContain("57014");
+      expect(logged).not.toContain(EMAIL);
+      expect(logged).not.toContain("invoice.example");
     });
 
     it("a Postgres failure during the sync answers non-2xx, releases the claim and a redelivery succeeds", async () => {

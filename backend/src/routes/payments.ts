@@ -654,8 +654,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           "Idempotency-Key already used for a different payment session"
         );
         return reply.code(409).send({
-          error:
-            "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.",
+          error: "This Idempotency-Key was already used with a different request body.",
           code: "IDEMPOTENCY_KEY_REUSED",
         });
       }
