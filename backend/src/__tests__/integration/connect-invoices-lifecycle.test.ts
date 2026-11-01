@@ -7,6 +7,7 @@ vi.mock("../../lib/stripe", async () => {
 });
 
 import { eq, inArray } from "drizzle-orm";
+import Stripe from "stripe";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, connectCustomers, connectInvoiceSends, connectInvoices } from "../../db/schema";
@@ -122,6 +123,15 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
     const row = await rowOf(stripeInvoiceId);
     return db.select().from(connectInvoiceSends).where(eq(connectInvoiceSends.invoiceId, row.id));
   };
+  /** Makes the Nth `db.update` call (1-based) throw; the first one is the invoice claim. */
+  function failUpdate(nth: number, message = "db down") {
+    const original = db.update.bind(db);
+    let n = 0;
+    vi.spyOn(db, "update").mockImplementation(((...args: unknown[]) => {
+      if (++n === nth) throw new Error(message);
+      return (original as any)(...args);
+    }) as never);
+  }
   const mutating = (name: string) => stripe.callsTo(name);
 
   beforeAll(async () => {
@@ -379,9 +389,7 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
     it("answers 503 LEDGER_PERSISTENCE_FAILED when Postgres fails after Stripe, and a retry adopts", async () => {
       const c = await seedClient();
       const { id } = await makeDraft(c);
-      vi.spyOn(db, "update").mockImplementationOnce((() => {
-        throw new Error("db down");
-      }) as never);
+      failUpdate(2);
       const failed = await finalize(c, id);
       expect(failed.statusCode).toBe(503);
       expect(failed.json().code).toBe("LEDGER_PERSISTENCE_FAILED");
@@ -477,14 +485,96 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
       expect((await rowOf(id)).sendCount).toBe(3);
     });
 
-    it("lets a failed key be retried under the cap, and refuses it at the cap", async () => {
+    it("answers 409 SEND_FAILED for a failed key, without calling Stripe or checking the cap", async () => {
       const c = await seedClient();
       const { id } = await makeOpen(c);
       stripe.failNth("invoices.sendInvoice", 1, stripeApiError(400));
-      await send(c, id, "again");
+      expect((await send(c, id, "again")).statusCode).toBe(400);
       for (const k of ["a", "b", "c"]) await send(c, id, k);
-      // Three sent: the failed key has no room left.
-      expect((await send(c, id, "again")).json().code).toBe("SEND_LIMIT_REACHED");
+      const before = mutating("invoices.sendInvoice").length;
+      const retry = await send(c, id, "again");
+      expect(retry.statusCode).toBe(409);
+      expect(retry.json().code).toBe("SEND_FAILED");
+      expect(mutating("invoices.sendInvoice")).toHaveLength(before);
+      expect((await sendsOf(id)).filter((r) => r.state === "failed")).toHaveLength(1);
+    });
+
+    describe.each([
+      [
+        "a 403 permission error",
+        () =>
+          new Stripe.errors.StripePermissionError({
+            type: "invalid_request_error",
+            statusCode: 403,
+          } as never),
+        "failed",
+        409,
+      ],
+      [
+        "a 401 authentication error",
+        () =>
+          new Stripe.errors.StripeAuthenticationError({
+            type: "authentication_error",
+            statusCode: 401,
+          } as never),
+        "failed",
+        502,
+      ],
+      [
+        "a 402 card error",
+        () => new Stripe.errors.StripeCardError({ type: "card_error", statusCode: 402 } as never),
+        "failed",
+        502,
+      ],
+      [
+        "a 400 idempotency mismatch",
+        () =>
+          new Stripe.errors.StripeIdempotencyError({
+            type: "idempotency_error",
+            statusCode: 400,
+          } as never),
+        "failed",
+        409,
+      ],
+      ["a 429 rate limit", () => stripeApiError(429), "pending", 503],
+      ["a 5xx error", () => stripeApiError(503), "pending", 503],
+      [
+        "a connection error",
+        () => new Stripe.errors.StripeConnectionError({ type: "api_error" } as never),
+        "pending",
+        503,
+      ],
+    ])("%s", (_name, makeErr, state, status) => {
+      it(`leaves the send row ${state} and answers ${status}`, async () => {
+        const c = await seedClient();
+        const { id } = await makeOpen(c);
+        stripe.failNth("invoices.sendInvoice", 1, makeErr());
+        const res = await send(c, id, "k");
+        expect(res.statusCode).toBe(status);
+        expect((await sendsOf(id)).map((r) => r.state)).toEqual([state]);
+        if (state === "pending") expect(res.json().code).toBe("SEND_STATUS_UNKNOWN");
+      });
+    });
+
+    it("races two sends with the same key: one Stripe call, one count, the other is 409 or a replay", async () => {
+      const c = await seedClient();
+      const { id } = await makeOpen(c);
+      const results = await Promise.all([send(c, id, "same"), send(c, id, "same")]);
+      const codes = results.map((r) => r.statusCode).sort();
+      expect(codes[0]).toBe(200);
+      expect([200, 409]).toContain(codes[1]);
+      if (codes[1] === 409) {
+        expect(results.find((r) => r.statusCode === 409).json().code).toBe(
+          "IDEMPOTENCY_KEY_IN_USE"
+        );
+      }
+      expect(mutating("invoices.sendInvoice")).toHaveLength(1);
+      expect(await sendsOf(id)).toHaveLength(1);
+      expect((await rowOf(id)).sendCount).toBe(1);
+      // The cap is used once: two more distinct keys still fit.
+      expect((await send(c, id, "x")).statusCode).toBe(200);
+      expect((await send(c, id, "y")).statusCode).toBe(200);
+      expect((await send(c, id, "z")).json().code).toBe("SEND_LIMIT_REACHED");
     });
 
     it("keeps an unknown error pending (it counts) and answers 503; the same key retries safely", async () => {
@@ -702,9 +792,7 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
     it("answers 503 LEDGER_PERSISTENCE_FAILED when Postgres fails after Stripe, and a retry adopts", async () => {
       const c = await seedClient();
       const { id } = await makeOpen(c);
-      vi.spyOn(db, "update").mockImplementationOnce((() => {
-        throw new Error("db down");
-      }) as never);
+      failUpdate(2);
       const failed = await voidInv(c, id);
       expect(failed.statusCode).toBe(503);
       expect(failed.json().code).toBe("LEDGER_PERSISTENCE_FAILED");
@@ -926,6 +1014,101 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
     });
   });
 
+  describe("lifecycle mutual exclusion", () => {
+    it("refuses a delete that overlaps a finalize (409 INVOICE_IN_USE) and finalizes", async () => {
+      const c = await seedClient();
+      const { id } = await makeDraft(c);
+      let overlap: any;
+      stripe.onCall = async (name) => {
+        if (name === "invoices.retrieve" && !overlap) overlap = await del(c, id);
+      };
+      const res = await finalize(c, id);
+      expect(overlap.statusCode).toBe(409);
+      expect(overlap.json().code).toBe("INVOICE_IN_USE");
+      expect(res.statusCode).toBe(200);
+      expect((await rowOf(id)).claimedAt).toBeNull();
+    });
+
+    it("refuses a finalize that overlaps a delete (409 INVOICE_IN_USE) and deletes", async () => {
+      const c = await seedClient();
+      const { id } = await makeDraft(c);
+      let overlap: any;
+      stripe.onCall = async (name) => {
+        if (name === "invoices.del" && !overlap) overlap = await finalize(c, id);
+      };
+      const res = await del(c, id);
+      expect(overlap.statusCode).toBe(409);
+      expect(overlap.json().code).toBe("INVOICE_IN_USE");
+      expect(res.statusCode).toBe(200);
+      expect((await rowOf(id)).status).toBe("deleted");
+    });
+
+    it("refuses a void that overlaps a finalize, and finalize overlapping a void", async () => {
+      const c = await seedClient();
+      const { id } = await makeOpen(c);
+      let overlap: any;
+      stripe.onCall = async (name) => {
+        if (name === "invoices.voidInvoice" && !overlap) overlap = await finalize(c, id);
+      };
+      expect((await voidInv(c, id)).statusCode).toBe(200);
+      expect(overlap.json().code).toBe("INVOICE_IN_USE");
+    });
+
+    it("releases the claim on every exit path", async () => {
+      const c = await seedClient();
+      const { id } = await makeDraft(c);
+      stripe.failNth("invoices.finalizeInvoice", 1, stripeApiError(500));
+      expect((await finalize(c, id)).statusCode).toBeGreaterThanOrEqual(500);
+      expect((await rowOf(id)).claimedAt).toBeNull();
+      stripe.retrieveOverrides[id] = { total: 3 };
+      expect((await finalize(c, id)).statusCode).toBe(502);
+      expect((await rowOf(id)).claimedAt).toBeNull();
+      expect((await voidInv(c, id)).statusCode).toBe(409);
+      expect((await rowOf(id)).claimedAt).toBeNull();
+    });
+  });
+
+  describe("Stripe state errors become 409 INVOICE_STATE_CHANGED", () => {
+    const refuse = (name: string, id: string, after: Record<string, unknown>) => {
+      stripe.failNth(name, 1, stripeApiError(400));
+      stripe.onCall = async (n) => {
+        if (n === name) stripe.retrieveOverrides[id] = after;
+      };
+    };
+
+    it("finalize: a paid invoice is re-read, recorded and reported", async () => {
+      const c = await seedClient();
+      const { id } = await makeDraft(c);
+      refuse("invoices.finalizeInvoice", id, { status: "paid", amount_paid: 100_250 });
+      const res = await finalize(c, id);
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ code: "INVOICE_STATE_CHANGED", status: "paid" });
+      expect((await rowOf(id)).status).toBe("paid");
+      expect((await rowOf(id)).claimedAt).toBeNull();
+    });
+
+    it("void: a paid invoice is re-read and reported", async () => {
+      const c = await seedClient();
+      const { id } = await makeOpen(c);
+      refuse("invoices.voidInvoice", id, { status: "paid", amount_paid: 100_250 });
+      const res = await voidInv(c, id);
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ code: "INVOICE_STATE_CHANGED", status: "paid" });
+      expect((await rowOf(id)).status).toBe("paid");
+    });
+
+    it("delete: a draft finalized meanwhile is re-read and reported open", async () => {
+      const c = await seedClient();
+      const { id } = await makeDraft(c);
+      refuse("invoices.del", id, { status: "open" });
+      const res = await del(c, id);
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ code: "INVOICE_STATE_CHANGED", status: "open" });
+      expect((await rowOf(id)).status).toBe("open");
+      expect((await rowOf(id)).claimedAt).toBeNull();
+    });
+  });
+
   describe("listing deleted invoices", () => {
     it("hides deleted invoices from the list unless status=deleted is asked for", async () => {
       const c = await seedClient();
@@ -948,13 +1131,79 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
     });
   });
 
-  describe("logging", () => {
+  describe("serialization", () => {
     it("serializes description and metadata, never the bookkeeping keys", async () => {
       const c = await seedClient();
       const { id } = await makeOpen(c);
       const body = (await call("GET", c.apiKey, `/api/v1/invoices/${id}`)).json();
       expect(body.description).toBe("March");
       expect(body.metadata).toEqual({ unit: "12" });
+    });
+  });
+
+  describe("logging", () => {
+    it("never logs a hosted URL, PDF link, email or Idempotency-Key value from the lifecycle routes", async () => {
+      const lines: string[] = [];
+      const rec = (...args: unknown[]) => {
+        lines.push(JSON.stringify(args));
+      };
+      const recorder: Record<string, unknown> = {
+        level: "info",
+        info: rec,
+        warn: rec,
+        error: rec,
+        debug: rec,
+        trace: rec,
+        fatal: rec,
+        silent: rec,
+      };
+      recorder.child = () => recorder;
+      const logged = await buildServer();
+      logged.addHook("onRequest", async (request: any) => {
+        request.log = recorder;
+      });
+      const c = await seedClient();
+      const email = "tenant.private@example.com";
+      const req = (method: string, url: string, key?: string) =>
+        logged.inject({
+          method: method as any,
+          url,
+          headers: { "x-api-key": c.apiKey, ...(key ? { "idempotency-key": key } : {}) },
+        });
+      const IDEM = "IDEM-SECRET-KEY-98765";
+      const quoted = (status: number) =>
+        new Stripe.errors.StripeAPIError({
+          type: "api_error",
+          statusCode: status,
+          message: `bad customer ${email} https://invoice.example/secret`,
+        } as never);
+
+      const a = await makeDraft(c);
+      stripe.failNth("invoices.finalizeInvoice", 1, quoted(500));
+      await req("POST", `/api/v1/invoices/${a.id}/finalize`);
+      const fin = await req("POST", `/api/v1/invoices/${a.id}/finalize`);
+      expect(fin.json().hostedInvoiceUrl).toContain("invoice.example"); // returned, never logged
+      stripe.failNth("invoices.sendInvoice", 1, quoted(500));
+      await req("POST", `/api/v1/invoices/${a.id}/send`, IDEM);
+      await req("POST", `/api/v1/invoices/${a.id}/send`, IDEM);
+      stripe.failNth("invoices.sendInvoice", 3, stripeApiError(400));
+      await req("POST", `/api/v1/invoices/${a.id}/send`, `${IDEM}-2`);
+      failUpdate(2, `db down ${email} https://invoice.example/secret`);
+      await req("POST", `/api/v1/invoices/${a.id}/void`);
+      vi.restoreAllMocks();
+      await req("POST", `/api/v1/invoices/${a.id}/void`);
+      const b = await makeDraft(c);
+      stripe.failNth("invoices.del", 1, quoted(500));
+      await req("DELETE", `/api/v1/invoices/${b.id}`);
+      await req("DELETE", `/api/v1/invoices/${b.id}`);
+      await logged.close();
+
+      expect(lines.length).toBeGreaterThan(0);
+      const all = lines.join("\n");
+      for (const secret of ["invoice.example", "/pdf", email, "tenant.private", IDEM, sha(IDEM)]) {
+        expect(all, secret).not.toContain(secret);
+      }
+      expect(all).toContain(c.id);
     });
   });
 });

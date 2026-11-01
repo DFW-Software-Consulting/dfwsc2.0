@@ -21,6 +21,7 @@ import {
 } from "../lib/circuit-breakers";
 import {
   assertTotalWithinCap,
+  classifySendError,
   computeBaseCents,
   createInvoiceBodySchema,
   decodeCursor,
@@ -1426,6 +1427,116 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   const invoiceIdParams = (request: FastifyRequest, reply: FastifyReply) =>
     parseBody(idParamsSchema, request.params, reply);
 
+  /**
+   * Takes the row's claim lease (the one a create holds) for the length of a lifecycle write, so
+   * finalize, void and delete never overlap each other or a create that is still adding lines. A
+   * live claim is 409 INVOICE_IN_USE (the write token is given back). The claim is released before
+   * ANY response leaves (the onSend hook), whatever path the handler takes.
+   */
+  async function claimInvoice(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    row: InvoiceRow,
+    opts: { draftOnly?: boolean; deletedIsOk?: boolean } = {}
+  ): Promise<boolean> {
+    const claimAt = new Date();
+    const [claimed] = await db
+      .update(connectInvoices)
+      .set({ claimedAt: claimAt })
+      .where(
+        and(
+          eq(connectInvoices.id, row.id),
+          opts.draftOnly
+            ? eq(connectInvoices.status, "draft")
+            : ne(connectInvoices.status, "deleted"),
+          or(
+            isNull(connectInvoices.claimedAt),
+            lt(connectInvoices.claimedAt, new Date(claimAt.getTime() - INVOICE_CLAIM_LEASE_MS))
+          )
+        )
+      )
+      .returning();
+    if (!claimed) {
+      await writeBucket.refund(request);
+      const [latest] = await db
+        .select()
+        .from(connectInvoices)
+        .where(eq(connectInvoices.id, row.id))
+        .limit(1);
+      if (opts.deletedIsOk && latest?.status === "deleted") {
+        reply.code(200).send(serializeInvoice(latest));
+      } else if (latest?.status === "deleted") {
+        lifecycleErr(reply, 409, "INVOICE_DELETED", "The invoice was deleted.");
+      } else {
+        lifecycleErr(
+          reply,
+          409,
+          "INVOICE_IN_USE",
+          "The invoice is being created or changed right now. Retry shortly."
+        );
+      }
+      return false;
+    }
+    pendingRelease.set(request, () =>
+      db
+        .update(connectInvoices)
+        .set({ claimedAt: null })
+        .where(and(eq(connectInvoices.id, row.id), eq(connectInvoices.claimedAt, claimAt)))
+        .then(() => undefined)
+        .catch(() => undefined)
+    );
+    return true;
+  }
+
+  // Stripe refusing a finalize, void or delete with a 400 means the invoice is no longer in the
+  // state we expected (a race, or a dashboard action). That is not the caller's mistake: the
+  // invoice is re-read, recorded, and reported as a 409 with its current status.
+  const STATE_REJECTED = Symbol("stripe-state-rejection");
+  const isStateRejection = (err: unknown) => {
+    const e = err as { type?: unknown; code?: unknown } | null;
+    return (
+      e?.type === "StripeInvalidRequestError" &&
+      e.code !== "resource_missing" &&
+      e.code !== "idempotency_key_in_use"
+    );
+  };
+  const rejectable =
+    <T>(fn: () => Promise<T>) =>
+    async (): Promise<T | typeof STATE_REJECTED> => {
+      try {
+        return await fn();
+      } catch (err) {
+        if (isStateRejection(err)) return STATE_REJECTED;
+        throw err;
+      }
+    };
+
+  async function replyStateChanged(request: FastifyRequest, reply: FastifyReply, row: InvoiceRow) {
+    request.log.warn(
+      { clientId: row.clientId, invoiceRowId: row.id },
+      "Stripe refused an invoice change because its state changed; refreshing"
+    );
+    const stripeAccount = row.connectedAccountId;
+    const invoiceId = row.stripeInvoiceId as string;
+    const fresh = await stripeCall(
+      request,
+      reply,
+      "invoices.retrieve",
+      () => stripe.invoices.retrieve(invoiceId, {}, { stripeAccount }),
+      { notFound: "Invoice not found." }
+    );
+    if (!fresh) return reply;
+    const updated = await persistAfterStripe(request, reply, row, () =>
+      applyStripeInvoice(db, row, fresh)
+    );
+    if (!updated) return reply;
+    return reply.code(409).send({
+      error: `The invoice changed state and is now ${updated.status}. Nothing was changed.`,
+      code: "INVOICE_STATE_CHANGED",
+      status: updated.status,
+    });
+  }
+
   // ── POST /invoices/:id/finalize ────────────────────────────────────────────
   fastify.post("/invoices/:id/finalize", { preHandler: writeGuards }, async (request, reply) => {
     const params = invoiceIdParams(request, reply);
@@ -1445,6 +1556,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       return lifecycleErr(reply, 409, "INVOICE_NOT_FINALIZABLE", "The invoice was deleted.");
     }
     if (!(await takeWriteToken(request, reply))) return reply;
+    if (!(await claimInvoice(request, reply, row))) return reply;
 
     const stripeAccount = row.connectedAccountId;
     const invoiceId = row.stripeInvoiceId as string;
@@ -1482,15 +1594,17 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         request,
         reply,
         "invoices.finalizeInvoice",
-        () =>
+        rejectable(() =>
           stripe.invoices.finalizeInvoice(
             invoiceId,
             { auto_advance: false },
             { stripeAccount, idempotencyKey: `${clientId}:${invoiceId}:finalize` }
-          ),
+          )
+        ),
         { notFound: "Invoice not found." }
       );
       if (!finalized) return reply;
+      if (finalized === STATE_REJECTED) return replyStateChanged(request, reply, row);
       result = finalized;
     }
 
@@ -1531,6 +1645,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         );
       }
       if (!(await takeWriteToken(request, reply))) return reply;
+      if (!(await claimInvoice(request, reply, row))) return reply;
 
       const stripeAccount = row.connectedAccountId;
       const invoiceId = row.stripeInvoiceId as string;
@@ -1549,15 +1664,17 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           request,
           reply,
           "invoices.voidInvoice",
-          () =>
+          rejectable(() =>
             stripe.invoices.voidInvoice(
               invoiceId,
               {},
               { stripeAccount, idempotencyKey: `${clientId}:${invoiceId}:void` }
-            ),
+            )
+          ),
           { notFound: "Invoice not found." }
         );
         if (!voided) return reply;
+        if (voided === STATE_REJECTED) return replyStateChanged(request, reply, row);
         result = voided;
       }
 
@@ -1578,9 +1695,9 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   );
 
   // ── DELETE /invoices/:id ───────────────────────────────────────────────────
-  // Drafts only. The row is claimed first (the same lease a create holds), so a delete never
-  // races a create that is still adding lines, and a create that comes back afterwards finds the
-  // row deleted. An orphan whose create gave up (claim expired) can be deleted to clean up.
+  // Drafts only. The row's claim is taken first, so a delete never races a create that is still
+  // adding lines (or a finalize), and a create that comes back afterwards finds the row deleted.
+  // An orphan whose create gave up (claim expired) can be deleted to clean up.
   fastify.delete("/invoices/:id", { preHandler: lifecycleOpenGuards }, async (request, reply) => {
     const params = invoiceIdParams(request, reply);
     if (!params) return;
@@ -1596,47 +1713,9 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       );
     }
     if (!(await takeWriteToken(request, reply))) return reply;
-
-    const claimAt = new Date();
-    const [claimed] = await db
-      .update(connectInvoices)
-      .set({ claimedAt: claimAt })
-      .where(
-        and(
-          eq(connectInvoices.id, row.id),
-          eq(connectInvoices.status, "draft"),
-          or(
-            isNull(connectInvoices.claimedAt),
-            lt(connectInvoices.claimedAt, new Date(claimAt.getTime() - INVOICE_CLAIM_LEASE_MS))
-          )
-        )
-      )
-      .returning();
-    if (!claimed) {
-      await writeBucket.refund(request);
-      const [latest] = await db
-        .select()
-        .from(connectInvoices)
-        .where(eq(connectInvoices.id, row.id))
-        .limit(1);
-      if (latest?.status === "deleted") return reply.code(200).send(serializeInvoice(latest));
-      return lifecycleErr(
-        reply,
-        409,
-        "INVOICE_IN_USE",
-        "The invoice is being created or changed right now. Retry shortly."
-      );
+    if (!(await claimInvoice(request, reply, row, { draftOnly: true, deletedIsOk: true }))) {
+      return reply;
     }
-    const releaseClaim = () =>
-      db
-        .update(connectInvoices)
-        .set({ claimedAt: null })
-        .where(and(eq(connectInvoices.id, row.id), eq(connectInvoices.claimedAt, claimAt)))
-        .then(() => undefined)
-        .catch(() => undefined);
-    // Every error reply (stripeCall sends its own) gives the claim back before it leaves; a
-    // finished delete already cleared it.
-    pendingRelease.set(request, releaseClaim);
 
     const stripeAccount = row.connectedAccountId;
     const invoiceId = row.stripeInvoiceId as string;
@@ -1646,7 +1725,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       request,
       reply,
       "invoices.del",
-      async () => {
+      rejectable(async () => {
         try {
           return await stripe.invoices.del(invoiceId, {}, { stripeAccount });
         } catch (err) {
@@ -1656,10 +1735,11 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           }
           throw err;
         }
-      },
+      }),
       { write: true }
     );
-    // `undefined` after a 404-as-success is not an error reply: told apart by `gone` / reply.sent.
+    if (out === STATE_REJECTED) return replyStateChanged(request, reply, row);
+    // `undefined` after a 404-as-success is not an error reply: told apart by `gone`.
     if (!gone && (out === undefined || reply.sent)) return reply;
 
     const updated = await persistAfterStripe(request, reply, row, async () => {
@@ -1682,12 +1762,14 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   // ── POST /invoices/:id/send ────────────────────────────────────────────────
   // Each accepted Idempotency-Key is a connect_invoice_sends row, taken in a transaction that
   // holds a lock on the invoice, so the cap of INVOICE_MAX_SENDS counts exactly. 'pending' and
-  // 'sent' count; 'failed' (a definite Stripe 4xx: nothing was emailed) does not. A replay of a
-  // sent key answers from Postgres and never reaches Stripe or the count.
+  // 'sent' count; 'failed' (a definite Stripe rejection: nothing was emailed) does not. A replay
+  // of a sent key answers from Postgres and never reaches Stripe or the count. A failed key is
+  // never retried: Stripe would replay its stored error for 24 hours, so the caller needs a new key.
   type SendDecision =
     | { kind: "replay" }
     | { kind: "in_use" }
     | { kind: "limit" }
+    | { kind: "failed" }
     | { kind: "not_open"; status: string }
     | { kind: "go"; sendId: string };
 
@@ -1726,33 +1808,31 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           and(eq(connectInvoiceSends.invoiceId, row.id), eq(connectInvoiceSends.keyHash, keyHash))
         )
         .limit(1);
+      if (existing) {
+        if (existing.state === "sent") return { kind: "replay" };
+        if (existing.state === "failed") return { kind: "failed" };
+        const live =
+          existing.claimedAt !== null &&
+          existing.claimedAt.getTime() > now.getTime() - INVOICE_CLAIM_LEASE_MS;
+        if (live) return { kind: "in_use" };
+        // Pending with an expired claim: it already counts, so no cap check. Same Stripe key.
+        await tx
+          .update(connectInvoiceSends)
+          .set({ claimedAt: now })
+          .where(eq(connectInvoiceSends.id, existing.id));
+        return { kind: "go", sendId: existing.id };
+      }
+      if (locked?.status !== "open")
+        return { kind: "not_open", status: locked?.status ?? "unknown" };
       const [counted] = await tx
         .select({ n: count() })
         .from(connectInvoiceSends)
         .where(
           and(
             eq(connectInvoiceSends.invoiceId, row.id),
-            inArray(connectInvoiceSends.state, ["pending", "sent"]),
-            existing ? ne(connectInvoiceSends.id, existing.id) : undefined
+            inArray(connectInvoiceSends.state, ["pending", "sent"])
           )
         );
-      if (existing) {
-        if (existing.state === "sent") return { kind: "replay" };
-        const live =
-          existing.state === "pending" &&
-          existing.claimedAt !== null &&
-          existing.claimedAt.getTime() > now.getTime() - INVOICE_CLAIM_LEASE_MS;
-        if (live) return { kind: "in_use" };
-        // A failed key being retried counts again, so it needs room under the cap.
-        if (existing.state === "failed" && counted.n >= INVOICE_MAX_SENDS) return { kind: "limit" };
-        await tx
-          .update(connectInvoiceSends)
-          .set({ state: "pending", claimedAt: now })
-          .where(eq(connectInvoiceSends.id, existing.id));
-        return { kind: "go", sendId: existing.id };
-      }
-      if (locked?.status !== "open")
-        return { kind: "not_open", status: locked?.status ?? "unknown" };
       if (counted.n >= INVOICE_MAX_SENDS) return { kind: "limit" };
       const sendId = uuidv4();
       await tx.insert(connectInvoiceSends).values({
@@ -1778,6 +1858,14 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         return reply.code(200).send(serializeInvoice(current ?? row));
       }
       if (decision.kind === "in_use") return invoiceKeyInUse(reply);
+      if (decision.kind === "failed") {
+        return lifecycleErr(
+          reply,
+          409,
+          "SEND_FAILED",
+          "This send failed. Use a new Idempotency-Key to try again."
+        );
+      }
       if (decision.kind === "limit") {
         return lifecycleErr(
           reply,
@@ -1820,7 +1908,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       if (isStripeBusyError(err) || (isCircuitOpenError(err) && !called)) {
         await writeBucket.refund(request);
       }
-      if (e?.code === "idempotency_key_in_use") {
+      const kind = classifySendError(err);
+      if (kind === "in_progress") {
         // The first attempt with this key is still running at Stripe: it stays pending.
         await setSend({ claimedAt: null }).catch(() => undefined);
         return reply.code(409).send({
@@ -1829,29 +1918,30 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           code: "IDEMPOTENCY_KEY_IN_USE",
         });
       }
-      if (e?.type === "StripeInvalidRequestError") {
+      if (kind === "rejected") {
         // Stripe refused it for good: nothing was emailed, so it does not use up a send.
         await persistAfterStripe(request, reply, row, () =>
           setSend({ state: "failed", claimedAt: null })
         );
         if (reply.sent) return reply;
         if (isResourceMissing(err)) return reply.code(404).send(INVOICE_NOT_FOUND);
-        mapStripeError(err, reply, {
-          circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
-          permanentErrors: true,
-        });
+        if (
+          !mapStripeError(err, reply, {
+            circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+            permanentErrors: true,
+          })
+        ) {
+          reply.code(502).send({
+            error: "Stripe refused to send the invoice.",
+            code: "SEND_REJECTED",
+          });
+        }
         return reply;
       }
       // Unknown outcome (network, 5xx, rate limit, circuit): the email may have gone out. The row
       // stays pending and counts; the same key retries it.
       await setSend({ claimedAt: null }).catch(() => undefined);
-      if (
-        mapStripeError(err, reply, {
-          circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
-        })
-      ) {
-        return reply;
-      }
+      if (mapStripeError(err, reply, { circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR })) return reply;
       return reply.code(503).header("Retry-After", "5").send({
         error:
           "The send could not be confirmed. Retry with the same Idempotency-Key; it will not be sent twice.",

@@ -14,4 +14,5 @@ CREATE TABLE "connect_invoice_sends" (
 ALTER TABLE "connect_invoices" ADD COLUMN "description" text;--> statement-breakpoint
 ALTER TABLE "connect_invoices" ADD COLUMN "metadata" jsonb;--> statement-breakpoint
 ALTER TABLE "connect_invoice_sends" ADD CONSTRAINT "connect_invoice_sends_invoice_id_connect_invoices_id_fk" FOREIGN KEY ("invoice_id") REFERENCES "public"."connect_invoices"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "connect_invoice_sends" ADD CONSTRAINT "connect_invoice_sends_client_id_clients_id_fk" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE cascade ON UPDATE no action;
+ALTER TABLE "connect_invoice_sends" ADD CONSTRAINT "connect_invoice_sends_client_id_clients_id_fk" FOREIGN KEY ("client_id") REFERENCES "public"."clients"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "connect_invoice_sends_client_idx" ON "connect_invoice_sends" USING btree ("client_id");

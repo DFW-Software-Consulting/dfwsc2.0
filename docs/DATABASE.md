@@ -138,10 +138,11 @@ One row per invoice created through the connected-account invoicing API; the row
 Both tables, and `clients.invoicing_enabled`, are in `REQUIRED_TABLES` (`backend/src/lib/schema-check.ts`).
 
 ### `connect_invoice_sends`
-One row per accepted `POST /invoices/:id/send` Idempotency-Key (migration `0036_connect_invoice_lifecycle`). PK `id` (text uuid); `invoice_id` (FK → `connect_invoices.id`, cascade), `client_id` (FK → `clients.id`, cascade), `key_hash` (SHA-256 hex of the caller's key), `state` (`pending`, `sent`, `failed`), `claimed_at` (60 s lease while a Stripe call is in flight; null otherwise), `created_at`, `updated_at`. `pending` and `sent` rows count towards the cap of 3 sends per invoice, enforced in a transaction holding `SELECT ... FOR UPDATE` on the invoice row; `failed` (a definite Stripe 4xx) does not. Verified at boot by `lib/schema-check.ts`.
+One row per accepted `POST /invoices/:id/send` Idempotency-Key (migration `0036_connect_invoice_lifecycle`). PK `id` (text uuid); `invoice_id` (FK → `connect_invoices.id`, cascade), `client_id` (FK → `clients.id`, cascade), `key_hash` (SHA-256 hex of the caller's key), `state` (`pending`, `sent`, `failed`), `claimed_at` (60 s lease while a Stripe call is in flight; null otherwise), `created_at`, `updated_at`. `pending` and `sent` rows count towards the cap of 3 sends per invoice, enforced in a transaction holding `SELECT ... FOR UPDATE` on the invoice row; `failed` (a definite Stripe rejection) does not and is never retried (the caller uses a new key). Verified at boot by `lib/schema-check.ts`.
 
 **Indexes / constraints:**
 - `connect_invoice_sends_invoice_key_uniq` — unique (`invoice_id`, `key_hash`)
+- `connect_invoice_sends_client_idx` — (`client_id`), backs the `clients` cascade (`client_id` is an FK but is not used in any query)
 - `connect_invoice_sends_state_check` — CHECK `state IN ('pending', 'sent', 'failed')`
 
 ## 3. Tooling & Migrations

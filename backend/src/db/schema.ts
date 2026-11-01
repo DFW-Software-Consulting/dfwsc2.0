@@ -813,6 +813,9 @@ export const connectInvoiceSends = pgTable(
       table.invoiceId,
       table.keyHash
     ),
+    // Backs the clients -> connect_invoice_sends cascade (the invoice_id side is covered by the
+    // unique constraint above).
+    clientIdx: index("connect_invoice_sends_client_idx").on(table.clientId),
     stateCheck: check(
       "connect_invoice_sends_state_check",
       sql`${table.state} IN ('pending', 'sent', 'failed')`

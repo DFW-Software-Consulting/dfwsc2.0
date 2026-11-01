@@ -261,3 +261,23 @@ export function decodeCursor(cursor: string): { createdAt: Date; id: string } | 
     return null;
   }
 }
+
+/**
+ * How a failed `sendInvoice` call must be treated.
+ * - `rejected`: Stripe refused it for good (a 4xx that is not "retry shortly"): nothing was
+ *   emailed, so the attempt does not count towards the send cap.
+ * - `in_progress`: Stripe is still running the first request with this key (409): wait.
+ * - `unknown`: the email may or may not have gone out (429, 5xx, connection or timeout errors, an
+ *   open circuit, a busy limiter): the attempt stays pending and counts.
+ */
+export type SendErrorClass = "rejected" | "in_progress" | "unknown";
+
+export function classifySendError(err: unknown): SendErrorClass {
+  const e = err as { code?: unknown; statusCode?: unknown } | null;
+  if (e?.code === "idempotency_key_in_use" || e?.statusCode === 409) return "in_progress";
+  const status = e?.statusCode;
+  if (typeof status === "number" && status >= 400 && status < 500 && status !== 429) {
+    return "rejected";
+  }
+  return "unknown";
+}

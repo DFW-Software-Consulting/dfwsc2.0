@@ -1,5 +1,5 @@
 {
-  "id": "c0097531-3e84-4230-bd53-8d96c954e32b",
+  "id": "c499e495-fde6-4c6b-a014-9ddfd9390ff3",
   "prevId": "b0e44de4-80bf-4f80-b9a8-e2c5da250c85",
   "version": "7",
   "dialect": "postgresql",
@@ -1513,7 +1513,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "connect_invoice_sends_client_idx": {
+          "name": "connect_invoice_sends_client_idx",
+          "columns": [
+            {
+              "expression": "client_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "connect_invoice_sends_invoice_id_connect_invoices_id_fk": {
           "name": "connect_invoice_sends_invoice_id_connect_invoices_id_fk",
