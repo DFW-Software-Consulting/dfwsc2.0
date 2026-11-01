@@ -74,6 +74,10 @@ const STRIPE_RATE_LIMITED_ERROR = {
   error: "Invoicing service is busy. Please retry.",
   code: "RATE_LIMITED",
 };
+const REQUEST_REJECTED = {
+  error: "Stripe could not complete the request.",
+  code: "STRIPE_REQUEST_REJECTED",
+};
 const USER_METADATA_RESERVED_PREFIX = "dfwsc_";
 
 const emailSchema = z
@@ -253,7 +257,12 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     reply: FastifyReply,
     action: string,
     call: () => Promise<T>,
-    opts: { write?: boolean; notFound?: string } = {}
+    opts: {
+      write?: boolean;
+      notFound?: string;
+      /** Never return Stripe's own text: an invalid-request error becomes a generic 502. */
+      generic?: boolean;
+    } = {}
   ): Promise<T | undefined> {
     let called = false;
     try {
@@ -277,6 +286,17 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       );
       if (isResourceMissing(err)) {
         reply.code(404).send({ error: opts.notFound ?? "Customer not found.", code: "NOT_FOUND" });
+        return undefined;
+      }
+      if (
+        opts.generic &&
+        (err as { type?: unknown } | null)?.type === "StripeInvalidRequestError"
+      ) {
+        if ((err as { code?: unknown }).code === "idempotency_key_in_use") {
+          invoiceKeyInUse(reply);
+        } else {
+          reply.code(502).send(REQUEST_REJECTED);
+        }
         return undefined;
       }
       if (
@@ -1491,7 +1511,10 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   // Stripe refusing a finalize, void or delete with a 400 means the invoice is no longer in the
   // state we expected (a race, or a dashboard action). That is not the caller's mistake: the
   // invoice is re-read, recorded, and reported as a 409 with its current status.
-  const STATE_REJECTED = Symbol("stripe-state-rejection");
+  /** A Stripe invalid-request answer to a lifecycle write, carried back to the handler. */
+  class Rejected {
+    constructor(readonly err: unknown) {}
+  }
   const isStateRejection = (err: unknown) => {
     const e = err as { type?: unknown; code?: unknown } | null;
     return (
@@ -1502,20 +1525,54 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   };
   const rejectable =
     <T>(fn: () => Promise<T>) =>
-    async (): Promise<T | typeof STATE_REJECTED> => {
+    async (): Promise<T | Rejected> => {
       try {
         return await fn();
       } catch (err) {
-        if (isStateRejection(err)) return STATE_REJECTED;
+        if (isStateRejection(err)) return new Rejected(err);
         throw err;
       }
     };
 
-  async function replyStateChanged(request: FastifyRequest, reply: FastifyReply, row: InvoiceRow) {
+  /** Codes and ids only: Stripe's message can quote an email or a hosted URL. */
+  const logRejection = (
+    request: FastifyRequest,
+    row: InvoiceRow,
+    action: string,
+    err: unknown,
+    stripeStatus?: string | null
+  ) => {
+    const e = err as { code?: unknown; type?: unknown; statusCode?: unknown } | null;
     request.log.warn(
-      { clientId: row.clientId, invoiceRowId: row.id },
-      "Stripe refused an invoice change because its state changed; refreshing"
+      {
+        clientId: row.clientId,
+        invoiceRowId: row.id,
+        stripeInvoiceId: row.stripeInvoiceId,
+        requestId: request.id,
+        action,
+        stripeCode: e?.code,
+        stripeType: e?.type,
+        stripeStatusCode: e?.statusCode,
+        stripeInvoiceStatus: stripeStatus,
+      },
+      "Stripe refused an invoice change"
     );
+  };
+
+  /**
+   * Stripe refused a finalize, void or delete with a 400. The invoice is re-read and recorded; then
+   * either its status really moved away from what the operation needs (a race, or a dashboard
+   * action): 409 INVOICE_STATE_CHANGED with the current status, or it did not: a genuine
+   * rejection, a generic 502. Stripe's own message is never returned.
+   */
+  async function replyAfterRejection(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    row: InvoiceRow,
+    action: string,
+    required: readonly string[],
+    err: unknown
+  ) {
     const stripeAccount = row.connectedAccountId;
     const invoiceId = row.stripeInvoiceId as string;
     const fresh = await stripeCall(
@@ -1523,13 +1580,17 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       reply,
       "invoices.retrieve",
       () => stripe.invoices.retrieve(invoiceId, {}, { stripeAccount }),
-      { notFound: "Invoice not found." }
+      { notFound: "Invoice not found.", generic: true }
     );
     if (!fresh) return reply;
+    logRejection(request, row, action, err, fresh.status);
     const updated = await persistAfterStripe(request, reply, row, () =>
       applyStripeInvoice(db, row, fresh)
     );
     if (!updated) return reply;
+    if (fresh.status && required.includes(fresh.status)) {
+      return reply.code(502).send(REQUEST_REJECTED);
+    }
     return reply.code(409).send({
       error: `The invoice changed state and is now ${updated.status}. Nothing was changed.`,
       code: "INVOICE_STATE_CHANGED",
@@ -1565,7 +1626,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       reply,
       "invoices.retrieve",
       () => stripe.invoices.retrieve(invoiceId, {}, { stripeAccount }),
-      { write: true, notFound: "Invoice not found." }
+      { write: true, notFound: "Invoice not found.", generic: true }
     );
     if (!fresh) return reply;
 
@@ -1601,10 +1662,19 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
             { stripeAccount, idempotencyKey: `${clientId}:${invoiceId}:finalize` }
           )
         ),
-        { notFound: "Invoice not found." }
+        { notFound: "Invoice not found.", generic: true }
       );
       if (!finalized) return reply;
-      if (finalized === STATE_REJECTED) return replyStateChanged(request, reply, row);
+      if (finalized instanceof Rejected) {
+        return replyAfterRejection(
+          request,
+          reply,
+          row,
+          "invoices.finalizeInvoice",
+          ["draft"],
+          finalized.err
+        );
+      }
       result = finalized;
     }
 
@@ -1654,7 +1724,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         reply,
         "invoices.retrieve",
         () => stripe.invoices.retrieve(invoiceId, {}, { stripeAccount }),
-        { write: true, notFound: "Invoice not found." }
+        { write: true, notFound: "Invoice not found.", generic: true }
       );
       if (!fresh) return reply;
 
@@ -1674,7 +1744,16 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           { notFound: "Invoice not found." }
         );
         if (!voided) return reply;
-        if (voided === STATE_REJECTED) return replyStateChanged(request, reply, row);
+        if (voided instanceof Rejected) {
+          return replyAfterRejection(
+            request,
+            reply,
+            row,
+            "invoices.voidInvoice",
+            ["open", "uncollectible"],
+            voided.err
+          );
+        }
         result = voided;
       }
 
@@ -1736,9 +1815,11 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           throw err;
         }
       }),
-      { write: true }
+      { write: true, generic: true }
     );
-    if (out === STATE_REJECTED) return replyStateChanged(request, reply, row);
+    if (out instanceof Rejected) {
+      return replyAfterRejection(request, reply, row, "invoices.del", ["draft"], out.err);
+    }
     // `undefined` after a 404-as-success is not an error reply: told apart by `gone`.
     if (!gone && (out === undefined || reply.sent)) return reply;
 
@@ -1924,19 +2005,46 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           setSend({ state: "failed", claimedAt: null })
         );
         if (reply.sent) return reply;
-        if (isResourceMissing(err)) return reply.code(404).send(INVOICE_NOT_FOUND);
-        if (
-          !mapStripeError(err, reply, {
-            circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
-            permanentErrors: true,
-          })
-        ) {
-          reply.code(502).send({
-            error: "Stripe refused to send the invoice.",
-            code: "SEND_REJECTED",
+        // Re-read the invoice: if it is no longer open (a send that lost to a void, or a payment),
+        // that is the answer. Stripe's own message is never returned.
+        const fresh = await stripeCall(
+          request,
+          reply,
+          "invoices.retrieve",
+          () => stripe.invoices.retrieve(invoiceId, {}, { stripeAccount }),
+          { notFound: "Invoice not found.", generic: true }
+        );
+        if (!fresh) return reply;
+        logRejection(request, row, "invoices.sendInvoice", err, fresh.status);
+        const refreshed = await persistAfterStripe(request, reply, row, () =>
+          applyStripeInvoice(db, row, fresh)
+        );
+        if (!refreshed) return reply;
+        if (fresh.status !== "open") {
+          return reply.code(409).send({
+            error: `The invoice is now ${refreshed.status} and cannot be sent.`,
+            code: "INVOICE_STATE_CHANGED",
+            status: refreshed.status,
           });
         }
-        return reply;
+        const rejection = err as { type?: unknown; code?: unknown } | null;
+        if (isResourceMissing(err)) return reply.code(404).send(INVOICE_NOT_FOUND);
+        if (rejection?.type === "StripePermissionError") {
+          return reply.code(409).send({
+            error: "Client Stripe account is not connected or cannot accept charges.",
+            code: "ACCOUNT_NOT_CONNECTED",
+          });
+        }
+        if (rejection?.type === "StripeIdempotencyError") {
+          return reply.code(409).send({
+            error: "This Idempotency-Key was already used for a different request. Use a new key.",
+            code: "IDEMPOTENCY_KEY_REUSED",
+          });
+        }
+        return reply.code(502).send({
+          error: "Stripe refused to send the invoice.",
+          code: "SEND_REJECTED",
+        });
       }
       // Unknown outcome (network, 5xx, rate limit, circuit): the email may have gone out. The row
       // stays pending and counts; the same key retries it.

@@ -476,8 +476,8 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
       const { id } = await makeOpen(c);
       stripe.failNth("invoices.sendInvoice", 1, stripeApiError(400));
       const failed = await send(c, id, "bad");
-      expect(failed.statusCode).toBe(400);
-      expect(failed.json().code).toBe("INVALID_REQUEST");
+      expect(failed.statusCode).toBe(502);
+      expect(failed.json().code).toBe("SEND_REJECTED");
       expect((await sendsOf(id)).map((r) => r.state)).toEqual(["failed"]);
 
       for (const k of ["a", "b", "c"]) expect((await send(c, id, k)).statusCode).toBe(200);
@@ -489,7 +489,7 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
       const c = await seedClient();
       const { id } = await makeOpen(c);
       stripe.failNth("invoices.sendInvoice", 1, stripeApiError(400));
-      expect((await send(c, id, "again")).statusCode).toBe(400);
+      expect((await send(c, id, "again")).statusCode).toBe(502);
       for (const k of ["a", "b", "c"]) await send(c, id, k);
       const before = mutating("invoices.sendInvoice").length;
       const retry = await send(c, id, "again");
@@ -1106,6 +1106,119 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
       expect(res.json()).toMatchObject({ code: "INVOICE_STATE_CHANGED", status: "open" });
       expect((await rowOf(id)).status).toBe("open");
       expect((await rowOf(id)).claimedAt).toBeNull();
+    });
+  });
+
+  describe("a genuine Stripe rejection is a generic 502", () => {
+    const quotedReject = () =>
+      new Stripe.errors.StripeInvalidRequestError({
+        type: "invalid_request_error",
+        statusCode: 400,
+        code: "parameter_invalid_empty",
+        message: "SECRET-STRIPE-TEXT for tenant.private@example.com",
+      } as never);
+
+    const expectGeneric = (res: any) => {
+      expect(res.statusCode).toBe(502);
+      expect(res.json().code).toBe("STRIPE_REQUEST_REJECTED");
+      expect(res.body).not.toContain("SECRET-STRIPE-TEXT");
+      expect(res.body).not.toContain("tenant.private");
+    };
+
+    it("finalize: a 400 while Stripe still shows a draft", async () => {
+      const c = await seedClient();
+      const { id } = await makeDraft(c);
+      stripe.failNth("invoices.finalizeInvoice", 1, quotedReject());
+      expectGeneric(await finalize(c, id));
+      expect((await rowOf(id)).status).toBe("draft");
+      expect((await rowOf(id)).claimedAt).toBeNull();
+    });
+
+    it("void: a 400 while Stripe still shows an open invoice", async () => {
+      const c = await seedClient();
+      const { id } = await makeOpen(c);
+      stripe.failNth("invoices.voidInvoice", 1, quotedReject());
+      expectGeneric(await voidInv(c, id));
+      expect((await rowOf(id)).status).toBe("open");
+    });
+
+    it("delete: a 400 while Stripe still shows a draft", async () => {
+      const c = await seedClient();
+      const { id } = await makeDraft(c);
+      stripe.failNth("invoices.del", 1, quotedReject());
+      expectGeneric(await del(c, id));
+      expect((await rowOf(id)).status).toBe("draft");
+    });
+
+    it("send: a rejection never returns Stripe's message, and the row is failed", async () => {
+      const c = await seedClient();
+      const { id } = await makeOpen(c);
+      stripe.failNth("invoices.sendInvoice", 1, quotedReject());
+      const res = await send(c, id, "k");
+      expect(res.statusCode).toBe(502);
+      expect(res.json().code).toBe("SEND_REJECTED");
+      expect(res.body).not.toContain("SECRET-STRIPE-TEXT");
+      expect(res.body).not.toContain("tenant.private");
+      expect((await sendsOf(id)).map((r) => r.state)).toEqual(["failed"]);
+    });
+
+    it("send: losing to a void answers 409 INVOICE_STATE_CHANGED with the current status", async () => {
+      const c = await seedClient();
+      const { id } = await makeOpen(c);
+      stripe.failNth("invoices.sendInvoice", 1, quotedReject());
+      stripe.onCall = async (name) => {
+        if (name === "invoices.sendInvoice") stripe.retrieveOverrides[id] = { status: "void" };
+      };
+      const res = await send(c, id, "k");
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ code: "INVOICE_STATE_CHANGED", status: "void" });
+      expect(res.body).not.toContain("SECRET-STRIPE-TEXT");
+      expect((await rowOf(id)).status).toBe("void");
+      expect((await sendsOf(id)).map((r) => r.state)).toEqual(["failed"]);
+    });
+
+    it("logs the Stripe code, type and ids but never the message", async () => {
+      const lines: string[] = [];
+      const rec = (...args: unknown[]) => {
+        lines.push(JSON.stringify(args));
+      };
+      const recorder: Record<string, unknown> = {
+        level: "info",
+        info: rec,
+        warn: rec,
+        error: rec,
+        debug: rec,
+        trace: rec,
+        fatal: rec,
+        silent: rec,
+      };
+      recorder.child = () => recorder;
+      const logged = await buildServer();
+      logged.addHook("onRequest", async (request: any) => {
+        request.log = recorder;
+      });
+      const c = await seedClient();
+      const a = await makeDraft(c);
+      stripe.failNth("invoices.finalizeInvoice", 1, quotedReject());
+      await logged.inject({
+        method: "POST",
+        url: `/api/v1/invoices/${a.id}/finalize`,
+        headers: { "x-api-key": c.apiKey },
+      });
+      const o = await makeOpen(c);
+      stripe.failNth("invoices.sendInvoice", 1, quotedReject());
+      await logged.inject({
+        method: "POST",
+        url: `/api/v1/invoices/${o.id}/send`,
+        headers: { "x-api-key": c.apiKey, "idempotency-key": "k" },
+      });
+      await logged.close();
+      const all = lines.join("\n");
+      expect(all).toContain("parameter_invalid_empty");
+      expect(all).toContain("StripeInvalidRequestError");
+      expect(all).toContain(a.id);
+      expect(all).not.toContain("SECRET-STRIPE-TEXT");
+      expect(all).not.toContain("tenant.private");
     });
   });
 
