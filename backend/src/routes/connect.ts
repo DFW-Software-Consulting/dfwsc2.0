@@ -224,6 +224,7 @@ async function provisionExpressAccount(
   Object.assign(prepared.client, {
     stripeAccountId: account.stripeAccountId,
     chargesEnabled: account.chargesEnabled,
+    cardPaymentsStatus: account.cardPaymentsStatus,
     payoutsEnabled: account.payoutsEnabled,
     detailsSubmitted: account.detailsSubmitted,
   });
@@ -917,6 +918,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       }
 
       const chargesEnabled = verifiedAccount.charges_enabled ?? false;
+      const cardPaymentsStatus = verifiedAccount.capabilities?.card_payments ?? null;
       const payoutsEnabled = verifiedAccount.payouts_enabled ?? false;
       const detailsSubmitted = verifiedAccount.details_submitted ?? false;
       const tokenStatus = detailsSubmitted ? "completed" : "in_progress";
@@ -940,6 +942,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           .set({
             stripeAccountId: effectiveAccountId,
             chargesEnabled,
+            cardPaymentsStatus,
             payoutsEnabled,
             detailsSubmitted,
             updatedAt: new Date(),

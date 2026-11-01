@@ -59,6 +59,7 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
       status: "active",
       stripeAccountId: account,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       invoicingEnabled: true,
       // A fixed fee so a test never depends on the global settings defaults.
       processingFeeCents: 250,

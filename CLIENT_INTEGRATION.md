@@ -423,6 +423,7 @@ This is an optional feature that DFWSC turns on per client. Use the same `X-Api-
 
 - **Enablement.** Ask your DFWSC administrator to turn on invoicing for your account. Until then every invoicing call returns `403` with `code: INVOICING_NOT_ENABLED`.
 - **Charges must be enabled.** Calls that create or change things (create a customer, create, finalize or send an invoice, and so on) need a Stripe account that can take charges. If onboarding is not finished, or Stripe has switched charges off, they return `409` with `code: ACCOUNT_NOT_CONNECTED`. Reading, voiding and deleting a draft still work when charges are off, so you can read and cancel what you already created.
+- **Card payments must be enabled.** Creating, finalizing and sending an invoice also need the `card_payments` capability to be active on your Stripe account. If it is not, those calls return `409` with `code: ACCOUNT_NOT_CONNECTED` and a message saying card payments are not enabled on the account yet; finish the account's Stripe onboarding and retry.
 - Set these once in your shell for the examples below:
 
 ```sh

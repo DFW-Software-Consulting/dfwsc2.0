@@ -55,6 +55,7 @@ describe("stripe-connect-account", () => {
       charges_enabled: true,
       payouts_enabled: false,
       details_submitted: true,
+      capabilities: { card_payments: "pending", transfers: "active" },
     });
 
     const state = await createExpressAccountForClient({ id: clientId, email: "a@example.com" });
@@ -62,6 +63,7 @@ describe("stripe-connect-account", () => {
     expect(state).toEqual({
       stripeAccountId: "acct_fresh",
       chargesEnabled: true,
+      cardPaymentsStatus: "pending",
       payoutsEnabled: false,
       detailsSubmitted: true,
     });

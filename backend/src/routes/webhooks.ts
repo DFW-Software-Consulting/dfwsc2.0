@@ -279,6 +279,7 @@ async function syncAccountFromStripe(accountId: string, logger: FastifyBaseLogge
     .update(clients)
     .set({
       chargesEnabled: account.charges_enabled ?? false,
+      cardPaymentsStatus: account.capabilities?.card_payments ?? null,
       payoutsEnabled: account.payouts_enabled ?? false,
       detailsSubmitted: account.details_submitted ?? false,
       updatedAt: new Date(),

@@ -51,8 +51,10 @@ import {
 } from "../lib/constants";
 import { errors, isUniqueViolation } from "../lib/errors";
 import { rateLimit, tokenBucketRateLimit } from "../lib/rate-limit";
+import { errorLogFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
+import { resolveCardPaymentsStatus } from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
 import { validateStripeMetadata } from "../lib/stripe-input";
 import { DEFAULT_DAYS_UNTIL_DUE, parseBody } from "../lib/validation";
@@ -154,7 +156,7 @@ function isResourceMissing(err: unknown): boolean {
  * connected account that can take charges; reads only need an account id (so a client whose
  * charges were switched off can still read what it created).
  */
-function requireInvoicingClient(mode: "read" | "write") {
+function requireInvoicingClient(mode: "read" | "write" | "charge") {
   return async function requireInvoicingClientGuard(request: FastifyRequest, reply: FastifyReply) {
     const authFailure = await requireApiKey(request, reply);
     if (reply.sent || authFailure) return;
@@ -165,10 +167,36 @@ function requireInvoicingClient(mode: "read" | "write") {
         code: "INVOICING_NOT_ENABLED",
       });
     }
-    const usable = mode === "write" ? getChargeableAccountId(client) : client.stripeAccountId;
+    const usable = mode === "read" ? client.stripeAccountId : getChargeableAccountId(client);
     if (!usable) {
       return reply.code(409).send({
         error: "Client Stripe account is not connected or cannot accept charges.",
+        code: "ACCOUNT_NOT_CONNECTED",
+      });
+    }
+    if (mode !== "charge") return;
+    // Routes that end up charging the account also need the card_payments capability.
+    let cardPayments: string | null;
+    try {
+      cardPayments = await resolveCardPaymentsStatus(client, usable);
+    } catch (err) {
+      request.log.error(
+        { clientId: client.id, ...errorLogFields(err) },
+        "Could not read the card_payments capability from Stripe"
+      );
+      if (
+        mapStripeError(err, reply, {
+          circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+          rateLimited: STRIPE_RATE_LIMITED_ERROR,
+        })
+      )
+        return;
+      throw errors.stripeFailed("Invoicing request failed. Please try again.");
+    }
+    if (cardPayments !== "active") {
+      return reply.code(409).send({
+        error:
+          "Card payments are not enabled on this client's Stripe account yet, so it cannot be invoiced. Finish the account's Stripe onboarding and try again.",
         code: "ACCOUNT_NOT_CONNECTED",
       });
     }
@@ -241,6 +269,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   // The write token is taken inside each handler, after header and body validation, so a request
   // that fails with a 400 never spends one.
   const writeGuards = [requireInvoicingClient("write")];
+  // Invoice create, finalize and send charge (or prepare to charge) the connected account.
+  const chargeGuards = [requireInvoicingClient("charge")];
   async function takeWriteToken(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
     await writeBucket(request, reply);
     return !reply.sent;
@@ -933,7 +963,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   }
 
   // ── POST /invoices ─────────────────────────────────────────────────────────
-  fastify.post("/invoices", { preHandler: writeGuards }, async (request, reply) => {
+  fastify.post("/invoices", { preHandler: chargeGuards }, async (request, reply) => {
     const client = (request as RequestWithClient).client;
     const clientId = client.id;
     const stripeAccount = accountOf(request);
@@ -1566,7 +1596,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   }
 
   // ── POST /invoices/:id/finalize ────────────────────────────────────────────
-  fastify.post("/invoices/:id/finalize", { preHandler: writeGuards }, async (request, reply) => {
+  fastify.post("/invoices/:id/finalize", { preHandler: chargeGuards }, async (request, reply) => {
     const params = invoiceIdParams(request, reply);
     if (!params) return;
     const clientId = (request as RequestWithClient).client.id;
@@ -1821,7 +1851,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     | { kind: "not_open"; status: string }
     | { kind: "go"; sendId: string };
 
-  fastify.post("/invoices/:id/send", { preHandler: writeGuards }, async (request, reply) => {
+  fastify.post("/invoices/:id/send", { preHandler: chargeGuards }, async (request, reply) => {
     const params = invoiceIdParams(request, reply);
     if (!params) return;
     const clientId = (request as RequestWithClient).client.id;

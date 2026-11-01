@@ -12,6 +12,7 @@ type Logger = Pick<FastifyBaseLogger, "info" | "error">;
 export interface ExpressAccountState {
   stripeAccountId: string;
   chargesEnabled: boolean;
+  cardPaymentsStatus: string | null;
   payoutsEnabled: boolean;
   detailsSubmitted: boolean;
 }
@@ -42,6 +43,7 @@ export async function createExpressAccountForClient(
   return {
     stripeAccountId: account.id,
     chargesEnabled: account.charges_enabled ?? false,
+    cardPaymentsStatus: account.capabilities?.card_payments ?? null,
     payoutsEnabled: account.payouts_enabled ?? false,
     detailsSubmitted: account.details_submitted ?? false,
   };
@@ -93,6 +95,7 @@ export async function ensureExpressAccountForClient(
       .set({
         stripeAccountId: created.stripeAccountId,
         chargesEnabled: created.chargesEnabled,
+        cardPaymentsStatus: created.cardPaymentsStatus,
         payoutsEnabled: created.payoutsEnabled,
         detailsSubmitted: created.detailsSubmitted,
       })
@@ -127,4 +130,26 @@ export async function ensureExpressAccountForClient(
   // The client row disappeared between the read and the claim, so nothing references the account.
   await deleteUnpersistedExpressAccount(created.stripeAccountId, client.id, logger);
   throw new Error(`Stripe account was not persisted for client ${client.id}`);
+}
+
+/**
+ * Stripe can report `charges_enabled` while `capabilities.card_payments` is not active (for
+ * example on transfers-only accounts), and invoicing on such an account fails at Stripe. Returns
+ * the stored status, or reads it live once when it is NULL (a row from before the column existed)
+ * and persists the result. Throws when the live read fails, so callers fail closed.
+ */
+export async function resolveCardPaymentsStatus(
+  client: Pick<ClientRecord, "id" | "cardPaymentsStatus">,
+  stripeAccountId: string
+): Promise<string | null> {
+  if (client.cardPaymentsStatus !== null) return client.cardPaymentsStatus;
+  const account = await withStripeCircuit(() => stripe.accounts.retrieve(stripeAccountId));
+  const status = account.capabilities?.card_payments ?? null;
+  if (status !== null) {
+    await db
+      .update(clients)
+      .set({ cardPaymentsStatus: status, updatedAt: new Date() })
+      .where(eq(clients.id, client.id));
+  }
+  return status;
 }
