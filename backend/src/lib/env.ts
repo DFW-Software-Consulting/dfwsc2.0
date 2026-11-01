@@ -68,6 +68,7 @@ const OPTIONAL_ENV_VARS = [
   "BILLING_MAX_AMOUNT_CENTS",
   "BILLING_AUTO_SEND",
   "BILLING_DEFAULT_DAYS_UNTIL_DUE",
+  "CONNECT_INVOICING",
 ];
 
 // Vars whose values must never appear in logs, even partially — presence only.

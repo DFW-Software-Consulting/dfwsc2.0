@@ -99,6 +99,9 @@ All resources can be deployed independently on Coolify while sharing the same mo
   # BILLING_MAX_AMOUNT_CENTS=2500000   (per invoice or per plan payment)
   # BILLING_AUTO_SEND=true   (false = leave one-off invoices as drafts)
   # BILLING_DEFAULT_DAYS_UNTIL_DUE=7
+  # Optional: connected-account invoicing API (/api/v1/customers; docs/BACKEND.md section 7). Global kill switch, off by default;
+  # only the exact value "true" registers the routes, and each client also needs invoicing_enabled (admin PATCH /clients/:id).
+  CONNECT_INVOICING=false
   ```
 - **Admin login (Nextcloud)**: the admin panel signs users in against Nextcloud; there are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ALLOW_ADMIN_SETUP` are no longer read (remove them from Coolify). Before deploying this change:
   1. **Create the Nextcloud groups first and put members in them.** The defaults are `dfwsc-admins` and `managers` (override with `ADMIN_NEXTCLOUD_GROUPS`, comma-separated, exact ids). A user whose Nextcloud account is in none of them gets 403 "This Nextcloud account isn't authorized for the admin panel".
