@@ -114,8 +114,7 @@ export function mapStripeError(
       // Fixed text: Stripe's message quotes the key it received, which is not necessarily
       // the key the caller sent.
       reply.code(409).send({
-        error:
-          "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.",
+        error: "This Idempotency-Key was already used with a different request body.",
         code: "IDEMPOTENCY_KEY_REUSED",
       });
       return true;

@@ -145,4 +145,20 @@ describe("Docs page", () => {
       expect(container.textContent).not.toMatch(/randomUUID\(\),|uuid\.uuid4\(\)\),|random_bytes/);
     }
   });
+
+  it("lists the optional invoicing and customers endpoints", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+
+    for (const endpoint of [
+      "POST /api/v1/customers",
+      "POST /api/v1/invoices",
+      "POST /api/v1/invoices/{id}/finalize",
+      "POST /api/v1/invoices/{id}/send",
+      "POST /api/v1/invoices/{id}/void",
+      "DELETE /api/v1/invoices/{id}",
+    ]) {
+      expect(container.textContent).toContain(endpoint);
+    }
+    expect(container.textContent).toContain("INVOICING_NOT_ENABLED");
+  });
 });

@@ -119,6 +119,21 @@ The Connect endpoint (`POST /api/v1/webhooks/stripe`) keeps `connect_invoices` c
 2. Verify in test mode: create and finalize a draft through the API for a test-mode connected account, then pay it from `hostedInvoiceUrl` with card 4242 4242 4242 4242. Within seconds `GET /invoices/:id` shows `paid` and the endpoint's delivery log shows `200` for `invoice.paid`. Or run `stripe trigger invoice.paid --stripe-account acct_xxx` (the dev stack has the stripe-cli service): that invoice is not in `connect_invoices`, so a `200` with a debug log and no row change is the expected result.
 3. Failure modes: repeated 5xx deliveries mean the Stripe circuit is open or Stripe is down (retries are automatic). Until the events are added, the 30 s `GET` re-check is the only updater.
 
+### Connected-account invoicing: rollout checklist (DFWSC staff)
+Do these in order. The integrator-facing guide is [CLIENT_INTEGRATION.md](../CLIENT_INTEGRATION.md) ("Invoicing your customers").
+
+1. **Test-mode run.** With a test-mode connected account, create, finalize and send an invoice and pay it from `hostedInvoiceUrl` (card 4242 4242 4242 4242). Check and write down:
+   - who pays Stripe's own processing and Invoicing fees on that account type (the connected account or the platform);
+   - the branding of the invoice email and hosted page (account name, logo, colors);
+   - that the application fee shows up in the platform balance (Dashboard > Balance, or the application fee on the payment);
+   - what happens to pending invoice items when a draft is deleted (this API sets `pending_invoice_items_behavior: "exclude"` and attaches each item to the invoice; confirm no stray pending items remain on the customer after `DELETE /invoices/:id`).
+2. **Webhook events (owner step).** In the Stripe dashboard, add the 8 invoice events to the existing Connect endpoint (see the runbook above): `invoice.finalized`, `invoice.sent`, `invoice.paid`, `invoice.payment_failed`, `invoice.voided`, `invoice.marked_uncollectible`, `invoice.updated`, `invoice.deleted`.
+3. **Turn the routes on.** Set `CONNECT_INVOICING=true` on the API (only the exact value `true` registers `/customers` and `/invoices`) and redeploy.
+4. **Enable one client.** With an admin JWT: `PATCH /api/v1/clients/:id` with body `{ "invoicingEnabled": true }`. The client's account must also have charges enabled, or writes return `409 ACCOUNT_NOT_CONNECTED`. Start with a single building and watch the logs for `Connected-account invoicing Stripe call failed`.
+5. **First live invoice.** Have that client create a small real invoice for a known customer, send it, pay it, and confirm `GET /invoices/:id` shows `paid` and the `invoice.paid` delivery shows `200` in the endpoint's log. Only then enable more clients.
+
+To switch a client off, `PATCH` `{ "invoicingEnabled": false }`; to switch the feature off everywhere, unset `CONNECT_INVOICING` and redeploy.
+
 ## 7. Environment Variables
 | Variable | Description |
 |----------|-------------|

@@ -63,6 +63,9 @@ If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environm
 5. **Callback**: Stripe redirects to the platform-registered return URL, `GET /api/v1/connect/callback` with `client_id` and `state` (Stripe does not append `account`; it is accepted only as an optional legacy cross-check). Validates CSRF state, looks up `stripeAccountId` from the client record, marks token `completed`, redirects browser to `/onboarding-success`. The state expires after 24 hours; an expired state redirects to `/onboarding-success?status=expired` instead of returning an error.
 6. **Refresh**: `GET /api/v1/connect/refresh?client_id=...&state=...` regenerates an expired account link and redirects the client.
 
+### Connected-account invoicing (overview)
+An optional feature, off unless `CONNECT_INVOICING=true` and the client's `invoicing_enabled` flag is set. An integrator with an API key creates Customers and invoices on its own connected account: create a customer, create a **draft** invoice, finalize, send (Stripe emails the customer), and the customer pays on Stripe's hosted page; a draft can be deleted and an open invoice voided. Statuses stay current through the Connect webhook and a stale re-check on `GET /invoices/:id`. Route details are in section 7 ("Connected-account invoicing"); the integrator-facing guide with examples, limits and the full error table is [CLIENT_INTEGRATION.md](../CLIENT_INTEGRATION.md) ("Invoicing your customers"); the Stripe-side design and the rollout checklist are in [STRIPE.md](./STRIPE.md).
+
 ## 4. Rate Limiting
 - **Implementation**: Sliding-window limiter (`rateLimit` in `lib/rate-limit.ts`) — Redis-backed (shared across replicas) when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets and logs a one-time startup warning, since limits are then effectively multiplied by replica count under horizontal scaling.
 - **Bucket isolation**: Each limiter keeps its own bucket, namespaced by an optional `name` or, by default, the request's method and route pattern (`ratelimit:<METHOD>:<route>:<key>`), so hits on one route never count against or prune another's.
@@ -110,7 +113,7 @@ All routes are prefixed with `/api/v1`.
 |--------|------|-------------|------|
 | GET | `/clients` | List clients (`?workspace=client_portal`) | Admin JWT |
 | GET | `/clients/:id` | Get single client | Admin JWT |
-| PATCH | `/clients/:id` | Update client fields. `invoicingEnabled` (boolean; a non-boolean is `400`) is the per-client opt-in for connected-account invoicing, admin-only, returned in the response and in the `GET /clients` list; unused until the invoicing routes land | Admin JWT |
+| PATCH | `/clients/:id` | Update client fields. `invoicingEnabled` (boolean; a non-boolean is `400`) is the per-client opt-in for connected-account invoicing, admin-only, returned in the response and in the `GET /clients` list; gates the connected-account invoicing routes below | Admin JWT |
 
 ### Groups
 | Method | Path | Description | Auth |

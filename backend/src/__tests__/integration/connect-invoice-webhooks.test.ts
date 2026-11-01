@@ -497,6 +497,23 @@ describe("Connect webhook sync of connected-account invoices", () => {
       expect(logged).toContain("500");
       expect(logged).not.toContain(EMAIL);
       expect(logged).not.toContain("invoice.example");
+      expect(logged).not.toContain("errMessage");
+      expect(logged).not.toContain("errStack");
+    });
+
+    it("the retry path logs the message and stack of a non-Stripe error", async () => {
+      const c = await seedClient();
+      const id = await seedInvoice(c);
+      stripe.failNth("invoices.retrieve", 1, new TypeError("our own bug in the sync"));
+      const errorLog = vi.spyOn(app.log, "error");
+      const event = makeEvent("invoice.paid", id, c.account);
+      expect((await post(event)).statusCode).toBeGreaterThanOrEqual(500);
+      const entry = errorLog.mock.calls
+        .map((call) => call[0] as Record<string, unknown>)
+        .find((o) => o?.eventId === event.id);
+      expect(entry?.errMessage).toBe("our own bug in the sync");
+      expect(String(entry?.errStack)).toContain("our own bug in the sync");
+      expect(String(entry?.errStack)).toContain("at ");
     });
 
     it("a Postgres failure during the sync answers non-2xx, releases the claim and a redelivery succeeds", async () => {

@@ -211,8 +211,7 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
 
     expect(response.statusCode).toBe(409);
     expect(response.json()).toEqual({
-      error:
-        "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.",
+      error: "This Idempotency-Key was already used with a different request body.",
       code: "IDEMPOTENCY_KEY_REUSED",
     });
   });
