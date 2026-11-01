@@ -30,12 +30,12 @@ import {
   INVOICE_STATUS_PRIORS,
   type InvoiceRequest,
   type InvoiceRow,
-  invoicePatchFromStripe,
   listQuerySchema,
   PROCESSING_FEE_DESCRIPTION,
   serializeInvoice,
   TERMINAL_INVOICE_STATUSES,
 } from "../lib/connect-invoice";
+import { applyStripeInvoice } from "../lib/connect-invoice-sync";
 import { getChargeableAccountId } from "../lib/connected-account";
 import {
   INVOICE_ADOPTION_MAX_PAGES,
@@ -1214,38 +1214,6 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     eq(connectInvoices.status, "deleted")
   );
 
-  /**
-   * Writes what Stripe says about an invoice onto its row, never moving the status backward. When
-   * the guard refuses (the row is already further along) the stored row is returned unchanged.
-   * `extra` carries columns only the caller knows (send bookkeeping). Throws on a Postgres failure.
-   */
-  async function applyStripeInvoice(
-    exec: Pick<typeof db, "update" | "select">,
-    row: InvoiceRow,
-    invoice: Stripe.Invoice,
-    extra: Partial<typeof connectInvoices.$inferInsert> = {}
-  ): Promise<InvoiceRow> {
-    const patch = invoicePatchFromStripe(invoice);
-    if (!patch) return row;
-    const [updated] = await exec
-      .update(connectInvoices)
-      .set({ ...patch, ...extra })
-      .where(
-        and(
-          eq(connectInvoices.id, row.id),
-          inArray(connectInvoices.status, [...INVOICE_STATUS_PRIORS[patch.status]])
-        )
-      )
-      .returning();
-    if (updated) return updated;
-    const [current] = await exec
-      .select()
-      .from(connectInvoices)
-      .where(eq(connectInvoices.id, row.id))
-      .limit(1);
-    return current ?? row;
-  }
-
   // ── Stale re-check (GET /invoices/:id) ─────────────────────────────────────
   // At most one Stripe lookup per invoice per interval and a bounded map, in process (the same
   // shape as the payments status reconcile).
@@ -1296,10 +1264,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
           maxNetworkRetries: 0,
         }
       );
-      const patch = invoicePatchFromStripe(invoice);
-      if (!patch) return row;
-      const updated = await applyStripeInvoice(db, row, invoice);
-      return updated;
+      return await applyStripeInvoice(db, row, invoice);
     } catch (err) {
       // Codes only: a Stripe error message may quote customer data.
       request.log.warn(
@@ -1424,7 +1389,9 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     row: InvoiceRow,
     write: () => Promise<T>,
     // Runs before the 503 leaves, so a caller that retries at once finds the work released.
-    beforeReply?: () => Promise<unknown>
+    beforeReply?: () => Promise<unknown>,
+    // For a write after which the same request would no longer be retried as is.
+    message = "The invoice was updated but confirmation failed. Please retry the same request."
   ): Promise<T | undefined> {
     try {
       return await write();
@@ -1437,7 +1404,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       );
       await beforeReply?.();
       reply.code(503).send({
-        error: "The invoice was updated but confirmation failed. Please retry the same request.",
+        error: message,
         code: "LEDGER_PERSISTENCE_FAILED",
       });
       return undefined;
@@ -2016,8 +1983,15 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         );
         if (!fresh) return reply;
         logRejection(request, row, "invoices.sendInvoice", err, fresh.status);
-        const refreshed = await persistAfterStripe(request, reply, row, () =>
-          applyStripeInvoice(db, row, fresh)
+        // This key is already recorded as failed (a retry of it answers 409 SEND_FAILED), so the
+        // caller must not be told to retry the same request.
+        const refreshed = await persistAfterStripe(
+          request,
+          reply,
+          row,
+          () => applyStripeInvoice(db, row, fresh),
+          undefined,
+          "Stripe rejected the send and the invoice status could not be recorded. Check the invoice status, then use a new Idempotency-Key to try again."
         );
         if (!refreshed) return reply;
         if (fresh.status !== "open") {
@@ -2037,7 +2011,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         }
         if (rejection?.type === "StripeIdempotencyError") {
           return reply.code(409).send({
-            error: "This Idempotency-Key was already used for a different request. Use a new key.",
+            error:
+              "Stripe could not accept this send. Check the invoice status and try again with a new Idempotency-Key.",
             code: "IDEMPOTENCY_KEY_REUSED",
           });
         }

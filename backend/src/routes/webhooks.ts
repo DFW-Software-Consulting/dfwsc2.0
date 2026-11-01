@@ -4,6 +4,7 @@ import type Stripe from "stripe";
 import { db } from "../db/client";
 import { clients, paymentLedger } from "../db/schema";
 import { isCircuitOpenError, isStripeBusyError, withStripeCircuit } from "../lib/circuit-breakers";
+import { syncConnectInvoice } from "../lib/connect-invoice-sync";
 import { isUniqueViolation } from "../lib/errors";
 import { stripe } from "../lib/stripe";
 import { mapStripeError } from "../lib/stripe-errors";
@@ -405,20 +406,22 @@ async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Pro
       logger.info({ payoutId: payout.id, status: payout.status }, "Payout event received.");
       break;
     }
-    case "invoice.payment_succeeded": {
-      const inv = event.data.object as Stripe.Invoice;
-      logger.info(
-        { invoiceId: inv.id, clientId: inv.metadata?.clientId },
-        "Invoice payment succeeded."
-      );
+    case "invoice.finalized":
+    case "invoice.sent":
+    case "invoice.paid":
+    case "invoice.payment_succeeded": // alias of invoice.paid
+    case "invoice.voided":
+    case "invoice.marked_uncollectible":
+    case "invoice.updated":
+    case "invoice.deleted": {
+      await syncConnectInvoice(event, logger);
       break;
     }
     case "invoice.payment_failed": {
+      await syncConnectInvoice(event, logger);
+      // The only signal of a failed payment attempt: the invoice itself stays open.
       const inv = event.data.object as Stripe.Invoice;
-      logger.warn(
-        { invoiceId: inv.id, clientId: inv.metadata?.clientId },
-        "Invoice payment failed."
-      );
+      logger.warn({ invoiceId: inv.id, accountId: event.account }, "Invoice payment failed.");
       break;
     }
     case "customer.subscription.updated": {

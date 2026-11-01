@@ -1162,6 +1162,50 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
       expect((await sendsOf(id)).map((r) => r.state)).toEqual(["failed"]);
     });
 
+    it("send: an idempotency rejection gets a neutral message that does not blame the caller", async () => {
+      const c = await seedClient();
+      const { id } = await makeOpen(c);
+      stripe.failNth(
+        "invoices.sendInvoice",
+        1,
+        new Stripe.errors.StripeIdempotencyError({
+          type: "idempotency_error",
+          statusCode: 400,
+          message: "SECRET-STRIPE-TEXT for tenant.private@example.com",
+        } as never)
+      );
+      const res = await send(c, id, "k");
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe("IDEMPOTENCY_KEY_REUSED");
+      expect(res.json().error).not.toMatch(/different request/);
+      expect(res.json().error).toMatch(/new Idempotency-Key/);
+      expect(res.body).not.toContain("SECRET-STRIPE-TEXT");
+      expect((await sendsOf(id)).map((r) => r.state)).toEqual(["failed"]);
+    });
+
+    it("send: when recording a rejected send fails, the 503 says to use a new key (the old one is SEND_FAILED)", async () => {
+      const c = await seedClient();
+      const { id } = await makeOpen(c);
+      stripe.failNth("invoices.sendInvoice", 1, quotedReject());
+      let armed = false;
+      stripe.onCall = async (name) => {
+        // The re-read comes after the send row was marked failed; the next update is the refresh.
+        if (name === "invoices.retrieve" && !armed) {
+          armed = true;
+          failUpdate(1);
+        }
+      };
+      const failed = await send(c, id, "k");
+      expect(failed.statusCode).toBe(503);
+      expect(failed.json().code).toBe("LEDGER_PERSISTENCE_FAILED");
+      expect(failed.json().error).toMatch(/new Idempotency-Key/);
+      expect(failed.json().error).not.toMatch(/retry the same request/i);
+      vi.restoreAllMocks();
+      const retry = await send(c, id, "k");
+      expect(retry.statusCode).toBe(409);
+      expect(retry.json().code).toBe("SEND_FAILED");
+    });
+
     it("send: losing to a void answers 409 INVOICE_STATE_CHANGED with the current status", async () => {
       const c = await seedClient();
       const { id } = await makeOpen(c);

@@ -181,6 +181,8 @@ A create replay (same key and body) on a deleted row is `200` with the deleted i
 
 **Stale re-check.** `GET /invoices/:id` re-reads a `draft`, `open` or `uncollectible` invoice from Stripe when `last_synced_at` is older than 30 s (`INVOICE_RECONCILE_MIN_AGE_MS`), at most once per invoice per 30 s per process, outside the circuit breaker (an open breaker skips it), with a 3 s timeout and no retries, and writes status, amounts, number, URLs and transition times back. Any failure leaves the stored row and never fails the request. Terminal statuses (`paid`, `void`, `deleted`) are never re-checked.
 
+**Webhook sync.** The Connect webhook (`routes/webhooks.ts`) calls `syncConnectInvoice` (`lib/connect-invoice-sync.ts`) for `invoice.finalized`, `sent`, `paid`, `payment_failed`, `voided`, `marked_uncollectible`, `updated` and `deleted`. It re-reads the invoice on the event's account and writes it with `applyStripeInvoice`, the same function the routes and the `GET` re-check use (status never moves backward; `last_synced_at` set; `last_stripe_event_created_at` kept as `GREATEST`, diagnostic only). Events without `account`, for unknown invoices or for rows not yet `complete` are acknowledged. A dashboard `invoice.sent` sets `sent_at` if null and never touches `send_count`. Setup and verification: docs/STRIPE.md.
+
 Write limits: `POST /invoices` takes one token from the write bucket (keyed `stripe:<connectedAccountId>`, namespaced by route like the other limiters, so it is separate from the customers bucket) after validation and the 4xx checks, and gives it back when refused before reaching Stripe. Reads share the 600 req/min per client window.
 
 ### Products & Settings
