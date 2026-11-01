@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import Redis from "ioredis";
 import { getClientIp } from "./client-ip";
+import { errorLogFields } from "./safe-error-log";
 
 type RateLimitOptions = {
   max: number;
@@ -55,7 +56,7 @@ function logRedisFailure(request: FastifyRequest, err: unknown): void {
   if (now - lastRedisErrorLogAt < REDIS_ERROR_LOG_INTERVAL_MS) return;
   lastRedisErrorLogAt = now;
   request.log.error(
-    { err },
+    errorLogFields(err),
     "Rate limiter Redis error; falling back to in-memory limits until Redis recovers"
   );
 }

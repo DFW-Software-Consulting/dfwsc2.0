@@ -46,6 +46,13 @@ import { sendMail } from "../../lib/mailer";
 import { stripe } from "../../lib/stripe";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
+import {
+  captureAppLogs,
+  dump,
+  expectNoPlanted,
+  plantedMailError,
+  plantedStripeError,
+} from "../helpers/log-capture";
 
 const REGEN_LINK_REGEX = /\/regenerate-key#token=([a-f0-9]+)/;
 
@@ -254,7 +261,8 @@ describe("Onboard Initiate — API key via email link", () => {
   it("returns 502, preserves the client, and revokes newly issued tokens when email fails", async () => {
     const email = `onboard-mail-fail-${randomUUID()}@example.com`;
     const token = makeAdminToken();
-    (sendMail as any).mockRejectedValueOnce(new Error("smtp down"));
+    (sendMail as any).mockRejectedValueOnce(plantedMailError());
+    const logs = captureAppLogs(app);
 
     const response = await app.inject({
       method: "POST",
@@ -262,7 +270,14 @@ describe("Onboard Initiate — API key via email link", () => {
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       payload: { name: "Mail Fail Client", email, workspace: "client_portal" },
     });
+    logs.restore();
 
+    expect(logs.find("Failed to send onboarding email")?.fields).toMatchObject({
+      errCode: "EENVELOPE",
+      errResponseCode: 550,
+      errCommand: "RCPT TO",
+    });
+    expectNoPlanted(logs.text());
     expect(response.statusCode).toBe(502);
     expect(response.json()).toMatchObject({
       code: "EMAIL_DELIVERY_FAILED",
@@ -331,7 +346,8 @@ describe("Onboard Initiate — API key via email link", () => {
 
   it("does not persist a client when Stripe account creation fails", async () => {
     const email = `onboard-stripe-fail-${randomUUID()}@example.com`;
-    (stripe.accounts.create as any).mockRejectedValueOnce(new Error("stripe unavailable"));
+    (stripe.accounts.create as any).mockRejectedValueOnce(plantedStripeError());
+    const logs = captureAppLogs(app);
 
     const response = await app.inject({
       method: "POST",
@@ -342,6 +358,14 @@ describe("Onboard Initiate — API key via email link", () => {
       },
       payload: { name: "Stripe Fail Client", email, workspace: "client_portal" },
     });
+    logs.restore();
+
+    expect(logs.find("Stripe account creation failed")?.fields).toMatchObject({
+      errType: "StripeInvalidRequestError",
+      errCode: "resource_missing",
+      errRequestId: "req_planted",
+    });
+    expectNoPlanted(logs.text());
 
     expect(response.statusCode).toBe(502);
     expect(response.json()).toMatchObject({ code: "STRIPE_FAILED" });
@@ -369,6 +393,7 @@ describe("Onboard Initiate — API key via email link", () => {
     (stripe.accounts.create as any).mockResolvedValueOnce({ id: occupiedAccountId });
 
     const email = `onboard-db-fail-${randomUUID()}@example.com`;
+    const logs = captureAppLogs(app);
     const response = await app.inject({
       method: "POST",
       url: "/api/v1/onboard-client/initiate",
@@ -379,7 +404,14 @@ describe("Onboard Initiate — API key via email link", () => {
       payload: { name: "DB Fail Client", email, workspace: "client_portal" },
     });
 
+    logs.restore();
     expect(response.statusCode).toBe(409);
+    // Whatever the persistence error is, a raw pg message or detail must not reach the log.
+    const persisted = logs.find("Failed to persist client after Stripe account creation");
+    expect(persisted?.fields).toMatchObject({ clientId: expect.any(String) });
+    const failures = dump(logs.calls.filter((c) => c.level !== "info"));
+    expect(failures).not.toMatch(/Key \(|duplicate key|Failed query/);
+    expect(failures).not.toContain(email);
     expect(stripe.accounts.del).toHaveBeenCalledWith(occupiedAccountId);
     expect(sendMail).not.toHaveBeenCalled();
     const rows = await db.select().from(clients).where(eq(clients.email, email));

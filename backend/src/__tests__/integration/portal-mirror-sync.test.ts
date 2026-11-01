@@ -316,6 +316,9 @@ describe("provisioning", () => {
     expect((await cycle(env)).status).toBe("invalid_config");
     expect(fake.callsTo("POST", /columns|shares/)).toHaveLength(0);
     expect(lines.some((l) => l.text.includes("lacks columns"))).toBe(true);
+    // The error message is not logged; the titles-only detail is a field under a fixed line.
+    expect(lines.some((l) => l.text.includes("Portal mirror misconfigured."))).toBe(true);
+    expect(lines.some((l) => l.text.includes("misconfigured: table"))).toBe(false);
   });
 });
 

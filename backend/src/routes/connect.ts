@@ -32,6 +32,7 @@ import {
 import { AppError, errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
+import { errorLogFields, transportErrorFields } from "../lib/safe-error-log";
 import { getSettings, stripe } from "../lib/stripe-billing";
 import {
   createExpressAccountForClient,
@@ -209,7 +210,7 @@ async function provisionExpressAccount(
     });
   } catch (error) {
     request.log.error(
-      { err: error, clientId: prepared.clientId },
+      { ...errorLogFields(error), clientId: prepared.clientId },
       "Stripe account creation failed"
     );
     if (mapStripeError(error, reply, { circuitOpen: STRIPE_ONBOARDING_CIRCUIT_OPEN_ERROR })) {
@@ -244,7 +245,11 @@ async function persistOrCompensate<T>(
     return await persist();
   } catch (err) {
     request.log.error(
-      { err, clientId: prepared.clientId, stripeAccountId: account.stripeAccountId },
+      {
+        ...errorLogFields(err),
+        clientId: prepared.clientId,
+        stripeAccountId: account.stripeAccountId,
+      },
       "Failed to persist client after Stripe account creation"
     );
     await deleteUnpersistedExpressAccount(account.stripeAccountId, prepared.clientId, request.log);
@@ -430,7 +435,10 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           text: mailText,
         });
       } catch (err) {
-        request.log.error({ err, clientId }, "Failed to send onboarding email");
+        request.log.error(
+          { ...transportErrorFields(err), clientId },
+          "Failed to send onboarding email"
+        );
         try {
           await db.transaction(async (tx) => {
             const onboardingResult = await tx
@@ -460,7 +468,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           });
         } catch (cleanupErr) {
           request.log.error(
-            { err: cleanupErr, clientId },
+            { ...errorLogFields(cleanupErr), clientId },
             "Failed to revoke onboarding credentials after email failure"
           );
           throw errors.emailFailed(
@@ -595,7 +603,10 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           text: mailText,
         });
       } catch (err) {
-        request.log.error({ err, clientId: clientRecord.id }, "Failed to send onboarding email");
+        request.log.error(
+          { ...transportErrorFields(err), clientId: clientRecord.id },
+          "Failed to send onboarding email"
+        );
         try {
           const result = await db
             .update(onboardingTokens)
@@ -614,7 +625,11 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           }
         } catch (cleanupErr) {
           request.log.error(
-            { err: cleanupErr, clientId: clientRecord.id, tokenId: newOnboardingTokenId },
+            {
+              ...errorLogFields(cleanupErr),
+              clientId: clientRecord.id,
+              tokenId: newOnboardingTokenId,
+            },
             "Failed to revoke undelivered onboarding token"
           );
           throw errors.emailFailed(
@@ -655,10 +670,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         const { accountLinkUrl } = await createAccountLinkForToken(request, token);
         return reply.send({ url: accountLinkUrl });
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
         request.log.error(
           {
-            error: errorMessage,
+            ...errorLogFields(error),
             token_hash: hashToken(token),
           },
           "Stripe accountLinks.create failed"
@@ -720,10 +734,9 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         const { accountLinkUrl } = await createAccountLinkForRecord(request, onboardingRecord);
         return reply.redirect(accountLinkUrl);
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
         request.log.error(
           {
-            error: errorMessage,
+            ...errorLogFields(error),
             client_id: normalizedClientId,
             state_hash: hashToken(normalizedState),
           },
@@ -884,7 +897,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       } catch (err) {
         if (mapStripeError(err, reply, { circuitOpen: STRIPE_ONBOARDING_CIRCUIT_OPEN_ERROR })) {
           request.log.warn(
-            { account: effectiveAccountId, err },
+            { account: effectiveAccountId, ...errorLogFields(err) },
             "Stripe circuit open while verifying account; leaving token in_progress"
           );
           return;
@@ -892,7 +905,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
         // Transient Stripe failure on a user-facing return: don't dead-end the
         // user. The account.updated webhook reconciles readiness authoritatively.
         request.log.warn(
-          { account: effectiveAccountId, err },
+          { account: effectiveAccountId, ...errorLogFields(err) },
           "Failed to verify account with Stripe; leaving token in_progress"
         );
         return reply.redirect(`${redirectBase}?status=error`);
@@ -1023,13 +1036,13 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           });
         })().catch(async (err) => {
           request.log.error(
-            { err, clientId: clientRecord.id },
+            { ...transportErrorFields(err), clientId: clientRecord.id },
             "Failed to send regeneration email"
           );
           if (rawToken) {
             await revokeRegenerationToken(rawToken).catch((revokeErr) => {
               request.log.error(
-                { err: revokeErr, clientId: clientRecord.id },
+                { ...errorLogFields(revokeErr), clientId: clientRecord.id },
                 "Failed to revoke regeneration token after email failure"
               );
             });
@@ -1112,7 +1125,10 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           text: mailText,
         });
       } catch (err) {
-        request.log.error({ err, clientId: clientRecord.id }, "Failed to send regeneration email");
+        request.log.error(
+          { ...transportErrorFields(err), clientId: clientRecord.id },
+          "Failed to send regeneration email"
+        );
         try {
           const tokenHash = hashRegenerationToken(rawToken);
           const result = await db
@@ -1133,7 +1149,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           }
         } catch (cleanupErr) {
           request.log.error(
-            { err: cleanupErr, clientId: clientRecord.id },
+            { ...errorLogFields(cleanupErr), clientId: clientRecord.id },
             "Failed to revoke unsent regeneration token"
           );
           throw errors.emailFailed(

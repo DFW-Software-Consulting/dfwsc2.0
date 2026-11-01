@@ -5,6 +5,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import jwt from "jsonwebtoken";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
+import { errorLogFields } from "./safe-error-log";
 
 export function sha256Lookup(apiKey: string): string {
   return crypto.createHash("sha256").update(apiKey).digest("hex");
@@ -207,7 +208,7 @@ export async function requireApiKey(request: FastifyRequest, reply: FastifyReply
 
     return reply.code(401).send({ error: "Invalid API key." });
   } catch (error) {
-    request.log.error({ error }, "Error in requireApiKey");
+    request.log.error(errorLogFields(error), "Error in requireApiKey");
     return reply.code(500).send({ error: "Internal server error during API key validation." });
   }
 }

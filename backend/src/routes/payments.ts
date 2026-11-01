@@ -42,6 +42,7 @@ import {
   sendRateLimited,
   tokenBucketRateLimit,
 } from "../lib/rate-limit";
+import { errorLogFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
 import { mapStripeError } from "../lib/stripe-errors";
@@ -154,7 +155,10 @@ async function reconcileStaleCheckout(
       .limit(1);
     return updated ?? row;
   } catch (err) {
-    request.log.warn({ err, sessionId }, "Checkout status reconciliation with Stripe failed");
+    request.log.warn(
+      { ...errorLogFields(err), sessionId },
+      "Checkout status reconciliation with Stripe failed"
+    );
     return row;
   }
 }
@@ -595,7 +599,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           });
         });
       } catch (err) {
-        request.log.error({ err }, "Stripe Checkout session creation failed");
+        request.log.error(errorLogFields(err), "Stripe Checkout session creation failed");
         // A request refused before it reached Stripe (no slot in time, or the circuit already
         // open) is told to retry, so it gives its rate-limit token back and the retry is not
         // charged twice. A circuit-open error after the call started is a timeout of a call
@@ -638,7 +642,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         });
       } catch (err) {
         request.log.error(
-          { err, stripeSessionId: session.id },
+          { ...errorLogFields(err), stripeSessionId: session.id },
           "Ledger insert failed after Stripe Checkout session creation — returning 503"
         );
         return reply.code(503).send({
@@ -810,7 +814,11 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
                 return;
               failedAccounts.push(c.id);
               request.log.error(
-                { err: outcome.reason, clientId: c.id, stripeAccountId: c.stripeAccountId },
+                {
+                  ...errorLogFields(outcome.reason),
+                  clientId: c.id,
+                  stripeAccountId: c.stripeAccountId,
+                },
                 "Failed to list payments for connected account; excluding from group report"
               );
             }
@@ -848,7 +856,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           })
         );
       } catch (err) {
-        request.log.error({ err, clientId }, "Stripe PaymentIntent list failed");
+        request.log.error({ ...errorLogFields(err), clientId }, "Stripe PaymentIntent list failed");
         if (mapStripeError(err, reply, { circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR })) return;
         return reply.code(502).send({ error: "Failed to list payments." });
       }

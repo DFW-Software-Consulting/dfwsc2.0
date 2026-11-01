@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { dbErrorFields, retryErrorFields } from "../../lib/safe-error-log";
+import {
+  dbErrorFields,
+  errorLogFields,
+  retryErrorFields,
+  transportErrorFields,
+} from "../../lib/safe-error-log";
 
 const URL_SECRET = "https://invoice.stripe.com/i/acct_1/live_secret";
 const EMAIL = "jane@customer.example";
@@ -77,5 +82,69 @@ describe("safe-error-log", () => {
     expect(fields.errName).toBe("TypeError");
     expect(fields.errCode).toBe("ERR_X");
     expect(JSON.stringify(fields)).not.toContain(EMAIL);
+  });
+
+  describe("errorLogFields", () => {
+    it("keeps identifiers only for a Stripe error", () => {
+      const e = Object.assign(new Error(`No such customer ${EMAIL}`), {
+        type: "StripeInvalidRequestError",
+        code: "resource_missing",
+      });
+      expect(errorLogFields(e)).toMatchObject({ errCode: "resource_missing" });
+      expect(JSON.stringify(errorLogFields(e))).not.toContain(EMAIL);
+    });
+
+    it("keeps SQLSTATE and schema names only for a Drizzle error", () => {
+      const fields = errorLogFields(drizzleError());
+      expect(fields).toMatchObject({ errCode: "23505", errConstraint: "uq_email" });
+      expect(JSON.stringify(fields)).not.toContain(EMAIL);
+    });
+
+    it("keeps message and stack for our own bug", () => {
+      expect(errorLogFields(new Error("boom"))).toMatchObject({ errMessage: "boom" });
+    });
+  });
+
+  describe("transportErrorFields", () => {
+    it("keeps nodemailer identifiers and never the message or response text", () => {
+      const e = Object.assign(new Error(`Recipient address rejected: ${EMAIL}`), {
+        code: "EENVELOPE",
+        responseCode: 550,
+        command: "RCPT TO",
+        response: `550 <${EMAIL}> unknown`,
+      });
+      expect(transportErrorFields(e)).toEqual({
+        errName: "Error",
+        errCode: "EENVELOPE",
+        errResponseCode: 550,
+        errCommand: "RCPT TO",
+        errStatus: undefined,
+      });
+      expect(JSON.stringify(transportErrorFields(e))).not.toContain(EMAIL);
+    });
+
+    it("keeps the HTTP status of a Nextcloud client error", () => {
+      const e = Object.assign(new Error(`body ${EMAIL}`), {
+        name: "NextcloudHttpError",
+        status: 502,
+      });
+      expect(transportErrorFields(e)).toMatchObject({
+        errName: "NextcloudHttpError",
+        errStatus: 502,
+      });
+    });
+
+    it("drops values of the wrong type and tolerates non-errors", () => {
+      expect(
+        transportErrorFields({ code: { x: 1 }, responseCode: "550", command: 5, status: "500" })
+      ).toEqual({
+        errName: undefined,
+        errCode: undefined,
+        errResponseCode: undefined,
+        errCommand: undefined,
+        errStatus: undefined,
+      });
+      expect(transportErrorFields(null).errName).toBeUndefined();
+    });
   });
 });

@@ -9,6 +9,7 @@ vi.mock("../../db/client", () => ({
 }));
 
 import { requireApiKey } from "../../lib/auth";
+import { dump, expectNoPlanted, plantedDbError } from "../helpers/log-capture";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -169,5 +170,23 @@ describe("requireApiKey", () => {
     expect(reply.send).toHaveBeenCalledWith({
       error: "Internal server error during API key validation.",
     });
+  });
+
+  it("logs only SQLSTATE and schema names when the lookup fails with a database error", async () => {
+    mockSelect.mockReturnValueOnce({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          limit: vi.fn().mockRejectedValue(plantedDbError()),
+        }),
+      }),
+    });
+
+    const request = makeRequest("db-error-key-2");
+    await requireApiKey(request as any, makeReply() as any);
+
+    const [fields, msg] = request.log.error.mock.calls[0];
+    expect(msg).toBe("Error in requireApiKey");
+    expect(fields).toMatchObject({ errCode: "23505", errTable: "planted_table" });
+    expectNoPlanted(dump(request.log.error.mock.calls));
   });
 });

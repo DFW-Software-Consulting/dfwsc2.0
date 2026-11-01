@@ -25,6 +25,7 @@ import { db } from "../../db/client";
 import { clientGroups, clients } from "../../db/schema";
 import { hashApiKey, sha256Lookup } from "../../lib/auth";
 import { stripe } from "../../lib/stripe";
+import { captureAppLogs, expectNoPlanted, plantedStripeError } from "../helpers/log-capture";
 
 const TEST_JWT_SECRET = "test_jwt_secret_minimum_32_characters_long_random_string";
 
@@ -120,6 +121,36 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
 
     expect(response.statusCode).toBe(400);
     expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("logs only identifiers when Stripe Checkout creation fails with customer data in the message", async () => {
+    vi.mocked(stripe.checkout.sessions.create).mockRejectedValueOnce(plantedStripeError());
+    const logs = captureAppLogs(app);
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": randomUUID(),
+        "content-type": "application/json",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: { currency: "usd", product_data: { name: "S" }, unit_amount: 5000 },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+    logs.restore();
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+    expect(logs.find("Stripe Checkout session creation failed")?.fields).toMatchObject({
+      errType: "StripeInvalidRequestError",
+      errCode: "resource_missing",
+      errRequestId: "req_planted",
+    });
+    expectNoPlanted(logs.text());
   });
 
   it("returns 502 when the Stripe Checkout session creation call fails", async () => {

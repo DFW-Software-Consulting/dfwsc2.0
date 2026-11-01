@@ -7,6 +7,7 @@ import { forgetBadApiKey, requireAdminJwt } from "../lib/auth";
 import { MAX_FEE_PERCENT, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { errors, isUniqueViolation } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
+import { errorLogFields } from "../lib/safe-error-log";
 import { isValidHttpsUrl, parseBody } from "../lib/validation";
 import { isWorkspace } from "../lib/workspace";
 
@@ -222,7 +223,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         ...pagination,
       });
     } catch (error) {
-      req.log.error(error, "Error fetching client list");
+      req.log.error(errorLogFields(error), "Error fetching client list");
       return res.status(500).send({ error: "Internal server error" });
     }
   });
@@ -410,7 +411,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         updatedAt: updatedClient.updatedAt?.toISOString(),
       });
     } catch (error) {
-      req.log.error(error, "Error updating client");
+      req.log.error(errorLogFields(error), "Error updating client");
       return res.status(500).send({ error: "Internal server error" });
     }
   });
@@ -431,7 +432,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         }
         return res.status(204).send();
       } catch (error) {
-        req.log.error(error, "Error deleting client");
+        req.log.error(errorLogFields(error), "Error deleting client");
         return res.status(500).send({ error: "Internal server error" });
       }
     }

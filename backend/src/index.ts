@@ -1,5 +1,6 @@
 import path from "node:path";
 import dotenv from "dotenv";
+import { errorLogFields } from "./lib/safe-error-log";
 
 // Load environment variables synchronously before any other imports
 if (process.env.NODE_ENV !== "production") {
@@ -45,7 +46,7 @@ async function start() {
           server.log.info({ deleted }, "Pruned processed webhook_events past retention window.");
         }
       } catch (err) {
-        server.log.error({ err }, "Failed to prune processed webhook_events.");
+        server.log.error(errorLogFields(err), "Failed to prune processed webhook_events.");
       }
     };
     await runWebhookPrune();
@@ -70,7 +71,7 @@ async function start() {
     // Client Billing -> Nextcloud Table (read-only; Stripe is only read): off unless BILLING_MIRROR=true. Same guarantees.
     billingMirror = startBillingMirror(server.log);
   } catch (err) {
-    server.log.error(err);
+    server.log.error(errorLogFields(err));
     process.exit(1);
   }
 
@@ -88,7 +89,7 @@ async function start() {
       server.log.info("Server closed successfully");
       process.exit(0);
     } catch (err) {
-      server.log.error(err, "Error during shutdown");
+      server.log.error(errorLogFields(err), "Error during shutdown");
       process.exit(1);
     }
   };

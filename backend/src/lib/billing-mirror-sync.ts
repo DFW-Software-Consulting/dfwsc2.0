@@ -337,7 +337,12 @@ export async function runBillingMirrorCycle(options: {
     return outcome;
   } catch (error) {
     if (error instanceof PortalMirrorConfigError) {
-      logProblemOnce(logger, `config:${error.detail}`, { detail: error.detail }, error.message);
+      logProblemOnce(
+        logger,
+        `config:${error.detail}`,
+        { detail: error.detail },
+        "Billing mirror misconfigured."
+      );
       return result("invalid_config");
     }
     if (isOutage(error)) {

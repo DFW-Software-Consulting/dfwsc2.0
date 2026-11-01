@@ -1,4 +1,5 @@
 import { getNextcloudConfig, type NextcloudConfig, nextcloudRequest } from "./nextcloud";
+import { transportErrorFields } from "./safe-error-log";
 
 // Admin panel login is checked against Nextcloud:
 //   1. the user's own credentials (HTTP Basic) against GET /ocs/v2.php/cloud/user, which also
@@ -96,11 +97,8 @@ export async function checkAdminLogin(
       ? { ok: true, userId }
       : { ok: false, reason: "not_authorized" };
   } catch (error) {
-    // Only the error class and label are logged (they carry no URL, user or password).
-    logger.warn(
-      { error: error instanceof Error ? error.message : "unknown" },
-      "Admin login unavailable: Nextcloud request failed"
-    );
+    // Only identifiers are logged: the message can carry a URL, user or response body.
+    logger.warn(transportErrorFields(error), "Admin login unavailable: Nextcloud request failed");
     return { ok: false, reason: "unavailable" };
   }
 }
