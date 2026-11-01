@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type Stripe from "stripe";
 import { markCustomerDirty } from "../lib/billing-snapshot";
+import { retryErrorFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import {
   claimStripeEvent,
@@ -69,7 +70,10 @@ export default async function billingWebhookRoute(fastify: FastifyInstance) {
       try {
         event = stripe.webhooks.constructEvent(request.rawBody as string, signature, secret);
       } catch (err: unknown) {
-        fastify.log.error({ err }, "Failed to verify Stripe billing webhook signature.");
+        fastify.log.error(
+          retryErrorFields(err),
+          "Failed to verify Stripe billing webhook signature."
+        );
         const message = err instanceof Error ? err.message : String(err);
         return reply.code(400).send({ error: `Webhook Error: ${message}` });
       }
@@ -94,7 +98,7 @@ export default async function billingWebhookRoute(fastify: FastifyInstance) {
       } catch (err) {
         await releaseStripeEvent(event.id);
         fastify.log.error(
-          { err, eventId: event.id, eventType: event.type },
+          { ...retryErrorFields(err), eventId: event.id, eventType: event.type },
           "Billing webhook processing failed; released claim so Stripe can retry"
         );
         return reply.code(500).send({ error: "Webhook processing failed" });

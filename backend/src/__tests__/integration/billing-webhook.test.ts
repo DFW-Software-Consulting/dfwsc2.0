@@ -253,4 +253,29 @@ describe("POST /api/v1/webhooks/stripe-billing", () => {
       spy.mockRestore();
     }
   });
+
+  it("logs only database-safe fields when processing fails", async () => {
+    const event = makeEvent("invoice.paid", { customer: "cus_known" });
+    const snapshots = await import("../../lib/billing-snapshot");
+    const pg = Object.assign(new Error("dup jane@customer.example"), {
+      code: "40001",
+      severity: "ERROR",
+      detail: "row jane@customer.example",
+    });
+    const drizzleErr = new Error("Failed query: update x params: jane@customer.example", {
+      cause: pg,
+    });
+    drizzleErr.name = "DrizzleQueryError";
+    const spy = vi.spyOn(snapshots, "markCustomerDirty").mockRejectedValueOnce(drizzleErr);
+    const logSpy = vi.spyOn(app.log, "error");
+    try {
+      expect((await send(event)).statusCode).toBe(500);
+      const call = logSpy.mock.calls.find((c) => String(c[1]).includes("released claim"));
+      expect(call?.[0]).toMatchObject({ errCode: "40001", eventId: event.id });
+      expect(JSON.stringify(logSpy.mock.calls)).not.toContain("jane@customer.example");
+    } finally {
+      spy.mockRestore();
+      logSpy.mockRestore();
+    }
+  });
 });
