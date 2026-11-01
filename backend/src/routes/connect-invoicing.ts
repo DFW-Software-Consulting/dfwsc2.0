@@ -684,7 +684,9 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       );
       if (hit) return hit;
       const last = list.data[list.data.length - 1];
-      if (!list.has_more || !last) return null;
+      if (!list.has_more) return null;
+      // has_more with nothing to page from is inconclusive, never "not found".
+      if (!last) break;
       startingAfter = last.id;
     }
     request.log.error(

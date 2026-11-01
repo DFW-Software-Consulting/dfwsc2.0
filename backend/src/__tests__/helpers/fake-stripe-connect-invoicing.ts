@@ -91,7 +91,11 @@ export class FakeConnectInvoicingStripe {
   /** Runs after `customers.create` made its customer but before it answers (to inject a race). */
   afterCreate: ((created: Record<string, any>) => Promise<void>) | null = null;
 
+  /** Forces the Nth `invoices.list` call (1-based, since reset) to answer exactly this page. */
+  listPageOverrides = new Map<number, { data: Record<string, any>[]; has_more: boolean }>();
+
   reset() {
+    this.listPageOverrides.clear();
     this.calls = [];
     this.failures = [];
     this.counts.clear();
@@ -297,6 +301,11 @@ export class FakeConnectInvoicingStripe {
     }
 
     if (call === "invoices.list" || call === "invoiceItems.list") {
+      const forced =
+        call === "invoices.list"
+          ? this.listPageOverrides.get(this.calls.filter((c) => c.call === call).length)
+          : undefined;
+      if (forced) return { object: "list", ...forced };
       const store = call === "invoices.list" ? invoices : items;
       let data = [...store.values()].reverse(); // newest first
       if (params?.customer) data = data.filter((o) => o.customer === params.customer);

@@ -1276,6 +1276,33 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
       expect(res.json().id).toBe(orphan.id);
     });
 
+    it("treats an empty page that still says has_more as inconclusive and creates nothing", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      await leaveOrphan(c, cust, "emptymore");
+      stripe.listPageOverrides.set(1, { data: [], has_more: true });
+      const before = stripe.callsTo("invoices.create").length;
+      const res = await post(c.apiKey, body(cust), "emptymore");
+      expect(res.statusCode).toBe(503);
+      expect(res.json().code).toBe("INVOICE_ADOPTION_INCOMPLETE");
+      expect(stripe.callsTo("invoices.create")).toHaveLength(before);
+      expect(stripe.callsTo("invoiceItems.create")).toHaveLength(0);
+    });
+
+    it("stops with nothing created when the list fails on page 2 of the search", async () => {
+      const c = await seedClient();
+      const cust = await seedCustomer(c);
+      await leaveOrphan(c, cust, "page2err");
+      junk(c, cust, 150); // two pages
+      stripe.failNth("invoices.list", 2, stripeApiError(500));
+      const before = stripe.callsTo("invoices.create").length;
+      const res = await post(c.apiKey, body(cust), "page2err");
+      expect(res.statusCode).toBeGreaterThanOrEqual(500);
+      expect(res.json().code).not.toBe(undefined);
+      expect(stripe.callsTo("invoices.list")).toHaveLength(2);
+      expect(stripe.callsTo("invoices.create")).toHaveLength(before);
+    });
+
     it("answers 503 INVOICE_ADOPTION_INCOMPLETE and creates nothing when the search runs out of pages", async () => {
       const c = await seedClient();
       const cust = await seedCustomer(c);
