@@ -875,6 +875,76 @@ describe("Clients API Integration", () => {
     });
   });
 
+  describe("PATCH /api/v1/clients/:id invoicingEnabled", () => {
+    async function insertClient() {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Invoicing Client",
+        email: `invoicing-${clientId}@example.com`,
+        workspace,
+        status: "active",
+      });
+      return clientId;
+    }
+
+    const patch = (clientId: string, payload: unknown) =>
+      app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId}`,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload,
+      });
+
+    it("defaults to false and lets an admin toggle it on and off", async () => {
+      const clientId = await insertClient();
+      const [initial] = await db.select().from(clients).where(eq(clients.id, clientId));
+      expect(initial.invoicingEnabled).toBe(false);
+
+      const on = await patch(clientId, { invoicingEnabled: true });
+      expect(on.statusCode).toBe(200);
+      expect(on.json().invoicingEnabled).toBe(true);
+      const [afterOn] = await db.select().from(clients).where(eq(clients.id, clientId));
+      expect(afterOn.invoicingEnabled).toBe(true);
+
+      const off = await patch(clientId, { invoicingEnabled: false });
+      expect(off.statusCode).toBe(200);
+      expect(off.json().invoicingEnabled).toBe(false);
+    });
+
+    it("leaves the flag unchanged when it is not in the body", async () => {
+      const clientId = await insertClient();
+      await patch(clientId, { invoicingEnabled: true });
+      const res = await patch(clientId, { notes: "unrelated" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().invoicingEnabled).toBe(true);
+    });
+
+    it.each(["true", 1, null, "yes"])("rejects non-boolean input %j", async (value) => {
+      const clientId = await insertClient();
+      const res = await patch(clientId, { invoicingEnabled: value });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toMatch(/invoicingEnabled/);
+      const [row] = await db.select().from(clients).where(eq(clients.id, clientId));
+      expect(row.invoicingEnabled).toBe(false);
+    });
+
+    it("requires admin auth", async () => {
+      const clientId = await insertClient();
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId}`,
+        headers: { "content-type": "application/json" },
+        payload: { invoicingEnabled: true },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+  });
+
   describe("GET /api/v1/clients/:id", () => {
     it("returns 401 if not authenticated", async () => {
       const response = await app.inject({

@@ -21,6 +21,7 @@ The primary entity for each consulting client.
 - **Contact**: `phone`, `billingContactName`.
 - **Address**: `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`.
 - **Billing**: `defaultPaymentTermsDays`.
+- **Invoicing**: `invoicingEnabled` (boolean, NOT NULL, default false; per-client opt-in for connected-account invoicing, set only by admin `PATCH /clients/:id`, never by `X-Api-Key` routes). Unused until the invoicing routes land (migration `0035_connect_invoicing_schema`).
 - **Notes**: `notes` (free-form admin text).
 - **Timestamps**: `createdAt`, `updatedAt`.
 
@@ -111,6 +112,26 @@ One row per submission of the "New invoice" Nextcloud Form (docs/BACKEND.md sect
 
 ### `billing_request_sync_state`
 Per-form baseline (`form_id` PK, `baseline_submission_id`): submissions up to that id existed before the automation was first enabled and are never processed.
+
+### `connect_customers`
+Customers created on a client's connected account for connected-account invoicing (migration `0035_connect_invoicing_schema`). **Unused until the invoicing routes land.** PK `id` (text uuid); `client_id` (FK → `clients.id`, cascade), `connected_account_id`, `stripe_customer_id`, `external_ref` (nullable opaque integrator reference, max 100 chars, no PII), `idempotency_key`, `created_at`. No PII is stored: the Customer itself lives on the connected account. Never mixed with `billing_customers` (platform account).
+
+**Indexes / constraints:**
+- `connect_customers_account_customer_uniq` — unique (`connected_account_id`, `stripe_customer_id`)
+- `connect_customers_client_external_ref_uniq` — partial unique (`client_id`, `external_ref`) WHERE `external_ref IS NOT NULL`
+- `connect_customers_client_idempotency_key_uniq` — unique (`client_id`, `idempotency_key`)
+
+### `connect_invoices`
+One row per invoice created through the connected-account invoicing API; the row is stored before any Stripe call so a retry can resume (migration `0035_connect_invoicing_schema`). **Unused until the invoicing routes land.** Deliberately separate from `payment_ledger`. PK `id` (text uuid); `client_id` (FK → `clients.id`, cascade), `connected_account_id`, `stripe_customer_id`, `idempotency_key`, `request_hash`. Create progress: `creation_state` (`reserved`, `invoice_created`, `lines_added`, `complete`), `stripe_invoice_id` (`in_...`, nullable until Stripe returns it), `stripe_fee_item_id`, `line_item_ids` (jsonb). `status` (`draft`, `open`, `paid`, `void`, `uncollectible`, `deleted`). Amounts: `currency`, `subtotal_cents`, `fee_amount_cents`, `total_cents`, `amount_paid_cents` (default 0), `amount_remaining_cents`. Stripe fields: `number`, `due_date`, `hosted_invoice_url`, `invoice_pdf`. Lifecycle: `send_count` (default 0), `finalized_at`, `sent_at`, `paid_at`, `voided_at`, `last_stripe_event_created_at` (integer, event-order guard), `last_synced_at`, `claimed_at`, `created_at`, `updated_at`.
+
+**Indexes / constraints:**
+- `connect_invoices_client_idempotency_key_uniq` — unique (`client_id`, `idempotency_key`)
+- `connect_invoices_stripe_invoice_id_uniq` — partial unique (`stripe_invoice_id`) WHERE NOT NULL
+- `connect_invoices_client_created_idx` — (`client_id`, `created_at` DESC, `id`), keyset listing
+- `connect_invoices_client_status_idx` — (`client_id`, `status`)
+- `connect_invoices_creation_state_check`, `connect_invoices_status_check` — CHECK on the enums above
+
+Both tables, and `clients.invoicing_enabled`, are in `REQUIRED_TABLES` (`backend/src/lib/schema-check.ts`).
 
 ## 3. Tooling & Migrations
 - **Schema Changes**: Edit `backend/src/db/schema.ts`.
