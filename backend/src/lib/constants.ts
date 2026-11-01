@@ -94,3 +94,22 @@ export const CONTACT_STRIPE_SYNC_MIN_INTERVAL_MS = 10 * 1000;
 export const CLIENT_ONBOARDING_MIN_WEBHOOK_SECRET_LENGTH = 32;
 // Webhook calls per minute per IP (Nextcloud sends one per submission).
 export const CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX = 60;
+
+// "New invoice" form (lib/billing-request-sync.ts). The webhook is the fast path; the poll is the
+// safety net. Retries back off like the onboarding's.
+export const BILLING_REQUESTS_DEFAULT_POLL_INTERVAL_MS = 5 * 60 * 1000;
+export const BILLING_REQUESTS_MIN_POLL_INTERVAL_MS = 30 * 1000;
+export const BILLING_REQUESTS_MAX_ATTEMPTS = 10;
+export const BILLING_REQUESTS_RETRY_BASE_MS = 60 * 1000;
+export const BILLING_REQUESTS_RETRY_MAX_MS = 60 * 60 * 1000;
+export const BILLING_REQUESTS_CLAIM_LEASE_MS = 10 * 60 * 1000;
+export const BILLING_REQUESTS_MAX_PER_CYCLE = 20;
+export const BILLING_REQUESTS_MAX_DISCOVERY_PAGES = 20;
+export const BILLING_REQUESTS_MIN_WEBHOOK_SECRET_LENGTH = 32;
+export const BILLING_REQUESTS_WEBHOOK_RATE_LIMIT_MAX = 60;
+// A submission older than this (by its Forms timestamp) is not billed unless an object of its own
+// already exists in Stripe; then it is resumed whatever its age.
+export const BILLING_REQUESTS_DEFAULT_MAX_AGE_HOURS = 72;
+// Per invoice, or per payment of a recurring plan: $25,000.
+export const BILLING_DEFAULT_MAX_AMOUNT_CENTS = 2_500_000;
+export const BILLING_DEFAULT_DAYS_UNTIL_DUE = 7;

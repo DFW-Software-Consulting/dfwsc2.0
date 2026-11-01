@@ -15,6 +15,7 @@ async function start() {
   const { WEBHOOK_PRUNE_INTERVAL_MS } = await import("./lib/constants");
   const { startSalesLeadPoller } = await import("./lib/sales-lead-sync");
   const { startClientOnboarding } = await import("./lib/client-onboarding-sync");
+  const { startBillingRequests } = await import("./lib/billing-request-sync");
   const { startContactStripeSync } = await import("./lib/contact-stripe-sync");
   const { startPortalMirror } = await import("./lib/portal-mirror-sync");
   const { startBillingMirror } = await import("./lib/billing-mirror-sync");
@@ -23,6 +24,7 @@ async function start() {
   const server = await buildServer();
   let salesLeadPoller: { stop(): Promise<void> } | null = null;
   let clientOnboarding: { stop(): Promise<void> } | null = null;
+  let billingRequests: { stop(): Promise<void> } | null = null;
   let contactStripeSync: { stop(): Promise<void> } | null = null;
   let portalMirror: { stop(): Promise<void> } | null = null;
   let billingMirror: { stop(): Promise<void> } | null = null;
@@ -59,6 +61,8 @@ async function start() {
     salesLeadPoller = startSalesLeadPoller(server.log);
     // Client onboarding: off unless CLIENT_ONBOARDING_ENABLED=true. Same guarantees.
     clientOnboarding = startClientOnboarding(server.log);
+    // "New invoice" form -> Stripe invoices and plans: off unless BILLING_REQUESTS_ENABLED=true. Same guarantees.
+    billingRequests = startBillingRequests(server.log);
     // Contact card -> billing Stripe Customer: off unless CONTACT_STRIPE_SYNC=true. Same guarantees.
     contactStripeSync = startContactStripeSync(server.log);
     // Portal Accounts -> Nextcloud Table (read-only mirror): off unless PORTAL_MIRROR=true. Same guarantees.
@@ -75,6 +79,7 @@ async function start() {
     try {
       await salesLeadPoller?.stop();
       await clientOnboarding?.stop();
+      await billingRequests?.stop();
       await contactStripeSync?.stop();
       await portalMirror?.stop();
       await billingMirror?.stop();

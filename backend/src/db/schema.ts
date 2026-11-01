@@ -571,3 +571,76 @@ export const billingSnapshots = pgTable("billing_snapshots", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// "New invoice" form (lib/billing-request-sync.ts): one row per submission of the Nextcloud form
+// that creates a one-off invoice or a recurring plan (Subscription Schedule) for a billing_customers
+// client on DFWSC's own Stripe account. Progress is saved as it happens: every Stripe object id as
+// soon as Stripe returns it, so a retry resumes instead of creating a second invoice.
+export const billingRequestSubmissions = pgTable(
+  "billing_request_submissions",
+  {
+    formId: integer("form_id").notNull(),
+    submissionId: integer("submission_id").notNull(),
+    status: text("status", { enum: ["pending", "completed", "failed"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimToken: text("claim_token"),
+    // PII-free failure code such as "unauthorized", "company_mismatch" or "stripe.invoice:503".
+    lastErrorCode: text("last_error_code"),
+    // What was asked, saved once the answers were read (also for requests that fail validation).
+    requestedBy: text("requested_by"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    clientCode: text("client_code"),
+    kind: text("kind", { enum: ["one_off", "recurring"] }),
+    amountCents: integer("amount_cents"),
+    planInterval: text("plan_interval", { enum: ["week", "bi_weekly", "month"] }),
+    planPayments: integer("plan_payments"),
+    // YYYY-MM-DD, America/Chicago.
+    planStartDate: text("plan_start_date"),
+    // Stripe objects, saved the moment they exist. Platform account only.
+    stripeStartedAt: timestamp("stripe_started_at", { withTimezone: true }),
+    stripeProductId: text("stripe_product_id"),
+    stripeInvoiceId: text("stripe_invoice_id"),
+    stripeInvoiceItemId: text("stripe_invoice_item_id"),
+    stripeScheduleId: text("stripe_schedule_id"),
+    invoiceFinalizedAt: timestamp("invoice_finalized_at", { withTimezone: true }),
+    invoiceSentAt: timestamp("invoice_sent_at", { withTimezone: true }),
+    outcome: text("outcome", { enum: ["sent", "draft", "scheduled"] }),
+    // Row in the read-only "Billing Requests" Nextcloud Table, and the hash of what it holds.
+    ncRowId: integer("nc_row_id"),
+    ncRowHash: text("nc_row_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.formId, table.submissionId] }),
+    dueIdx: index("billing_request_submissions_due_idx").on(table.status, table.nextAttemptAt),
+    statusCheck: check(
+      "billing_request_submissions_status_check",
+      sql`${table.status} IN ('pending', 'completed', 'failed')`
+    ),
+    kindCheck: check(
+      "billing_request_submissions_kind_check",
+      sql`${table.kind} IS NULL OR ${table.kind} IN ('one_off', 'recurring')`
+    ),
+    intervalCheck: check(
+      "billing_request_submissions_interval_check",
+      sql`${table.planInterval} IS NULL OR ${table.planInterval} IN ('week', 'bi_weekly', 'month')`
+    ),
+    outcomeCheck: check(
+      "billing_request_submissions_outcome_check",
+      sql`${table.outcome} IS NULL OR ${table.outcome} IN ('sent', 'draft', 'scheduled')`
+    ),
+  })
+);
+
+// Per-form baseline, as for client_onboarding_sync_state: submissions that existed before the
+// automation was enabled are never turned into invoices.
+export const billingRequestSyncState = pgTable("billing_request_sync_state", {
+  formId: integer("form_id").primaryKey(),
+  baselineSubmissionId: integer("baseline_submission_id").notNull(),
+  baselinedAt: timestamp("baselined_at", { withTimezone: true }).notNull().defaultNow(),
+});

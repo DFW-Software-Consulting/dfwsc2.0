@@ -161,6 +161,7 @@ The two client-creation routes call Stripe before their atomic database write, w
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | POST | `/webhooks/nextcloud/client-onboarding` | Trigger for the client onboarding (§10): starts a cycle, answers 202. The body is ignored. 404 when the onboarding or its webhook secret is not configured | `Authorization: Bearer <CLIENT_ONBOARDING_WEBHOOK_SECRET>` (rate-limited) |
+| POST | `/webhooks/nextcloud/billing-request` | Trigger for the "New invoice" form (§14): starts a cycle, answers 202. The body is ignored. 404 when billing requests or their webhook secret are not configured | `Authorization: Bearer <BILLING_REQUESTS_WEBHOOK_SECRET>` (rate-limited) |
 
 ## 8. Swagger
 Swagger UI is available at `/docs` when the backend is started with `ENABLE_SWAGGER=true`. It is disabled by default in production to keep the build lean.
@@ -371,3 +372,77 @@ A read-only Nextcloud Table, **Client Billing**, shows the billing state of DFWS
 - **Mirror loop.** Every cycle re-renders every row (one query) and writes only rows whose content hash differs from `portal_mirror_rows.content_hash` (`kind = 'billing'`), at most `PORTAL_MIRROR_BATCH` per cycle; per-row backoff, outage handling and the daily reconcile are those of section 12, with their own advisory lock (`billing_mirror_cycle`) and a Tables circuit breaker of its own.
 - **Rollout.** Deploy with the flag off (migration `0033_billing_snapshots`). Create the account-level Stripe endpoint and set `STRIPE_BILLING_WEBHOOK_SECRET` (docs/STRIPE.md; optional, the sweep works without it), set `BILLING_MIRROR=true`, redeploy. Disable: set it to `false`; the table, snapshots and mapping stay. The API boots regardless of this configuration.
 
+## 14. New Invoice Form (Nextcloud -> Stripe invoices and plans)
+**These are real invoices on DFWSC's live Stripe account.** Each submission of the Nextcloud Form **New invoice** creates, exactly once, either a one-off invoice or a recurring plan for a client in `billing_customers` (DFWSC's own billing Customers on the platform account; Stripe Connect is never involved and no call passes a connected account). Off unless `BILLING_REQUESTS_ENABLED=true`; the API boots whatever the configuration (a bad one is logged and the feature stays off).
+
+**Flow.** Same model as §10: Forms is the queue, progress per submission lives in `billing_request_submissions`, rows are claimed with a lease, a Nextcloud webhook (`POST /webhooks/nextcloud/billing-request`) only asks for a cycle to run now and a poll (`BILLING_REQUESTS_POLL_INTERVAL_MS`, default 5 min) runs one anyway, so a lost webhook delays a request but never loses it. Two rules keep old answers from being billed. Submissions that already exist when the form is **first** read are skipped (baseline in `billing_request_sync_state`, kept for good). And a submission whose Forms timestamp is older than `BILLING_REQUESTS_MAX_AGE_HOURS` (default 72) is marked **Expired** (`request_expired`) with no Stripe call, so submissions made while the feature was switched off are not billed when it is switched back on; resubmit if one is still wanted. The age limit also applies after a Stripe call that left no trace: a request older than that is resumed only if an object of its own is actually found (a saved invoice or schedule id, or the metadata lookup on that Customer; a Product alone does not count); if nothing is found it is marked Expired and nothing is created. Once an object exists it is resumed whatever the age.
+
+**One-off invoice.** `invoices.create` (customer, `usd`, `send_invoice`, `days_until_due` = `BILLING_DEFAULT_DAYS_UNTIL_DUE`, `pending_invoice_items_behavior: exclude`, `auto_advance: false`, memo as the description, metadata `nc_form`, `nc_submission`, `client_code`), then `invoiceItems.create` for the one line, then, when `BILLING_AUTO_SEND` is on (default), `finalizeInvoice` and `sendInvoice`. Status **Sent**; with auto-send off the invoice stays a draft in Stripe and the status is **Draft created**.
+
+**Recurring plan.** One Product per submission, then a Subscription Schedule starting at the start date 09:00 America/Chicago, `end_behavior: cancel`, `send_invoice` collection, and one phase with the price inline. The phase length is `duration: { interval, interval_count }` (payments x the interval), **not `iterations`**: on the pinned Stripe API version (`2025-09-30.clover`, stripe-node 19) a phase takes `duration` or `end_date` and `iterations` no longer exists. Weekly x 20 is `{ interval: week, interval_count: 20 }`, every 2 weeks x 10 is `{ week, 20 }`, monthly x 12 is `{ month, 12 }`. Status **Scheduled**. Stripe creates and emails each invoice itself (Dashboard: Settings > Billing > Subscriptions and emails > "Email finalized invoices"), `BILLING_AUTO_SEND` does not apply to plans.
+
+**Validation** (a refused request never reaches Stripe, is marked `failed` with a code and is not retried; resubmit the form to try again. This applies only to a request with **no Stripe link** in the result table: one that has a link exists in Stripe, so finish or void it in the Dashboard instead of resubmitting):
+
+| Code | Meaning |
+|------|---------|
+| `unauthorized` | Anonymous or unknown submitter, or not in `BILLING_REQUESTS_ALLOWED_GROUPS` |
+| `unknown_client_code` | `client_code` is not in `billing_customers` (case-insensitive) |
+| `company_mismatch` | `company` differs from `billing_customers.company` after ignoring case, repeated spaces and trailing punctuation ("Emmut Properties Corp" = "Emmut Properties Corp.") |
+| `invalid_amount`, `amount_too_large` | Amount not `^\d{1,6}(\.\d{2})?$`, zero, or above `BILLING_MAX_AMOUNT_CENTS` (default 2,500,000 = $25,000, per invoice or per plan payment) |
+| `invalid_kind`, `invalid_description`, `invalid_memo`, `invalid_client_code`, `missing_company` | Missing or malformed answer (description max 250 characters, memo max 1000) |
+| `missing_interval`, `invalid_interval` | Plan without a valid interval |
+| `invalid_payments` | Payments not a whole number from 2 to 104 |
+| `invalid_start_date`, `start_date_out_of_range` | Not a real date, or outside tomorrow to +90 days (America/Chicago, judged at the submission time) |
+| `start_date_passed` | The start time passed before the schedule was created. If an earlier attempt may have sent the create, Stripe is searched first and a schedule found is adopted instead |
+| `request_expired` | Older than `BILLING_REQUESTS_MAX_AGE_HOURS` and no Stripe object of its own exists (none saved, none found by the lookup); nothing is created (status Expired) |
+| `customer_no_email`, `customer_missing` | The Customer in Stripe has no email, or is deleted or gone. Checked with a read before anything is created, so nothing exists to clean up |
+| `unknown_client_code`, `ambiguous_client_code` | Codes are compared trimmed and upper-cased on both sides; two clients whose codes differ only in case are refused, not guessed |
+| `submission_not_found` | The submission was deleted before it was read |
+
+**Authorization.** The form is restricted to Nextcloud groups (below) and the API checks again: the submitter's user id must be in one of `BILLING_REQUESTS_ALLOWED_GROUPS` (default `dfwsc-admins,managers`), read with `GET /ocs/v2.php/cloud/users/{userId}/groups` (the service account `dfwsc-admin` is a Nextcloud admin). Anonymous (`anon-user-*`), unknown (404) and non-member submitters fail with `unauthorized`. If the groups lookup itself is unavailable the request is retried, not refused.
+
+**Retries.** Stripe 429, 5xx, no answer, 409 (same idempotency key still in flight) and an open Stripe circuit breaker are retried with backoff (1 min doubling to 1 h, at most 10 attempts; an open breaker also stops the cycle so the rest wait untouched). Any other Stripe 4xx fails the request (`stripe.<step>:<status>`). Nextcloud errors are retried the same way.
+
+**Finalized, not sent.** If the invoice was finalized but the send fails, a retryable error (429, 5xx, no answer) is retried on later cycles for the saved invoice id only (finalize is never repeated); once retries are used up, or on a permanent error, the table shows **Finalized, not sent** with the invoice link and the error code. That invoice is open and collectible in Stripe: **never resubmit the form**, send it from the Stripe Dashboard (or void it there).
+
+**Idempotency and resuming.** Every Stripe call carries the key `ncbill-{formId}-{submissionId}-{step}` (`invoice`, `item`, `finalize`, `send`, `product`, `schedule`) and the id of each created object is saved in `billing_request_submissions` right away, so a retry reuses it and resumes (for example the invoice exists but the item does not). Order for every object: the saved id; then, if an earlier attempt may have sent the create (its answer or id may have been lost), a lookup by metadata `nc_form` + `nc_submission` (paginated `invoices.list` and `subscriptionSchedules.list` for that Customer since the request was made, `invoiceItems.list` for the invoice, `products.search`), adopting what is found; only then validation that depends on time (start date passed) and the create. This runs on every retry, not only past Stripe's 24 hour key window, and the key still protects a create inside it. After a lost response the invoice email can in the worst case be sent twice, never zero times. Nothing existing is ever updated, voided or cancelled: the API only creates.
+
+**Result table.** A read-only Nextcloud Table **Billing Requests**, created and shared by the API (same helper as §12 and §13) to `BILLING_REQUESTS_SHARE_GROUPS` (default `dfwsc-admins,managers`; read-only). One row per request: Submitted, By (Nextcloud user id), Client Code, Type, Amount, Plan (for example `$1,500 weekly × 20 from 2026-11-03`), Status (Processing, Sent, Draft created, Scheduled, Finalized not sent, Expired, Failed), Error (code only) and Stripe (Dashboard link to the invoice or schedule; kept on a failed request that got as far as creating one). A request that Stripe completed is never shown as Failed because the table could not be written: that part is retried on its own. After a success the client's `billing_snapshots` row is marked dirty, so **Client Billing** (§13) refreshes within a minute. Logs carry ids and codes only, never names, descriptions or amounts.
+
+**Environment.** `BILLING_REQUESTS_ENABLED` (default false), `BILLING_REQUESTS_FORM_ID`, `BILLING_REQUESTS_WEBHOOK_SECRET` (32+ characters; unset = webhook answers 404, poll only), `BILLING_REQUESTS_POLL_INTERVAL_MS` (300000, min 30000), `BILLING_REQUESTS_ALLOWED_GROUPS`, `BILLING_REQUESTS_SHARE_GROUPS`, `BILLING_REQUESTS_MAX_AGE_HOURS` (72), `BILLING_MAX_AMOUNT_CENTS` (2500000), `BILLING_AUTO_SEND` (true), `BILLING_DEFAULT_DAYS_UNTIL_DUE` (7). Needs `NEXTCLOUD_*`.
+
+**Known limits.** The amount cap is per invoice or per plan payment; there is no cap on a plan's total (payments x amount, up to 104 x $25,000), so keep the form restricted. Answers are re-read on every attempt and not snapshotted: keep "Allow editing responses" **off** on the form, because an edit during a retry changes the parameters of an idempotent call (Stripe then refuses it and the request fails).
+
+### Form setup (exact)
+Create the form in Nextcloud Forms as `dfwsc-admin`, title **New invoice**. Questions are found by their **technical name** (Question settings > Technical name), not by title or position; extra questions are ignored and radio options are matched by their text (case and spacing ignored).
+
+| # | Title (suggested) | Type | Technical name | Required | Notes |
+|---|-------------------|------|----------------|----------|-------|
+| 1 | Client code | Short text | `client_code` | yes | for example `CP-004` |
+| 2 | Company | Short text | `company` | yes | must match the client's company (typo guard) |
+| 3 | What are you creating? | Multiple choice (radio) | `kind` | yes | options exactly `One-off invoice` and `Recurring plan` |
+| 4 | Description | Short text | `description` | yes | the invoice line, or the plan name; max 250 characters |
+| 5 | Amount (USD) | Short text | `amount_usd` | yes | digits only: `1500` or `1500.00`, no `$` or commas. Per invoice, or per payment of a plan |
+| 6 | Interval (plans only) | Multiple choice (radio) | `interval` | no | options exactly `Weekly`, `Every 2 weeks`, `Monthly` |
+| 7 | Number of payments (plans only) | Short text | `payments` | no | whole number 2 to 104 |
+| 8 | Start date (plans only) | Date | `start_date` | no | tomorrow to 90 days ahead (America/Chicago); the first invoice is created at 09:00 Chicago time |
+| 9 | Memo | Long text | `memo` | no | optional; becomes the invoice description (and the plan description) |
+
+The API refuses to process anything (and logs which names) while questions 1 to 8 are missing. Turn on "Allow multiple responses per user" (operators submit many requests) and keep the form non-anonymous and not public: an anonymous submission is refused with `unauthorized`.
+
+1. **Restrict who can submit**: Share > "Share with groups/users": `dfwsc-admins` and `managers` only; no public link. (The API checks the same groups again.)
+2. **Share the responses with `dfwsc-admin`** (the service account) with the **"View responses"** permission: the API reads the submissions with its app password. Without it every read answers 403 and nothing is processed.
+3. Note the form id (the number in `.../apps/forms/<id>/...`) for `BILLING_REQUESTS_FORM_ID`.
+4. **Register the webhook listener** (the `webhook_listeners` app, as in §10 step 7), as a Nextcloud admin:
+   ```sh
+   curl -u <admin>:<app-password> -H 'OCS-APIRequest: true' -H 'Content-Type: application/json' \
+     -X POST 'https://cloud.dfwsc.com/ocs/v2.php/apps/webhook_listeners/api/v1/webhooks' \
+     -d '{"httpMethod":"POST",
+          "uri":"https://<api-host>/api/v1/webhooks/nextcloud/billing-request",
+          "event":"OCA\\Forms\\Events\\FormSubmittedEvent",
+          "eventFilter":{"event.form.id":<form id>},
+          "authMethod":"header",
+          "authData":{"Authorization":"Bearer <BILLING_REQUESTS_WEBHOOK_SECRET>"}}'
+   ```
+   It is optional: without it the poll picks submissions up within `BILLING_REQUESTS_POLL_INTERVAL_MS`.
+5. Set the environment, deploy, then set `BILLING_REQUESTS_ENABLED=true`. The first cycle records the baseline and creates the **Billing Requests** table (shared read-only).

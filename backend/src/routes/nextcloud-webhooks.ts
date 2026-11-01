@@ -1,7 +1,12 @@
 import crypto from "node:crypto";
 import type { FastifyInstance } from "fastify";
+import { getBillingRequestsWebhook } from "../lib/billing-request-sync";
 import { getClientOnboardingWebhook } from "../lib/client-onboarding-sync";
-import { CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
+import {
+  BILLING_REQUESTS_WEBHOOK_RATE_LIMIT_MAX,
+  CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX,
+  RATE_LIMIT_WINDOW_MS,
+} from "../lib/constants";
 import { rateLimit } from "../lib/rate-limit";
 
 /**
@@ -63,6 +68,37 @@ export default async function nextcloudWebhookRoutes(fastify: FastifyInstance) {
     async (_request, reply) => {
       // The secret was checked in onRequest; the webhook can only have gone away since.
       const webhook = getClientOnboardingWebhook();
+      if (!webhook) return reply.status(404).send({ error: "Not Found" });
+      webhook.trigger();
+      return reply.status(202).send({ accepted: true });
+    }
+  );
+
+  // ── POST /webhooks/nextcloud/billing-request ────────────────────────────────
+  // Same contract as the client-onboarding webhook, for the "New invoice" form: called by
+  // webhook_listeners on OCA\Forms\Events\FormSubmittedEvent, the body is never read, it only
+  // starts (or queues) a cycle that re-reads the submissions from the Forms API. 404 when billing
+  // requests or their webhook secret are not configured; 401 on a wrong secret.
+  fastify.post(
+    "/webhooks/nextcloud/billing-request",
+    {
+      onRequest: [
+        rateLimit({
+          max: BILLING_REQUESTS_WEBHOOK_RATE_LIMIT_MAX,
+          windowMs: RATE_LIMIT_WINDOW_MS,
+        }),
+        async (request, reply) => {
+          const webhook = getBillingRequestsWebhook();
+          if (!webhook) return reply.status(404).send({ error: "Not Found" });
+          if (!isAuthorizedWebhook(request.headers.authorization, webhook.secret)) {
+            request.log.warn("Nextcloud billing request webhook rejected: bad or missing secret.");
+            return reply.status(401).send({ error: "Unauthorized" });
+          }
+        },
+      ],
+    },
+    async (_request, reply) => {
+      const webhook = getBillingRequestsWebhook();
       if (!webhook) return reply.status(404).send({ error: "Not Found" });
       webhook.trigger();
       return reply.status(202).send({ accepted: true });
