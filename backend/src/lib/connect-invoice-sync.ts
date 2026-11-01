@@ -62,14 +62,29 @@ export async function applyStripeInvoice(
   return applyInvoicePatch(exec, row, patch, extra);
 }
 
-function stripeStatusOf(err: unknown): number | undefined {
-  const status = (err as { statusCode?: unknown } | null)?.statusCode;
-  return typeof status === "number" ? status : undefined;
-}
+/**
+ * How a failed re-read of an invoice is handled.
+ * - `missing`: Stripe has no such invoice (404 or resource_missing).
+ * - `ack`: a definite answer about this one invoice that a retry cannot change (a 400 invalid
+ *   request that is not about credentials).
+ * - `retry`: anything that can heal or be fixed: a bad or rotated key (401), a permission error
+ *   (403), a rate limit (429), a lock (409), 5xx, network errors, timeouts. The webhook answers
+ *   non-2xx so Stripe redelivers, rather than dropping the only push signal.
+ */
+export type InvoiceReadErrorClass = "missing" | "ack" | "retry";
 
-function isResourceMissing(err: unknown): boolean {
-  const e = err as { code?: unknown } | null;
-  return stripeStatusOf(err) === 404 || e?.code === "resource_missing";
+const AUTH_ERROR_TYPES = new Set(["StripeAuthenticationError", "StripePermissionError"]);
+
+export function classifyInvoiceReadError(err: unknown): InvoiceReadErrorClass {
+  const e = err as { statusCode?: unknown; code?: unknown; type?: unknown } | null;
+  const status = typeof e?.statusCode === "number" ? e.statusCode : undefined;
+  if (status === 404 || e?.code === "resource_missing") return "missing";
+  if (status !== 400) return "retry";
+  if (typeof e?.type === "string" && AUTH_ERROR_TYPES.has(e.type)) return "retry";
+  if (typeof e?.code === "string" && /^(api_key|account_invalid|platform_)/.test(e.code)) {
+    return "retry";
+  }
+  return "ack";
 }
 
 /**
@@ -124,26 +139,30 @@ export async function syncConnectInvoice(
     );
   } catch (err) {
     if (isCircuitOpenError(err) || isStripeBusyError(err)) throw err;
-    if (isResourceMissing(err)) {
-      await applyInvoicePatch(
+    const kind = classifyInvoiceReadError(err);
+    if (kind === "retry") throw err;
+    if (kind === "missing") {
+      // Only a draft can be deleted: the status guard refuses anything further along.
+      const after = await applyInvoicePatch(
         db,
         row,
         { status: "deleted", lastSyncedAt: new Date() },
         eventStamp(event)
       );
+      if (after.status !== "deleted") {
+        logger.warn(
+          { ...log, rowId: row.id, invoiceId, accountId: account, status: after.status },
+          "Invoice is missing on Stripe but the row is past draft; left as is."
+        );
+      }
       return;
     }
-    const status = stripeStatusOf(err);
-    if (status !== undefined && status >= 400 && status < 500 && status !== 429) {
-      // A retry never helps (revoked access, bad request). Codes only: Stripe's message can
-      // quote customer data.
-      logger.warn(
-        { ...log, stripeCode: (err as { code?: unknown } | null)?.code },
-        "Invoice event could not be synced; Stripe refused the read."
-      );
-      return;
-    }
-    throw err;
+    // Codes only: Stripe's message can quote customer data.
+    logger.warn(
+      { ...log, stripeCode: (err as { code?: unknown } | null)?.code },
+      "Invoice event could not be synced; Stripe refused the read."
+    );
+    return;
   }
 
   const extra: RowExtra = eventStamp(event);

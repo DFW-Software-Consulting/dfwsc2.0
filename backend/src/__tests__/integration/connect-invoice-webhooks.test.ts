@@ -374,6 +374,22 @@ describe("Connect webhook sync of connected-account invoices", () => {
       expect((await rowOf(open)).status).toBe("open");
     });
 
+    it("warns with ids and status when a 404 hits a row past draft", async () => {
+      const c = await seedClient();
+      const paid = await seedInvoice(c, { status: "paid" });
+      stripe.reset();
+      const { lines, logger } = recorder();
+      await syncConnectInvoice(makeEvent("invoice.deleted", paid, c.account) as never, logger);
+      const row = await rowOf(paid);
+      expect(row.status).toBe("paid");
+      const all = lines.join("\n");
+      expect(all).toContain("past draft");
+      expect(all).toContain(paid);
+      expect(all).toContain(c.account);
+      expect(all).toContain(row.id);
+      expect(all).toContain('"status":"paid"');
+    });
+
     it("an open circuit answers non-2xx and releases the claim; the redelivery succeeds", async () => {
       const c = await seedClient();
       const id = await seedInvoice(c, {}, { status: "paid", amount_paid: 100_250 });
@@ -393,12 +409,24 @@ describe("Connect webhook sync of connected-account invoices", () => {
       expect((await rowOf(id)).status).toBe("paid");
     });
 
-    it("5xx, rate limit and connection errors answer non-2xx so Stripe retries", async () => {
+    it("401, 403, 409, 429, 5xx and connection errors answer non-2xx so Stripe retries", async () => {
       const c = await seedClient();
       const id = await seedInvoice(c);
       const errors = [
         stripeApiError(500),
         stripeApiError(429),
+        new Stripe.errors.StripeAuthenticationError({
+          type: "authentication_error",
+          statusCode: 401,
+        } as never),
+        new Stripe.errors.StripePermissionError({
+          type: "invalid_request_error",
+          statusCode: 403,
+        } as never),
+        new Stripe.errors.StripeInvalidRequestError({
+          type: "invalid_request_error",
+          statusCode: 409,
+        } as never),
         new Stripe.errors.StripeConnectionError({
           type: "api_error",
           message: "An error occurred with our connection to Stripe.",
@@ -410,7 +438,7 @@ describe("Connect webhook sync of connected-account invoices", () => {
         stripe.failNth("invoices.retrieve", 1, error);
         const event = makeEvent("invoice.paid", id, c.account);
         const res = await post(event);
-        expect(res.statusCode, `error ${i}`).toBeGreaterThanOrEqual(429);
+        expect(res.statusCode, `error ${i}`).toBeGreaterThanOrEqual(400);
         expect((await rowOf(id)).status).toBe("open");
         const [lease] = await db
           .select()
@@ -421,30 +449,77 @@ describe("Connect webhook sync of connected-account invoices", () => {
       }
     });
 
-    it("a permanent 4xx is acked with a warn carrying the code and no Stripe message", async () => {
+    it("a definite 400 is acked with a warn carrying the code and no Stripe message", async () => {
       const c = await seedClient();
       const id = await seedInvoice(c);
       stripe.failNth(
         "invoices.retrieve",
         1,
-        new Stripe.errors.StripePermissionError({
+        new Stripe.errors.StripeInvalidRequestError({
           type: "invalid_request_error",
-          statusCode: 403,
-          code: "account_invalid",
-          message: `revoked for ${EMAIL} ${HOSTED}`,
+          statusCode: 400,
+          code: "parameter_invalid_empty",
+          message: `bad ${EMAIL} ${HOSTED}`,
         } as never)
       );
       const { lines, logger } = recorder();
       await syncConnectInvoice(makeEvent("invoice.paid", id, c.account) as never, logger);
       const all = lines.join("\n");
-      expect(all).toContain("account_invalid");
+      expect(all).toContain("parameter_invalid_empty");
       expect(all).not.toContain(EMAIL);
       expect(all).not.toContain("invoice.example");
       expect((await rowOf(id)).status).toBe("open");
       expect((await rowOf(id)).lastSyncedAt).toBeNull();
 
-      stripe.failNth("invoices.retrieve", 2, stripeApiError(403));
+      stripe.failNth("invoices.retrieve", 2, stripeApiError(400));
       expect((await post(makeEvent("invoice.paid", id, c.account))).statusCode).toBe(200);
+    });
+
+    it("the retry path logs ids and codes, never the Stripe message", async () => {
+      const c = await seedClient();
+      const id = await seedInvoice(c);
+      stripe.failNth(
+        "invoices.retrieve",
+        1,
+        new Stripe.errors.StripeAPIError({
+          type: "api_error",
+          statusCode: 500,
+          code: "boom",
+          message: `down for ${EMAIL} ${HOSTED}`,
+        } as never)
+      );
+      const errorLog = vi.spyOn(app.log, "error");
+      const event = makeEvent("invoice.paid", id, c.account);
+      expect((await post(event)).statusCode).toBeGreaterThanOrEqual(500);
+      const logged = JSON.stringify(errorLog.mock.calls);
+      expect(logged).toContain(event.id);
+      expect(logged).toContain("boom");
+      expect(logged).toContain("500");
+      expect(logged).not.toContain(EMAIL);
+      expect(logged).not.toContain("invoice.example");
+    });
+
+    it("a Postgres failure during the sync answers non-2xx, releases the claim and a redelivery succeeds", async () => {
+      const c = await seedClient();
+      const id = await seedInvoice(c, {}, { status: "paid", amount_paid: 100_250 });
+      const event = makeEvent("invoice.paid", id, c.account);
+      const original = db.update.bind(db);
+      vi.spyOn(db, "update").mockImplementation(((table: unknown) => {
+        if (table === connectInvoices) throw new Error(`db down ${EMAIL}`);
+        return (original as any)(table);
+      }) as never);
+      const res = await post(event);
+      expect(res.statusCode).toBe(500);
+      expect((await rowOf(id)).status).toBe("open");
+      const [lease] = await db
+        .select()
+        .from(webhookEvents)
+        .where(eq(webhookEvents.stripeEventId, event.id));
+      expect(lease).toBeUndefined();
+
+      vi.restoreAllMocks();
+      expect((await post(event)).statusCode).toBe(200);
+      expect((await rowOf(id)).status).toBe("paid");
     });
 
     it("an invoice Stripe returns without a status is acked and not written", async () => {
@@ -486,6 +561,20 @@ describe("Connect webhook sync of connected-account invoices", () => {
         200
       );
       expect((await rowOf(id)).lastStripeEventCreatedAt).toBe(T0 + 200);
+    });
+
+    it("syncs while a lifecycle claim is held and leaves claimed_at alone", async () => {
+      const c = await seedClient();
+      const claimedAt = new Date(Date.now() - 1000);
+      const id = await seedInvoice(
+        c,
+        { claimedAt },
+        { status: "paid", amount_paid: 100_250, amount_remaining: 0 }
+      );
+      expect((await post(makeEvent("invoice.paid", id, c.account))).statusCode).toBe(200);
+      const row = await rowOf(id);
+      expect(row.status).toBe("paid");
+      expect(row.claimedAt).toEqual(claimedAt);
     });
 
     it("an uncollectible row can still become paid", async () => {
@@ -542,11 +631,24 @@ describe("Connect webhook sync of connected-account invoices", () => {
         ...makeEvent("invoice.paid", id, undefined),
         data: { object: { id, customer: "cus_unknown_to_billing" } },
       };
+      const info = vi.spyOn(app.log, "info");
+      const before = await rowOf(id);
       const res = await post(event, BILLING_URL);
       delete process.env.STRIPE_BILLING_WEBHOOK_SECRET;
       expect(res.statusCode).toBe(200);
+      // The billing handler ran: it logged its own line for this event and marked it processed.
+      expect(info).toHaveBeenCalledWith(
+        expect.objectContaining({ eventId: event.id, eventType: "invoice.paid", known: false }),
+        "Billing webhook handled."
+      );
+      const [lease] = await db
+        .select()
+        .from(webhookEvents)
+        .where(eq(webhookEvents.stripeEventId, event.id));
+      expect(lease?.processedAt).toBeInstanceOf(Date);
+      // The Connect sync did not: no Stripe read and the connect row is byte-for-byte unchanged.
       expect(retrieves()).toHaveLength(0);
-      expect((await rowOf(id)).lastSyncedAt).toBeNull();
+      expect(await rowOf(id)).toEqual(before);
     });
 
     it("a webhook write resets the 30 s clock, so GET does not re-read the invoice", async () => {

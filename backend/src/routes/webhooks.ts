@@ -21,6 +21,23 @@ function isNonRetryableDbError(err: unknown): boolean {
   return isUniqueViolation(err);
 }
 
+// Only identifiers: a Stripe error message can quote customer data (emails, hosted URLs).
+function safeErrorFields(err: unknown) {
+  const e = err as {
+    type?: unknown;
+    code?: unknown;
+    statusCode?: unknown;
+    requestId?: unknown;
+    name?: unknown;
+  } | null;
+  return {
+    errType: e?.type ?? e?.name,
+    errCode: e?.code,
+    errStatusCode: e?.statusCode,
+    errRequestId: e?.requestId,
+  };
+}
+
 const CIRCUIT_OPEN_ERROR = { error: "Stripe service temporarily unavailable" };
 
 // ── Ledger update helpers ──────────────────────────────────────────────────────
@@ -513,7 +530,7 @@ export default async function webhooksRoute(fastify: FastifyInstance) {
         // Retryable failure: release the claim so Stripe's retry can re-process.
         await releaseStripeEvent(event.id);
         fastify.log.error(
-          { err, eventId: event.id, eventType: event.type },
+          { ...safeErrorFields(err), eventId: event.id, eventType: event.type },
           "Webhook event processing failed; released claim so Stripe can retry"
         );
         if (mapStripeError(err, reply, { circuitOpen: CIRCUIT_OPEN_ERROR })) return;
