@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../lib/stripe", async () => {
@@ -29,6 +29,7 @@ import {
 } from "../helpers/fake-stripe-connect-invoicing";
 
 const EMAIL = "tenant.private@example.com";
+const sha = (v: string) => createHash("sha256").update(v).digest("hex");
 
 describe("connected-account customers API (/api/v1/customers)", () => {
   let app: any;
@@ -211,6 +212,7 @@ describe("connected-account customers API (/api/v1/customers)", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
         stripeCustomerId: body.id,
+        idempotencyKey: expect.stringMatching(/^[0-9a-f]{64}$/),
         connectedAccountId: c.account,
         externalRef: "unit-12",
       });
@@ -223,7 +225,7 @@ describe("connected-account customers API (/api/v1/customers)", () => {
       const c = await seedClient();
       await post(c.apiKey, { email: EMAIL }, "my-key");
       expect(stripe.callsTo("customers.create")[0].options?.idempotencyKey).toBe(
-        `${c.id}:cust:my-key`
+        `${c.id}:cust:${sha("my-key")}`
       );
     });
 
@@ -321,7 +323,7 @@ describe("connected-account customers API (/api/v1/customers)", () => {
           connectedAccountId: c.account,
           stripeCustomerId: created.id,
           externalRef: null,
-          idempotencyKey: "twin",
+          idempotencyKey: sha("twin"),
         });
         first = created;
       };
@@ -332,16 +334,151 @@ describe("connected-account customers API (/api/v1/customers)", () => {
       expect(stripe.liveCustomers(c.account)).toHaveLength(1);
     });
 
-    it("answers 503 and keeps the key retryable when the insert fails for another reason", async () => {
+    it("answers 503 on a non-unique insert failure; a retry re-adopts the same Stripe customer", async () => {
       const c = await seedClient();
-      stripe.afterCreate = async () => {
-        stripe.afterCreate = null;
-        // Remove the client so the FK insert fails with a non-unique error.
-        await db.delete(clients).where(eq(clients.id, c.id));
-      };
-      const res = await post(c.apiKey, { email: EMAIL }, "persist");
+      const spy = vi.spyOn(db, "insert").mockImplementationOnce(() => {
+        throw new Error("db down");
+      });
+      const res = await post(c.apiKey, { email: EMAIL, externalRef: "p-1" }, "persist");
+      spy.mockRestore();
       expect(res.statusCode).toBe(503);
       expect(res.json().code).toBe("CUSTOMER_PERSISTENCE_FAILED");
+      expect(stripe.liveCustomers(c.account)).toHaveLength(1);
+
+      const retry = await post(c.apiKey, { email: EMAIL, externalRef: "p-1" }, "persist");
+      expect(retry.statusCode).toBe(201);
+      const live = stripe.liveCustomers(c.account);
+      expect(live).toHaveLength(1);
+      expect(retry.json().id).toBe(live[0].id);
+      expect(stripe.callsTo("customers.del")).toHaveLength(0);
+      const rows = await db
+        .select()
+        .from(connectCustomers)
+        .where(eq(connectCustomers.clientId, c.id));
+      expect(rows).toHaveLength(1);
+    });
+
+    it("rejects a replayed Idempotency-Key whose body differs (409 IDEMPOTENCY_KEY_REUSED)", async () => {
+      const c = await seedClient();
+      const base = {
+        email: "First@Example.com",
+        name: "First",
+        phone: "555",
+        externalRef: "same-ref",
+        metadata: { a: "1", b: "2" },
+      };
+      expect((await post(c.apiKey, base, "k-replay")).statusCode).toBe(201);
+      // Same body, normalized: case/whitespace in email, reordered metadata.
+      const same = await post(
+        c.apiKey,
+        { ...base, email: " first@example.com ", metadata: { b: "2", a: "1" } },
+        "k-replay"
+      );
+      expect(same.statusCode).toBe(200);
+      const variants = [
+        { ...base, email: "other@example.com" },
+        { ...base, externalRef: "other-ref" },
+        { ...base, externalRef: undefined },
+        { ...base, name: "Second" },
+        { ...base, phone: undefined },
+        { ...base, metadata: { a: "1" } },
+        { ...base, metadata: { a: "1", b: "3" } },
+        { ...base, metadata: { a: "1", b: "2", c: "3" } },
+      ];
+      for (const body of variants) {
+        const res = await post(c.apiKey, body, "k-replay");
+        expect(res.statusCode, JSON.stringify(body)).toBe(409);
+        expect(res.json().code).toBe("IDEMPOTENCY_KEY_REUSED");
+      }
+      expect(stripe.callsTo("customers.create")).toHaveLength(1);
+    });
+
+    it("treats absent, null-like and empty optional fields as equal on replay", async () => {
+      const c = await seedClient();
+      expect((await post(c.apiKey, { email: EMAIL }, "k-empty")).statusCode).toBe(201);
+      const again = await post(c.apiKey, { email: EMAIL, name: "", phone: "" }, "k-empty");
+      expect(again.statusCode).toBe(200);
+    });
+
+    it("does not spend a write token on a 400", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-01T09:00:00Z"));
+      const c = await seedClient();
+      expect((await post(c.apiKey, { email: "bad" })).statusCode).toBe(400);
+      expect((await post(c.apiKey, { email: EMAIL }, null)).statusCode).toBe(400);
+      expect((await patch(c.apiKey, "cus_1", {})).statusCode).toBe(400);
+      expect(
+        tokenBuckets.get(`ratelimit:bucket:POST:/api/v1/customers:stripe:${c.account}`)
+      ).toBeUndefined();
+    });
+
+    it("refunds the token when the replay's Stripe read is refused by an open circuit", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-01T09:00:00Z"));
+      const c = await seedClient();
+      expect((await post(c.apiKey, { email: EMAIL }, "k-open")).statusCode).toBe(201);
+      openStripeCircuitForTests();
+      const res = await post(c.apiKey, { email: EMAIL }, "k-open");
+      expect(res.statusCode).toBe(503);
+      expect(
+        tokenBuckets.get(`ratelimit:bucket:POST:/api/v1/customers:stripe:${c.account}`)?.tokens
+      ).toBeCloseTo(INVOICE_WRITE_BUCKET_CAPACITY - 1, 0);
+    });
+
+    it("ignores unknown body fields on create and update, like POST /payments/create", async () => {
+      const c = await seedClient();
+      const res = await post(c.apiKey, { email: EMAIL, address: { line1: "x" } });
+      expect(res.statusCode).toBe(201);
+      expect(stripe.callsTo("customers.create")[0].params).not.toHaveProperty("address");
+      const upd = await patch(c.apiKey, res.json().id, { name: "N", address: "x" });
+      expect(upd.statusCode).toBe(200);
+      expect(stripe.callsTo("customers.update")[0].params).toEqual({
+        id: res.json().id,
+        name: "N",
+      });
+    });
+
+    it("does not delete a customer a stored row still references, and answers CUSTOMER_EXISTS", async () => {
+      const c = await seedClient();
+      stripe.afterCreate = async (created) => {
+        stripe.afterCreate = null;
+        // A different request recorded this very Stripe customer under the contested externalRef.
+        await db.insert(connectCustomers).values({
+          id: randomUUID(),
+          clientId: c.id,
+          connectedAccountId: c.account,
+          stripeCustomerId: created.id,
+          externalRef: "ref-shared",
+          idempotencyKey: sha("someone-else"),
+        });
+      };
+      const res = await post(c.apiKey, { email: EMAIL, externalRef: "ref-shared" });
+      expect(res.statusCode).toBe(409);
+      expect(res.json().code).toBe("CUSTOMER_EXISTS");
+      expect(stripe.callsTo("customers.del")).toHaveLength(0);
+      expect(stripe.liveCustomers(c.account)).toHaveLength(1);
+    });
+
+    it("answers 503 (not CUSTOMER_EXISTS) and deletes nothing on an unrecognised unique violation", async () => {
+      const c = await seedClient();
+      stripe.afterCreate = async (created) => {
+        stripe.afterCreate = null;
+        // Same Stripe customer recorded under another key and no externalRef: neither a same-key
+        // race nor an externalRef conflict.
+        await db.insert(connectCustomers).values({
+          id: randomUUID(),
+          clientId: c.id,
+          connectedAccountId: c.account,
+          stripeCustomerId: created.id,
+          externalRef: null,
+          idempotencyKey: sha("another-key"),
+        });
+      };
+      const res = await post(c.apiKey, { email: EMAIL }, "odd");
+      expect(res.statusCode).toBe(503);
+      expect(res.json().code).toBe("CUSTOMER_PERSISTENCE_FAILED");
+      expect(stripe.callsTo("customers.del")).toHaveLength(0);
+      expect(stripe.liveCustomers(c.account)).toHaveLength(1);
     });
 
     it("validates the request", async () => {

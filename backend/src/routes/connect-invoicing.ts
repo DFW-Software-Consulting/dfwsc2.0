@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
@@ -69,7 +70,6 @@ const updateBodySchema = z
     name: nameSchema.optional(),
     phone: phoneSchema.optional(),
   })
-  .strict()
   .refine((b) => b.email !== undefined || b.name !== undefined || b.phone !== undefined, {
     message: "At least one of email, name or phone is required.",
   });
@@ -139,6 +139,33 @@ function requireInvoicingClient(mode: "read" | "write") {
 const accountOf = (request: FastifyRequest): string =>
   (request as RequestWithClient).client.stripeAccountId as string;
 
+interface ReplayRequest {
+  email: string;
+  name?: string;
+  phone?: string;
+  externalRef?: string;
+  userMetadata: Record<string, string>;
+}
+
+const norm = (v: string | null | undefined) => (v ?? "").trim();
+
+/**
+ * Does a replayed create carry the same request as the stored customer? Email, name, phone and
+ * user metadata come from the Stripe customer (Postgres holds no PII), externalRef from the row.
+ * Absent, null and empty compare equal; email is compared case-insensitively.
+ */
+function replayMatches(row: CustomerRow, customer: Stripe.Customer, req: ReplayRequest): boolean {
+  if (norm(req.externalRef) !== norm(row.externalRef)) return false;
+  if (norm(req.email).toLowerCase() !== norm(customer.email).toLowerCase()) return false;
+  if (norm(req.name) !== norm(customer.name)) return false;
+  if (norm(req.phone) !== norm(customer.phone)) return false;
+  const stored = Object.entries(customer.metadata ?? {})
+    .filter(([k]) => !k.startsWith(USER_METADATA_RESERVED_PREFIX))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const sent = Object.entries(req.userMetadata).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify(stored) === JSON.stringify(sent);
+}
+
 export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   const writeBucket = tokenBucketRateLimit({
     capacity: INVOICE_WRITE_BUCKET_CAPACITY,
@@ -152,7 +179,13 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     keyGenerator: (request) => `client:${(request as RequestWithClient).client.id}`,
   });
 
-  const writeGuards = [requireInvoicingClient("write"), writeBucket];
+  // The write token is taken inside each handler, after header and body validation, so a request
+  // that fails with a 400 never spends one.
+  const writeGuards = [requireInvoicingClient("write")];
+  async function takeWriteToken(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+    await writeBucket(request, reply);
+    return !reply.sent;
+  }
   const readGuards = [requireInvoicingClient("read"), readLimit];
 
   /**
@@ -222,16 +255,29 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     request: FastifyRequest,
     reply: FastifyReply,
     row: CustomerRow,
-    status = 200
+    status = 200,
+    replayOf?: ReplayRequest
   ) {
-    const customer = await stripeCall(request, reply, "customers.retrieve", () =>
-      stripe.customers.retrieve(row.stripeCustomerId, undefined, {
-        stripeAccount: accountOf(request),
-      })
+    const customer = await stripeCall(
+      request,
+      reply,
+      "customers.retrieve",
+      () =>
+        stripe.customers.retrieve(row.stripeCustomerId, undefined, {
+          stripeAccount: accountOf(request),
+        }),
+      { write: Boolean(replayOf) }
     );
     if (customer === undefined) return reply;
     if (isDeletedCustomer(customer)) {
       return reply.code(404).send({ error: "Customer not found.", code: "NOT_FOUND" });
+    }
+    if (replayOf && !replayMatches(row, customer, replayOf)) {
+      return reply.code(409).send({
+        error:
+          "This Idempotency-Key was already used for a different customer. Use a new unique key for each new customer.",
+        code: "IDEMPOTENCY_KEY_REUSED",
+      });
     }
     return reply.code(status).send(sanitizeCustomer(row, customer));
   }
@@ -246,13 +292,14 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     if (!keyHeader || keyHeader.trim().length === 0) {
       throw errors.badRequest("Idempotency-Key header is required.");
     }
-    const idempotencyKey = keyHeader.trim();
-    const stripeIdempotencyKey = `${clientId}:cust:${idempotencyKey}`;
-    if (stripeIdempotencyKey.length > 255) {
-      throw errors.badRequest(
-        `Idempotency-Key must not exceed ${255 - clientId.length - ":cust:".length - 1} characters.`
-      );
+    const rawKey = keyHeader.trim();
+    if (rawKey.length > 255) {
+      throw errors.badRequest("Idempotency-Key must not exceed 255 characters.");
     }
+    // Only a hash of the caller's key is stored and sent to Stripe: the key is free text and could
+    // otherwise carry personal data into Postgres.
+    const idempotencyKey = createHash("sha256").update(rawKey).digest("hex");
+    const stripeIdempotencyKey = `${clientId}:cust:${idempotencyKey}`;
 
     const body = parseBody(createBodySchema, request.body, reply);
     if (!body) return;
@@ -269,6 +316,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
       ...(body.externalRef ? { dfwsc_external_ref: body.externalRef } : {}),
     });
 
+    if (!(await takeWriteToken(request, reply))) return;
+
     // Same (client, Idempotency-Key) again: answer with the stored customer, no new Stripe create.
     // Checked before externalRef so a retry of a request that already succeeded is a replay, not a
     // CUSTOMER_EXISTS conflict with itself.
@@ -282,7 +331,15 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         )
       )
       .limit(1);
-    if (replay) return replyWithCustomer(request, reply, replay, 200);
+    if (replay) {
+      return replyWithCustomer(request, reply, replay, 200, {
+        email: body.email,
+        name: body.name,
+        phone: body.phone,
+        externalRef: body.externalRef,
+        userMetadata,
+      });
+    }
 
     // Existing externalRef: conflict, decided locally before any Stripe call.
     if (body.externalRef) {
@@ -353,11 +410,15 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
   }
 
   /**
-   * A unique violation after the Stripe create. Either the same Idempotency-Key raced itself (both
-   * requests got the same Stripe customer: answer with the stored one and delete nothing), or the
-   * externalRef was taken in between: this request's Stripe customer is an orphan, so it is deleted
-   * on a best effort and the caller gets 409 CUSTOMER_EXISTS. A failed delete only leaves an
-   * unreferenced customer on the client's own account (its id is logged).
+   * A unique violation after the Stripe create. Three cases:
+   * - the same Idempotency-Key raced itself and both got the same Stripe customer: answer with the
+   *   stored one, delete nothing;
+   * - the externalRef was taken in between: this request's Stripe customer is an orphan, so it is
+   *   deleted on a best effort (only if no stored row references it) and the caller gets 409
+   *   CUSTOMER_EXISTS. A failed delete only leaves an unreferenced customer on the client's own
+   *   account (its id is logged);
+   * - anything else: nothing is deleted and the caller gets 503 CUSTOMER_PERSISTENCE_FAILED, to
+   *   retry with the same key (Stripe hands back the same customer inside its 24 hour window).
    */
   async function handleInsertRace(
     request: FastifyRequest,
@@ -374,23 +435,8 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
         )
       )
       .limit(1);
-    if (sameKey) {
-      if (sameKey.stripeCustomerId === row.stripeCustomerId) {
-        return replyWithCustomer(request, reply, sameKey, 200);
-      }
-    }
-
-    try {
-      await withStripeCircuit(() =>
-        stripe.customers.del(row.stripeCustomerId, undefined, {
-          stripeAccount: row.connectedAccountId,
-        })
-      );
-    } catch {
-      request.log.warn(
-        { clientId: row.clientId, stripeCustomerId: row.stripeCustomerId },
-        "Could not delete orphan Stripe customer after insert race"
-      );
+    if (sameKey && sameKey.stripeCustomerId === row.stripeCustomerId) {
+      return replyWithCustomer(request, reply, sameKey, 200);
     }
 
     const [existing] = row.externalRef
@@ -404,12 +450,42 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
             )
           )
           .limit(1)
-      : [sameKey];
+      : [];
     if (!existing) {
-      return reply.code(409).send({
-        error: "A customer with this externalRef already exists.",
-        code: "CUSTOMER_EXISTS",
+      request.log.error(
+        { clientId: row.clientId, stripeCustomerId: row.stripeCustomerId },
+        "Customer insert hit an unexpected unique violation; returning 503"
+      );
+      return reply.code(503).send({
+        error:
+          "Customer created but confirmation failed. Please retry with the same Idempotency-Key.",
+        code: "CUSTOMER_PERSISTENCE_FAILED",
       });
+    }
+
+    const [referenced] = await db
+      .select({ id: connectCustomers.id })
+      .from(connectCustomers)
+      .where(
+        and(
+          eq(connectCustomers.connectedAccountId, row.connectedAccountId),
+          eq(connectCustomers.stripeCustomerId, row.stripeCustomerId)
+        )
+      )
+      .limit(1);
+    if (!referenced) {
+      try {
+        await withStripeCircuit(() =>
+          stripe.customers.del(row.stripeCustomerId, undefined, {
+            stripeAccount: row.connectedAccountId,
+          })
+        );
+      } catch {
+        request.log.warn(
+          { clientId: row.clientId, stripeCustomerId: row.stripeCustomerId },
+          "Could not delete orphan Stripe customer after insert race"
+        );
+      }
     }
     return customerExists(reply, existing.stripeCustomerId);
   }
@@ -447,6 +523,7 @@ export default async function connectInvoicingRoutes(fastify: FastifyInstance) {
     if (!params) return;
     const body = parseBody(updateBodySchema, request.body, reply);
     if (!body) return;
+    if (!(await takeWriteToken(request, reply))) return;
     const row = await findOwned((request as RequestWithClient).client.id, params.id);
     if (!row) return reply.code(404).send({ error: "Customer not found.", code: "NOT_FOUND" });
 
