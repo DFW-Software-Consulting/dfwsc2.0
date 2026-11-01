@@ -29,6 +29,7 @@ interface ClientPatchBody {
   country?: string | null;
   notes?: string | null;
   defaultPaymentTermsDays?: number | null;
+  invoicingEnabled?: boolean;
 }
 
 interface ClientParams {
@@ -66,6 +67,7 @@ const clientPatchBodySchema = z
     country: nullableString.optional(),
     notes: nullableString.optional(),
     defaultPaymentTermsDays: z.number().nullable().optional(),
+    invoicingEnabled: z.boolean({ error: "invoicingEnabled must be a boolean." }).optional(),
   })
   .superRefine((body, ctx) => {
     if (body.paymentSuccessUrl != null && !isValidHttpsUrl(body.paymentSuccessUrl)) {
@@ -175,6 +177,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
           workspace: clients.workspace,
           groupId: clients.groupId,
           chargesEnabled: clients.chargesEnabled,
+          invoicingEnabled: clients.invoicingEnabled,
           detailsSubmitted: clients.detailsSubmitted,
           payoutsEnabled: clients.payoutsEnabled,
           processingFeePercent: clients.processingFeePercent,
@@ -339,6 +342,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         country?: string | null;
         notes?: string | null;
         defaultPaymentTermsDays?: number | null;
+        invoicingEnabled?: boolean;
       } = { updatedAt: new Date() };
 
       if (status !== undefined) setValues.status = status;
@@ -369,6 +373,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       if ("notes" in body) setValues.notes = body.notes;
       if ("defaultPaymentTermsDays" in body)
         setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
+      if (body.invoicingEnabled !== undefined) setValues.invoicingEnabled = body.invoicingEnabled;
 
       let updatedClients: (typeof clients.$inferSelect)[];
       try {

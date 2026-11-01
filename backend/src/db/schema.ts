@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -83,6 +84,9 @@ export const clients = pgTable(
     country: text("country"),
     notes: text("notes"),
     defaultPaymentTermsDays: integer("default_payment_terms_days"),
+    // Per-client opt-in for connected-account invoicing (also needs the global
+    // CONNECT_INVOICING switch once the routes land). Admin-only toggle.
+    invoicingEnabled: boolean("invoicing_enabled").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
@@ -644,3 +648,136 @@ export const billingRequestSyncState = pgTable("billing_request_sync_state", {
   baselineSubmissionId: integer("baseline_submission_id").notNull(),
   baselinedAt: timestamp("baselined_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Connected-account invoicing (inert until the invoicing routes land). Customers
+// live on the client's connected account; Postgres stores ids and an opaque
+// external_ref only, never PII.
+export const connectCustomers = pgTable(
+  "connect_customers",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    connectedAccountId: text("connected_account_id").notNull(),
+    stripeCustomerId: text("stripe_customer_id").notNull(),
+    // Opaque integrator reference (max 100 chars, no PII); unique per client when set.
+    externalRef: text("external_ref"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    accountCustomerUniq: unique("connect_customers_account_customer_uniq").on(
+      table.connectedAccountId,
+      table.stripeCustomerId
+    ),
+    clientExternalRefUniq: uniqueIndex("connect_customers_client_external_ref_uniq")
+      .on(table.clientId, table.externalRef)
+      .where(sql`${table.externalRef} IS NOT NULL`),
+    clientIdempotencyKeyUniq: unique("connect_customers_client_idempotency_key_uniq").on(
+      table.clientId,
+      table.idempotencyKey
+    ),
+  })
+);
+
+export const connectInvoices = pgTable(
+  "connect_invoices",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    connectedAccountId: text("connected_account_id").notNull(),
+    stripeCustomerId: text("stripe_customer_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    // Create-flow progress, saved as each Stripe object id arrives so a retry resumes.
+    creationState: text("creation_state", {
+      enum: ["reserved", "invoice_created", "lines_added", "complete"],
+    })
+      .notNull()
+      .default("reserved"),
+    stripeInvoiceId: text("stripe_invoice_id"),
+    stripeFeeItemId: text("stripe_fee_item_id"),
+    lineItemIds: jsonb("line_item_ids"),
+    status: text("status", {
+      enum: ["draft", "open", "paid", "void", "uncollectible", "deleted"],
+    })
+      .notNull()
+      .default("draft"),
+    currency: text("currency").notNull(),
+    subtotalCents: integer("subtotal_cents").notNull(),
+    feeAmountCents: integer("fee_amount_cents").notNull(),
+    totalCents: integer("total_cents").notNull(),
+    amountPaidCents: integer("amount_paid_cents").notNull().default(0),
+    amountRemainingCents: integer("amount_remaining_cents").notNull(),
+    number: text("number"),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    hostedInvoiceUrl: text("hosted_invoice_url"),
+    invoicePdf: text("invoice_pdf"),
+    sendCount: integer("send_count").notNull().default(0),
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    // Stripe event ordering can be out-of-order; ignore stale updates.
+    lastStripeEventCreatedAt: bigint("last_stripe_event_created_at", { mode: "number" }),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    clientIdempotencyKeyUniq: unique("connect_invoices_client_idempotency_key_uniq").on(
+      table.clientId,
+      table.idempotencyKey
+    ),
+    stripeInvoiceIdUniq: uniqueIndex("connect_invoices_stripe_invoice_id_uniq")
+      .on(table.stripeInvoiceId)
+      .where(sql`${table.stripeInvoiceId} IS NOT NULL`),
+    clientCreatedIdx: index("connect_invoices_client_created_idx").on(
+      table.clientId,
+      sql`${table.createdAt} DESC`,
+      table.id
+    ),
+    clientStatusIdx: index("connect_invoices_client_status_idx").on(table.clientId, table.status),
+    // No ON DELETE action (NO ACTION): customers are never deleted in v1, and a client delete
+    // still cascades to both tables in one statement.
+    customerFk: foreignKey({
+      name: "connect_invoices_customer_fk",
+      columns: [table.connectedAccountId, table.stripeCustomerId],
+      foreignColumns: [connectCustomers.connectedAccountId, connectCustomers.stripeCustomerId],
+    }),
+    subtotalCentsCheck: check(
+      "connect_invoices_subtotal_cents_check",
+      sql`${table.subtotalCents} >= 0`
+    ),
+    feeAmountCentsCheck: check(
+      "connect_invoices_fee_amount_cents_check",
+      sql`${table.feeAmountCents} >= 0`
+    ),
+    totalCentsCheck: check("connect_invoices_total_cents_check", sql`${table.totalCents} >= 0`),
+    amountPaidCentsCheck: check(
+      "connect_invoices_amount_paid_cents_check",
+      sql`${table.amountPaidCents} >= 0`
+    ),
+    amountRemainingCentsCheck: check(
+      "connect_invoices_amount_remaining_cents_check",
+      sql`${table.amountRemainingCents} >= 0`
+    ),
+    sendCountCheck: check("connect_invoices_send_count_check", sql`${table.sendCount} >= 0`),
+    currencyCheck: check("connect_invoices_currency_check", sql`${table.currency} ~ '^[a-z]{3}$'`),
+    creationStateCheck: check(
+      "connect_invoices_creation_state_check",
+      sql`${table.creationState} IN ('reserved', 'invoice_created', 'lines_added', 'complete')`
+    ),
+    statusCheck: check(
+      "connect_invoices_status_check",
+      sql`${table.status} IN ('draft', 'open', 'paid', 'void', 'uncollectible', 'deleted')`
+    ),
+  })
+);

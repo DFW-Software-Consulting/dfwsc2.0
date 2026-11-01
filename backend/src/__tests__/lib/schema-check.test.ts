@@ -52,6 +52,7 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "details_submitted" },
             { column_name: "workspace" },
             { column_name: "group_id" },
+            { column_name: "invoicing_enabled" },
             { column_name: "created_at" },
             { column_name: "updated_at" },
             // webhook_events columns
@@ -159,6 +160,30 @@ describe("verifyDatabaseSchema", () => {
               "nc_row_id",
               "nc_row_hash",
             ].map((column_name) => ({ column_name })),
+            // connect_customers / connect_invoices columns (others are listed above)
+            ...[
+              "external_ref",
+              "idempotency_key",
+              "request_hash",
+              "creation_state",
+              "stripe_fee_item_id",
+              "line_item_ids",
+              "subtotal_cents",
+              "total_cents",
+              "amount_paid_cents",
+              "amount_remaining_cents",
+              "number",
+              "due_date",
+              "hosted_invoice_url",
+              "invoice_pdf",
+              "send_count",
+              "finalized_at",
+              "sent_at",
+              "paid_at",
+              "voided_at",
+              "last_synced_at",
+              "updated_at",
+            ].map((column_name) => ({ column_name })),
           ],
         };
       }
@@ -167,7 +192,18 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(16);
+    expect(mockDb.execute).toHaveBeenCalledTimes(18);
+  });
+
+  it("requires the connected-account invoicing tables and the clients flag", () => {
+    const byTable = new Map(REQUIRED_TABLES.map((t) => [t.table, t.columns]));
+    expect(byTable.get("clients")).toContain("invoicing_enabled");
+    expect(byTable.get("connect_customers")).toEqual(
+      expect.arrayContaining(["client_id", "connected_account_id", "stripe_customer_id"])
+    );
+    expect(byTable.get("connect_invoices")).toEqual(
+      expect.arrayContaining(["client_id", "stripe_invoice_id", "creation_state", "send_count"])
+    );
   });
 
   it("throws when a table is missing required columns", async () => {
@@ -188,6 +224,7 @@ describe("verifyDatabaseSchema", () => {
           { column_name: "details_submitted" },
           { column_name: "workspace" },
           { column_name: "group_id" },
+          { column_name: "invoicing_enabled" },
           { column_name: "created_at" },
           { column_name: "updated_at" },
         ],
@@ -235,6 +272,7 @@ describe("verifyDatabaseSchema", () => {
               { column_name: "details_submitted" },
               { column_name: "workspace" },
               { column_name: "group_id" },
+              { column_name: "invoicing_enabled" },
               { column_name: "created_at" },
               { column_name: "updated_at" },
             ],
@@ -301,6 +339,7 @@ describe("verifyDatabaseSchema", () => {
           { column_name: "details_submitted" },
           { column_name: "workspace" },
           { column_name: "group_id" },
+          { column_name: "invoicing_enabled" },
           { column_name: "created_at" },
           { column_name: "updated_at" },
         ],
@@ -382,6 +421,7 @@ describe("verifyDatabaseSchema", () => {
               { column_name: "details_submitted" },
               { column_name: "workspace" },
               { column_name: "group_id" },
+              { column_name: "invoicing_enabled" },
               { column_name: "created_at" },
               { column_name: "updated_at" },
             ],

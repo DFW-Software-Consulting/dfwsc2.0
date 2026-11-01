@@ -246,6 +246,13 @@
       "when": 1793485797072,
       "tag": "0034_billing_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793496638055,
+      "tag": "0035_connect_invoicing_schema",
+      "breakpoints": true
     }
   ]
 }

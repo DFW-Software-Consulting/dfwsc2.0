@@ -108,7 +108,7 @@ All routes are prefixed with `/api/v1`.
 |--------|------|-------------|------|
 | GET | `/clients` | List clients (`?workspace=client_portal`) | Admin JWT |
 | GET | `/clients/:id` | Get single client | Admin JWT |
-| PATCH | `/clients/:id` | Update client fields | Admin JWT |
+| PATCH | `/clients/:id` | Update client fields. `invoicingEnabled` (boolean; a non-boolean is `400`) is the per-client opt-in for connected-account invoicing, admin-only, returned in the response and in the `GET /clients` list; unused until the invoicing routes land | Admin JWT |
 
 ### Groups
 | Method | Path | Description | Auth |
