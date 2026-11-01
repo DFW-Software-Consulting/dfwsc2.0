@@ -24,6 +24,12 @@ export const DEFAULT_DB_POOL_MAX = 10;
 export const PAYMENT_CREATE_BUCKET_CAPACITY = 200;
 export const PAYMENT_CREATE_REFILL_PER_MINUTE = 120;
 
+// Connected-account invoicing writes (customers, and later invoices) share one token bucket per
+// connected account, same shape as the payment bucket above. Reads use a 600/min sliding window.
+export const INVOICE_WRITE_BUCKET_CAPACITY = 300;
+export const INVOICE_WRITE_REFILL_PER_MINUTE = 120;
+export const INVOICE_READ_RATE_LIMIT_MAX = 600;
+
 // Stripe calls made through withStripeCircuit share one in-process concurrency limit so a burst
 // queues for a slot instead of fanning out to Stripe all at once. Calls beyond MAX_CONCURRENT
 // wait FIFO; one that waits longer than QUEUE_MAX_WAIT_MS, or arrives with QUEUE_MAX_WAITING

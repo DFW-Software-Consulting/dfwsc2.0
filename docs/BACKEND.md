@@ -74,6 +74,8 @@ If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environm
 - **Session Lookup** (`GET /payments/session/:sessionId`): 30 req/min per IP when anonymous. A request with an `X-Api-Key` header is authenticated with `requireApiKey` (a bad or inactive key is `401`, not a fall back to anonymous; each distinct key is charged to the client IP by `failureRateLimit` before its lookup, keyed by the key's SHA-256 lookup hash, 30 a minute: the same bad key repeated counts once, a charge is given back when the key is accepted or the lookup errors (500), and a blank or missing key is not counted; over 30 distinct keys a request with a key is refused with 429 before any lookup unless the key passed verification within `VERIFIED_KEY_TTL_MS`, and requests over budget while charges from this process are still in flight wait for them to settle; refusals are not counted. `requireApiKey` also remembers a lookup hash that matched no active client for `BAD_API_KEY_TTL_MS` (60 s) and answers repeats 401 without a lookup, cleared early when an admin PATCHes a client's status (`forgetBadApiKey`), so a reactivated client is refused for at most that long (a lookup that read the client as inactive before that PATCH and finishes after it records nothing); and concurrent verifications of the same key share one lookup, which is given up after `API_KEY_VERIFICATION_TIMEOUT_MS` (10 s): its entry is removed so the next request starts a fresh lookup, the requests waiting on it fail with `500` exactly as for a database error (not counted against the failed-auth budget, not recorded as a bad key), and a result that arrives after the timeout is discarded without touching the bad-key record or the verification cache. The database pool itself still has no query timeout), is limited to 600 req/min per client in its own bucket, and only sees its own client's sessions (another client's session is the same `404` as an unknown one).
 - **Refusals**: every `429` from these limiters is `{ "error": "Too Many Requests", "code": "RATE_LIMITED" }` with a `Retry-After` header in whole seconds (at least 1): for the sliding window, the time until the oldest counted hit leaves the window; for the token bucket, the time until one token is available.
 
+- **Connected-account invoicing** (`/customers`): writes (`POST`, `PATCH`) use the same token bucket as checkout creation, keyed `stripe:<connectedAccountId>`, with `INVOICE_WRITE_BUCKET_CAPACITY` 300 and `INVOICE_WRITE_REFILL_PER_MINUTE` 120 (`lib/constants.ts`) and the same token refund when a request is refused before reaching Stripe (`503 STRIPE_BUSY`, or an already-open circuit). Reads (`GET`) are 600 req/min per client (`client:<id>`), one shared bucket for the read routes.
+
 ## 5. Workspace
 All clients and groups belong to the `client_portal` workspace. The `workspace` query parameter is required on all admin list endpoints and validated server-side.
 
@@ -135,6 +137,18 @@ The two client-creation routes call Stripe before their atomic database write, w
 | POST | `/payments/create` | Create Checkout Session | API Key or Admin JWT + Idempotency-Key |
 | GET | `/payments/session/:sessionId` | Get checkout session result from ledger (how integrators confirm payment; 30 req/min per IP, or 600 req/min per client with `X-Api-Key`) | Public, or API key |
 | GET | `/reports/payments` | List Stripe PaymentIntents by client or group | Admin JWT |
+
+### Connected-account invoicing: customers
+Registered only when `CONNECT_INVOICING` is exactly `true` (otherwise these paths are `404`). Implementation: `routes/connect-invoicing.ts`. No `/customers` route existed before, so the plain `/api/v1/customers` prefix is used.
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| POST | `/customers` | Create a Customer on the client's connected account. Body `{ email (required), name?, phone?, externalRef? (opaque, max 100, non-PII), metadata? }`; user metadata keys starting `dfwsc_` are rejected (`400`). `201` on create, `200` with the stored customer for a repeated `Idempotency-Key`, `409 CUSTOMER_EXISTS` (with the existing `id`) for a taken `externalRef`, `409 IDEMPOTENCY_KEY_REUSED` / `IDEMPOTENCY_KEY_IN_USE` from Stripe | API key + `Idempotency-Key` (required, max 255 with the client prefix) |
+| GET | `/customers/:id` | Sanitized `{ id, email, name, phone, externalRef, createdAt }`; another client's or an unknown id, or a customer deleted on Stripe, is `404` | API key |
+| GET | `/customers?externalRef=` | Same response, looked up by `externalRef`; `404` when missing | API key |
+| PATCH | `/customers/:id` | `{ email?, name?, phone? }`, at least one | API key |
+
+There is no delete. Guard `requireInvoicingClient`: `requireApiKey`, then `clients.invoicing_enabled` (else `403 INVOICING_NOT_ENABLED`); writes also need an account that can take charges (`getChargeableAccountId`, else `409 ACCOUNT_NOT_CONNECTED`, same body as payments), reads only need a `stripeAccountId`. Every Stripe call passes `stripeAccount` and goes through `withStripeCircuit`; Stripe errors are mapped by `mapStripeError` (`permanentErrors`). Postgres keeps ids and `externalRef` only, logs carry ids and codes only (never email, name or phone), and no raw Stripe object is returned. Limits: section 4. The id returned is the Stripe customer id (`cus_...`). Race handling and the orphan delete: docs/STRIPE.md "Connected-account invoicing: customers".
 
 ### Products & Settings
 | Method | Path | Description | Auth |

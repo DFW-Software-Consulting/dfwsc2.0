@@ -10,6 +10,7 @@ import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
 import connectRoutes from "./routes/connect";
+import connectInvoicingRoutes from "./routes/connect-invoicing";
 import contactRoutes from "./routes/contact";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
@@ -210,6 +211,10 @@ export async function buildServer() {
   server.register(authRoutes, { prefix: "/api/v1" });
   server.register(connectRoutes, { prefix: "/api/v1" });
   server.register(contactRoutes, { prefix: "/api/v1" });
+  // Connected-account invoicing: only the exact value "true" registers the routes (else 404).
+  if (process.env.CONNECT_INVOICING === "true") {
+    server.register(connectInvoicingRoutes, { prefix: "/api/v1" });
+  }
   server.register(paymentsRoutes, { prefix: "/api/v1" });
   server.register(webhooksRoute, { prefix: "/api/v1" });
   server.register(billingWebhookRoute, { prefix: "/api/v1" });

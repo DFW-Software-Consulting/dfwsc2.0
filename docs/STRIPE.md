@@ -90,11 +90,17 @@ Every call has the idempotency key `ncbill-{formId}-{submissionId}-{step}`; obje
 ## 6. Products
 Products and prices are created on the **connected account** (not the platform account) by passing `stripeAccount` to Stripe API calls. Both `GET /products` and `POST /products` require a `clientId` parameter to resolve the connected account.
 
+### Connected-account invoicing: customers
+Behind `CONNECT_INVOICING=true` and the per-client `invoicing_enabled` flag, an integrator with an API key manages **Customers on its own connected account** (`/api/v1/customers`, see docs/BACKEND.md section 7). These are direct calls: every Stripe call passes `{ stripeAccount: client.stripeAccountId }` and never touches the platform's `billing_customers`. Postgres (`connect_customers`) keeps only the Stripe customer id and an opaque `externalRef` (max 100 characters, documented as non-PII: it is the integrator's own reference, never an email or name); email, name and phone live on Stripe and are never logged. Responses are a whitelisted view, never the raw Stripe object. There is no delete endpoint.
+
+Idempotency: `POST` requires an `Idempotency-Key`; Stripe sees `<clientId>:cust:<key>`, and `(client_id, idempotency_key)` is unique locally, so a repeat returns the stored customer (200) without a second create. A taken `externalRef` is a `409 CUSTOMER_EXISTS` (with the existing id) decided locally before any Stripe call. If two requests race on the same `externalRef`, the loser has already created a Stripe customer: it is deleted on a best effort on the same account (a failed delete only leaves an unreferenced customer; its id is logged) and the loser gets `409 CUSTOMER_EXISTS`.
+
 ## 7. Environment Variables
 | Variable | Description |
 |----------|-------------|
 | `STRIPE_SECRET_KEY` | Stripe secret key (platform account) |
 | `STRIPE_WEBHOOK_SECRET` | Webhook endpoint signing secret (the Connect endpoint) |
+| `CONNECT_INVOICING` | (optional, default off) Global kill switch for the connected-account invoicing routes; only the exact value `true` registers them (otherwise 404). Each client also needs its own `invoicing_enabled` flag |
 | `STRIPE_BILLING_WEBHOOK_SECRET` | (optional) Signing secret of the account-level billing endpoint; unset = `/webhooks/stripe-billing` answers 404 |
 | `DEFAULT_PROCESS_FEE_CENTS` | (optional) Last-resort fallback fee (cents) when no client/group/DB default is configured |
 | `DEFAULT_PAYMENT_SUCCESS_URL` | (optional) Default Checkout success redirect URL used after client/group config |
