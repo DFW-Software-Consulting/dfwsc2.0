@@ -628,8 +628,8 @@ export default function Docs() {
                 Checkout session, and starting again does not cancel the earlier one: it stays
                 payable until it expires (24 hours by default), so the customer can still pay in the
                 earlier tab. Add the new sessionId to the order's list and keep the earlier ones; do
-                not replace them. Step 3 explains how to check all of them. Sending a key again for
-                a different payment returns 409 IDEMPOTENCY_KEY_REUSED: use a new key.
+                not replace them. Step 3 explains how to check all of them. Sending a key again with
+                a different request body returns 409 IDEMPOTENCY_KEY_REUSED: use a new key.
               </p>
             </div>
 

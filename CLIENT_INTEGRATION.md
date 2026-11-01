@@ -70,7 +70,7 @@ A key identifies one payment attempt, not one order:
 - **Generate a UUID per attempt** and store it with the `sessionId` you get back. Keys are scoped to your account, so another integrator's keys never clash with yours. A key can be at most 218 characters; a longer one returns `400` and the message states the exact limit.
 - **Reuse a key only to repeat a request** that failed or timed out, with the same body, and never more than 24 hours after you first sent it.
 - **Retire the key and generate a new one** when the customer abandons checkout and starts again later, when the order changed, or after a `400` that says Stripe rejected a field. Each new key creates a new Checkout session, and starting again does not cancel the earlier one: it stays payable until it expires (24 hours by default), so the customer can still pay in the earlier tab. Add the new `sessionId` to the order's list and keep the earlier ones; do not replace them. Step 3 explains how to check all of them.
-- Sending a key again for a different payment returns `409 IDEMPOTENCY_KEY_REUSED`. Retrying it will not help: use a new key.
+- Sending a key again with a different request body returns `409 IDEMPOTENCY_KEY_REUSED`. Retrying it will not help: use a new key.
 
 ### Request Body
 
@@ -469,7 +469,7 @@ curl -X POST "$API/customers" \
   }'
 ```
 
-Fields: `email` (required, valid address, max 320), `name` (max 256), `phone` (max 20), `externalRef` (1 to 100 characters), `metadata` (string keys and values; max 50 keys, key at most 40 characters, value at most 500; keys starting with `dfwsc_` are reserved and rejected). Unknown fields are ignored.
+Fields: `email` (required, valid address, max 320), `name` (max 256), `phone` (max 20), `externalRef` (1 to 100 characters), `metadata` (string keys and values; key at most 40 characters, value at most 500; at most 49 keys, or 48 when you also set `externalRef`, because the API adds its own `dfwsc_` keys to the 50 Stripe allows; keys starting with `dfwsc_` are reserved and rejected). Unknown fields are ignored.
 
 > **`externalRef` must not contain personal data.** It is stored in DFWSC's database. Use your own opaque id (a unit number, an account id), never an email address, name or phone number. Email, name and phone are kept only on Stripe. The `Idempotency-Key` is also free text, so keep personal data out of it as well (only a hash of it is stored).
 
@@ -527,7 +527,7 @@ curl -X POST "$API/invoices" \
   }'
 ```
 
-Fields: `customerId` (required; a customer you created through this API), `lines` (required, 1 to 50), `daysUntilDue` (1 to 365; default is your account's payment terms, else 30), `description` (max 1500), `footer` (max 500), `metadata` (as for customers), `currency` (optional, only `usd`). Each line: `description` (1 to 500 characters), `unitAmountCents` (whole cents, above 0), `quantity` (whole number 1 to 999999, default 1).
+Fields: `customerId` (required; a customer you created through this API), `lines` (required, 1 to 50), `daysUntilDue` (1 to 365; default is your account's payment terms, else 30), `description` (max 1500), `footer` (max 500), `metadata` (key at most 40 characters, value at most 500, at most 48 keys; `dfwsc_` keys are reserved), `currency` (optional, only `usd`). Each line: `description` (1 to 500 characters), `unitAmountCents` (whole cents, above 0), `quantity` (whole number 1 to 999999, default 1).
 
 `finalize` and `send` are not accepted on create: a body containing either is a `400`. Unknown fields such as a total or `waiveFee` are ignored; the server always computes the amounts itself.
 
@@ -626,7 +626,7 @@ Rules for every call that takes a key:
 
 - A **successful** send counts. A replay of that same key returns `200` from our records, sends no second email and does not count again.
 - A send whose result is **unknown** (network error, `5xx`, Stripe rate limit, `SEND_STATUS_UNKNOWN`) counts, because the email may have gone out. Retry it with the **same** key; it is never emailed twice.
-- A send that Stripe **definitely refused** (`SEND_REJECTED`, or the invoice is no longer open) does **not** count. Its key is then marked failed, and repeating that key returns `409 SEND_FAILED`. **`SEND_FAILED` means: use a new `Idempotency-Key`** (and check the invoice status first).
+- A send that Stripe **definitely refused** does **not** count. That first request answers `502 SEND_REJECTED`, or `409 INVOICE_STATE_CHANGED` when the invoice is no longer open (for example it was paid or voided meanwhile). Its key is then marked failed, and repeating that key returns `409 SEND_FAILED`. **`SEND_FAILED` means: use a new `Idempotency-Key`** (and check the invoice status first; a new key on an invoice that is not open returns `409 INVOICE_NOT_SENDABLE`).
 - A fourth send returns `409 SEND_LIMIT_REACHED`.
 
 **Customer create replays compare against Stripe's current data.** To decide whether a replay is the same request, the API compares your body with the customer as it is now on Stripe (email compared ignoring case; missing and empty are equal). So if a create succeeded but you never saw the response, and the customer was then edited (by `PATCH` or in the Stripe dashboard), retrying the original body with the same key returns a false `409 IDEMPOTENCY_KEY_REUSED`. To recover: look the customer up with `GET /customers?externalRef=...` (this is a good reason to always set `externalRef`), or resend the same key with a body that matches the customer's current email, name, phone and metadata, which returns `200` with the customer. Do not create it again with a new key, or you may end up with a duplicate.
