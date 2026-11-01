@@ -327,6 +327,26 @@ describe("billing snapshot refresh", () => {
     expect((await snapshot("CP-001")).dirtyAt).toBeNull();
   });
 
+  it("keeps a dirty mark that lands one microsecond after the one the refresh saw", async () => {
+    await addCustomer("CP-001", "cus_1");
+    fakeStripe.set("cus_1", {});
+    await refresh();
+    await markCustomerDirty("cus_1");
+
+    fakeStripe.beforeList = async (_customerId, call) => {
+      if (call === "invoices.list") {
+        fakeStripe.beforeList = null;
+        await db
+          .update(billingSnapshots)
+          .set({ dirtyAt: sql`${billingSnapshots.dirtyAt} + interval '1 microsecond'` });
+      }
+    };
+    await refresh();
+    expect((await snapshot("CP-001")).dirtyAt).not.toBeNull();
+    await refresh();
+    expect((await snapshot("CP-001")).dirtyAt).toBeNull();
+  });
+
   it("marks nothing for an unknown Customer", async () => {
     expect(await markCustomerDirty("cus_nobody")).toBe(false);
   });
