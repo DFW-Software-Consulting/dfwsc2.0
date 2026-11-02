@@ -44,6 +44,7 @@ describe("connected-account invoice lifecycle (finalize, send, void, delete)", (
       status: "active",
       stripeAccountId: account,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       invoicingEnabled: true,
       processingFeeCents: 250,
       ...over,

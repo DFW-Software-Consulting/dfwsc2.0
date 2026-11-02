@@ -75,6 +75,7 @@ describe("POST /api/v1/payments/create — checkout mode", () => {
       status: "active",
       stripeAccountId: `acct_checkout${clientId.replace(/-/g, "").slice(0, 12)}`,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       processingFeeCents: 1000, // $10 flat fee
     });
   });
@@ -325,6 +326,7 @@ describe("POST /api/v1/payments/create — fee waiver and connected-account guar
       status: "active",
       stripeAccountId: `acct_feeguard${clientId.replace(/-/g, "").slice(0, 12)}`,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       processingFeeCents: 1000,
     });
 
@@ -446,6 +448,7 @@ describe("POST /api/v1/payments/create — session ID for integrators", () => {
       status: "active",
       stripeAccountId: `acct_sessionid${clientId.replace(/-/g, "").slice(0, 12)}`,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       processingFeeCents: 1000,
       paymentSuccessUrl,
     });
@@ -611,6 +614,7 @@ describe("GET /api/v1/reports/payments — sanitizes Stripe payment intents", ()
       workspace: "client_portal",
       stripeAccountId: `acct_sanitize${clientId.replace(/-/g, "").slice(0, 12)}`,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
     });
   });
 
@@ -713,6 +717,7 @@ describe("GET /api/v1/reports/payments — Stripe list failures log identifiers 
         workspace: "client_portal",
         stripeAccountId: `acct_log${id.replace(/-/g, "").slice(0, 12)}`,
         chargesEnabled: true,
+        cardPaymentsStatus: "active",
       });
     }
   });

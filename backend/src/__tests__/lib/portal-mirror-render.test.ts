@@ -73,7 +73,13 @@ describe("portal mirror rendering", () => {
     expect(s({ stripeAccountId: null })).toBe("Not started");
     expect(s({ detailsSubmitted: false })).toBe("Details needed");
     expect(s({})).toBe("Under review");
-    expect(s({ payoutsEnabled: true })).toBe("Ready");
+    expect(s({ payoutsEnabled: true, cardPaymentsStatus: "active" })).toBe("Ready");
+    for (const status of ["inactive", "pending", "unrequested"]) {
+      expect(s({ payoutsEnabled: true, cardPaymentsStatus: status })).toBe("Card payments off");
+    }
+    expect(s({ payoutsEnabled: true, cardPaymentsStatus: null })).toBe("Needs Stripe sync");
+    expect(s({ payoutsEnabled: true })).toBe("Needs Stripe sync");
+    expect(s({ payoutsEnabled: false, cardPaymentsStatus: "inactive" })).toBe("Under review");
   });
 
   it("renders labels, yes/no, dollars, and leaves out PII and secrets", () => {

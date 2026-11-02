@@ -39,6 +39,7 @@ import {
   deleteUnpersistedExpressAccount,
   type ExpressAccountState,
   ensureExpressAccountForClient,
+  refreshCardPaymentsStatus,
 } from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
 import { parseBody } from "../lib/validation";
@@ -224,6 +225,7 @@ async function provisionExpressAccount(
   Object.assign(prepared.client, {
     stripeAccountId: account.stripeAccountId,
     chargesEnabled: account.chargesEnabled,
+    cardPaymentsStatus: account.cardPaymentsStatus,
     payoutsEnabled: account.payoutsEnabled,
     detailsSubmitted: account.detailsSubmitted,
   });
@@ -528,7 +530,37 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       // Client is already fully onboarded (has a Stripe account and can
       // accept charges) — avoid re-issuing a new onboarding link/token.
+      // It must also have card payments active (a stored value other than `active` is re-read live); otherwise it gets a
+      // fresh onboarding link like an incomplete account.
+      let alreadyOnboarded = false;
       if (clientRecord.stripeAccountId && clientRecord.chargesEnabled) {
+        try {
+          // A stored value other than active may be stale (for example the capability was just
+          // requested in the dashboard), so an admin resend reads Stripe's current state.
+          const cardPayments =
+            clientRecord.cardPaymentsStatus === "active"
+              ? "active"
+              : await refreshCardPaymentsStatus(clientRecord, clientRecord.stripeAccountId);
+          // A link cannot fix a capability that was never requested, so send nothing.
+          if (cardPayments === "unrequested") {
+            return reply.code(409).send({
+              error:
+                "Card payments were never requested for this connected account. Request the Card payments capability for it in the Stripe dashboard, then resend onboarding.",
+              code: "CARD_PAYMENTS_UNREQUESTED",
+            });
+          }
+          alreadyOnboarded = cardPayments === "active";
+        } catch (err) {
+          request.log.error(
+            { clientId: clientRecord.id, ...errorLogFields(err) },
+            "Could not read the card_payments capability from Stripe"
+          );
+          if (mapStripeError(err, reply, { circuitOpen: STRIPE_ONBOARDING_CIRCUIT_OPEN_ERROR }))
+            return;
+          throw errors.stripeFailed("Failed to check the client's Stripe account. Please retry.");
+        }
+      }
+      if (alreadyOnboarded) {
         return reply.code(200).send({
           message: "Onboarding is already complete for this client.",
           clientId: clientRecord.id,
@@ -917,6 +949,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       }
 
       const chargesEnabled = verifiedAccount.charges_enabled ?? false;
+      const cardPaymentsStatus = verifiedAccount.capabilities?.card_payments ?? "unrequested";
       const payoutsEnabled = verifiedAccount.payouts_enabled ?? false;
       const detailsSubmitted = verifiedAccount.details_submitted ?? false;
       const tokenStatus = detailsSubmitted ? "completed" : "in_progress";
@@ -940,6 +973,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           .set({
             stripeAccountId: effectiveAccountId,
             chargesEnabled,
+            cardPaymentsStatus,
             payoutsEnabled,
             detailsSubmitted,
             updatedAt: new Date(),

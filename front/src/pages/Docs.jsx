@@ -262,6 +262,12 @@ const ERROR_ROWS = [
   },
   {
     status: "409",
+    cause:
+      'Card payments are not active on the connected account yet (code "CARD_PAYMENTS_NOT_ACTIVE")',
+    retry: "No. Contact your DFWSC administrator to get card payments enabled for this account",
+  },
+  {
+    status: "409",
     cause: 'The key was already used with a different request body (code "IDEMPOTENCY_KEY_REUSED")',
     retry: "No, not with this key. Generate a new Idempotency-Key for the new payment",
   },

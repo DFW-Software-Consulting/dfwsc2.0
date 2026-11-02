@@ -64,6 +64,7 @@ describe("Connect webhook sync of connected-account invoices", () => {
       status: "active",
       stripeAccountId: account,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       invoicingEnabled: true,
       processingFeeCents: 250,
     });

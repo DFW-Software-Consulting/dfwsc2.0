@@ -135,11 +135,17 @@ export function onboardingState(
   client: Pick<
     typeof clients.$inferSelect,
     "stripeAccountId" | "chargesEnabled" | "payoutsEnabled" | "detailsSubmitted"
-  >
+  > &
+    Partial<Pick<typeof clients.$inferSelect, "cardPaymentsStatus">>
 ): string {
   if (!client.stripeAccountId) return "Not started";
   if (!client.detailsSubmitted) return "Details needed";
-  return client.chargesEnabled && client.payoutsEnabled ? "Ready" : "Under review";
+  if (!client.chargesEnabled || !client.payoutsEnabled) return "Under review";
+  // Stripe can enable charges without the card_payments capability; payments and invoices
+  // are refused then. NULL is a row that was never synced (the mirror never calls Stripe).
+  const cardPayments = client.cardPaymentsStatus ?? null;
+  if (cardPayments === null) return "Needs Stripe sync";
+  return cardPayments === "active" ? "Ready" : "Card payments off";
 }
 
 export function renderAccount(

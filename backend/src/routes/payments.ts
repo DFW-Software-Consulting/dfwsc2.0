@@ -24,7 +24,7 @@ import {
   resolveDefaultPaymentSuccessUrl,
   resolveFrontendOrigin,
 } from "../lib/config";
-import { getChargeableAccountId } from "../lib/connected-account";
+import { CARD_PAYMENTS_NOT_ACTIVE_ERROR, getChargeableAccountId } from "../lib/connected-account";
 import {
   PAYMENT_CREATE_BUCKET_CAPACITY,
   PAYMENT_CREATE_REFILL_PER_MINUTE,
@@ -45,6 +45,7 @@ import {
 import { errorLogFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
+import { resolveCardPaymentsStatus } from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
 import {
   CURRENCY_REGEX,
@@ -446,6 +447,32 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           error: "Client Stripe account is not connected or cannot accept charges.",
           code: "ACCOUNT_NOT_CONNECTED",
         });
+      }
+
+      // Checkout is a direct charge on the connected account, which needs card_payments active.
+      // Checked before any Checkout call; a failed live read fails closed.
+      let cardPayments: string;
+      try {
+        cardPayments = await resolveCardPaymentsStatus(client, stripeAccountId);
+      } catch (err) {
+        request.log.error(
+          { clientId: client.id, ...errorLogFields(err) },
+          "Could not read the card_payments capability from Stripe"
+        );
+        if (isStripeBusyError(err) || isCircuitOpenError(err)) {
+          await paymentCreateBucket.refund(request);
+        }
+        if (
+          mapStripeError(err, reply, {
+            circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+            rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
+          })
+        )
+          return;
+        throw errors.stripeFailed("Payment processing failed. Please try again.");
+      }
+      if (cardPayments !== "active") {
+        return reply.code(409).send(CARD_PAYMENTS_NOT_ACTIVE_ERROR);
       }
 
       const effectiveWaiveFee = isApiCall ? false : waiveFee;

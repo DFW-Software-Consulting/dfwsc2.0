@@ -58,6 +58,7 @@ async function createClient(label: string): Promise<TestClient> {
     status: "active",
     stripeAccountId: `acct_idem${id.replace(/-/g, "").slice(0, 12)}`,
     chargesEnabled: true,
+    cardPaymentsStatus: "active",
     processingFeeCents: 0,
   });
   return { id, apiKey };
