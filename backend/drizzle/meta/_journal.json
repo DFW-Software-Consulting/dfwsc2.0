@@ -267,6 +267,13 @@
       "when": 1793576907957,
       "tag": "0037_tan_barracuda",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793591199678,
+      "tag": "0038_wild_patriot",
+      "breakpoints": true
     }
   ]
 }

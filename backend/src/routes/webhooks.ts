@@ -8,6 +8,7 @@ import { syncConnectInvoice } from "../lib/connect-invoice-sync";
 import { isUniqueViolation } from "../lib/errors";
 import { dbErrorFields, retryErrorFields, safeErrorFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
+import { capabilityStatuses } from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
 import {
   claimStripeEvent,
@@ -279,7 +280,7 @@ async function syncAccountFromStripe(accountId: string, logger: FastifyBaseLogge
     .update(clients)
     .set({
       chargesEnabled: account.charges_enabled ?? false,
-      cardPaymentsStatus: account.capabilities?.card_payments ?? "unrequested",
+      ...capabilityStatuses(account),
       payoutsEnabled: account.payouts_enabled ?? false,
       detailsSubmitted: account.details_submitted ?? false,
       updatedAt: new Date(),

@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
+import type Stripe from "stripe";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
 import { withStripeCircuit } from "./circuit-breakers";
@@ -9,10 +10,22 @@ import { stripe } from "./stripe-billing";
 type ClientRecord = typeof clients.$inferSelect;
 type Logger = Pick<FastifyBaseLogger, "info" | "error">;
 
+/** Capability statuses of a Stripe account; an absent capability is stored as "unrequested". */
+export function capabilityStatuses(account: Pick<Stripe.Account, "capabilities">): {
+  cardPaymentsStatus: string;
+  achPaymentsStatus: string;
+} {
+  return {
+    cardPaymentsStatus: account.capabilities?.card_payments ?? "unrequested",
+    achPaymentsStatus: account.capabilities?.us_bank_account_ach_payments ?? "unrequested",
+  };
+}
+
 export interface ExpressAccountState {
   stripeAccountId: string;
   chargesEnabled: boolean;
   cardPaymentsStatus: string | null;
+  achPaymentsStatus: string | null;
   payoutsEnabled: boolean;
   detailsSubmitted: boolean;
 }
@@ -34,6 +47,8 @@ export async function createExpressAccountForClient(
         capabilities: {
           card_payments: { requested: true },
           transfers: { requested: true },
+          // Requested and tracked only; nothing offers bank payments until later changes.
+          us_bank_account_ach_payments: { requested: true },
         },
       },
       { idempotencyKey: `acct-create-${client.id}` }
@@ -43,7 +58,7 @@ export async function createExpressAccountForClient(
   return {
     stripeAccountId: account.id,
     chargesEnabled: account.charges_enabled ?? false,
-    cardPaymentsStatus: account.capabilities?.card_payments ?? "unrequested",
+    ...capabilityStatuses(account),
     payoutsEnabled: account.payouts_enabled ?? false,
     detailsSubmitted: account.details_submitted ?? false,
   };
@@ -96,6 +111,7 @@ export async function ensureExpressAccountForClient(
         stripeAccountId: created.stripeAccountId,
         chargesEnabled: created.chargesEnabled,
         cardPaymentsStatus: created.cardPaymentsStatus,
+        achPaymentsStatus: created.achPaymentsStatus,
         payoutsEnabled: created.payoutsEnabled,
         detailsSubmitted: created.detailsSubmitted,
       })
@@ -140,17 +156,23 @@ export async function ensureExpressAccountForClient(
  * webhook) wins and is the one returned. Throws when the live read fails, so callers fail closed.
  */
 export async function resolveCardPaymentsStatus(
-  client: Pick<ClientRecord, "id" | "cardPaymentsStatus">,
+  client: Pick<ClientRecord, "id" | "cardPaymentsStatus"> &
+    Partial<Pick<ClientRecord, "achPaymentsStatus">>,
   stripeAccountId: string
 ): Promise<string> {
   if (client.cardPaymentsStatus !== null) return client.cardPaymentsStatus;
   const account = await withStripeCircuit(() => stripe.accounts.retrieve(stripeAccountId));
-  const live = account.capabilities?.card_payments ?? "unrequested";
+  const { cardPaymentsStatus: live, achPaymentsStatus } = capabilityStatuses(account);
   const written = await db
     .update(clients)
     .set({ cardPaymentsStatus: live, updatedAt: new Date() })
     .where(and(eq(clients.id, client.id), isNull(clients.cardPaymentsStatus)))
     .returning({ id: clients.id });
+  // The account was read anyway: also fill ACH, only where it is still NULL.
+  await db
+    .update(clients)
+    .set({ achPaymentsStatus, updatedAt: new Date() })
+    .where(and(eq(clients.id, client.id), isNull(clients.achPaymentsStatus)));
   if (written.length > 0) return live;
   const [current] = await db
     .select({ status: clients.cardPaymentsStatus })
@@ -161,7 +183,7 @@ export async function resolveCardPaymentsStatus(
 }
 
 /**
- * Reads the account's card_payments status live and stores it unconditionally. For admin actions
+ * Reads the account's card_payments and ACH statuses live and stores both unconditionally. For admin actions
  * (onboarding resend), where Stripe's current state is newer than what is stored; the charge
  * guards use resolveCardPaymentsStatus, which only fills a NULL. Throws when the read fails.
  */
@@ -170,10 +192,10 @@ export async function refreshCardPaymentsStatus(
   stripeAccountId: string
 ): Promise<string> {
   const account = await withStripeCircuit(() => stripe.accounts.retrieve(stripeAccountId));
-  const live = account.capabilities?.card_payments ?? "unrequested";
+  const { cardPaymentsStatus: live, achPaymentsStatus } = capabilityStatuses(account);
   await db
     .update(clients)
-    .set({ cardPaymentsStatus: live, updatedAt: new Date() })
+    .set({ cardPaymentsStatus: live, achPaymentsStatus, updatedAt: new Date() })
     .where(eq(clients.id, client.id));
   return live;
 }

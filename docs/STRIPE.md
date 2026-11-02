@@ -5,7 +5,7 @@ This document explains the Stripe integration, Connect onboarding, and payment p
 ## 1. Overview
 The platform uses **Stripe Connect** with **Express Accounts**.
 - **Platform Account**: DFWSC's main Stripe account.
-- **Express Accounts**: One per connected client. Created when the client is created (`/accounts` or `/onboard-client/initiate`).
+- **Express Accounts**: One per connected client. Created when the client is created (`/accounts` or `/onboard-client/initiate`). Three capabilities are requested at creation: `card_payments`, `transfers` and `us_bank_account_ach_payments` (ACH). ACH is requested and tracked only (`clients.ach_payments_status`); nothing offers or gates on bank payments yet, and Checkout and invoices still choose payment methods dynamically (no `payment_method_types`). Existing accounts are not backfilled.
 
 ## 2. Onboarding Flow
 1. **Initiate**: Admin calls `POST /api/v1/onboard-client/initiate` (or `POST /api/v1/accounts`). The API prepares a stable client ID and credentials, creates the Stripe Express account with that client ID as metadata and the Stripe idempotency key, then atomically stores the client, Stripe account/readiness state, and tokens. No database transaction is held open during the Stripe call. `/accounts` returns the plaintext `apiKey` to the admin; `/onboard-client/initiate` does **not** — it delivers the API key via an emailed link instead.

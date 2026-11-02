@@ -17,6 +17,8 @@ import {
   createExpressAccountForClient,
   deleteUnpersistedExpressAccount,
   ensureExpressAccountForClient,
+  refreshCardPaymentsStatus,
+  resolveCardPaymentsStatus,
 } from "../../lib/stripe-connect-account";
 import { dump, expectNoPlanted, plantedStripeError } from "../helpers/log-capture";
 
@@ -52,6 +54,7 @@ describe("stripe-connect-account", () => {
     (stripe.accounts.create as any).mockResolvedValueOnce({ id: "acct_nocap" });
     const state = await createExpressAccountForClient({ id: randomUUID(), email: "b@example.com" });
     expect(state.cardPaymentsStatus).toBe("unrequested");
+    expect(state.achPaymentsStatus).toBe("unrequested");
   });
 
   it("creates the Express account with client metadata and a client-scoped idempotency key", async () => {
@@ -61,7 +64,11 @@ describe("stripe-connect-account", () => {
       charges_enabled: true,
       payouts_enabled: false,
       details_submitted: true,
-      capabilities: { card_payments: "pending", transfers: "active" },
+      capabilities: {
+        card_payments: "pending",
+        transfers: "active",
+        us_bank_account_ach_payments: "pending",
+      },
     });
 
     const state = await createExpressAccountForClient({ id: clientId, email: "a@example.com" });
@@ -70,6 +77,7 @@ describe("stripe-connect-account", () => {
       stripeAccountId: "acct_fresh",
       chargesEnabled: true,
       cardPaymentsStatus: "pending",
+      achPaymentsStatus: "pending",
       payoutsEnabled: false,
       detailsSubmitted: true,
     });
@@ -78,7 +86,11 @@ describe("stripe-connect-account", () => {
         type: "express",
         email: "a@example.com",
         metadata: { clientId },
-        capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
+        capabilities: {
+          card_payments: { requested: true },
+          transfers: { requested: true },
+          us_bank_account_ach_payments: { requested: true },
+        },
       },
       { idempotencyKey: `acct-create-${clientId}` }
     );
@@ -106,7 +118,12 @@ describe("stripe-connect-account", () => {
     await expect(ensureExpressAccountForClient(client, logger)).resolves.toBe(accountId);
 
     const [row] = await db.select().from(clients).where(eq(clients.id, client.id));
-    expect(row).toMatchObject({ stripeAccountId: accountId, detailsSubmitted: true });
+    expect(row).toMatchObject({
+      stripeAccountId: accountId,
+      detailsSubmitted: true,
+      cardPaymentsStatus: "unrequested",
+      achPaymentsStatus: "unrequested",
+    });
     expect(stripe.accounts.del).not.toHaveBeenCalled();
   });
 
@@ -175,5 +192,98 @@ describe("stripe-connect-account", () => {
     );
     // The raw pg error quotes the colliding row ("Key (stripe_account_id)=(...)").
     expect(dump(logger.error.mock.calls)).not.toMatch(/Key \(|duplicate key|Failed query/);
+  });
+});
+
+describe("ACH payments status", () => {
+  async function seed(card: string | null, ach: string | null) {
+    const id = randomUUID();
+    const [row] = await db
+      .insert(clients)
+      .values({
+        id,
+        name: "Ach Client",
+        email: `ach-${id}@example.com`,
+        stripeAccountId: `acct_ach_${id.slice(0, 8)}`,
+        cardPaymentsStatus: card,
+        achPaymentsStatus: ach,
+      })
+      .returning();
+    createdClientIds.push(id);
+    return row;
+  }
+  const stored = async (id: string) =>
+    (await db.select().from(clients).where(eq(clients.id, id)))[0];
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("persists the ACH status when lazily creating an account", async () => {
+    const id = randomUUID();
+    const [client] = await db
+      .insert(clients)
+      .values({ id, name: "Lazy Ach", email: `lazy-ach-${id}@example.com` })
+      .returning();
+    createdClientIds.push(id);
+    (stripe.accounts.create as any).mockResolvedValueOnce({
+      id: `acct_lazyach_${id.slice(0, 8)}`,
+      capabilities: { card_payments: "pending", us_bank_account_ach_payments: "active" },
+    });
+    await ensureExpressAccountForClient(client, logger);
+    expect(await stored(id)).toMatchObject({
+      cardPaymentsStatus: "pending",
+      achPaymentsStatus: "active",
+    });
+  });
+
+  it("lazy fill sets ACH alongside card when both are NULL", async () => {
+    const c = await seed(null, null);
+    (stripe.accounts.retrieve as any).mockResolvedValueOnce({
+      capabilities: { card_payments: "active", us_bank_account_ach_payments: "pending" },
+    });
+    await expect(resolveCardPaymentsStatus(c, c.stripeAccountId as string)).resolves.toBe("active");
+    expect(await stored(c.id)).toMatchObject({
+      cardPaymentsStatus: "active",
+      achPaymentsStatus: "pending",
+    });
+  });
+
+  it("lazy fill stores unrequested ACH when the capability is absent", async () => {
+    const c = await seed(null, null);
+    (stripe.accounts.retrieve as any).mockResolvedValueOnce({
+      capabilities: { card_payments: "active" },
+    });
+    await resolveCardPaymentsStatus(c, c.stripeAccountId as string);
+    expect((await stored(c.id)).achPaymentsStatus).toBe("unrequested");
+  });
+
+  it("lazy fill never overwrites a non-NULL ACH status", async () => {
+    const c = await seed(null, "active");
+    (stripe.accounts.retrieve as any).mockResolvedValueOnce({
+      capabilities: { card_payments: "active", us_bank_account_ach_payments: "inactive" },
+    });
+    await resolveCardPaymentsStatus(c, c.stripeAccountId as string);
+    expect(await stored(c.id)).toMatchObject({
+      cardPaymentsStatus: "active",
+      achPaymentsStatus: "active",
+    });
+  });
+
+  it("makes no Stripe call when card status is already stored", async () => {
+    const c = await seed("active", null);
+    await resolveCardPaymentsStatus(c, c.stripeAccountId as string);
+    expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
+    expect((await stored(c.id)).achPaymentsStatus).toBeNull();
+  });
+
+  it("refresh writes both statuses unconditionally", async () => {
+    const c = await seed("inactive", "active");
+    (stripe.accounts.retrieve as any).mockResolvedValueOnce({
+      capabilities: { card_payments: "active", us_bank_account_ach_payments: "inactive" },
+    });
+    await expect(refreshCardPaymentsStatus(c, c.stripeAccountId as string)).resolves.toBe("active");
+    expect(await stored(c.id)).toMatchObject({
+      cardPaymentsStatus: "active",
+      achPaymentsStatus: "inactive",
+    });
   });
 });
