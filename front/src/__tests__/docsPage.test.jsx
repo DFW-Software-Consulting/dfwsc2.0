@@ -19,6 +19,7 @@ describe("Docs page", () => {
     for (const code of [
       "INVALID_REQUEST",
       "CARD_DECLINED",
+      "CARD_PAYMENTS_NOT_ACTIVE",
       "IDEMPOTENCY_KEY_REUSED",
       "IDEMPOTENCY_KEY_IN_USE",
       "RATE_LIMITED",

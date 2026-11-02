@@ -36,7 +36,7 @@ import {
   TERMINAL_INVOICE_STATUSES,
 } from "../lib/connect-invoice";
 import { applyStripeInvoice } from "../lib/connect-invoice-sync";
-import { getChargeableAccountId } from "../lib/connected-account";
+import { CARD_PAYMENTS_NOT_ACTIVE_ERROR, getChargeableAccountId } from "../lib/connected-account";
 import {
   INVOICE_ADOPTION_MAX_PAGES,
   INVOICE_CLAIM_LEASE_MS,
@@ -194,11 +194,7 @@ function requireInvoicingClient(mode: "read" | "write" | "charge") {
       throw errors.stripeFailed("Invoicing request failed. Please try again.");
     }
     if (cardPayments !== "active") {
-      return reply.code(409).send({
-        error:
-          "Card payments are not active on this connected account yet. Contact your DFWSC administrator.",
-        code: "CARD_PAYMENTS_NOT_ACTIVE",
-      });
+      return reply.code(409).send(CARD_PAYMENTS_NOT_ACTIVE_ERROR);
     }
   };
 }

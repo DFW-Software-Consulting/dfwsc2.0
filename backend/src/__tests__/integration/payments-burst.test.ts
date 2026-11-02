@@ -48,6 +48,7 @@ describe("POST /payments/create burst handling (token bucket)", () => {
       status: "active",
       stripeAccountId: `acct_burst_${id.slice(0, 8)}`,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       processingFeeCents: 100,
     });
     clientIds.push(id);

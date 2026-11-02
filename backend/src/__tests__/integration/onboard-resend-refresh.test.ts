@@ -2,7 +2,7 @@ import { vi } from "vitest";
 
 vi.mock("../../lib/stripe", () => ({
   stripe: {
-    accounts: { create: vi.fn(), del: vi.fn() },
+    accounts: { create: vi.fn(), del: vi.fn(), retrieve: vi.fn() },
     accountLinks: { create: vi.fn() },
     webhooks: { constructEvent: vi.fn() },
     paymentIntents: { create: vi.fn(), list: vi.fn() },
@@ -283,6 +283,7 @@ describe("Onboard Resend + Connect Refresh", () => {
         status: "active",
         stripeAccountId: "acct_already_live",
         chargesEnabled: true,
+        cardPaymentsStatus: "active",
       });
       extraClientIds.push(liveClientId);
 
@@ -306,6 +307,80 @@ describe("Onboard Resend + Connect Refresh", () => {
         .where(eq(onboardingTokens.clientId, liveClientId));
       expect(tokens).toHaveLength(0);
       expect(sendMail).not.toHaveBeenCalled();
+    });
+    describe("card_payments gate on the already-onboarded short-circuit", () => {
+      async function seedLive(cardPaymentsStatus: string | null) {
+        const id = randomUUID();
+        await db.insert(clients).values({
+          id,
+          name: "Card Gate Client",
+          email: `gate-${id}@example.com`,
+          status: "active",
+          stripeAccountId: `acct_gate_${id.slice(0, 8)}`,
+          chargesEnabled: true,
+          cardPaymentsStatus,
+        });
+        extraClientIds.push(id);
+        return id;
+      }
+      const resend = (clientId: string) =>
+        app.inject({
+          method: "POST",
+          url: "/api/v1/onboard-client/resend",
+          headers: {
+            authorization: `Bearer ${makeAdminToken()}`,
+            "content-type": "application/json",
+          },
+          payload: { clientId },
+        });
+      const tokenCount = async (clientId: string) =>
+        (await db.select().from(onboardingTokens).where(eq(onboardingTokens.clientId, clientId)))
+          .length;
+
+      it.each([
+        "inactive",
+        "pending",
+        "unrequested",
+      ])("issues a fresh onboarding link when card_payments is %s", async (status) => {
+        const id = await seedLive(status);
+        const res = await resend(id);
+        expect(res.statusCode).toBe(200);
+        expect(res.json().alreadyOnboarded).toBeUndefined();
+        expect(await tokenCount(id)).toBe(1);
+        expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
+      });
+
+      it("reads a NULL status live, stores it and short-circuits when it is active", async () => {
+        const id = await seedLive(null);
+        (stripe.accounts.retrieve as any).mockResolvedValueOnce({
+          capabilities: { card_payments: "active" },
+        });
+        const res = await resend(id);
+        expect(res.statusCode).toBe(200);
+        expect(res.json().alreadyOnboarded).toBe(true);
+        expect(await tokenCount(id)).toBe(0);
+        const [row] = await db.select().from(clients).where(eq(clients.id, id));
+        expect(row.cardPaymentsStatus).toBe("active");
+      });
+
+      it("reads a NULL status live and issues a fresh link when it is not active", async () => {
+        const id = await seedLive(null);
+        (stripe.accounts.retrieve as any).mockResolvedValueOnce({ capabilities: {} });
+        const res = await resend(id);
+        expect(res.statusCode).toBe(200);
+        expect(res.json().alreadyOnboarded).toBeUndefined();
+        expect(await tokenCount(id)).toBe(1);
+        const [row] = await db.select().from(clients).where(eq(clients.id, id));
+        expect(row.cardPaymentsStatus).toBe("unrequested");
+      });
+
+      it("fails with 502 when the live read of a NULL status fails", async () => {
+        const id = await seedLive(null);
+        (stripe.accounts.retrieve as any).mockRejectedValueOnce(new Error("stripe down"));
+        const res = await resend(id);
+        expect(res.statusCode).toBe(502);
+        expect(await tokenCount(id)).toBe(0);
+      });
     });
   });
 

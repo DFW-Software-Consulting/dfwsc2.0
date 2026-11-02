@@ -390,6 +390,7 @@ These are the statuses `POST /api/v1/payments/create` can return for a failed re
 | `401` | Bad, missing or deactivated API key | No. Verify your `X-Api-Key` header. A deactivated client gets the same response — ask your DFWSC administrator |
 | `402` | The card was declined (`code`: `CARD_DECLINED`) | No, not with the same key. Start a new attempt with a new `Idempotency-Key` |
 | `409` | Stripe onboarding is not finished, or the account cannot take payments (`code`: `ACCOUNT_NOT_CONNECTED`) | No. Finish the Stripe onboarding for this account, or ask your DFWSC administrator to confirm it can accept charges |
+| `409` | The `card_payments` capability is not active on the connected account (`code`: `CARD_PAYMENTS_NOT_ACTIVE`) | No. Contact your DFWSC administrator to get card payments enabled for this account |
 | `409` | The key was already used with a different request body (`code`: `IDEMPOTENCY_KEY_REUSED`) | No, not with this key. Generate a new `Idempotency-Key` for the new payment |
 | `409` | A request with this key is still in progress (`code`: `IDEMPOTENCY_KEY_IN_USE`) | Yes. Wait a moment and retry the same request with the same key |
 | `429` | Too many requests, or Stripe is rate limiting the platform (`code`: `RATE_LIMITED`). The response has a `Retry-After` header | Yes. Wait the `Retry-After` seconds plus a small random extra delay, then retry automatically with the same key |

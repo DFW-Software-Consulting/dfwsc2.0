@@ -39,6 +39,7 @@ import {
   deleteUnpersistedExpressAccount,
   type ExpressAccountState,
   ensureExpressAccountForClient,
+  resolveCardPaymentsStatus,
 } from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
 import { parseBody } from "../lib/validation";
@@ -529,7 +530,25 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       // Client is already fully onboarded (has a Stripe account and can
       // accept charges) — avoid re-issuing a new onboarding link/token.
+      // It must also have card payments active (NULL is read live once); otherwise it gets a
+      // fresh onboarding link like an incomplete account.
+      let alreadyOnboarded = false;
       if (clientRecord.stripeAccountId && clientRecord.chargesEnabled) {
+        try {
+          alreadyOnboarded =
+            (await resolveCardPaymentsStatus(clientRecord, clientRecord.stripeAccountId)) ===
+            "active";
+        } catch (err) {
+          request.log.error(
+            { clientId: clientRecord.id, ...errorLogFields(err) },
+            "Could not read the card_payments capability from Stripe"
+          );
+          if (mapStripeError(err, reply, { circuitOpen: STRIPE_ONBOARDING_CIRCUIT_OPEN_ERROR }))
+            return;
+          throw errors.stripeFailed("Failed to check the client's Stripe account. Please retry.");
+        }
+      }
+      if (alreadyOnboarded) {
         return reply.code(200).send({
           message: "Onboarding is already complete for this client.",
           clientId: clientRecord.id,

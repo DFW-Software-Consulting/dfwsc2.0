@@ -330,6 +330,7 @@ describe("rows", () => {
       groupId: "g1",
       stripeAccountId: "acct_1",
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       payoutsEnabled: true,
       detailsSubmitted: true,
       phone: "555-0100",

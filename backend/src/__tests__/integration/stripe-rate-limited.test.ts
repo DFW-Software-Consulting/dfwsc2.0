@@ -52,6 +52,7 @@ describe("POST /payments/create when Stripe answers 429", () => {
       status: "active",
       stripeAccountId: `acct_rl_${clientId.slice(0, 8)}`,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       processingFeeCents: 100,
     });
   });
