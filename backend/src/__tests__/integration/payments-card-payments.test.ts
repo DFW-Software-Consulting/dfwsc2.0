@@ -159,10 +159,14 @@ describe("POST /api/v1/payments/create requires the card_payments capability", (
   });
 
   // The write token taken by the route's rate limiter, read from the in-memory bucket store.
-  const tokensOf = (account: string) => {
+  const bucketOf = (account: string) => {
     const entry = [...tokenBuckets.entries()].find(([key]) => key.endsWith(`:${account}`));
-    return entry?.[1].tokens as number;
+    return entry?.[1] as { tokens: number; updatedAt: number };
   };
+  const tokensOf = (account: string) => bucketOf(account).tokens;
+  /** Freezes the limiter's clock at the bucket's last update, so nothing refills meanwhile. */
+  const freezeBucketClock = (account: string) =>
+    vi.spyOn(Date, "now").mockReturnValue(bucketOf(account).updatedAt);
 
   /** Takes (and keeps) one token so the bucket exists, then puts the status back to NULL. */
   async function primeBucket() {
@@ -181,13 +185,15 @@ describe("POST /api/v1/payments/create requires the card_payments capability", (
     const c = await primeBucket();
     const before = tokensOf(c.account);
     openStripeCircuitForTests();
+    const clock = freezeBucketClock(c.account);
     const res = await pay(c.apiKey);
+    clock.mockRestore();
     expect(res.statusCode).toBe(503);
     expect(res.json().code).toBe("STRIPE_CIRCUIT_OPEN");
     expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
     expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
-    // Refunded: the count is back where it was (a spent token would leave it a whole one lower).
-    expect(tokensOf(c.account)).toBeGreaterThanOrEqual(before);
+    // Refunded: with the clock frozen nothing refills, so only a refund keeps the count equal.
+    expect(tokensOf(c.account)).toBe(before);
   });
 
   it("fails closed with 503 STRIPE_BUSY and refunds the rate-limit token", async () => {
@@ -198,13 +204,15 @@ describe("POST /api/v1/payments/create requires the card_payments capability", (
       release = () => resolve("done");
     });
     const slot = withStripeCircuit(() => gate);
+    const clock = freezeBucketClock(c.account);
     const res = await pay(c.apiKey);
+    clock.mockRestore();
     release();
     await slot;
     expect(res.statusCode).toBe(503);
     expect(res.json().code).toBe("STRIPE_BUSY");
     expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
     expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
-    expect(tokensOf(c.account)).toBeGreaterThanOrEqual(before);
+    expect(tokensOf(c.account)).toBe(before);
   });
 });

@@ -39,7 +39,7 @@ import {
   deleteUnpersistedExpressAccount,
   type ExpressAccountState,
   ensureExpressAccountForClient,
-  resolveCardPaymentsStatus,
+  refreshCardPaymentsStatus,
 } from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
 import { parseBody } from "../lib/validation";
@@ -530,15 +530,17 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       // Client is already fully onboarded (has a Stripe account and can
       // accept charges) — avoid re-issuing a new onboarding link/token.
-      // It must also have card payments active (NULL is read live once); otherwise it gets a
+      // It must also have card payments active (a stored value other than `active` is re-read live); otherwise it gets a
       // fresh onboarding link like an incomplete account.
       let alreadyOnboarded = false;
       if (clientRecord.stripeAccountId && clientRecord.chargesEnabled) {
         try {
-          const cardPayments = await resolveCardPaymentsStatus(
-            clientRecord,
-            clientRecord.stripeAccountId
-          );
+          // A stored value other than active may be stale (for example the capability was just
+          // requested in the dashboard), so an admin resend reads Stripe's current state.
+          const cardPayments =
+            clientRecord.cardPaymentsStatus === "active"
+              ? "active"
+              : await refreshCardPaymentsStatus(clientRecord, clientRecord.stripeAccountId);
           // A link cannot fix a capability that was never requested, so send nothing.
           if (cardPayments === "unrequested") {
             return reply.code(409).send({

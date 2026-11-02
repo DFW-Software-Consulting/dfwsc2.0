@@ -337,16 +337,51 @@ describe("Onboard Resend + Connect Refresh", () => {
         (await db.select().from(onboardingTokens).where(eq(onboardingTokens.clientId, clientId)))
           .length;
 
+      const stripeNow = (status?: string) =>
+        (stripe.accounts.retrieve as any).mockResolvedValueOnce({
+          capabilities: status ? { card_payments: status } : {},
+        });
+      const storedOf = async (id: string) =>
+        (await db.select().from(clients).where(eq(clients.id, id)))[0].cardPaymentsStatus;
+
       it.each([
         "inactive",
         "pending",
       ])("issues a fresh onboarding link when card_payments is %s", async (status) => {
         const id = await seedLive(status);
+        stripeNow(status);
         const res = await resend(id);
         expect(res.statusCode).toBe(200);
         expect(res.json().alreadyOnboarded).toBeUndefined();
         expect(await tokenCount(id)).toBe(1);
+        expect(stripe.accounts.retrieve).toHaveBeenCalledTimes(1);
+      });
+
+      it("does not read Stripe when the stored status is already active", async () => {
+        const id = await seedLive("active");
+        const res = await resend(id);
+        expect(res.json().alreadyOnboarded).toBe(true);
         expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
+      });
+
+      it("re-reads a stored unrequested status: now active means already onboarded", async () => {
+        const id = await seedLive("unrequested");
+        stripeNow("active");
+        const res = await resend(id);
+        expect(res.statusCode).toBe(200);
+        expect(res.json().alreadyOnboarded).toBe(true);
+        expect(await tokenCount(id)).toBe(0);
+        expect(await storedOf(id)).toBe("active");
+      });
+
+      it("re-reads a stored inactive status: now pending means a fresh link, and stores it", async () => {
+        const id = await seedLive("inactive");
+        stripeNow("pending");
+        const res = await resend(id);
+        expect(res.statusCode).toBe(200);
+        expect(res.json().alreadyOnboarded).toBeUndefined();
+        expect(await tokenCount(id)).toBe(1);
+        expect(await storedOf(id)).toBe("pending");
       });
 
       const expectUnrequestedRefusal = async (id: string) => {
@@ -362,8 +397,11 @@ describe("Onboard Resend + Connect Refresh", () => {
         expect(sendMail).not.toHaveBeenCalled();
       };
 
-      it("refuses with 409 CARD_PAYMENTS_UNREQUESTED: no link, no email", async () => {
-        await expectUnrequestedRefusal(await seedLive("unrequested"));
+      it("refuses with 409 CARD_PAYMENTS_UNREQUESTED when it is still unrequested: no link, no email", async () => {
+        const id = await seedLive("unrequested");
+        stripeNow();
+        await expectUnrequestedRefusal(id);
+        expect(await storedOf(id)).toBe("unrequested");
       });
 
       it("reads a NULL status live, stores it and short-circuits when it is active", async () => {
@@ -397,6 +435,16 @@ describe("Onboard Resend + Connect Refresh", () => {
         const [row] = await db.select().from(clients).where(eq(clients.id, id));
         expect(row.cardPaymentsStatus).toBe("unrequested");
       });
+
+      it("fails with 502 when the live read of a non-active status fails", async () => {
+        const id = await seedLive("unrequested");
+        (stripe.accounts.retrieve as any).mockRejectedValueOnce(new Error("stripe down"));
+        const res = await resend(id);
+        expect(res.statusCode).toBe(502);
+        expect(await tokenCount(id)).toBe(0);
+        expect(await storedOf(id)).toBe("unrequested");
+      });
+
       it("fails with 502 when the live read of a NULL status fails", async () => {
         const id = await seedLive(null);
         (stripe.accounts.retrieve as any).mockRejectedValueOnce(new Error("stripe down"));

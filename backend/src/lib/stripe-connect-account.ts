@@ -159,3 +159,21 @@ export async function resolveCardPaymentsStatus(
     .limit(1);
   return current?.status ?? live;
 }
+
+/**
+ * Reads the account's card_payments status live and stores it unconditionally. For admin actions
+ * (onboarding resend), where Stripe's current state is newer than what is stored; the charge
+ * guards use resolveCardPaymentsStatus, which only fills a NULL. Throws when the read fails.
+ */
+export async function refreshCardPaymentsStatus(
+  client: Pick<ClientRecord, "id">,
+  stripeAccountId: string
+): Promise<string> {
+  const account = await withStripeCircuit(() => stripe.accounts.retrieve(stripeAccountId));
+  const live = account.capabilities?.card_payments ?? "unrequested";
+  await db
+    .update(clients)
+    .set({ cardPaymentsStatus: live, updatedAt: new Date() })
+    .where(eq(clients.id, client.id));
+  return live;
+}
