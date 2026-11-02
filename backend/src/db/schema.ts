@@ -67,6 +67,8 @@ export const clients = pgTable(
       .default("active")
       .notNull(),
     chargesEnabled: boolean("charges_enabled").default(false).notNull(),
+    // Stripe's capabilities.card_payments status (active/inactive/pending/unrequested); NULL = never synced.
+    cardPaymentsStatus: text("card_payments_status"),
     payoutsEnabled: boolean("payouts_enabled").default(false).notNull(),
     detailsSubmitted: boolean("details_submitted").default(false).notNull(),
     groupId: text("group_id").references(() => clientGroups.id, { onDelete: "set null" }),

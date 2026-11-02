@@ -19,6 +19,7 @@ export const REQUIRED_TABLES: TableColumns[] = [
       "stripe_customer_id",
       "status",
       "charges_enabled",
+      "card_payments_status",
       "payouts_enabled",
       "details_submitted",
       "workspace",

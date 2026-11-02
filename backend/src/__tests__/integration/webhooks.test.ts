@@ -239,6 +239,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
       details_submitted: true,
       charges_enabled: true,
       payouts_enabled: true,
+      capabilities: { card_payments: "active", transfers: "active" },
     });
 
     const response = await sendWebhook(app, event);
@@ -254,6 +255,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
     expect(updatedClient.name).toBe("Webhook Test Client");
     expect(updatedClient.email).toBe("webhooktest@example.com");
     expect(updatedClient.chargesEnabled).toBe(true);
+    expect(updatedClient.cardPaymentsStatus).toBe("active");
     expect(updatedClient.payoutsEnabled).toBe(true);
     expect(updatedClient.detailsSubmitted).toBe(true);
 
@@ -302,6 +304,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     expect(updatedClient.detailsSubmitted).toBe(false);
     expect(updatedClient.chargesEnabled).toBe(false);
+    expect(updatedClient.cardPaymentsStatus).toBe("unrequested");
     expect(updatedClient.payoutsEnabled).toBe(false);
 
     // Clean up

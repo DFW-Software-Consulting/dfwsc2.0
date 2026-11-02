@@ -12,6 +12,7 @@ type Logger = Pick<FastifyBaseLogger, "info" | "error">;
 export interface ExpressAccountState {
   stripeAccountId: string;
   chargesEnabled: boolean;
+  cardPaymentsStatus: string | null;
   payoutsEnabled: boolean;
   detailsSubmitted: boolean;
 }
@@ -42,6 +43,7 @@ export async function createExpressAccountForClient(
   return {
     stripeAccountId: account.id,
     chargesEnabled: account.charges_enabled ?? false,
+    cardPaymentsStatus: account.capabilities?.card_payments ?? "unrequested",
     payoutsEnabled: account.payouts_enabled ?? false,
     detailsSubmitted: account.details_submitted ?? false,
   };
@@ -93,6 +95,7 @@ export async function ensureExpressAccountForClient(
       .set({
         stripeAccountId: created.stripeAccountId,
         chargesEnabled: created.chargesEnabled,
+        cardPaymentsStatus: created.cardPaymentsStatus,
         payoutsEnabled: created.payoutsEnabled,
         detailsSubmitted: created.detailsSubmitted,
       })
@@ -127,4 +130,32 @@ export async function ensureExpressAccountForClient(
   // The client row disappeared between the read and the claim, so nothing references the account.
   await deleteUnpersistedExpressAccount(created.stripeAccountId, client.id, logger);
   throw new Error(`Stripe account was not persisted for client ${client.id}`);
+}
+
+/**
+ * Stripe can report `charges_enabled` while `capabilities.card_payments` is not active (for
+ * example on transfers-only accounts), and invoicing on such an account fails at Stripe. Returns
+ * the stored status, or reads it live once when it is NULL (never synced) and stores it. The
+ * write only fills a NULL, so a newer value written meanwhile (for example by the account.updated
+ * webhook) wins and is the one returned. Throws when the live read fails, so callers fail closed.
+ */
+export async function resolveCardPaymentsStatus(
+  client: Pick<ClientRecord, "id" | "cardPaymentsStatus">,
+  stripeAccountId: string
+): Promise<string> {
+  if (client.cardPaymentsStatus !== null) return client.cardPaymentsStatus;
+  const account = await withStripeCircuit(() => stripe.accounts.retrieve(stripeAccountId));
+  const live = account.capabilities?.card_payments ?? "unrequested";
+  const written = await db
+    .update(clients)
+    .set({ cardPaymentsStatus: live, updatedAt: new Date() })
+    .where(and(eq(clients.id, client.id), isNull(clients.cardPaymentsStatus)))
+    .returning({ id: clients.id });
+  if (written.length > 0) return live;
+  const [current] = await db
+    .select({ status: clients.cardPaymentsStatus })
+    .from(clients)
+    .where(eq(clients.id, client.id))
+    .limit(1);
+  return current?.status ?? live;
 }

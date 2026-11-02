@@ -423,6 +423,7 @@ This is an optional feature that DFWSC turns on per client. Use the same `X-Api-
 
 - **Enablement.** Ask your DFWSC administrator to turn on invoicing for your account. Until then every invoicing call returns `403` with `code: INVOICING_NOT_ENABLED`.
 - **Charges must be enabled.** Calls that create or change things (create a customer, create, finalize or send an invoice, and so on) need a Stripe account that can take charges. If onboarding is not finished, or Stripe has switched charges off, they return `409` with `code: ACCOUNT_NOT_CONNECTED`. Reading, voiding and deleting a draft still work when charges are off, so you can read and cancel what you already created.
+- **Card payments must be active.** Creating, finalizing and sending an invoice also need the `card_payments` capability to be active on your Stripe account. If it is not, those calls return `409` with `code: CARD_PAYMENTS_NOT_ACTIVE`; contact your DFWSC administrator. Retrying will not help until DFWSC has enabled it.
 - Set these once in your shell for the examples below:
 
 ```sh
@@ -669,6 +670,7 @@ Errors have the shape `{ "error": "...", "code": "...", "requestId": "..." }`. S
 | 403 | `INVOICING_NOT_ENABLED` | Invoicing is not enabled for your account | Ask your DFWSC administrator |
 | 404 | `NOT_FOUND` | Unknown customer or invoice, or one that belongs to another client | Check the id. For a customer in an invoice call, create the customer first |
 | 409 | `ACCOUNT_NOT_CONNECTED` | Your Stripe account is not connected or cannot take charges | Finish Stripe onboarding, or ask DFWSC |
+| 409 | `CARD_PAYMENTS_NOT_ACTIVE` | The `card_payments` capability is not active on your Stripe account (invoice create, finalize, send) | Contact your DFWSC administrator |
 | 409 | `CUSTOMER_EXISTS` | That `externalRef` is already used; the body has the existing `id` | Use the returned `id` |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | The key was already used with a different request body (for a customer create, also a replay that no longer matches Stripe's current data, see above) | Use a new key for a new request, or follow the customer recovery steps above |
 | 409 | `IDEMPOTENCY_KEY_IN_USE` | The first request with this key is still running | Wait a few seconds, retry with the same key |
