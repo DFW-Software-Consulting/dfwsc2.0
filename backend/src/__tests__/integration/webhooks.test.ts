@@ -304,6 +304,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     expect(updatedClient.detailsSubmitted).toBe(false);
     expect(updatedClient.chargesEnabled).toBe(false);
+    expect(updatedClient.cardPaymentsStatus).toBe("unrequested");
     expect(updatedClient.payoutsEnabled).toBe(false);
 
     // Clean up

@@ -176,7 +176,7 @@ function requireInvoicingClient(mode: "read" | "write" | "charge") {
     }
     if (mode !== "charge") return;
     // Routes that end up charging the account also need the card_payments capability.
-    let cardPayments: string | null;
+    let cardPayments: string;
     try {
       cardPayments = await resolveCardPaymentsStatus(client, usable);
     } catch (err) {
@@ -196,8 +196,8 @@ function requireInvoicingClient(mode: "read" | "write" | "charge") {
     if (cardPayments !== "active") {
       return reply.code(409).send({
         error:
-          "Card payments are not enabled on this client's Stripe account yet, so it cannot be invoiced. Finish the account's Stripe onboarding and try again.",
-        code: "ACCOUNT_NOT_CONNECTED",
+          "Card payments are not active on this connected account yet. Contact your DFWSC administrator.",
+        code: "CARD_PAYMENTS_NOT_ACTIVE",
       });
     }
   };

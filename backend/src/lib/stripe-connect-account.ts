@@ -43,7 +43,7 @@ export async function createExpressAccountForClient(
   return {
     stripeAccountId: account.id,
     chargesEnabled: account.charges_enabled ?? false,
-    cardPaymentsStatus: account.capabilities?.card_payments ?? null,
+    cardPaymentsStatus: account.capabilities?.card_payments ?? "unrequested",
     payoutsEnabled: account.payouts_enabled ?? false,
     detailsSubmitted: account.details_submitted ?? false,
   };
@@ -135,21 +135,27 @@ export async function ensureExpressAccountForClient(
 /**
  * Stripe can report `charges_enabled` while `capabilities.card_payments` is not active (for
  * example on transfers-only accounts), and invoicing on such an account fails at Stripe. Returns
- * the stored status, or reads it live once when it is NULL (a row from before the column existed)
- * and persists the result. Throws when the live read fails, so callers fail closed.
+ * the stored status, or reads it live once when it is NULL (never synced) and stores it. The
+ * write only fills a NULL, so a newer value written meanwhile (for example by the account.updated
+ * webhook) wins and is the one returned. Throws when the live read fails, so callers fail closed.
  */
 export async function resolveCardPaymentsStatus(
   client: Pick<ClientRecord, "id" | "cardPaymentsStatus">,
   stripeAccountId: string
-): Promise<string | null> {
+): Promise<string> {
   if (client.cardPaymentsStatus !== null) return client.cardPaymentsStatus;
   const account = await withStripeCircuit(() => stripe.accounts.retrieve(stripeAccountId));
-  const status = account.capabilities?.card_payments ?? null;
-  if (status !== null) {
-    await db
-      .update(clients)
-      .set({ cardPaymentsStatus: status, updatedAt: new Date() })
-      .where(eq(clients.id, client.id));
-  }
-  return status;
+  const live = account.capabilities?.card_payments ?? "unrequested";
+  const written = await db
+    .update(clients)
+    .set({ cardPaymentsStatus: live, updatedAt: new Date() })
+    .where(and(eq(clients.id, client.id), isNull(clients.cardPaymentsStatus)))
+    .returning({ id: clients.id });
+  if (written.length > 0) return live;
+  const [current] = await db
+    .select({ status: clients.cardPaymentsStatus })
+    .from(clients)
+    .where(eq(clients.id, client.id))
+    .limit(1);
+  return current?.status ?? live;
 }

@@ -18,7 +18,7 @@ vi.mock("../../lib/stripe", () => ({ stripe: stripeMock }));
 import { eq, inArray } from "drizzle-orm";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
-import { clients } from "../../db/schema";
+import { clients, connectCustomers, connectInvoices } from "../../db/schema";
 import { hashApiKey, sha256Lookup } from "../../lib/auth";
 import {
   openStripeCircuitForTests,
@@ -26,7 +26,8 @@ import {
 } from "../../lib/circuit-breakers";
 import { tokenBuckets } from "../../lib/rate-limit";
 
-const NOT_ENABLED_MESSAGE = /card payments are not enabled/i;
+const NOT_ACTIVE_MESSAGE = /card payments are not active on this connected account yet/i;
+const NOT_ACTIVE_CODE = "CARD_PAYMENTS_NOT_ACTIVE";
 
 describe("invoicing requires the card_payments capability", () => {
   let app: any;
@@ -34,6 +35,7 @@ describe("invoicing requires the card_payments capability", () => {
 
   async function seedClient(cardPaymentsStatus: string | null) {
     const id = randomUUID();
+    const account = `acct_cp_${id.slice(0, 8)}`;
     const apiKey = `cp_key_${randomUUID().replace(/-/g, "")}`;
     await db.insert(clients).values({
       id,
@@ -42,13 +44,44 @@ describe("invoicing requires the card_payments capability", () => {
       apiKeyHash: await hashApiKey(apiKey),
       apiKeyLookup: sha256Lookup(apiKey),
       status: "active",
-      stripeAccountId: `acct_cp_${id.slice(0, 8)}`,
+      stripeAccountId: account,
       chargesEnabled: true,
       cardPaymentsStatus,
       invoicingEnabled: true,
     });
     clientIds.push(id);
-    return { id, apiKey };
+    return { id, apiKey, account };
+  }
+
+  async function seedInvoice(clientId: string, account: string) {
+    const id = randomUUID();
+    const stripeInvoiceId = `in_cp_${id.slice(0, 12)}`;
+    await db.insert(connectCustomers).values({
+      id: randomUUID(),
+      clientId,
+      connectedAccountId: account,
+      stripeCustomerId: "cus_cp",
+      externalRef: null,
+      idempotencyKey: randomUUID(),
+    });
+    await db.insert(connectInvoices).values({
+      id,
+      clientId,
+      connectedAccountId: account,
+      stripeCustomerId: "cus_cp",
+      idempotencyKey: id,
+      requestHash: `req-${id}`,
+      creationState: "complete",
+      stripeInvoiceId,
+      status: "draft",
+      currency: "usd",
+      subtotalCents: 1000,
+      feeAmountCents: 0,
+      totalCents: 1000,
+      amountRemainingCents: 1000,
+      lastSyncedAt: new Date(),
+    });
+    return { id, stripeInvoiceId };
   }
 
   const storedStatus = async (id: string) =>
@@ -122,18 +155,32 @@ describe("invoicing requires the card_payments capability", () => {
     const c = await seedClient(status);
     for (const res of [await create(c.apiKey), await finalize(c.apiKey), await send(c.apiKey)]) {
       expect(res.statusCode).toBe(409);
-      expect(res.json().code).toBe("ACCOUNT_NOT_CONNECTED");
-      expect(res.json().error).toMatch(NOT_ENABLED_MESSAGE);
+      expect(res.json().code).toBe(NOT_ACTIVE_CODE);
+      expect(res.json().error).toMatch(NOT_ACTIVE_MESSAGE);
     }
     expect(stripeMock.accounts.retrieve).not.toHaveBeenCalled();
     noStripeInvoiceCalls();
   });
 
-  it("lets an active account through the guard without a live read", async () => {
+  it("lets an active account through the guard without a live read and reaches Stripe", async () => {
     const c = await seedClient("active");
-    // Past the guard, the unknown invoice id is a plain 404 (and Stripe is never called).
-    expect((await finalize(c.apiKey)).statusCode).toBe(404);
-    expect((await create(c.apiKey)).statusCode).not.toBe(409);
+    const row = await seedInvoice(c.id, c.account);
+    const open = {
+      id: row.stripeInvoiceId,
+      status: "open",
+      total: 1000,
+      amount_paid: 0,
+      amount_due: 1000,
+      amount_remaining: 1000,
+    };
+    stripeMock.invoices.retrieve.mockResolvedValueOnce(open);
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/invoices/${row.stripeInvoiceId}/finalize`,
+      headers: { "x-api-key": c.apiKey },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(stripeMock.invoices.retrieve).toHaveBeenCalledTimes(1);
     expect(stripeMock.accounts.retrieve).not.toHaveBeenCalled();
   });
 
@@ -161,16 +208,31 @@ describe("invoicing requires the card_payments capability", () => {
     });
     const res = await send(c.apiKey);
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toMatch(NOT_ENABLED_MESSAGE);
+    expect(res.json().error).toMatch(NOT_ACTIVE_MESSAGE);
     expect(await storedStatus(c.id)).toBe("inactive");
     noStripeInvoiceCalls();
   });
 
-  it("refuses when Stripe reports no card_payments capability at all", async () => {
+  it("stores unrequested and refuses when Stripe reports no card_payments capability", async () => {
     const c = await seedClient(null);
     stripeMock.accounts.retrieve.mockResolvedValueOnce({ capabilities: {} });
-    expect((await create(c.apiKey)).statusCode).toBe(409);
-    expect(await storedStatus(c.id)).toBeNull();
+    const res = await create(c.apiKey);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe(NOT_ACTIVE_CODE);
+    expect(await storedStatus(c.id)).toBe("unrequested");
+    noStripeInvoiceCalls();
+  });
+
+  it("refuses when the webhook stores inactive between the live read and the write", async () => {
+    const c = await seedClient(null);
+    stripeMock.accounts.retrieve.mockImplementationOnce(async () => {
+      await db.update(clients).set({ cardPaymentsStatus: "inactive" }).where(eq(clients.id, c.id));
+      return { capabilities: { card_payments: "active" } };
+    });
+    const res = await create(c.apiKey);
+    expect(res.statusCode).toBe(409);
+    expect(res.json().code).toBe(NOT_ACTIVE_CODE);
+    expect(await storedStatus(c.id)).toBe("inactive");
     noStripeInvoiceCalls();
   });
 
@@ -178,7 +240,7 @@ describe("invoicing requires the card_payments capability", () => {
     const c = await seedClient(null);
     stripeMock.accounts.retrieve.mockRejectedValueOnce(new Error("stripe down"));
     const res = await create(c.apiKey);
-    expect(res.statusCode).toBeGreaterThanOrEqual(500);
+    expect(res.statusCode).toBe(502);
     expect(await storedStatus(c.id)).toBeNull();
     noStripeInvoiceCalls();
   });

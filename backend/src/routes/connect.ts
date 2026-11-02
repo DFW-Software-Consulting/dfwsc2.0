@@ -918,7 +918,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       }
 
       const chargesEnabled = verifiedAccount.charges_enabled ?? false;
-      const cardPaymentsStatus = verifiedAccount.capabilities?.card_payments ?? null;
+      const cardPaymentsStatus = verifiedAccount.capabilities?.card_payments ?? "unrequested";
       const payoutsEnabled = verifiedAccount.payouts_enabled ?? false;
       const detailsSubmitted = verifiedAccount.details_submitted ?? false;
       const tokenStatus = detailsSubmitted ? "completed" : "in_progress";

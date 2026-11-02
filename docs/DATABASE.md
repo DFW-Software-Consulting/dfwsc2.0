@@ -21,7 +21,7 @@ The primary entity for each consulting client.
 - **Contact**: `phone`, `billingContactName`.
 - **Address**: `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`.
 - **Billing**: `defaultPaymentTermsDays`.
-- **Stripe readiness**: `chargesEnabled`, `payoutsEnabled`, `detailsSubmitted` and `cardPaymentsStatus` (nullable text: Stripe's `capabilities.card_payments` value, `active`/`inactive`/`pending`; NULL = not read yet, migration `0037`). Written together from the Stripe account by the `account.updated` webhook, the onboarding callback and lazy account creation. Invoice create, finalize and send require `cardPaymentsStatus = 'active'`; a NULL is read live once and stored.
+- **Stripe readiness**: `chargesEnabled`, `payoutsEnabled`, `detailsSubmitted` and `cardPaymentsStatus` (nullable text: Stripe's `capabilities.card_payments` value, `active`, `inactive`, `pending` or `unrequested` (stored when Stripe's account has no such capability); NULL = never synced, migration `0037`). Written together from the Stripe account by the `account.updated` webhook, the onboarding callback and lazy account creation. Invoice create, finalize and send require `cardPaymentsStatus = 'active'`; a NULL is read live once and stored, only if still NULL.
 - **Invoicing**: `invoicingEnabled` (boolean, NOT NULL, default false; per-client opt-in for connected-account invoicing, set only by admin `PATCH /clients/:id`, never by `X-Api-Key` routes). Unused until the invoicing routes land (migration `0035_connect_invoicing_schema`).
 - **Notes**: `notes` (free-form admin text).
 - **Timestamps**: `createdAt`, `updatedAt`.
