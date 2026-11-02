@@ -340,7 +340,6 @@ describe("Onboard Resend + Connect Refresh", () => {
       it.each([
         "inactive",
         "pending",
-        "unrequested",
       ])("issues a fresh onboarding link when card_payments is %s", async (status) => {
         const id = await seedLive(status);
         const res = await resend(id);
@@ -348,6 +347,23 @@ describe("Onboard Resend + Connect Refresh", () => {
         expect(res.json().alreadyOnboarded).toBeUndefined();
         expect(await tokenCount(id)).toBe(1);
         expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
+      });
+
+      const expectUnrequestedRefusal = async (id: string) => {
+        const res = await resend(id);
+        expect(res.statusCode).toBe(409);
+        expect(res.json()).toEqual({
+          error:
+            "Card payments were never requested for this connected account. Request the Card payments capability for it in the Stripe dashboard, then resend onboarding.",
+          code: "CARD_PAYMENTS_UNREQUESTED",
+        });
+        expect(await tokenCount(id)).toBe(0);
+        expect(stripe.accountLinks.create).not.toHaveBeenCalled();
+        expect(sendMail).not.toHaveBeenCalled();
+      };
+
+      it("refuses with 409 CARD_PAYMENTS_UNREQUESTED: no link, no email", async () => {
+        await expectUnrequestedRefusal(await seedLive("unrequested"));
       });
 
       it("reads a NULL status live, stores it and short-circuits when it is active", async () => {
@@ -363,17 +379,24 @@ describe("Onboard Resend + Connect Refresh", () => {
         expect(row.cardPaymentsStatus).toBe("active");
       });
 
-      it("reads a NULL status live and issues a fresh link when it is not active", async () => {
+      it("reads a NULL status live and issues a fresh link when it is inactive", async () => {
         const id = await seedLive(null);
-        (stripe.accounts.retrieve as any).mockResolvedValueOnce({ capabilities: {} });
+        (stripe.accounts.retrieve as any).mockResolvedValueOnce({
+          capabilities: { card_payments: "inactive" },
+        });
         const res = await resend(id);
         expect(res.statusCode).toBe(200);
         expect(res.json().alreadyOnboarded).toBeUndefined();
         expect(await tokenCount(id)).toBe(1);
+      });
+
+      it("reads a NULL status live and refuses when the capability was never requested", async () => {
+        const id = await seedLive(null);
+        (stripe.accounts.retrieve as any).mockResolvedValueOnce({ capabilities: {} });
+        await expectUnrequestedRefusal(id);
         const [row] = await db.select().from(clients).where(eq(clients.id, id));
         expect(row.cardPaymentsStatus).toBe("unrequested");
       });
-
       it("fails with 502 when the live read of a NULL status fails", async () => {
         const id = await seedLive(null);
         (stripe.accounts.retrieve as any).mockRejectedValueOnce(new Error("stripe down"));

@@ -535,9 +535,19 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       let alreadyOnboarded = false;
       if (clientRecord.stripeAccountId && clientRecord.chargesEnabled) {
         try {
-          alreadyOnboarded =
-            (await resolveCardPaymentsStatus(clientRecord, clientRecord.stripeAccountId)) ===
-            "active";
+          const cardPayments = await resolveCardPaymentsStatus(
+            clientRecord,
+            clientRecord.stripeAccountId
+          );
+          // A link cannot fix a capability that was never requested, so send nothing.
+          if (cardPayments === "unrequested") {
+            return reply.code(409).send({
+              error:
+                "Card payments were never requested for this connected account. Request the Card payments capability for it in the Stripe dashboard, then resend onboarding.",
+              code: "CARD_PAYMENTS_UNREQUESTED",
+            });
+          }
+          alreadyOnboarded = cardPayments === "active";
         } catch (err) {
           request.log.error(
             { clientId: clientRecord.id, ...errorLogFields(err) },
