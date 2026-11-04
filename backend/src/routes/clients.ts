@@ -4,6 +4,7 @@ import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
 import { forgetBadApiKey, requireAdminJwt } from "../lib/auth";
+import { normalizeRedirectOrigin } from "../lib/connect-redirect";
 import { MAX_FEE_PERCENT, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { errors, isUniqueViolation } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
@@ -31,6 +32,7 @@ interface ClientPatchBody {
   notes?: string | null;
   defaultPaymentTermsDays?: number | null;
   invoicingEnabled?: boolean;
+  connectRedirectOrigins?: string[];
 }
 
 interface ClientParams {
@@ -69,8 +71,17 @@ const clientPatchBodySchema = z
     notes: nullableString.optional(),
     defaultPaymentTermsDays: z.number().nullable().optional(),
     invoicingEnabled: z.boolean({ error: "invoicingEnabled must be a boolean." }).optional(),
+    connectRedirectOrigins: z.array(z.string()).max(10).optional(),
   })
   .superRefine((body, ctx) => {
+    if (body.connectRedirectOrigins?.some((o) => normalizeRedirectOrigin(o) === null)) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "connectRedirectOrigins must be origins only (https://host[:port], no path); http is allowed for localhost.",
+        path: ["connectRedirectOrigins"],
+      });
+    }
     if (body.paymentSuccessUrl != null && !isValidHttpsUrl(body.paymentSuccessUrl)) {
       ctx.addIssue({
         code: "custom",
@@ -344,6 +355,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         notes?: string | null;
         defaultPaymentTermsDays?: number | null;
         invoicingEnabled?: boolean;
+        connectRedirectOrigins?: string[];
       } = { updatedAt: new Date() };
 
       if (status !== undefined) setValues.status = status;
@@ -375,6 +387,11 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       if ("defaultPaymentTermsDays" in body)
         setValues.defaultPaymentTermsDays = defaultPaymentTermsDays;
       if (body.invoicingEnabled !== undefined) setValues.invoicingEnabled = body.invoicingEnabled;
+      if (body.connectRedirectOrigins !== undefined) {
+        setValues.connectRedirectOrigins = [
+          ...new Set(body.connectRedirectOrigins.map((o) => normalizeRedirectOrigin(o) as string)),
+        ];
+      }
 
       let updatedClients: (typeof clients.$inferSelect)[];
       try {
