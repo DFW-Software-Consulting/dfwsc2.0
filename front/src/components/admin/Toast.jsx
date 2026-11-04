@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 
-export const TOAST_TIMEOUT_MS = 5000;
+const TOAST_TIMEOUT_MS = 5000;
 
 const TOAST_STYLES = {
   success: "bg-green-700",
