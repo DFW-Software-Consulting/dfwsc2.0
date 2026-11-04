@@ -218,7 +218,7 @@ export async function hashApiKey(apiKey: string): Promise<string> {
   return bcrypt.hash(apiKey, saltRounds);
 }
 
-export async function verifyPassword(plaintext: string, hashed: string): Promise<boolean> {
+async function verifyPassword(plaintext: string, hashed: string): Promise<boolean> {
   return bcrypt.compare(plaintext, hashed);
 }
 
