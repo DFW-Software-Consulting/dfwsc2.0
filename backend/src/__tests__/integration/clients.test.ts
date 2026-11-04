@@ -959,6 +959,83 @@ describe("Clients API Integration", () => {
     });
   });
 
+  describe("PATCH /api/v1/clients/:id fee clearing", () => {
+    async function seed(fees: { processingFeePercent?: string; processingFeeCents?: number }) {
+      const id = randomUUID();
+      cleanupIds.push(id);
+      await db.insert(clients).values({
+        id,
+        name: "Fee Client",
+        email: `fee-${id}@example.com`,
+        workspace,
+        status: "active",
+        ...fees,
+      });
+      return id;
+    }
+
+    const patch = (id: string, payload: unknown) =>
+      app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${id}`,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload,
+      });
+
+    const stored = async (id: string) => {
+      const [row] = await db.select().from(clients).where(eq(clients.id, id));
+      return { percent: row.processingFeePercent, cents: row.processingFeeCents };
+    };
+
+    it("stores a percent and nulls the stored cents", async () => {
+      const id = await seed({ processingFeeCents: 100 });
+      const res = await patch(id, { processingFeePercent: 2.5 });
+      expect(res.statusCode).toBe(200);
+      const row = await stored(id);
+      expect(Number(row.percent)).toBeCloseTo(2.5);
+      expect(typeof row.percent).toBe("string");
+      expect(row.cents).toBeNull();
+    });
+
+    it("stores cents and nulls the stored percent", async () => {
+      const id = await seed({ processingFeePercent: "3" });
+      const res = await patch(id, { processingFeeCents: 250 });
+      expect(res.statusCode).toBe(200);
+      const row = await stored(id);
+      expect(row.cents).toBe(250);
+      expect(row.percent).toBeNull();
+    });
+
+    it("clearing percent leaves stored cents unchanged", async () => {
+      const id = await seed({ processingFeePercent: "3", processingFeeCents: 100 });
+      const res = await patch(id, { processingFeePercent: null });
+      expect(res.statusCode).toBe(200);
+      const row = await stored(id);
+      expect(row.percent).toBeNull();
+      expect(row.cents).toBe(100);
+    });
+
+    it("clearing cents leaves stored percent unchanged", async () => {
+      const id = await seed({ processingFeePercent: "3", processingFeeCents: 100 });
+      const res = await patch(id, { processingFeeCents: null });
+      expect(res.statusCode).toBe(200);
+      const row = await stored(id);
+      expect(row.cents).toBeNull();
+      expect(Number(row.percent)).toBeCloseTo(3);
+    });
+
+    it("leaves both fees unchanged when neither is in the body", async () => {
+      const id = await seed({ processingFeePercent: "3", processingFeeCents: 100 });
+      const before = await stored(id);
+      const res = await patch(id, { notes: "unrelated" });
+      expect(res.statusCode).toBe(200);
+      expect(await stored(id)).toEqual(before);
+    });
+  });
+
   describe("GET /api/v1/clients/:id", () => {
     it("returns 401 if not authenticated", async () => {
       const response = await app.inject({
