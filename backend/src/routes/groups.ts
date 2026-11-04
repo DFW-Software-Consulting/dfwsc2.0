@@ -11,9 +11,8 @@ import {
   feeSetValues,
   parsePagination,
 } from "../lib/admin-crud";
-import { MAX_FEE_PERCENT } from "../lib/constants";
 import { errors } from "../lib/errors";
-import { isValidHttpsUrl, parseBody } from "../lib/validation";
+import { parseBody } from "../lib/validation";
 import { isWorkspace, type Workspace } from "../lib/workspace";
 
 interface GroupBody {
@@ -140,45 +139,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
       const { id } = req.params;
       const body = parseBody(groupPatchBodySchema, req.body, res);
       if (!body) return;
-      const {
-        name,
-        status,
-        processingFeePercent,
-        processingFeeCents,
-        paymentSuccessUrl,
-        paymentCancelUrl,
-      } = body;
-
-      if (status !== undefined && status !== "active" && status !== "inactive") {
-        throw errors.badRequest('Invalid status value. Must be "active" or "inactive".');
-      }
-      if (name !== undefined && (typeof name !== "string" || name.trim().length === 0)) {
-        throw errors.badRequest("name must be a non-empty string.");
-      }
-
-      if (processingFeePercent != null && processingFeeCents != null) {
-        throw errors.badRequest("Set one fee type, not both.");
-      }
-      if (
-        processingFeePercent != null &&
-        (processingFeePercent <= 0 || processingFeePercent > MAX_FEE_PERCENT)
-      ) {
-        throw errors.badRequest(
-          `processingFeePercent must be greater than 0 and at most ${MAX_FEE_PERCENT}.`
-        );
-      }
-      if (
-        processingFeeCents != null &&
-        (!Number.isInteger(processingFeeCents) || processingFeeCents < 0)
-      ) {
-        throw errors.badRequest("processingFeeCents must be a non-negative integer.");
-      }
-      if (paymentSuccessUrl != null && !isValidHttpsUrl(paymentSuccessUrl)) {
-        throw errors.badRequest("paymentSuccessUrl must be a valid HTTPS URL.");
-      }
-      if (paymentCancelUrl != null && !isValidHttpsUrl(paymentCancelUrl)) {
-        throw errors.badRequest("paymentCancelUrl must be a valid HTTPS URL.");
-      }
+      const { name, status, paymentSuccessUrl, paymentCancelUrl } = body;
 
       const [existing] = await db
         .select()
