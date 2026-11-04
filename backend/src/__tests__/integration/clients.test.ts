@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clientGroups, clients } from "../../db/schema";
+import { MAX_FEE_PERCENT } from "../../lib/constants";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
 
@@ -1025,6 +1026,143 @@ describe("Clients API Integration", () => {
       expect(client.defaultPaymentTermsDays).toBe(45);
       expect(client.createdAt).toBeDefined();
       expect(client.updatedAt).toBeDefined();
+    });
+  });
+
+  describe("Admin validation responses (pinned)", () => {
+    const patchUrl = "/api/v1/clients/client-validation-only";
+    const feePercentMax = `processingFeePercent must be greater than 0 and at most ${MAX_FEE_PERCENT}.`;
+    const NAME_TYPE_ERROR = "Invalid input: expected string, received number";
+    const PAGINATION_ERROR =
+      "limit must be an integer between 1 and 100 and offset must be a non-negative integer.";
+
+    const patch = (payload: unknown) =>
+      app.inject({
+        method: "PATCH",
+        url: patchUrl,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload,
+      });
+
+    it.each([
+      ["limit=0"],
+      ["limit=101"],
+      ["limit=abc"],
+      ["limit=1.5"],
+      ["offset=-1"],
+      ["offset=1.5"],
+      ["offset=abc"],
+    ])("GET list with %s returns 400 with only an error key", async (qs) => {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/v1/clients?workspace=client_portal&${qs}`,
+        headers: { authorization: `Bearer ${makeAdminToken()}` },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: PAGINATION_ERROR });
+    });
+
+    it.each([
+      [
+        "both fee types",
+        { processingFeePercent: 5, processingFeeCents: 100 },
+        "Set one fee type, not both.",
+      ],
+      ["percent above max", { processingFeePercent: MAX_FEE_PERCENT + 1 }, feePercentMax],
+      ["percent zero", { processingFeePercent: 0 }, feePercentMax],
+      ["percent negative", { processingFeePercent: -1 }, feePercentMax],
+      [
+        "cents negative",
+        { processingFeeCents: -1 },
+        "processingFeeCents must be a non-negative integer.",
+      ],
+      [
+        "cents fractional",
+        { processingFeeCents: 1.5 },
+        "processingFeeCents must be a non-negative integer.",
+      ],
+      [
+        "success URL http",
+        { paymentSuccessUrl: "http://example.com/ok" },
+        "paymentSuccessUrl must be a valid HTTPS URL.",
+      ],
+      [
+        "success URL garbage",
+        { paymentSuccessUrl: "not a url" },
+        "paymentSuccessUrl must be a valid HTTPS URL.",
+      ],
+      [
+        "cancel URL http",
+        { paymentCancelUrl: "http://example.com/no" },
+        "paymentCancelUrl must be a valid HTTPS URL.",
+      ],
+      [
+        "cancel URL garbage",
+        { paymentCancelUrl: "nope" },
+        "paymentCancelUrl must be a valid HTTPS URL.",
+      ],
+      [
+        "invalid status",
+        { status: "archived" },
+        'Invalid status value. Must be "active" or "inactive".',
+      ],
+      [
+        "status beats refinements",
+        { status: "bogus", paymentSuccessUrl: "http://x.test", processingFeeCents: -1 },
+        'Invalid status value. Must be "active" or "inactive".',
+      ],
+      ["name empty", { name: "" }, "name must not be empty."],
+      ["name whitespace", { name: "   " }, "name must not be empty."],
+      ["name not a string", { name: 123 }, NAME_TYPE_ERROR],
+    ])("PATCH rejects %s with the exact 400 body", async (_label, payload, message) => {
+      const response = await patch(payload);
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: message });
+    });
+
+    it.each([
+      [
+        "URL beats fee",
+        { processingFeeCents: -1, paymentSuccessUrl: "http://x.test" },
+        "paymentSuccessUrl must be a valid HTTPS URL.",
+      ],
+      [
+        "URL beats name",
+        { name: "", paymentCancelUrl: "nope" },
+        "paymentCancelUrl must be a valid HTTPS URL.",
+      ],
+      [
+        "fee beats name",
+        { name: "", processingFeeCents: -1 },
+        "processingFeeCents must be a non-negative integer.",
+      ],
+      [
+        "fee beats email",
+        { email: "bad", processingFeeCents: -1 },
+        "processingFeeCents must be a non-negative integer.",
+      ],
+      [
+        "both-fees beats percent range",
+        { processingFeePercent: 500, processingFeeCents: 100 },
+        "Set one fee type, not both.",
+      ],
+      [
+        "both-fees beats cents range",
+        { processingFeePercent: 5, processingFeeCents: -1 },
+        "Set one fee type, not both.",
+      ],
+      [
+        "success URL beats cancel URL",
+        { paymentSuccessUrl: "http://x.test", paymentCancelUrl: "nope" },
+        "paymentSuccessUrl must be a valid HTTPS URL.",
+      ],
+    ])("PATCH validation order: %s", async (_label, payload, message) => {
+      const response = await patch(payload);
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: message });
     });
   });
 });
