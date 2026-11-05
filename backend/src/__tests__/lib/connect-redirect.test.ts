@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isAllowedRedirectUrl, normalizeRedirectOrigin } from "../../lib/connect-redirect";
+import {
+  allowedRedirectHref,
+  isAllowedRedirectUrl,
+  normalizeRedirectOrigin,
+} from "../../lib/connect-redirect";
 
 describe("normalizeRedirectOrigin", () => {
   it.each([
@@ -40,5 +44,24 @@ describe("isAllowedRedirectUrl", () => {
   });
   it("rejects everything for an empty allowlist", () => {
     expect(isAllowedRedirectUrl("https://app.example.com/", [])).toBe(false);
+  });
+});
+
+describe("allowedRedirectHref", () => {
+  const allowed = ["https://app.example.com"];
+  it.each([
+    ["https://app.example.com/a?b=1#c", "https://app.example.com/a?b=1#c"],
+    ["HTTPS://APP.example.com", "https://app.example.com/"],
+    ["https://app.example.com\\@evil.com/", "https://app.example.com/@evil.com/"],
+    ["https://app.example.com\\path", "https://app.example.com/path"],
+  ])("returns the canonical href for %s", (input, expected) => {
+    expect(allowedRedirectHref(input, allowed)).toBe(expected);
+  });
+  it.each([
+    "https://evil.com\\@app.example.com/",
+    "https://app.example.com:444/",
+    "nope",
+  ])("returns null for %s", (input) => {
+    expect(allowedRedirectHref(input, allowed)).toBeNull();
   });
 });

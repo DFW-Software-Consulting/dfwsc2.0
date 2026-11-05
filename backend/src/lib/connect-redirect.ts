@@ -25,15 +25,27 @@ export function normalizeRedirectOrigin(value: string): string | null {
   return url.origin;
 }
 
-/** True when `value` is an absolute https (or localhost http) URL whose origin is allowlisted. */
-export function isAllowedRedirectUrl(value: string, allowedOrigins: readonly string[]): boolean {
+/**
+ * The canonical `href` of `value` when it is an absolute https (or localhost http) URL whose
+ * origin is allowlisted, else null. Send this parsed form onward, not the raw string, so every
+ * downstream parser sees exactly what was validated.
+ */
+export function allowedRedirectHref(
+  value: string,
+  allowedOrigins: readonly string[]
+): string | null {
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    return false;
+    return null;
   }
-  if (!isAcceptableScheme(url)) return false;
-  if (url.username || url.password) return false;
-  return allowedOrigins.includes(url.origin);
+  if (!isAcceptableScheme(url)) return null;
+  if (url.username || url.password) return null;
+  return allowedOrigins.includes(url.origin) ? url.href : null;
+}
+
+/** True when `value` is an absolute https (or localhost http) URL whose origin is allowlisted. */
+export function isAllowedRedirectUrl(value: string, allowedOrigins: readonly string[]): boolean {
+  return allowedRedirectHref(value, allowedOrigins) !== null;
 }

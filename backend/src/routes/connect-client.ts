@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { clients } from "../db/schema";
 import { requireApiKey } from "../lib/auth";
 import { withStripeCircuit } from "../lib/circuit-breakers";
-import { isAllowedRedirectUrl } from "../lib/connect-redirect";
+import { allowedRedirectHref } from "../lib/connect-redirect";
 import {
   CONNECT_CLIENT_LINK_RATE_LIMIT_MAX,
   CONNECT_CLIENT_STATUS_RATE_LIMIT_MAX,
@@ -70,6 +70,7 @@ export default async function connectClientRoutes(fastify: FastifyInstance) {
     return mapStripeError(err, reply, {
       circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
       rateLimited: STRIPE_RATE_LIMITED_ERROR,
+      permanentErrors: true,
     });
   }
 
@@ -86,13 +87,17 @@ export default async function connectClientRoutes(fastify: FastifyInstance) {
         code: "REDIRECT_ORIGINS_NOT_CONFIGURED",
       });
     }
+    // Stripe gets the parsed href that passed the allowlist, never the raw string.
+    const hrefs = {} as Record<"returnUrl" | "refreshUrl", string>;
     for (const field of ["returnUrl", "refreshUrl"] as const) {
-      if (!isAllowedRedirectUrl(body[field], client.connectRedirectOrigins)) {
+      const href = allowedRedirectHref(body[field], client.connectRedirectOrigins);
+      if (!href) {
         return reply.code(400).send({
           error: `${field} must be an https URL on one of this client's allowed origins.`,
           code: "REDIRECT_URL_NOT_ALLOWED",
         });
       }
+      hrefs[field] = href;
     }
 
     try {
@@ -102,8 +107,8 @@ export default async function connectClientRoutes(fastify: FastifyInstance) {
       const link = await withStripeCircuit(() =>
         stripe.accountLinks.create({
           account: stripeAccountId,
-          return_url: body.returnUrl,
-          refresh_url: body.refreshUrl,
+          return_url: hrefs.returnUrl,
+          refresh_url: hrefs.refreshUrl,
           type: "account_onboarding",
         })
       );

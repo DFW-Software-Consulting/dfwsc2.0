@@ -68,8 +68,13 @@ function resolveRequestId(header: string | string[] | undefined): string {
   return value && REQUEST_ID_HEADER_PATTERN.test(value) ? value : crypto.randomUUID();
 }
 
-export async function buildServer() {
-  const logger = process.env.NODE_ENV === "test" ? { level: "silent" } : true;
+export async function buildServer(opts: { logStream?: { write(line: string): void } } = {}) {
+  // `logStream` lets a test capture every log line, at every level, including child loggers.
+  const logger = opts.logStream
+    ? { level: "trace", stream: opts.logStream }
+    : process.env.NODE_ENV === "test"
+      ? { level: "silent" }
+      : true;
   const trustProxy = parseTrustProxy();
   const server = fastify({
     logger,

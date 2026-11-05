@@ -365,7 +365,9 @@ Starts or resumes Stripe-hosted onboarding (business details, bank account). Cre
 
 **Response `200`:** `{ "url": "https://connect.stripe.com/...", "expiresAt": "2026-11-04T20:00:00.000Z" }`. Redirect the user to `url`. When Stripe sends them to `refreshUrl` (the link expired or was already used), call this endpoint again and redirect to the new `url`. On `returnUrl`, call `GET /connect/account` for the real status; returning does not mean onboarding is finished.
 
-**Errors:** `400 REDIRECT_URL_NOT_ALLOWED` (not https, or origin not allowlisted), `409 REDIRECT_ORIGINS_NOT_CONFIGURED`, `401`, `429`, `502/503` (Stripe unavailable; retry).
+**Errors:** `400 REDIRECT_URL_NOT_ALLOWED` (not https, or origin not allowlisted), `409 REDIRECT_ORIGINS_NOT_CONFIGURED`, `401`, `429`, `502/503` (Stripe unavailable; retry), and the permanent errors below (do not retry).
+
+The URLs are sent to Stripe in their canonical parsed form (for example a backslash becomes a slash), so Stripe may redirect to a slightly normalized URL.
 
 ##### `GET /api/v1/connect/account`
 
@@ -390,7 +392,21 @@ Returns a link to the Stripe Express Dashboard, where the user updates bank and 
 
 **Response `200`:** `{ "url": "https://connect.stripe.com/express/..." }`
 
-**Errors:** `409 ONBOARDING_INCOMPLETE` when the account does not exist or onboarding is not finished; use the onboarding link instead.
+**Errors:** `409 ONBOARDING_INCOMPLETE` when the account does not exist or onboarding is not finished; use the onboarding link instead. Also the permanent errors below, and `502/503` (retry).
+
+##### Stripe errors on the Connect routes
+
+All three Connect routes share this mapping. Retry only the retryable ones.
+
+| Status | `code` | Retry? |
+|---|---|---|
+| 400 | `INVALID_REQUEST` (Stripe rejected the request, e.g. a non-https redirect URL on a live key) | No. Fix the input |
+| 409 | `IDEMPOTENCY_KEY_REUSED` (the account was first requested with different details, e.g. the client email changed within 24h) | No. Contact DFWSC |
+| 409 | `ACCOUNT_NOT_CONNECTED` (the connected account is disconnected or lacks permission) | No. Contact DFWSC |
+| 409 | `IDEMPOTENCY_KEY_IN_USE` (the first request is still running) | Yes, shortly |
+| 429 | `RATE_LIMITED`, with `Retry-After` | Yes |
+| 502 | `STRIPE_FAILED` | Yes |
+| 503 | `STRIPE_BUSY` (with `Retry-After`) or `STRIPE_CIRCUIT_OPEN` | Yes |
 
 ---
 

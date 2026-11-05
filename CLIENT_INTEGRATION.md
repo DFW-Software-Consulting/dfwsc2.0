@@ -424,6 +424,8 @@ Your admins can connect their bank account to Stripe without leaving your settin
 2. **Come back.** Stripe sends the admin to `returnUrl`. That only means they left Stripe, so call `GET /api/v1/connect/account` to show real status: `hasAccount`, `detailsSubmitted`, `chargesEnabled`, `payoutsEnabled`, `requirements` (`currentlyDue`, `pastDue`, `disabledReason`) and `capabilities`. If `currentlyDue` is not empty, offer "Continue setup" (step 1 again). If Stripe sends them to `refreshUrl`, the link expired: call step 1 again and redirect to the new `url`.
 3. **Manage later.** `POST /api/v1/connect/dashboard-link` returns `{ "url" }` to the Stripe Express Dashboard, where they update bank and payout details. Before onboarding is finished it returns `409` with `code: "ONBOARDING_INCOMPLETE"`: use step 1 instead.
 
+Errors on these three endpoints: retry `429` (after `Retry-After`), `502`, `503` and `409` `IDEMPOTENCY_KEY_IN_USE` automatically. Do not retry `400` `INVALID_REQUEST`, `409` `IDEMPOTENCY_KEY_REUSED` or `409` `ACCOUNT_NOT_CONNECTED`: they will fail the same way until something changes, so show the admin an error and contact DFWSC. The redirect URLs are sent to Stripe in canonical form (for example a backslash becomes a slash).
+
 Links are single use and short lived: create one when the admin clicks, never store or log them. Limits: 10 requests per minute per client for the two link calls, 60 per minute for the status call. See `API_DOCS.md` for errors.
 
 ---

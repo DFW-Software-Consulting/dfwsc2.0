@@ -9,6 +9,7 @@ vi.mock("../../lib/stripe", () => ({
 }));
 
 import { eq } from "drizzle-orm";
+import Stripe from "stripe";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients } from "../../db/schema";
@@ -221,15 +222,124 @@ describe("client-facing Connect routes", () => {
       expect(stripe.accounts.create).not.toHaveBeenCalled();
     });
 
-    it("never logs the Stripe link URL or the redirect URLs", async () => {
-      const c = await seedClient({ stripeAccountId: "acct_log" });
+    it("sends Stripe the canonical parsed href, not the raw string", async () => {
+      const c = await seedClient({ stripeAccountId: "acct_canon" });
+      const res = await link(c.apiKey, {
+        returnUrl: `${ORIGIN}\\@evil.com/back?x=1`,
+        refreshUrl: "HTTPS://APP.client-example.com/settings/payments?refresh=1",
+      });
+      expect(res.statusCode).toBe(200);
+      expect(stripe.accountLinks.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          return_url: "https://app.client-example.com/@evil.com/back?x=1",
+          refresh_url: REFRESH_URL,
+        })
+      );
+    });
+
+    describe("log output", () => {
+      let logApp: any;
       const lines: string[] = [];
-      const spy = vi
-        .spyOn(app.log, "info")
-        .mockImplementation((...a: unknown[]) => void lines.push(JSON.stringify(a)));
-      await link(c.apiKey);
-      spy.mockRestore();
-      expect(lines.join("\n")).not.toContain("SECRETTOKEN");
+
+      beforeAll(async () => {
+        logApp = await buildServer({ logStream: { write: (line) => void lines.push(line) } });
+      });
+      afterAll(async () => {
+        if (logApp) await logApp.close();
+      });
+      beforeEach(() => {
+        lines.length = 0;
+      });
+
+      const callOnLogApp = (apiKey: string) =>
+        logApp.inject({
+          method: "POST",
+          url: "/api/v1/connect/onboarding-link",
+          headers: { "x-api-key": apiKey, "content-type": "application/json" },
+          payload: { returnUrl: RETURN_URL, refreshUrl: REFRESH_URL },
+        });
+
+      const expectNoSecrets = () => {
+        const out = lines.join("\n");
+        expect(out).toContain("Client Connect onboarding link"); // the route did log
+        for (const secret of [LINK_URL, "SECRETTOKEN", RETURN_URL, REFRESH_URL]) {
+          expect(out).not.toContain(secret);
+        }
+      };
+
+      it("never logs the Stripe link URL or the redirect URLs on success", async () => {
+        const c = await seedClient({ stripeAccountId: "acct_log" });
+        const res = await callOnLogApp(c.apiKey);
+        expect(res.statusCode).toBe(200);
+        expectNoSecrets();
+      });
+
+      it("never logs the Stripe link URL or the redirect URLs on a Stripe failure", async () => {
+        const c = await seedClient({ stripeAccountId: "acct_log_err" });
+        vi.mocked(stripe.accountLinks.create).mockRejectedValue(new Error("boom"));
+        const res = await callOnLogApp(c.apiKey);
+        expect(res.statusCode).toBe(502);
+        expectNoSecrets();
+      });
+    });
+  });
+
+  describe("Stripe error mapping", () => {
+    const sdkError = (type: string, statusCode: number, message: string) =>
+      type === "permission_error"
+        ? new Stripe.errors.StripePermissionError({ type, statusCode, message } as never)
+        : Stripe.errors.StripeError.generate({ type, statusCode, message } as never);
+
+    // Each route, wired so that the one Stripe call under test rejects with `err`.
+    const routes = {
+      "POST onboarding-link": async (err: Error) => {
+        const c = await seedClient({ stripeAccountId: "acct_err" });
+        vi.mocked(stripe.accountLinks.create).mockRejectedValue(err);
+        return call("POST", "onboarding-link", c.apiKey, {
+          returnUrl: RETURN_URL,
+          refreshUrl: REFRESH_URL,
+        });
+      },
+      "GET account": async (err: Error) => {
+        const c = await seedClient({ stripeAccountId: "acct_err" });
+        vi.mocked(stripe.accounts.retrieve).mockRejectedValue(err);
+        return call("GET", "account", c.apiKey);
+      },
+      "POST dashboard-link": async (err: Error) => {
+        const c = await seedClient({ stripeAccountId: "acct_err" });
+        vi.mocked(stripe.accounts.retrieve).mockResolvedValue({
+          id: "acct_err",
+          details_submitted: true,
+        } as never);
+        vi.mocked(stripe.accounts.createLoginLink).mockRejectedValue(err);
+        return call("POST", "dashboard-link", c.apiKey, {});
+      },
+    };
+
+    describe.each(Object.entries(routes))("%s", (_name, run) => {
+      it.each([
+        ["invalid request", "invalid_request_error", 400, 400, "INVALID_REQUEST"],
+        ["idempotency mismatch", "idempotency_error", 400, 409, "IDEMPOTENCY_KEY_REUSED"],
+        ["permission", "permission_error", 403, 409, "ACCOUNT_NOT_CONNECTED"],
+      ])("maps a permanent %s error to a non-retryable response", async (_l, type, st, status, code) => {
+        const res = await run(sdkError(type, st, "stripe detail"));
+        expect(res.statusCode).toBe(status);
+        expect(res.json().code).toBe(code);
+        expect(res.headers["retry-after"]).toBeUndefined();
+      });
+
+      it("keeps a transient Stripe failure retryable, without leaking its message", async () => {
+        const res = await run(sdkError("api_error", 500, "internal stripe detail"));
+        expect(res.statusCode).toBe(502);
+        expect(res.json().code).toBe("STRIPE_FAILED");
+        expect(res.body).not.toContain("internal stripe detail");
+      });
+
+      it("keeps a Stripe rate limit retryable with Retry-After", async () => {
+        const res = await run(sdkError("rate_limit_error", 429, "slow down"));
+        expect(res.statusCode).toBe(429);
+        expect(res.headers["retry-after"]).toBeDefined();
+      });
     });
   });
 
