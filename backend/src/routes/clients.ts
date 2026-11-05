@@ -3,13 +3,18 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { db } from "../db/client";
 import { clientGroups, clients } from "../db/schema";
-import { forgetBadApiKey, requireAdminJwt } from "../lib/auth";
+import {
+  addFeeIssues,
+  addUrlIssues,
+  adminCrudPreHandler,
+  feeSetValues,
+  parsePagination,
+} from "../lib/admin-crud";
+import { forgetBadApiKey } from "../lib/auth";
 import { normalizeRedirectOrigin } from "../lib/connect-redirect";
-import { MAX_FEE_PERCENT, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { errors, isUniqueViolation } from "../lib/errors";
-import { adminRateLimit } from "../lib/rate-limit";
 import { errorLogFields } from "../lib/safe-error-log";
-import { isValidHttpsUrl, parseBody } from "../lib/validation";
+import { parseBody } from "../lib/validation";
 import { isWorkspace } from "../lib/workspace";
 
 interface ClientPatchBody {
@@ -40,10 +45,6 @@ interface ClientParams {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const adminCrudRateLimit = adminRateLimit({
-  max: RATE_LIMIT_MAX,
-  windowMs: RATE_LIMIT_WINDOW_MS,
-});
 
 const nullableString = z.string().nullable();
 const clientPatchBodySchema = z
@@ -82,47 +83,8 @@ const clientPatchBodySchema = z
         path: ["connectRedirectOrigins"],
       });
     }
-    if (body.paymentSuccessUrl != null && !isValidHttpsUrl(body.paymentSuccessUrl)) {
-      ctx.addIssue({
-        code: "custom",
-        message: "paymentSuccessUrl must be a valid HTTPS URL.",
-        path: ["paymentSuccessUrl"],
-      });
-    }
-    if (body.paymentCancelUrl != null && !isValidHttpsUrl(body.paymentCancelUrl)) {
-      ctx.addIssue({
-        code: "custom",
-        message: "paymentCancelUrl must be a valid HTTPS URL.",
-        path: ["paymentCancelUrl"],
-      });
-    }
-    if (body.processingFeePercent != null && body.processingFeeCents != null) {
-      ctx.addIssue({
-        code: "custom",
-        message: "Set one fee type, not both.",
-        path: ["processingFeePercent"],
-      });
-    }
-    if (
-      body.processingFeePercent != null &&
-      (body.processingFeePercent <= 0 || body.processingFeePercent > MAX_FEE_PERCENT)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message: `processingFeePercent must be greater than 0 and at most ${MAX_FEE_PERCENT}.`,
-        path: ["processingFeePercent"],
-      });
-    }
-    if (
-      body.processingFeeCents != null &&
-      (!Number.isInteger(body.processingFeeCents) || body.processingFeeCents < 0)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        message: "processingFeeCents must be a non-negative integer.",
-        path: ["processingFeeCents"],
-      });
-    }
+    addUrlIssues(body, ctx);
+    addFeeIssues(body, ctx);
     if (body.name !== undefined && (!body.name || !body.name.trim())) {
       ctx.addIssue({ code: "custom", message: "name must not be empty.", path: ["name"] });
     }
@@ -146,17 +108,9 @@ const clientPatchBodySchema = z
     }
   });
 
-function parsePagination(query: { limit?: string; offset?: string }) {
-  const limit = query.limit === undefined ? 20 : Number(query.limit);
-  const offset = query.offset === undefined ? 0 : Number(query.offset);
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) return null;
-  if (!Number.isInteger(offset) || offset < 0) return null;
-  return { limit, offset };
-}
-
 const clientRoutes: FastifyPluginAsync = async (app) => {
   // GET /clients - List all clients (admin only)
-  app.get("/clients", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
+  app.get("/clients", { preHandler: adminCrudPreHandler }, async (req, res) => {
     try {
       const { groupId, workspace, limit, offset } = req.query as {
         groupId?: string;
@@ -242,7 +196,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
   // GET /clients/:id - Get a single client (admin only)
   app.get<{ Params: ClientParams; Querystring: { workspace?: string } }>(
     "/clients/:id",
-    { preHandler: [requireAdminJwt, adminCrudRateLimit] },
+    { preHandler: adminCrudPreHandler },
     async (req, res) => {
       const { id } = req.params;
       const { workspace } = req.query;
@@ -276,7 +230,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
   app.patch<{
     Params: ClientParams;
     Body: ClientPatchBody;
-  }>("/clients/:id", { preHandler: [requireAdminJwt, adminCrudRateLimit] }, async (req, res) => {
+  }>("/clients/:id", { preHandler: adminCrudPreHandler }, async (req, res) => {
     try {
       const { id } = req.params;
       const body = parseBody(clientPatchBodySchema, req.body, res) as ClientPatchBody | null;
@@ -286,8 +240,6 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         groupId,
         paymentSuccessUrl,
         paymentCancelUrl,
-        processingFeePercent,
-        processingFeeCents,
         name,
         email,
         defaultPaymentTermsDays,
@@ -362,17 +314,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       if ("groupId" in body) setValues.groupId = groupId;
       if ("paymentSuccessUrl" in body) setValues.paymentSuccessUrl = paymentSuccessUrl;
       if ("paymentCancelUrl" in body) setValues.paymentCancelUrl = paymentCancelUrl;
-      if ("processingFeePercent" in body) {
-        setValues.processingFeePercent =
-          processingFeePercent != null ? String(processingFeePercent) : null;
-        // Setting a non-null percent fee clears the flat cents fee to keep them mutually exclusive.
-        if (processingFeePercent != null) setValues.processingFeeCents = null;
-      }
-      if ("processingFeeCents" in body) {
-        setValues.processingFeeCents = processingFeeCents;
-        // Setting a non-null cents fee clears the percent fee to keep them mutually exclusive.
-        if (processingFeeCents != null) setValues.processingFeePercent = null;
-      }
+      Object.assign(setValues, feeSetValues(body));
       if (name !== undefined) setValues.name = name;
       if (email !== undefined) setValues.email = email;
       if ("phone" in body) setValues.phone = body.phone;
@@ -435,7 +377,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
 
   app.delete<{ Params: ClientParams }>(
     "/clients/:id",
-    { preHandler: [requireAdminJwt, adminCrudRateLimit] },
+    { preHandler: adminCrudPreHandler },
     async (req, res) => {
       try {
         const { id } = req.params;
