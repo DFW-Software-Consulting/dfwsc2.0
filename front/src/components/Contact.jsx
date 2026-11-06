@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useContactForm } from "../hooks/useContact";
 import { validateEmail, validateName } from "../utils/validation";
+import { getVisitContext } from "../utils/visitContext";
 
 const INITIAL_FORM = { name: "", email: "", company: "", message: "", _hp: "" };
 
@@ -72,6 +74,7 @@ export default function Contact() {
           email: form.email.trim(),
           company: form.company.trim(),
           message: form.message.trim(),
+          context: getVisitContext(),
           _hp: form._hp,
         },
         {
@@ -170,6 +173,10 @@ export default function Contact() {
       <button type="submit" className="studio-button" disabled={isPending}>
         {isPending ? "Sending..." : "Send message"}
       </button>
+      <p className="studio-form-note">
+        We include the pages you viewed on this site with your message.{" "}
+        <Link to="/privacy">Privacy</Link>
+      </p>
 
       {isError && (
         <p role="alert" className="studio-form-alert">

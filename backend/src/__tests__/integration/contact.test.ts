@@ -68,6 +68,59 @@ describe("POST /api/v1/contact", () => {
     expect(call.text).toContain("Hello, I would like a quote.");
   });
 
+  const post = (payload: unknown) =>
+    app.inject({
+      method: "POST",
+      url: "/api/v1/contact",
+      payload,
+      headers: { "content-type": "application/json" },
+    });
+
+  it("includes a valid visit context in the email and the lead", async () => {
+    (isWebsiteLeadEnabled as any).mockReturnValue(true);
+    const context = {
+      referrer: "google.com",
+      landingPath: "/services",
+      utm: { source: "linkedin", medium: "social" },
+      pages: ["/services", "/pricing"],
+      secondsOnSite: 192,
+    };
+    const response = await post({ ...validPayload(), context });
+
+    expect(response.statusCode).toBe(201);
+    const text = (sendMail as any).mock.calls[0][0].text as string;
+    expect(text).toContain("Hello, I would like a quote.\n\n--- Visit context ---");
+    expect(text).toContain("Found us via: google.com");
+    expect(text).toContain("Campaign: linkedin / social");
+    expect(text).toContain("Pages viewed (2): /services → /pricing");
+    expect(text).toContain("Time on site: 3m 12s");
+    expect((submitWebsiteLead as any).mock.calls[0][0].context).toEqual(context);
+  });
+
+  it("adds no context block when none is sent", async () => {
+    const response = await post(validPayload());
+    expect(response.statusCode).toBe(201);
+    expect((sendMail as any).mock.calls[0][0].text).not.toContain("Visit context");
+  });
+
+  it.each([
+    ["a string", "google.com"],
+    ["an array", []],
+    ["a referrer with a slash", { referrer: "google.com/search" }],
+    ["21 pages", { pages: Array.from({ length: 21 }, () => "/a") }],
+    ["a bad page path", { pages: ["no-slash"] }],
+    ["newline injection in utm", { utm: { source: "x\nBcc: evil@example.com" } }],
+    ["a float for seconds", { secondsOnSite: 1.5 }],
+    ["an unknown key", { referrer: "google.com", extra: "x" }],
+  ])("still returns 201 and drops the context for %s", async (_label, context) => {
+    (isWebsiteLeadEnabled as any).mockReturnValue(true);
+    const response = await post({ ...validPayload(), context });
+
+    expect(response.statusCode).toBe(201);
+    expect((sendMail as any).mock.calls[0][0].text).not.toContain("Visit context");
+    expect((submitWebsiteLead as any).mock.calls[0][0].context).toBeUndefined();
+  });
+
   it("returns 201 and does not send email when the honeypot field is filled", async () => {
     const response = await app.inject({
       method: "POST",

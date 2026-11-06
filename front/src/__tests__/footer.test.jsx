@@ -38,6 +38,7 @@ describe("Footer", () => {
       "/",
       "/pricing",
       "/team",
+      "/privacy",
       "tel:+12143260128",
       "mailto:mail@dfwsc.com",
       "https://github.com/DFW-Software-Consulting",

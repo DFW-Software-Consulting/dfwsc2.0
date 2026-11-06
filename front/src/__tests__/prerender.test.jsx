@@ -7,7 +7,7 @@ const text = (html) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 
 describe("prerender entry", () => {
   it("renders real page content for lazy routes, with no Suspense fallback or inline scripts", async () => {
-    for (const path of ["/", "/pricing", "/team", "/docs", "/404"]) {
+    for (const path of ["/", "/pricing", "/team", "/privacy", "/docs", "/404"]) {
       const html = await render(path);
       expect(html, path).not.toContain("animate-spin");
       expect(html, path).not.toContain("<script");
