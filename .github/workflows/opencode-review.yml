@@ -1,0 +1,193 @@
+# OpenCode AI pull-request review (advisory only; never blocks CI).
+#
+# Secret (Settings > Secrets and variables > Actions > Secrets):
+#   OPENCODE_API_KEY               OpenCode Go API key (the opencode-go provider reads it
+#                                  from the OPENCODE_API_KEY env var per models.dev).
+# Variables (optional, Settings > Secrets and variables > Actions > Variables):
+#   OPENCODE_REVIEW_MODEL          primary model, default opencode-go/kimi-k3.1-pro
+#   OPENCODE_REVIEW_FALLBACK_MODEL used only if the primary run fails, default opencode-go/kimi-k2.7-code
+#
+# Triggers: non-draft same-repo PRs get an automatic review; a /oc or /opencode comment from
+# an OWNER/MEMBER/COLLABORATOR on a PR runs OpenCode with the comment text as the instruction.
+# Without the secret the job logs a warning and succeeds. The model is read-only: edit and
+# webfetch are denied and bash is limited to read-only git/gh commands (see OPENCODE_CONFIG_CONTENT).
+# Every permission is an explicit allow/deny because `opencode github run` never answers "ask" prompts.
+# The action posts its own raw error comment on failure; the cleanup steps below delete only
+# github-actions[bot] issue comments created during this run that link to this run, so a failed
+# review leaves just our single warning comment.
+name: OpenCode Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+# One run per PR; a newer run supersedes the old one. Comments that are not /oc commands get a
+# unique group (run_id) so ordinary chatter never cancels an in-flight review.
+concurrency:
+  group: opencode-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ (github.event_name == 'pull_request' || contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode')) && 'active' || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    name: OpenCode review
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        !contains(fromJSON('["dependabot[bot]","renovate[bot]","github-actions[bot]"]'), github.event.pull_request.user.login)
+      ) || (
+        (
+          (github.event_name == 'issue_comment' && github.event.issue.pull_request) ||
+          github.event_name == 'pull_request_review_comment'
+        ) &&
+        (contains(github.event.comment.body, '/oc') || contains(github.event.comment.body, '/opencode')) &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      )
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+      # CI-only, review-only config. Highest-precedence runtime override; never touches repo files.
+      OPENCODE_CONFIG_CONTENT: |
+        {
+          "$schema": "https://opencode.ai/config.json",
+          "autoupdate": false,
+          "permission": {
+            "edit": "deny",
+            "webfetch": "deny",
+            "websearch": "deny",
+            "external_directory": "deny",
+            "doom_loop": "deny",
+            "question": "deny",
+            "read": {
+              "*": "allow",
+              "*.env": "deny",
+              "*.env.*": "deny",
+              "*.env.example": "allow"
+            },
+            "bash": {
+              "*": "deny",
+              "git diff*": "allow",
+              "git log*": "allow",
+              "git show*": "allow",
+              "git status*": "allow",
+              "gh pr diff*": "allow",
+              "gh pr view*": "allow"
+            }
+          }
+        }
+      REVIEW_PROMPT: |
+        Review this pull request's diff for correctness bugs, security issues, regressions,
+        data-loss risks, and missing or incorrect tests. Follow the conventions in the repo's
+        AGENTS.md. Skip formatting and style nits that a linter would catch. Group findings by
+        severity (blocking / should-fix / nit) with file:line references. If you find nothing
+        significant, reply with a short LGTM. Never modify files or push commits.
+    steps:
+      - name: Check OPENCODE_API_KEY
+        id: key
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          if [ -n "$OPENCODE_API_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::OpenCode review skipped: OPENCODE_API_KEY not configured"
+            echo "OpenCode review skipped: OPENCODE_API_KEY not configured" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Checkout
+        if: steps.key.outputs.configured == 'true'
+        uses: actions/checkout@v4
+
+      - name: Snapshot bot comments (primary)
+        if: steps.key.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | .id' > "$RUNNER_TEMP/bot-comments-primary.txt" || : > "$RUNNER_TEMP/bot-comments-primary.txt"
+
+      - name: OpenCode review (primary)
+        id: primary
+        if: steps.key.outputs.configured == 'true'
+        continue-on-error: true
+        uses: anomalyco/opencode/github@810c0eba1a7348036f8bdf61e6632d0c36c6876c # v1.19.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        with:
+          model: ${{ vars.OPENCODE_REVIEW_MODEL || 'opencode-go/kimi-k3.1-pro' }}
+          use_github_token: true
+          prompt: ${{ github.event_name == 'pull_request' && env.REVIEW_PROMPT || '' }}
+
+      - name: Remove raw error comments (primary)
+        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Only github-actions[bot] issue comments new since the snapshot AND linking to this run.
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("/actions/runs/" + env.GITHUB_RUN_ID)) | .id' > "$RUNNER_TEMP/bot-now-primary.txt" || exit 0
+          grep -vxFf "$RUNNER_TEMP/bot-comments-primary.txt" "$RUNNER_TEMP/bot-now-primary.txt" | while read -r id; do
+            case "$id" in ''|*[!0-9]*) continue ;; esac
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" || true
+          done || true
+
+      - name: Snapshot bot comments (fallback)
+        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | .id' > "$RUNNER_TEMP/bot-comments-fallback.txt" || : > "$RUNNER_TEMP/bot-comments-fallback.txt"
+
+      - name: OpenCode review (fallback model)
+        id: fallback
+        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure'
+        continue-on-error: true
+        uses: anomalyco/opencode/github@810c0eba1a7348036f8bdf61e6632d0c36c6876c # v1.19.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        with:
+          model: ${{ vars.OPENCODE_REVIEW_FALLBACK_MODEL || 'opencode-go/kimi-k2.7-code' }}
+          use_github_token: true
+          prompt: ${{ github.event_name == 'pull_request' && env.REVIEW_PROMPT || '' }}
+
+      - name: Remove raw error comments (fallback)
+        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure' && steps.fallback.outcome == 'failure'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Only github-actions[bot] issue comments new since the snapshot AND linking to this run.
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("/actions/runs/" + env.GITHUB_RUN_ID)) | .id' > "$RUNNER_TEMP/bot-now-fallback.txt" || exit 0
+          grep -vxFf "$RUNNER_TEMP/bot-comments-fallback.txt" "$RUNNER_TEMP/bot-now-fallback.txt" | while read -r id; do
+            case "$id" in ''|*[!0-9]*) continue ;; esac
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" || true
+          done || true
+
+      - name: Report skipped review
+        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure' && steps.fallback.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          echo "::warning::OpenCode review skipped: primary and fallback models both failed"
+          echo "OpenCode review skipped: primary and fallback models both failed. [Run logs]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "⚠️ OpenCode review skipped — the model errored or the OpenCode Go usage limit was reached. CI is unaffected. [Run logs]($RUN_URL)" \
+            || echo "::warning::Could not post skip comment"
