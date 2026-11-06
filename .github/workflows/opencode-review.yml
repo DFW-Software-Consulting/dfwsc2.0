@@ -3,18 +3,21 @@
 # Secret (Settings > Secrets and variables > Actions > Secrets):
 #   OPENCODE_API_KEY               OpenCode Go API key (the opencode-go provider reads it
 #                                  from the OPENCODE_API_KEY env var per models.dev).
-# Variables (optional, Settings > Secrets and variables > Actions > Variables):
-#   OPENCODE_REVIEW_MODEL          primary model, default opencode-go/kimi-k3.1-pro
-#   OPENCODE_REVIEW_FALLBACK_MODEL used only if the primary run fails, default opencode-go/kimi-k2.7-code
+# Variable (optional, Settings > Secrets and variables > Actions > Variables):
+#   OPENCODE_REVIEW_MODEL          model to use, default opencode-go/kimi-k3.1-pro
 #
 # Triggers: non-draft same-repo PRs get an automatic review; a /oc or /opencode comment from
 # an OWNER/MEMBER/COLLABORATOR on a PR runs OpenCode with the comment text as the instruction.
 # Without the secret the job logs a warning and succeeds. The model is read-only: edit and
 # webfetch are denied and bash is limited to read-only git/gh commands (see OPENCODE_CONFIG_CONTENT).
 # Every permission is an explicit allow/deny because `opencode github run` never answers "ask" prompts.
-# The action posts its own raw error comment on failure; the cleanup steps below delete only
-# github-actions[bot] issue comments created during this run that link to this run, so a failed
-# review leaves just our single warning comment.
+#
+# OpenCode is installed from the pinned GitHub release (not the composite action / curl installer,
+# which edits shell rc files) and `opencode github run` is supervised by a watchdog: when the
+# OpenCode Go quota is exhausted the CLI retries forever, so the first quota/429 error in its output
+# stops the run. There is no fallback model; a failed review is skipped with one PR comment. The
+# action also posts its own raw error comment; the cleanup step deletes only github-actions[bot]
+# issue comments created during this run that link to this run.
 name: OpenCode Review
 
 on:
@@ -40,7 +43,8 @@ jobs:
   review:
     name: OpenCode review
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Must stay well above the run step (12 min) so the cleanup and notify steps always run.
+    timeout-minutes: 25
     if: >-
       (
         github.event_name == 'pull_request' &&
@@ -57,6 +61,7 @@ jobs:
       )
     env:
       PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+      OPENCODE_VERSION: 1.19.5
       # CI-only, review-only config. Highest-precedence runtime override; never touches repo files.
       OPENCODE_CONFIG_CONTENT: |
         {
@@ -110,84 +115,153 @@ jobs:
         if: steps.key.outputs.configured == 'true'
         uses: actions/checkout@v4
 
-      - name: Snapshot bot comments (primary)
+      - name: Cache OpenCode
+        id: cache
+        if: steps.key.outputs.configured == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/opencode-1.19.5
+          key: opencode-1.19.5-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install OpenCode (pinned release)
+        if: steps.key.outputs.configured == 'true' && steps.cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] || { echo "::error::Unsupported runner platform $(uname -s)/$(uname -m)"; exit 1; }
+          # sha256 of the v${OPENCODE_VERSION} release assets (GitHub release asset digests).
+          if grep -qwi avx2 /proc/cpuinfo; then
+            asset=opencode-linux-x64.tar.gz
+            sha=588310a336fa3b9df36b3f0225b26f679d453efaad0cf3d66c3651ef3ec1647a
+          else
+            asset=opencode-linux-x64-baseline.tar.gz
+            sha=17c200fd4b2289954cc01552559f9b6d03ec157b2ddfb5eb54144f491656333d
+          fi
+          dir="$RUNNER_TEMP/opencode-$OPENCODE_VERSION"
+          dl="$RUNNER_TEMP/opencode-download"
+          rm -rf "$dir" "$dl"; mkdir -p "$dir" "$dl"
+          gh release download "v$OPENCODE_VERSION" -R anomalyco/opencode -p "$asset" -D "$dl"
+          echo "$sha  $dl/$asset" | sha256sum -c -
+          tar -xzf "$dl/$asset" -C "$dir"
+          rm -rf "$dl"
+
+      - name: Add OpenCode to PATH
+        if: steps.key.outputs.configured == 'true'
+        run: |
+          set -eu
+          echo "$RUNNER_TEMP/opencode-$OPENCODE_VERSION" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/opencode-$OPENCODE_VERSION/opencode" --version
+
+      - name: Snapshot bot comments
         if: steps.key.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | .id' > "$RUNNER_TEMP/bot-comments-primary.txt" || : > "$RUNNER_TEMP/bot-comments-primary.txt"
+            --jq '.[] | select(.user.login == "github-actions[bot]") | .id' > "$RUNNER_TEMP/bot-comments.txt" || : > "$RUNNER_TEMP/bot-comments.txt"
 
-      - name: OpenCode review (primary)
-        id: primary
+      # Replicates the composite action's "Run opencode" step (github/action.yml @ v1.19.5) with a
+      # watchdog. The step always exits 0; the outcome is in outputs.reason (ok|quota|error|timeout).
+      - name: OpenCode review
+        id: run
         if: steps.key.outputs.configured == 'true'
         continue-on-error: true
-        uses: anomalyco/opencode/github@810c0eba1a7348036f8bdf61e6632d0c36c6876c # v1.19.5
+        timeout-minutes: 12
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-        with:
-          model: ${{ vars.OPENCODE_REVIEW_MODEL || 'opencode-go/kimi-k3.1-pro' }}
-          use_github_token: true
-          prompt: ${{ github.event_name == 'pull_request' && env.REVIEW_PROMPT || '' }}
+          MODEL: ${{ vars.OPENCODE_REVIEW_MODEL || 'opencode-go/kimi-k3.1-pro' }}
+          # Empty for comment events so the comment text is the instruction.
+          PROMPT: ${{ github.event_name == 'pull_request' && env.REVIEW_PROMPT || '' }}
+          USE_GITHUB_TOKEN: "true"
+          AGENT: ""
+          MENTIONS: ""
+          VARIANT: ""
+          OIDC_BASE_URL: ""
+          WATCHDOG_SECONDS: "600"
+        run: |
+          log="$RUNNER_TEMP/opencode.log"
+          : > "$log"
+          setsid opencode github run > "$log" 2>&1 &
+          pid=$!
+          tail -n +1 -F "$log" 2>/dev/null &
+          tailpid=$!
+          pattern='GoUsageLimitError|statusCode: 429|AI_RetryError'
+          reason=""
+          start=$(date +%s)
+          stop_run() { kill -TERM -- "-$pid" 2>/dev/null || true; sleep 2; kill -KILL -- "-$pid" 2>/dev/null || true; }
+          trap 'stop_run; kill "$tailpid" 2>/dev/null || true' TERM INT
+          while :; do
+            if grep -Eq "$pattern" "$log"; then
+              reason=quota
+              sleep 2   # let the error body and headers finish logging
+              stop_run
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              wait "$pid" && rc=0 || rc=$?
+              if grep -Eq "$pattern" "$log"; then reason=quota
+              elif [ "$rc" -eq 0 ]; then reason=ok
+              else reason=error; fi
+              break
+            fi
+            if [ $(( $(date +%s) - start )) -ge "$WATCHDOG_SECONDS" ]; then
+              reason=timeout
+              stop_run
+              break
+            fi
+            sleep 3
+          done
+          sleep 1
+          kill "$tailpid" 2>/dev/null || true
+          limit="" ; reset=""
+          if [ "$reason" = "quota" ]; then
+            limit=$(grep -oE '"limitName" ?: ?"[A-Za-z0-9_-]+"' "$log" | head -n1 | sed -E 's/.*"([A-Za-z0-9_-]+)"$/\1/' || true)
+            ra=$(grep -ioE 'retry-after"? ?[:=] ?"?[0-9]+' "$log" | head -n1 | grep -oE '[0-9]+$' || true)
+            if [ -n "$ra" ]; then reset=$(date -u -d "@$(( $(date +%s) + ra ))" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || true); fi
+          fi
+          {
+            echo "reason=$reason"
+            echo "limit=$limit"
+            echo "reset=$reset"
+          } >> "$GITHUB_OUTPUT"
+          echo "OpenCode run finished: reason=$reason limit=$limit reset=$reset"
+          exit 0
 
-      - name: Remove raw error comments (primary)
-        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure'
+      - name: Remove raw error comments
+        if: steps.key.outputs.configured == 'true' && steps.run.outputs.reason != 'ok'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Only github-actions[bot] issue comments new since the snapshot AND linking to this run.
           gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("/actions/runs/" + env.GITHUB_RUN_ID)) | .id' > "$RUNNER_TEMP/bot-now-primary.txt" || exit 0
-          grep -vxFf "$RUNNER_TEMP/bot-comments-primary.txt" "$RUNNER_TEMP/bot-now-primary.txt" | while read -r id; do
-            case "$id" in ''|*[!0-9]*) continue ;; esac
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" || true
-          done || true
-
-      - name: Snapshot bot comments (fallback)
-        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | .id' > "$RUNNER_TEMP/bot-comments-fallback.txt" || : > "$RUNNER_TEMP/bot-comments-fallback.txt"
-
-      - name: OpenCode review (fallback model)
-        id: fallback
-        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure'
-        continue-on-error: true
-        uses: anomalyco/opencode/github@810c0eba1a7348036f8bdf61e6632d0c36c6876c # v1.19.5
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-        with:
-          model: ${{ vars.OPENCODE_REVIEW_FALLBACK_MODEL || 'opencode-go/kimi-k2.7-code' }}
-          use_github_token: true
-          prompt: ${{ github.event_name == 'pull_request' && env.REVIEW_PROMPT || '' }}
-
-      - name: Remove raw error comments (fallback)
-        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure' && steps.fallback.outcome == 'failure'
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Only github-actions[bot] issue comments new since the snapshot AND linking to this run.
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("/actions/runs/" + env.GITHUB_RUN_ID)) | .id' > "$RUNNER_TEMP/bot-now-fallback.txt" || exit 0
-          grep -vxFf "$RUNNER_TEMP/bot-comments-fallback.txt" "$RUNNER_TEMP/bot-now-fallback.txt" | while read -r id; do
+            --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("/actions/runs/" + env.GITHUB_RUN_ID)) | .id' > "$RUNNER_TEMP/bot-now.txt" || exit 0
+          grep -vxFf "$RUNNER_TEMP/bot-comments.txt" "$RUNNER_TEMP/bot-now.txt" | while read -r id; do
             case "$id" in ''|*[!0-9]*) continue ;; esac
             gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" || true
           done || true
 
       - name: Report skipped review
-        if: steps.key.outputs.configured == 'true' && steps.primary.outcome == 'failure' && steps.fallback.outcome == 'failure'
+        if: steps.key.outputs.configured == 'true' && steps.run.outputs.reason != 'ok'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REASON: ${{ steps.run.outputs.reason }}
+          LIMIT: ${{ steps.run.outputs.limit }}
+          RESET: ${{ steps.run.outputs.reset }}
         run: |
-          echo "::warning::OpenCode review skipped: primary and fallback models both failed"
-          echo "OpenCode review skipped: primary and fallback models both failed. [Run logs]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
+          case "$REASON" in
+            quota)
+              if [ -n "$LIMIT" ]; then what="OpenCode Go $LIMIT usage limit reached"; else what="OpenCode Go usage limit reached"; fi
+              [ -n "$RESET" ] && what="$what (resets ~$RESET)"
+              ;;
+            error) what="OpenCode errored" ;;
+            *) what="OpenCode timed out" ;;
+          esac
+          echo "::warning::OpenCode review skipped: $what"
+          echo "OpenCode review skipped: $what. [Run logs]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
           gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "⚠️ OpenCode review skipped — the model errored or the OpenCode Go usage limit was reached. CI is unaffected. [Run logs]($RUN_URL)" \
+            --body "⚠️ OpenCode review skipped — $what. CI is unaffected. [Run logs]($RUN_URL)" \
             || echo "::warning::Could not post skip comment"
