@@ -267,6 +267,13 @@
       "when": 1793576907957,
       "tag": "0037_tan_barracuda",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793825950057,
+      "tag": "0038_client_connect_redirect_origins",
+      "breakpoints": true
     }
   ]
 }
