@@ -1,0 +1,408 @@
+# OpenCode AI pull-request review (advisory only; never blocks CI).
+#
+# Secret (Settings > Secrets and variables > Actions > Secrets):
+#   OPENCODE_API_KEY               OpenCode Go API key (the opencode-go provider reads it
+#                                  from the OPENCODE_API_KEY env var per models.dev).
+# Variable (optional, Settings > Secrets and variables > Actions > Variables):
+#   OPENCODE_REVIEW_MODEL          model to use, default opencode-go/kimi-k3.1-pro
+#
+# Triggers: non-draft same-repo PRs get an automatic review. A comment that STARTS with /oc or
+# /opencode, written by an OWNER/MEMBER/COLLABORATOR on a same-repo PR, runs OpenCode with the
+# comment text as the instruction (fork PRs are skipped by the "Same-repo guard" step).
+# Without the secret the job logs a warning and succeeds. The model is read-only: edit, webfetch
+# and websearch are denied and bash is limited to read-only git/gh commands (see
+# OPENCODE_CONFIG_CONTENT). Every permission is an explicit allow/deny because
+# `opencode github run` never answers "ask" prompts.
+#
+# OpenCode is installed from the pinned 1.19.5 GitHub release (sha256-verified; not the composite
+# action / curl installer, which edits shell rc files) and `opencode github run` is supervised by a
+# watchdog: when the OpenCode Go quota is exhausted the CLI retries forever, so a repeated 429 /
+# GoUsageLimitError in its own ERROR log records stops the run. There is no fallback model; a
+# skipped review is reported in ONE sticky PR comment (updated in place, removed after a good
+# review). Every step is continue-on-error so this workflow never turns a PR red.
+name: OpenCode Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+# One run per PR; a newer run supersedes the old one. Only the PR event or a trusted /oc command
+# joins the shared group; every other comment gets a unique group (run_id) so it can never cancel
+# an in-flight review.
+concurrency:
+  group: opencode-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ (github.event_name == 'pull_request' || ((startsWith(github.event.comment.body, '/oc') || startsWith(github.event.comment.body, '/opencode')) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))) && 'active' || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    name: OpenCode review
+    runs-on: ubuntu-latest
+    # Must stay well above the run step (12 min) so the cleanup and notify steps always run.
+    timeout-minutes: 25
+    if: >-
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        !contains(fromJSON('["dependabot[bot]","renovate[bot]","github-actions[bot]"]'), github.event.pull_request.user.login)
+      ) || (
+        (
+          (github.event_name == 'issue_comment' && github.event.issue.pull_request) ||
+          github.event_name == 'pull_request_review_comment'
+        ) &&
+        (startsWith(github.event.comment.body, '/oc') || startsWith(github.event.comment.body, '/opencode')) &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      )
+    env:
+      PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+      OPENCODE_VERSION: 1.19.5
+      # CI-only, review-only config. Highest-precedence runtime override; never touches repo files.
+      OPENCODE_CONFIG_CONTENT: |
+        {
+          "$schema": "https://opencode.ai/config.json",
+          "autoupdate": false,
+          "permission": {
+            "edit": "deny",
+            "webfetch": "deny",
+            "websearch": "deny",
+            "external_directory": "deny",
+            "doom_loop": "deny",
+            "question": "deny",
+            "read": {
+              "*": "allow",
+              "*.env": "deny",
+              "*.env.*": "deny",
+              "*.env.example": "allow",
+              ".git/*": "deny",
+              ".git/**": "deny",
+              "**/.git/*": "deny",
+              "**/.git/**": "deny"
+            },
+            "bash": {
+              "*": "deny",
+              "git diff*": "allow",
+              "git log*": "allow",
+              "git show*": "allow",
+              "git status*": "allow",
+              "gh pr diff*": "allow",
+              "gh pr view*": "allow"
+            }
+          }
+        }
+      REVIEW_PROMPT: |
+        Review this pull request's diff for correctness bugs, security issues, regressions,
+        data-loss risks, and missing or incorrect tests. Follow the conventions in the repo's
+        AGENTS.md. Skip formatting and style nits that a linter would catch. Group findings by
+        severity (blocking / should-fix / nit) with file:line references. If you find nothing
+        significant, reply with a short LGTM. Never modify files or push commits.
+    steps:
+      - name: Check OPENCODE_API_KEY
+        id: key
+        continue-on-error: true
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          if [ -n "$OPENCODE_API_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::OpenCode review skipped: OPENCODE_API_KEY not configured"
+            echo "OpenCode review skipped: OPENCODE_API_KEY not configured" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Fails closed: later steps run only when the PR is verified to come from this repository.
+      - name: Same-repo guard
+        id: guard
+        if: steps.key.outputs.configured == 'true'
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            try {
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner, repo: context.repo.repo,
+                pull_number: Number(process.env.PR_NUMBER),
+              });
+              if (pr.head.repo && pr.head.repo.full_name === pr.base.repo.full_name) {
+                core.setOutput('go', 'true');
+              } else {
+                core.warning('OpenCode review skipped: pull request comes from a fork');
+                await core.summary.addRaw('OpenCode review skipped: pull request comes from a fork', true).write();
+              }
+            } catch (e) {
+              core.warning(`OpenCode review skipped: could not verify PR head repo (${e.message})`);
+            }
+
+      - name: Checkout
+        if: steps.guard.outputs.go == 'true'
+        continue-on-error: true
+        # Credentials stay persisted: with use_github_token, `opencode github run` does
+        # `git fetch origin <branch>` itself and relies on the checkout's credentials (this repo's
+        # private fetch would otherwise fail). The model is blocked from reading .git/ instead.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Restore OpenCode cache
+        id: cache
+        if: steps.guard.outputs.go == 'true'
+        continue-on-error: true
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/opencode-1.19.5
+          key: opencode-v2-1.19.5-${{ runner.os }}-${{ runner.arch }}
+
+      # Needs only curl, tar and sha256sum (no gh/jq: self-hosted runners may lack them). A cached
+      # binary is re-verified with --version; a fresh one is checksum-verified, staged outside the
+      # cache path, version-checked and only then moved into place. outputs.fresh gates the cache save.
+      - name: Install OpenCode (pinned release)
+        id: install
+        if: steps.guard.outputs.go == 'true'
+        continue-on-error: true
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/opencode-$OPENCODE_VERSION"
+          export HOME="$RUNNER_TEMP/opencode-home"; mkdir -p "$HOME"
+          works() { [ -x "$1/opencode" ] && "$1/opencode" --version 2>/dev/null | grep -qF "$OPENCODE_VERSION"; }
+          if works "$dir"; then
+            echo "Using cached OpenCode"
+            echo "$dir" >> "$GITHUB_PATH"
+            exit 0
+          fi
+          rm -rf "$dir"
+          [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] || { echo "::warning::Unsupported runner platform $(uname -s)/$(uname -m)"; exit 1; }
+          # sha256 of the v1.19.5 release assets (GitHub release asset digests).
+          if grep -qwi avx2 /proc/cpuinfo; then
+            asset=opencode-linux-x64.tar.gz
+            sha=588310a336fa3b9df36b3f0225b26f679d453efaad0cf3d66c3651ef3ec1647a
+          else
+            asset=opencode-linux-x64-baseline.tar.gz
+            sha=17c200fd4b2289954cc01552559f9b6d03ec157b2ddfb5eb54144f491656333d
+          fi
+          stage="$RUNNER_TEMP/opencode-stage"
+          rm -rf "$stage"; mkdir -p "$stage/x"
+          curl -fsSL --retry 3 -o "$stage/$asset" "https://github.com/anomalyco/opencode/releases/download/v$OPENCODE_VERSION/$asset"
+          echo "$sha  $stage/$asset" | sha256sum -c -
+          tar -xzf "$stage/$asset" -C "$stage/x"
+          works "$stage/x" || { echo "::warning::Downloaded OpenCode failed --version check"; exit 1; }
+          mv "$stage/x" "$dir"
+          rm -rf "$stage"
+          echo "$dir" >> "$GITHUB_PATH"
+          echo "fresh=true" >> "$GITHUB_OUTPUT"
+
+      - name: Save OpenCode cache
+        if: steps.install.outputs.fresh == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/opencode-1.19.5
+          key: opencode-v2-1.19.5-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Snapshot bot comments
+        if: steps.guard.outputs.go == 'true'
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require('fs');
+            let ids = null;
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: Number(process.env.PR_NUMBER), per_page: 100,
+              });
+              ids = comments.filter((c) => c.user && c.user.login === 'github-actions[bot]').map((c) => c.id);
+            } catch (e) {
+              core.warning(`Could not snapshot comments: ${e.message}`);
+            }
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/bot-comments.json`, JSON.stringify(ids));
+
+      # Replicates the composite action's "Run opencode" step (github/action.yml @ v1.19.5) with a
+      # watchdog. The step always exits 0; the outcome is in outputs.reason (ok|quota|error|timeout).
+      - name: OpenCode review
+        id: run
+        if: steps.guard.outputs.go == 'true'
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          MODEL: ${{ vars.OPENCODE_REVIEW_MODEL || 'opencode-go/kimi-k3.1-pro' }}
+          # Empty for comment events so the comment text is the instruction.
+          PROMPT: ${{ github.event_name == 'pull_request' && env.REVIEW_PROMPT || '' }}
+          USE_GITHUB_TOKEN: "true"
+          AGENT: ""
+          MENTIONS: ""
+          VARIANT: ""
+          OIDC_BASE_URL: ""
+          WATCHDOG_SECONDS: "600"
+          # Isolate from any user-level OpenCode config/auth (~/.opencode, ~/.config/opencode) on self-hosted runners.
+          HOME: ${{ runner.temp }}/opencode-home
+          XDG_CONFIG_HOME: ${{ runner.temp }}/opencode-xdg/config
+          XDG_DATA_HOME: ${{ runner.temp }}/opencode-xdg/data
+          XDG_STATE_HOME: ${{ runner.temp }}/opencode-xdg/state
+          XDG_CACHE_HOME: ${{ runner.temp }}/opencode-xdg/cache
+        run: |
+          if ! command -v opencode >/dev/null 2>&1; then
+            echo "::warning::opencode binary not available (install failed)"
+            echo "reason=error" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          mkdir -p "$HOME"
+          log="$RUNNER_TEMP/opencode.log"
+          : > "$log"
+          setsid opencode github run > "$log" 2>&1 &
+          pid=$!
+          tail -n +1 -F "$log" 2>/dev/null &
+          tailpid=$!
+          # Quota detection looks only at OpenCode's own ERROR log records ("[HH:MM:SS.mmm] ERROR (#n):
+          # stream error {" blocks), never at model or tool output. It fires when two separate error
+          # blocks carry a 429 / GoUsageLimitError, or one carries "AI_RetryError: Failed after".
+          quota_hit() {
+            awk '
+              /^\[[0-9:.]+\] [A-Z]+ / { inblk = 0 }
+              /^\[[0-9:.]+\] ERROR \(#[0-9]+\): stream error [{]$/ { inblk = 1; blk++; next }
+              inblk && (/^ statusCode: 429,/ || /^ responseBody: .*GoUsageLimitError/ || /^AI_RetryError: Failed after/) {
+                if (!seen[blk]++) n++
+                if (/^AI_RetryError: Failed after/) retry = 1
+              }
+              END { exit !(n >= 2 || retry) }
+            ' "$log"
+          }
+          reason=""
+          start=$(date +%s)
+          stop_run() { kill -TERM -- "-$pid" 2>/dev/null || true; sleep 2; kill -KILL -- "-$pid" 2>/dev/null || true; }
+          trap 'stop_run; kill "$tailpid" 2>/dev/null || true' TERM INT
+          while :; do
+            if quota_hit; then
+              reason=quota
+              sleep 2   # let the error body and headers finish logging
+              stop_run
+              break
+            fi
+            if ! kill -0 "$pid" 2>/dev/null; then
+              wait "$pid" && rc=0 || rc=$?
+              if [ "$rc" -eq 0 ]; then reason=ok
+              elif quota_hit; then reason=quota
+              else reason=error; fi
+              break
+            fi
+            if [ $(( $(date +%s) - start )) -ge "$WATCHDOG_SECONDS" ]; then
+              reason=timeout
+              stop_run
+              break
+            fi
+            sleep 3
+          done
+          sleep 1
+          kill "$tailpid" 2>/dev/null || true
+          limit="" ; reset=""
+          if [ "$reason" = "quota" ]; then
+            limit=$(grep -m1 -oE 'limitName[^A-Za-z0-9]+[A-Za-z0-9_-]+' "$log" | sed -E 's/.*[^A-Za-z0-9_-]//' || true)
+            ra=$(grep -m1 -ioE 'retry-after"? ?[:=] ?"?[0-9]+' "$log" | grep -oE '[0-9]+$' || true)
+            if [ -n "$ra" ]; then reset=$(date -u -d "@$(( $(date +%s) + ra ))" '+%Y-%m-%d %H:%M UTC' 2>/dev/null || true); fi
+          fi
+          {
+            echo "reason=$reason"
+            echo "limit=$limit"
+            echo "reset=$reset"
+          } >> "$GITHUB_OUTPUT"
+          echo "OpenCode run finished: reason=$reason limit=$limit reset=$reset"
+          exit 0
+
+      # Deletes only the action's own raw error comment(s): new since the snapshot, posted by
+      # github-actions[bot], ending with the action's "[github run](...)" footer for THIS run, and
+      # starting like an error message. Never the sticky notice, never a review.
+      - name: Remove raw error comments
+        if: steps.guard.outputs.go == 'true' && steps.run.outputs.reason != 'ok'
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require('fs');
+            const before = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/bot-comments.json`, 'utf8'));
+            if (!Array.isArray(before)) return;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER), per_page: 100,
+            });
+            const footer = `\n\n[github run](/${context.repo.owner}/${context.repo.repo}/actions/runs/${process.env.GITHUB_RUN_ID})`;
+            for (const c of comments) {
+              const body = c.body || '';
+              if (!c.user || c.user.login !== 'github-actions[bot]') continue;
+              if (before.includes(c.id) || body.includes('<!-- opencode-review-skip -->')) continue;
+              if (!body.endsWith(footer)) continue;
+              const msg = body.slice(0, body.length - footer.length);
+              if (!/^\s*([\w.]*(Error|Exception)\b|fatal:|error:)/i.test(msg)) continue;
+              try {
+                await github.rest.issues.deleteComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: c.id });
+              } catch (e) {
+                core.warning(`Could not delete comment ${c.id}: ${e.message}`);
+              }
+            }
+
+      - name: Report skipped review
+        if: steps.guard.outputs.go == 'true' && steps.run.outputs.reason != 'ok'
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REASON: ${{ steps.run.outputs.reason }}
+          LIMIT: ${{ steps.run.outputs.limit }}
+          RESET: ${{ steps.run.outputs.reset }}
+        with:
+          script: |
+            const { REASON, LIMIT, RESET, RUN_URL } = process.env;
+            let what;
+            if (REASON === 'quota') {
+              what = `OpenCode Go ${LIMIT ? LIMIT + ' ' : ''}usage limit reached${RESET ? ` (resets ~${RESET})` : ''}`;
+            } else if (REASON === 'timeout') {
+              what = 'OpenCode timed out';
+            } else {
+              what = 'OpenCode errored';   // reason=error or missing output
+            }
+            core.warning(`OpenCode review skipped: ${what}`);
+            await core.summary.addRaw(`OpenCode review skipped: ${what}. [Run logs](${RUN_URL})`, true).write();
+            const marker = '<!-- opencode-review-skip -->';
+            const body = `${marker}\n⚠️ OpenCode review skipped — ${what}. CI is unaffected. [Run logs](${RUN_URL}) (updated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC)`;
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: Number(process.env.PR_NUMBER), per_page: 100,
+              });
+              // Sticky notice: update the existing one (marker, or the legacy unmarked text) instead of adding another.
+              const existing = comments.filter((c) => c.user && c.user.login === 'github-actions[bot]' &&
+                ((c.body || '').includes(marker) || (c.body || '').startsWith('⚠️ OpenCode review skipped'))).pop();
+              if (existing) {
+                await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR_NUMBER), body });
+              }
+            } catch (e) {
+              core.warning(`Could not post skip comment: ${e.message}`);
+            }
+
+      - name: Clear stale skip notice
+        if: steps.guard.outputs.go == 'true' && steps.run.outputs.reason == 'ok'
+        continue-on-error: true
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER), per_page: 100,
+            });
+            for (const c of comments) {
+              const b = c.body || '';
+              if (c.user && c.user.login === 'github-actions[bot]' &&
+                  (b.includes('<!-- opencode-review-skip -->') || b.startsWith('⚠️ OpenCode review skipped'))) {
+                await github.rest.issues.deleteComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: c.id });
+              }
+            }
