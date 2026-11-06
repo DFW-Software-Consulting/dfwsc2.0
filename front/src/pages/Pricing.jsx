@@ -133,26 +133,24 @@ export default function Pricing() {
                 </ScrollItem>
               ))}
             </ScrollGroup>
-            <Reveal>
-              <Disclosure summary="Compare allowances" className="studio-allowances">
-                <div className="studio-allowance-grid">
-                  {hostingPlans.map((plan) => (
-                    <section key={plan.name}>
-                      <h3>{plan.name}</h3>
-                      <dl className="studio-plan-specs">
-                        {plan.specs.map(([label, value]) => (
-                          <div key={label}>
-                            <dt>{label}</dt>
-                            <dd>{value}</dd>
-                          </div>
-                        ))}
-                      </dl>
-                      <p className="studio-plan-includes">{plan.includes}</p>
-                    </section>
-                  ))}
-                </div>
-              </Disclosure>
-            </Reveal>
+            <Disclosure summary="Compare allowances" className="studio-allowances">
+              <div className="studio-allowance-grid">
+                {hostingPlans.map((plan) => (
+                  <section key={plan.name}>
+                    <h3>{plan.name}</h3>
+                    <dl className="studio-plan-specs">
+                      {plan.specs.map(([label, value]) => (
+                        <div key={label}>
+                          <dt>{label}</dt>
+                          <dd>{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    <p className="studio-plan-includes">{plan.includes}</p>
+                  </section>
+                ))}
+              </div>
+            </Disclosure>
           </div>
         </section>
         <section className="studio-section page-wrap">
@@ -161,13 +159,13 @@ export default function Pricing() {
             lead="A little clarity"
             accent="goes a long way."
           />
-          <Reveal className="studio-faq">
+          <div className="studio-faq">
             {faqItems.map(({ question, answer }) => (
               <Disclosure key={question} summary={question}>
                 <p>{answer}</p>
               </Disclosure>
             ))}
-          </Reveal>
+          </div>
         </section>
         <CtaStrip title="What do you need to move forward?" label="Start the conversation" />
       </div>

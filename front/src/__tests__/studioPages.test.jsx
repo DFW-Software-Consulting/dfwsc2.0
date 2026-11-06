@@ -103,10 +103,12 @@ describe("Pricing", () => {
       ["Business Hosting", "$200"],
     ];
     for (const [name, price] of expected) {
-      const card = screen
-        .getAllByRole("heading", { name })
-        .map((heading) => heading.closest("article"))
-        .find(Boolean);
+      // The name appears twice: on the plan card and in the "Compare allowances" disclosure.
+      const headings = screen.getAllByRole("heading", { name });
+      expect(headings).toHaveLength(2);
+      const cards = headings.map((heading) => heading.closest("article")).filter(Boolean);
+      expect(cards).toHaveLength(1);
+      const [card] = cards;
       expect(card.querySelector(".studio-plan-price")).toHaveTextContent(`${price} / month`);
     }
   });
