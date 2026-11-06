@@ -17,7 +17,11 @@ function mockMotion({ api = true, reduced = false } = {}) {
   if (api) {
     document.startViewTransition = vi.fn((update) => {
       update();
-      return { ready: Promise.resolve(), finished: Promise.resolve() };
+      return {
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+        finished: Promise.resolve(),
+      };
     });
   }
 }
