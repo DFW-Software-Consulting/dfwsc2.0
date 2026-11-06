@@ -111,6 +111,7 @@ function TeamMember({ member, index }) {
                 </>
               }
               className="studio-member-bio"
+              id={`bio-${member.name}`}
             >
               <p>{member.bio}</p>
             </Disclosure>

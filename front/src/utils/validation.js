@@ -1,7 +1,7 @@
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const validateEmail = (v) => {
-  if (!v || !v.trim()) return "Email is required";
+  if (!(typeof v === "string" ? v.trim() : v)) return "Email is required";
   if (!EMAIL_REGEX.test(v.trim())) return "Please enter a valid email address";
   return null;
 };
@@ -13,7 +13,7 @@ export const validatePassword = (v, minLen = 8) => {
 };
 
 export const validateUrl = (v) => {
-  if (!v || !v.trim()) return null;
+  if (!(typeof v === "string" ? v.trim() : v)) return null;
   if (!v.trim().startsWith("https://")) return "URL must start with https://";
   return null;
 };
@@ -32,7 +32,7 @@ export const validateFeeValue = (v, type) => {
 };
 
 export const validateName = (v, min = 1, max = 100, fieldName = "Name") => {
-  if (!v || !v.trim()) return `${fieldName} is required`;
+  if (!(typeof v === "string" ? v.trim() : v)) return `${fieldName} is required`;
   const len = v.trim().length;
   if (len < min || len > max) return `${fieldName} must be between ${min} and ${max} characters`;
   return null;

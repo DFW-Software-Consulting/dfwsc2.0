@@ -223,138 +223,132 @@ export default function EditClientModal({
         {client.name} &bull; {client.email}
       </p>
 
-      {isDfwscMode && (
-        <>
-          {clientLoading ? (
-            <p className="text-sm text-fg-muted mb-4">Loading profile...</p>
-          ) : (
-            <>
-              <h3 className="text-sm font-semibold text-fg-muted uppercase tracking-wide mb-3">
-                Contact
-              </h3>
+      {isDfwscMode &&
+        (clientLoading ? (
+          <p className="text-sm text-fg-muted mb-4">Loading profile...</p>
+        ) : (
+          <>
+            <h3 className="text-sm font-semibold text-fg-muted uppercase tracking-wide mb-3">
+              Contact
+            </h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <FormInput
-                  id="edit-client-name"
-                  label="Name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Acme Corp"
-                />
-                <FormInput
-                  id="edit-client-email"
-                  label="Email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. billing@acme.com"
-                />
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <FormInput
+                id="edit-client-name"
+                label="Name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. Acme Corp"
+              />
+              <FormInput
+                id="edit-client-email"
+                label="Email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="e.g. billing@acme.com"
+              />
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <FormInput
-                  id="edit-client-phone"
-                  label="Phone"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="e.g. +1 (555) 123-4567"
-                />
-                <FormInput
-                  id="edit-client-billing-contact"
-                  label="Billing Contact Name"
-                  value={billingContactName}
-                  onChange={(e) => setBillingContactName(e.target.value)}
-                  placeholder="e.g. John Smith"
-                />
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <FormInput
+                id="edit-client-phone"
+                label="Phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="e.g. +1 (555) 123-4567"
+              />
+              <FormInput
+                id="edit-client-billing-contact"
+                label="Billing Contact Name"
+                value={billingContactName}
+                onChange={(e) => setBillingContactName(e.target.value)}
+                placeholder="e.g. John Smith"
+              />
+            </div>
 
-              <h3 className="text-sm font-semibold text-fg-muted uppercase tracking-wide mb-3">
-                Address
-              </h3>
+            <h3 className="text-sm font-semibold text-fg-muted uppercase tracking-wide mb-3">
+              Address
+            </h3>
 
-              <div className="mb-4">
-                <FormInput
-                  id="edit-client-address1"
-                  label="Address Line 1"
-                  value={addressLine1}
-                  onChange={(e) => setAddressLine1(e.target.value)}
-                  placeholder="e.g. 123 Main Street"
-                />
-              </div>
+            <div className="mb-4">
+              <FormInput
+                id="edit-client-address1"
+                label="Address Line 1"
+                value={addressLine1}
+                onChange={(e) => setAddressLine1(e.target.value)}
+                placeholder="e.g. 123 Main Street"
+              />
+            </div>
 
-              <div className="mb-4">
-                <FormInput
-                  id="edit-client-address2"
-                  label="Address Line 2"
-                  value={addressLine2}
-                  onChange={(e) => setAddressLine2(e.target.value)}
-                  placeholder="e.g. Suite 100"
-                />
-              </div>
+            <div className="mb-4">
+              <FormInput
+                id="edit-client-address2"
+                label="Address Line 2"
+                value={addressLine2}
+                onChange={(e) => setAddressLine2(e.target.value)}
+                placeholder="e.g. Suite 100"
+              />
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                <FormInput
-                  id="edit-client-city"
-                  label="City"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="e.g. Dallas"
-                />
-                <FormInput
-                  id="edit-client-state"
-                  label="State"
-                  value={state}
-                  onChange={(e) => setState(e.target.value)}
-                  placeholder="e.g. TX"
-                />
-                <FormInput
-                  id="edit-client-postal"
-                  label="Postal Code"
-                  value={postalCode}
-                  onChange={(e) => setPostalCode(e.target.value)}
-                  placeholder="e.g. 75201"
-                />
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <FormInput
+                id="edit-client-city"
+                label="City"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="e.g. Dallas"
+              />
+              <FormInput
+                id="edit-client-state"
+                label="State"
+                value={state}
+                onChange={(e) => setState(e.target.value)}
+                placeholder="e.g. TX"
+              />
+              <FormInput
+                id="edit-client-postal"
+                label="Postal Code"
+                value={postalCode}
+                onChange={(e) => setPostalCode(e.target.value)}
+                placeholder="e.g. 75201"
+              />
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <FormInput
-                  id="edit-client-country"
-                  label="Country"
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  placeholder="e.g. US"
-                />
-                <FormInput
-                  id="edit-client-payment-terms"
-                  label="Default Payment Terms (days)"
-                  type="number"
-                  value={defaultPaymentTermsDays}
-                  onChange={(e) => setDefaultPaymentTermsDays(e.target.value)}
-                  placeholder="e.g. 30"
-                />
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <FormInput
+                id="edit-client-country"
+                label="Country"
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                placeholder="e.g. US"
+              />
+              <FormInput
+                id="edit-client-payment-terms"
+                label="Default Payment Terms (days)"
+                type="number"
+                value={defaultPaymentTermsDays}
+                onChange={(e) => setDefaultPaymentTermsDays(e.target.value)}
+                placeholder="e.g. 30"
+              />
+            </div>
 
-              <div className="mb-4">
-                <label
-                  htmlFor="edit-client-notes"
-                  className="block text-sm font-medium text-fg mb-1"
-                >
-                  Notes
-                </label>
-                <textarea
-                  id="edit-client-notes"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Any additional notes..."
-                  rows={3}
-                  className="w-full rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted
+            <div className="mb-4">
+              <label htmlFor="edit-client-notes" className="block text-sm font-medium text-fg mb-1">
+                Notes
+              </label>
+              <textarea
+                id="edit-client-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Any additional notes..."
+                rows={3}
+                className="w-full rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted
                            focus:outline-none focus:ring-2 focus:ring-focus"
-                />
-              </div>
-            </>
-          )}
-        </>
-      )}
+              />
+            </div>
+          </>
+        ))}
 
       {!isDfwscMode && (
         <>

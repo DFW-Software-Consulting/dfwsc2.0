@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import Disclosure from "../components/Disclosure.jsx";
 import { faqItems, hostingPlans } from "../content/pricing.js";
 import { teamMembers } from "../content/team.js";
@@ -80,5 +80,24 @@ describe("pages keep collapsed copy in the document", () => {
     renderWithProviders(<Privacy />, { initialEntries: ["/privacy"] });
     const cookies = screen.getByRole("heading", { name: "Analytics and cookies" });
     expect(cookies.closest("details")).toHaveAttribute("open");
+  });
+});
+
+describe("Disclosure open state with an id", () => {
+  it("is not carried over after a real unmount", async () => {
+    vi.useFakeTimers();
+    const tree = (
+      <Disclosure id="bio-nav" summary="More">
+        body
+      </Disclosure>
+    );
+    const first = render(tree);
+    first.container.querySelector("details").open = true;
+    first.unmount();
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+
+    const second = render(tree);
+    expect(second.container.querySelector("details").open).toBe(false);
   });
 });

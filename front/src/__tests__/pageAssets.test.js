@@ -45,7 +45,7 @@ describe("pageAssets", () => {
   });
 
   it("returns nothing when the template already links everything", () => {
-    expect(pageAssets(manifest, "/privacy", template + '"/assets/Privacy.js"')).toBe("");
+    expect(pageAssets(manifest, "/privacy", `${template}"/assets/Privacy.js"`)).toBe("");
   });
 
   it("throws when the manifest has no entry for the page", () => {
