@@ -1,5 +1,5 @@
-import { useEffect } from "react";
 import { Link } from "react-router-dom";
+import PageHero from "../components/PageHero.jsx";
 import { demos } from "../content/demos.js";
 import "../styles/studio.css";
 import "./Demos.css";
@@ -73,39 +73,23 @@ function DemoCard({ demo }) {
 
 // Unlisted: not in the nav, footer or sitemap, and served noindex (see PRIVATE_ROUTES in seo/meta.js).
 export default function Demos() {
-  useEffect(() => {
-    window.scrollTo({ top: 0 });
-  }, []);
   return (
     <div className="studio studio-page">
-      <section className="studio-page-hero">
-        <div className="page-wrap">
-          <p className="studio-eyebrow">SAMPLE SITES</p>
-          <h1>Sample sites for local businesses.</h1>
-          <p>
-            Three working examples of what a small business website can look like. Click through,
-            poke around, and see how it feels on your phone.
-          </p>
-        </div>
-      </section>
-      <section className="studio-section page-wrap" aria-label="Demo sites">
+      <PageHero eyebrow="SAMPLE SITES" title="Sample sites for local businesses.">
+        Three working examples of what a small business website can look like.
+      </PageHero>
+      <section className="studio-section demo-section page-wrap" aria-label="Demo sites">
         <ul className="demo-grid">
           {demos.map((demo) => (
             <DemoCard key={demo.url} demo={demo} />
           ))}
         </ul>
       </section>
-      <section className="studio-contact studio-inverse">
-        <div className="page-wrap">
-          <h2>Want something like this for your business?</h2>
-          <p>Tell us a bit about what you do and we&apos;ll talk through what would help.</p>
-          <div className="studio-actions">
-            <Link className="studio-button" to="/" state={{ scrollTo: "contact" }}>
-              Start a project <span aria-hidden="true">→</span>
-            </Link>
-          </div>
-        </div>
-      </section>
+      <p className="demo-cta page-wrap">
+        <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
+          Want something like this? Start a project <span aria-hidden="true">→</span>
+        </Link>
+      </p>
     </div>
   );
 }

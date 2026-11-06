@@ -19,15 +19,34 @@
 .studio-section h2, .studio-band h2 { font-size: clamp(34px, 4vw, 53px); line-height: 1.08; letter-spacing: -.045em; font-weight: 600; }
 
 .studio-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 24px; margin-top: 30px; }
-.studio-button { display: inline-flex; align-items: center; justify-content: space-between; gap: 24px; border-radius: 8px; background: var(--cta-bg); color: var(--cta-text); padding: 16px 20px; font-size: 15px; font-weight: 700; transition: background .2s, transform .2s; }
-.studio-button:hover { background: var(--cta-bg-hover); transform: translateY(-2px); }
-.studio-button span { font-size: 20px; line-height: 1; }
-/* Underlined at rest so text links read as links without relying on color; thicker on hover. */
-.studio-text-link { color: var(--link); font-size: 15px; font-weight: 600; display: inline-flex; gap: 14px; align-items: center; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 5px; }
-.studio-text-link:hover { text-decoration-thickness: 2px; }
+.studio-button { position: relative; isolation: isolate; overflow: hidden; display: inline-flex; align-items: center; justify-content: space-between; gap: 24px; border-radius: 8px; background: var(--cta-bg); color: var(--cta-text); padding: 16px 20px; font-size: 15px; font-weight: 700; transition: background .2s, transform .2s; }
+.studio-button:hover, .studio-button:focus-visible { background: var(--cta-bg-hover); }
+.studio-button:hover { transform: translateY(-2px); }
+.dark .studio-button:hover, .dark .studio-button:focus-visible { background: var(--cta-bg); }
+.studio-button span { display: inline-block; font-size: 20px; line-height: 1; transition: transform .25s cubic-bezier(.2, .7, .2, 1); }
+.studio-button:not(:disabled):hover span, .studio-button:not(:disabled):focus-visible span,
+.studio-text-link:hover span, .studio-text-link:focus-visible span { transform: translate(3px, -3px); }
+/* Sheen: a faint diagonal highlight sweeps across on hover/focus. It sits under the label
+   (z-index -1 inside the button's own stacking context) and peaks at 7% white, which keeps
+   the white label above 4.5:1 on the CTA blue (dark mode keeps the base blue on hover, since
+   its lighter hover blue plus the sheen would dip under 4.5:1). */
+.studio-button::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; transform: translateX(-120%);
+  background: linear-gradient(105deg, transparent 30%, rgb(255 255 255 / .07) 50%, transparent 70%); }
+@media (prefers-reduced-motion: no-preference) {
+  .studio-button:not(:disabled):hover::after, .studio-button:not(:disabled):focus-visible::after { transform: translateX(120%); transition: transform .7s ease; }
+}
+/* Underlined at rest so text links read as links without relying on color. The rest line and
+   the 2px line that slides in from the left on hover/focus are both background layers clipped
+   to the content box, so they sit under the text even in the 44px touch hit area below. */
+.studio-text-link { color: var(--link); font-size: 15px; font-weight: 600; display: inline-flex; gap: 14px; align-items: center;
+  background: linear-gradient(currentColor, currentColor) 0 100% / 0 2px no-repeat, linear-gradient(currentColor, currentColor) 0 100% / 100% 1px no-repeat;
+  background-origin: content-box; background-clip: content-box; transition: background-size .3s ease; }
+.studio-text-link:hover, .studio-text-link:focus-visible { background-size: 100% 2px, 100% 1px; }
+/* Forced-colors mode drops backgrounds, so fall back to the native underline. */
+@media (forced-colors: active) { .studio-text-link { text-decoration: underline; } }
 /* Touch: 44px hit area. The link is already inline-flex and centred, so the taller box
    doesn't move the text. Desktop is unchanged. */
-@media (pointer: coarse) { .studio-text-link { min-height: 44px; } }
+@media (pointer: coarse) { .studio-text-link { min-height: 44px; padding-block: 13px; } }
 .studio a:focus-visible, .studio button:focus-visible, .studio summary:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 4px; border-radius: 4px; }
 
 /* Section rhythm */
@@ -62,7 +81,7 @@
 .studio-contact { padding-block: 88px; text-align: center; }
 .studio-contact .studio-eyebrow { justify-content: center; }
 .studio-contact h2 { font-size: clamp(38px, 5vw, 65px); line-height: 1.08; letter-spacing: -.04em; font-weight: 600; margin-top: 24px; }
-.studio-contact p:not(.studio-eyebrow) { max-width: 500px; margin: 24px auto; font-size: 16px; line-height: 1.75; color: var(--text-inverse-muted); }
+.studio-contact p:not(.studio-eyebrow) { max-width: 500px; margin: 24px 0; font-size: 16px; line-height: 1.75; color: var(--text-inverse-muted); }
 .studio-contact .studio-actions { justify-content: center; }
 
 @media (max-width: 760px) {
@@ -90,7 +109,6 @@
 .studio-contact { text-align: left; }
 .studio-contact-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; align-items: start; }
 .studio-contact .studio-eyebrow { justify-content: flex-start; }
-.studio-contact-copy p:not(.studio-eyebrow) { margin-inline: 0; }
 .studio-contact .studio-actions { justify-content: flex-start; }
 .studio-contact-form { display: grid; gap: 20px; position: relative; padding: 32px; border: 1px solid var(--border-inverse); border-radius: 12px; background: rgb(255 255 255 / .04); }
 .studio-field { display: grid; gap: 8px; }
@@ -114,7 +132,7 @@
   .studio-contact-form { padding: 24px 20px; }
 }
 .studio-contact-links { gap: 4px 14px; }
-.studio-contact-links .studio-text-link { display: inline-flex; align-items: center; min-height: 44px; }
+.studio-contact-links .studio-text-link { display: inline-flex; align-items: center; min-height: 44px; padding-block: 13px; }
 
 /* Contact form privacy note and the privacy page */
 .studio-contact .studio-contact-form .studio-form-note { text-align: left; max-width: none; margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-inverse-muted); }
@@ -143,3 +161,40 @@
 /* Heading lines rise from behind this mask; padding keeps descenders and italic overhang. */
 .studio-mask { display: block; overflow: hidden; padding: 0 .08em .14em 0; margin: 0 -.08em -.14em 0; }
 .studio-mask > span { display: block; }
+
+/* Card hover: a lift and a cursor-follow spotlight (useSpotlight sets --mx/--my). The lift
+   uses the `translate` property, not `transform`, so it stacks with the inline transform
+   that ScrollFx/ScrollItem animate instead of being overridden by it. */
+.studio-lift:hover { box-shadow: var(--shadow-card); }
+@media (prefers-reduced-motion: no-preference) {
+  .studio-lift { transition: translate .25s ease, box-shadow .25s ease; }
+  .studio-lift:hover { translate: 0 -4px; }
+}
+.studio-spot { position: relative; }
+@media (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .studio-spot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity .35s ease;
+    background: radial-gradient(520px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--link) 14%, transparent), transparent 62%); }
+  .studio-spot:hover::after { opacity: 1; }
+}
+
+/* Shared disclosure (components/Disclosure.jsx): a native <details>. The chevron turns and
+   the body fades/slides in when opened; nothing animates height. */
+.studio-disclosure > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; list-style: none; }
+.studio-disclosure > summary::-webkit-details-marker { display: none; }
+.studio-disclosure > summary::after { content: ""; flex-shrink: 0; width: 9px; height: 9px; margin-top: -4px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); transition: transform .25s ease; }
+.studio-disclosure[open] > summary::after { transform: rotate(-135deg); margin-top: 4px; }
+.studio-disclosure > summary > :is(h2, h3) { margin: 0; }
+.studio-disclosure[open] > .studio-disclosure-body { animation: studio-disclose .35s ease both; }
+@keyframes studio-disclose { from { opacity: 0; transform: translateY(-6px); } }
+
+/* Compact closing call to action (Pricing, Team) */
+.studio-cta-strip { padding-block: 40px; }
+.studio-cta-strip-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px 32px; }
+.studio-cta-strip-inner > p { font-size: clamp(22px, 2.6vw, 30px); font-weight: 600; letter-spacing: -.03em; line-height: 1.2; }
+
+/* Privacy page: accordion of the policy sections, two columns on wide screens. */
+.studio-privacy { max-width: none; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; align-items: start; }
+.studio-privacy .studio-disclosure { border-top: 1px solid var(--border-strong); padding-block: 20px; }
+.studio-privacy .studio-disclosure > summary h2 { font-size: 22px; letter-spacing: -.03em; margin-top: 0; }
+.studio-privacy .studio-disclosure-body { display: grid; gap: 14px; padding-top: 14px; }
+@media (max-width: 900px) { .studio-privacy { grid-template-columns: 1fr; } }

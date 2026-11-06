@@ -9,7 +9,6 @@ export const hostingPlans = [
       ["Monthly data transfer", "100 GB"],
       ["Database storage", "Not included"],
       ["Application backend", "Not included"],
-      ["Maintenance retainer", "Included"],
       ["Support", "Standard"],
     ],
   },
@@ -24,7 +23,6 @@ export const hostingPlans = [
       ["Monthly data transfer", "500 GB"],
       ["Database storage", "1 GB"],
       ["Application backend", "Included"],
-      ["Maintenance retainer", "Included"],
       ["Support", "Standard"],
     ],
   },
@@ -39,7 +37,6 @@ export const hostingPlans = [
       ["Monthly data transfer", "1 TB"],
       ["Database storage", "5 GB"],
       ["Application backend", "Included"],
-      ["Maintenance retainer", "Included"],
       ["Support", "Priority"],
     ],
   },
@@ -63,23 +60,13 @@ export const faqItems = [
       "Your hosting proposal will specify your included allowances and how additional usage is billed. More storage, data transfer, or application processing may require additional infrastructure charges or a different plan. Email, video delivery, third-party services, and AI usage are scoped separately.",
   },
   {
-    question: "Does hosting include building my website?",
+    question: "What does hosting include, and what costs extra?",
     answer:
-      "A new website or application is quoted separately. The monthly hosting price includes a maintenance retainer for repairs and fixes to existing functionality, within the scope agreed in your proposal. New features and larger changes are estimated separately.",
+      "All plans include hosting, SSL, monitoring, incident response, and a maintenance retainer for repairs and fixes to existing functionality, within the scope agreed in your proposal. A new website or application is quoted separately, as are new features, redesigns, and work outside that scope; additional development is billed at $100–$150/hr. After launch we can keep working together: if you need ongoing new features or dedicated development hours, we can discuss a separate development retainer.",
   },
   {
-    question: "How do we decide the project price?",
+    question: "How do we decide the project price, and can you work with what we have?",
     answer:
-      "We start with your goals, required features, and current tools. A discovery conversation helps us define the scope, estimate the work, and explain the proposed costs.",
-  },
-  {
-    question: "Can you work with a website or application we already have?",
-    answer:
-      "Tell us what you’re using and where you need help. We’ll review the setup with you before recommending improvements or a migration path.",
-  },
-  {
-    question: "Can we keep working together after launch?",
-    answer:
-      "Yes. Every hosting plan includes a maintenance retainer for agreed repairs and fixes. If you need ongoing new features or dedicated development hours, we can discuss a separate development retainer.",
+      "We start with your goals, required features, and current tools. A discovery conversation helps us define the scope, estimate the work, and explain the proposed costs. If you already have a website or application, tell us what you’re using and where you need help. We’ll review the setup with you before recommending improvements or a migration path.",
   },
 ];

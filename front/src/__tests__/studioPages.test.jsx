@@ -103,7 +103,10 @@ describe("Pricing", () => {
       ["Business Hosting", "$200"],
     ];
     for (const [name, price] of expected) {
-      const card = screen.getByRole("heading", { name }).closest("article");
+      const card = screen
+        .getAllByRole("heading", { name })
+        .map((heading) => heading.closest("article"))
+        .find(Boolean);
       expect(card.querySelector(".studio-plan-price")).toHaveTextContent(`${price} / month`);
     }
   });

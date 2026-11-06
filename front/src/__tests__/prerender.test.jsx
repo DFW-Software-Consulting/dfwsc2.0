@@ -25,7 +25,7 @@ describe("prerender entry", () => {
   });
 
   it("renders the not-found page for unknown paths", async () => {
-    expect(text(await render("/404"))).toContain("Page Not Found");
+    expect(text(await render("/404"))).toMatch(/page not found/i);
   });
 });
 

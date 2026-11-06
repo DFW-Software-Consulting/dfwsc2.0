@@ -5,20 +5,8 @@ import { useMotionAllowed } from "./useMotionAllowed.js";
 const FINE_POINTER = "(pointer: fine)";
 const SPRING = { stiffness: 220, damping: 24, mass: 0.6 };
 
-/**
- * Props to spread on a card for a subtle 3D tilt that follows the mouse. The same handler
- * writes --mx/--my (percent) so the stylesheet can paint a spotlight/glare at the cursor.
- * Returns an empty object (no tilt, no handlers) for touch/coarse pointers and reduced
- * motion. Transform only, so nothing shifts layout.
- */
-export function useTilt(max = 4) {
-  const allowed = useMotionAllowed();
+function useFinePointer() {
   const [fine, setFine] = useState(false);
-  const rx = useMotionValue(0);
-  const ry = useMotionValue(0);
-  const rotateX = useSpring(rx, SPRING);
-  const rotateY = useSpring(ry, SPRING);
-
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return undefined;
     const query = window.matchMedia(FINE_POINTER);
@@ -27,19 +15,52 @@ export function useTilt(max = 4) {
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
+  return fine;
+}
 
+/**
+ * Props to spread on a card so the stylesheet can paint a spotlight at the cursor (see
+ * `.studio-spot`): the handler writes --mx/--my (percent) imperatively, so it never fights
+ * a `style` prop owned by a scroll effect. One call can serve a whole list of cards. Returns
+ * an empty object (no handlers) for touch/coarse pointers and reduced motion.
+ */
+export function useSpotlight() {
+  const allowed = useMotionAllowed();
+  const fine = useFinePointer();
   if (!allowed || !fine) return {};
   return {
-    style: { rotateX, rotateY, transformPerspective: 1200 },
     onPointerMove(event) {
       if (event.pointerType !== "mouse") return;
       const box = event.currentTarget.getBoundingClientRect();
       const px = (event.clientX - box.left) / box.width;
       const py = (event.clientY - box.top) / box.height;
-      ry.set((px - 0.5) * 2 * max);
-      rx.set(-(py - 0.5) * 2 * max);
       event.currentTarget.style.setProperty("--mx", `${px * 100}%`);
       event.currentTarget.style.setProperty("--my", `${py * 100}%`);
+    },
+  };
+}
+
+/**
+ * Props to spread on a card for a subtle 3D tilt that follows the mouse, plus the
+ * spotlight position from `useSpotlight`. Returns an empty object for touch/coarse
+ * pointers and reduced motion. Transform only, so nothing shifts layout.
+ */
+export function useTilt(max = 4) {
+  const spotlight = useSpotlight();
+  const rx = useMotionValue(0);
+  const ry = useMotionValue(0);
+  const rotateX = useSpring(rx, SPRING);
+  const rotateY = useSpring(ry, SPRING);
+
+  if (!spotlight.onPointerMove) return {};
+  return {
+    style: { rotateX, rotateY, transformPerspective: 1200 },
+    onPointerMove(event) {
+      if (event.pointerType !== "mouse") return;
+      const box = event.currentTarget.getBoundingClientRect();
+      ry.set(((event.clientX - box.left) / box.width - 0.5) * 2 * max);
+      rx.set(-((event.clientY - box.top) / box.height - 0.5) * 2 * max);
+      spotlight.onPointerMove(event);
     },
     onPointerLeave() {
       rx.set(0);

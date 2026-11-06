@@ -1,0 +1,30 @@
+/* Fills the space between the header and footer (main is a flex column, see App.jsx), so the
+   page fits one viewport; it only scrolls when the window is shorter than its content. */
+.studio-notfound { flex: 1; display: grid; align-items: center; padding-block: 32px; background: radial-gradient(ellipse at 100% 100%, var(--hero-glow) 0, transparent 60%), var(--bg-main); }
+.studio-notfound-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); align-items: center; gap: 48px; }
+.studio-notfound .studio-eyebrow { margin-bottom: 16px; }
+.studio-notfound h1 { font-size: clamp(32px, 4.2vw, 56px); }
+.studio-notfound-grid p:not(.studio-eyebrow) { font-size: 17px; line-height: 1.7; color: var(--text-muted); max-width: 460px; margin-top: 16px; }
+.studio-notfound .studio-actions { margin-top: 24px; }
+
+.studio-lost-route { width: 100%; max-width: 280px; height: auto; justify-self: center; color: var(--accent); }
+.studio-lost-route path, .studio-lost-route circle { stroke: currentColor; stroke-width: 3; stroke-linecap: round; fill: none; }
+.studio-lost-route .lost-grid { stroke: var(--border-subtle); stroke-width: 1; }
+.studio-lost-route .lost-line { stroke: var(--link); stroke-dasharray: 1; stroke-dashoffset: 0; }
+.studio-lost-route .lost-gap { stroke: var(--link); stroke-dasharray: 2 9; }
+.studio-lost-route .lost-start { fill: var(--link); stroke: none; }
+.studio-lost-route .lost-x { stroke: var(--accent); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .studio-lost-route .lost-line { animation: lost-draw 1.6s cubic-bezier(.45, 0, .2, 1) .15s both; }
+  .studio-lost-route .lost-gap, .studio-lost-route .lost-x { animation: lost-fade .5s ease 1.6s both; }
+  .studio-lost-route .lost-x { transform-box: fill-box; transform-origin: center; animation-name: lost-pop; }
+}
+@keyframes lost-draw { from { stroke-dashoffset: 1; } }
+@keyframes lost-fade { from { opacity: 0; } }
+@keyframes lost-pop { from { opacity: 0; transform: scale(.4) rotate(-45deg); } }
+
+@media (max-width: 760px) {
+  .studio-notfound-grid { grid-template-columns: 1fr; gap: 24px; }
+  .studio-lost-route { max-width: 160px; justify-self: start; order: -1; }
+}
