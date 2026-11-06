@@ -123,6 +123,13 @@ describe("Environment Template Documentation", () => {
       expect(groupingDistance).toBeLessThan(500);
     });
   });
+  describe("Stripe ID write-back variables", () => {
+    it("documents the flag, dry run and interval, all off or default", () => {
+      expect(envExampleContent).toContain("# STRIPE_ID_WRITEBACK=false");
+      expect(envExampleContent).toContain("# STRIPE_ID_WRITEBACK_DRY_RUN=false");
+      expect(envExampleContent).toContain("# STRIPE_ID_WRITEBACK_INTERVAL_MS=300000");
+    });
+  });
 });
 
 /**

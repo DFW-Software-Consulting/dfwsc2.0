@@ -29,6 +29,10 @@ import {
 import { resetNextcloudBreakerForTests } from "../../lib/nextcloud";
 import { stripe } from "../../lib/stripe";
 import {
+  resetStripeIdWritebackStateForTests,
+  runStripeIdWritebackCycle,
+} from "../../lib/stripe-id-writeback-sync";
+import {
   BILLING_EMAIL_QUESTION,
   FakeOnboardingNextcloud,
   ONB_FORM_ID,
@@ -429,6 +433,40 @@ describe("pushing edits", () => {
     const note = lines.find((l) => l.text.includes("email_ambiguous"));
     expect(note?.level).toBe("warn");
     expect(note?.text).not.toMatch(/zephyrine\.example/);
+  });
+});
+
+describe("Stripe ID write-back", () => {
+  it("does not echo into Stripe: the card with our URL entry is not pushed, and is not rewritten", async () => {
+    resetStripeIdWritebackStateForTests();
+    await baselined();
+    const before = (await stateOf(UID_A)).lastHash;
+    const written = await runStripeIdWritebackCycle({
+      logger: logger(),
+      env: { ...on, STRIPE_ID_WRITEBACK: "true" } as NodeJS.ProcessEnv,
+      minGapMs: 0,
+    });
+    expect(written).toMatchObject({ status: "ok" });
+    expect(fake.cards.get(`${UID_A}.vcf`)?.data).toContain(
+      "URL:https://dashboard.stripe.com/customers/cus_dash"
+    );
+
+    // The write changed the ETag, so the sync looks at the card again: nothing mapped changed.
+    expect(await cycle()).toMatchObject({ pushed: 0, failed: 0, baselined: 0 });
+    expect(update).not.toHaveBeenCalled();
+    expect((await stateOf(UID_A)).lastHash).toBe(before);
+
+    // A full re-scan (token refused) sees the same: still no push, and the write-back writes nothing more.
+    fake.expireSyncTokens();
+    const cardWrites = fake.writes().filter((r) => r.path.includes("addressbooks")).length;
+    expect(await cycle()).toMatchObject({ pushed: 0, failed: 0 });
+    await runStripeIdWritebackCycle({
+      logger: logger(),
+      env: { ...on, STRIPE_ID_WRITEBACK: "true" } as NodeJS.ProcessEnv,
+      minGapMs: 0,
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(fake.writes().filter((r) => r.path.includes("addressbooks"))).toHaveLength(cardWrites);
   });
 });
 
