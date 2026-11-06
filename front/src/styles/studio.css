@@ -43,10 +43,11 @@
 .studio-process-line { position: absolute; inset: 0 0 auto 0; height: 2px; pointer-events: none; }
 .studio-process-fill { display: block; width: 100%; height: 100%; background: var(--link); transform-origin: 0 50%; }
 .studio-process-fill-y { display: none; transform-origin: 50% 0; }
-.studio-process-grid article { border-top: 1px solid var(--border-strong); padding-top: 24px; }
-.studio-process-grid article > span { font-size: 13px; font-weight: 600; color: var(--accent); }
-.studio-process-grid h3 { font-size: 23px; font-weight: 600; letter-spacing: -.03em; margin: 20px 0 12px; }
-.studio-process-grid p { font-size: 15px; color: var(--text-muted); line-height: 1.75; }
+.studio-process-grid article { border-top: 1px solid color-mix(in srgb, var(--link) calc(var(--step-lit, 1) * 100%), var(--border-strong)); padding-top: 24px; }
+.studio-process-grid article { --lit: calc(var(--step-lit, 1) * 100%); }
+.studio-process-grid article > span { font-size: 13px; font-weight: 600; color: color-mix(in srgb, var(--accent) var(--lit), var(--step-dim-accent)); }
+.studio-process-grid h3 { font-size: 23px; font-weight: 600; letter-spacing: -.03em; margin: 20px 0 12px; color: color-mix(in srgb, var(--text-main) var(--lit), var(--step-dim-text)); }
+.studio-process-grid p { font-size: 15px; color: color-mix(in srgb, var(--text-muted) var(--lit), var(--step-dim-text)); line-height: 1.75; }
 
 /* Interior page hero — Pricing and Team */
 .studio-page-hero { background: radial-gradient(ellipse at 100% 100%, var(--hero-glow) 0, transparent 60%), var(--bg-main); border-bottom: 1px solid var(--border-subtle); padding: 80px 0 88px; }

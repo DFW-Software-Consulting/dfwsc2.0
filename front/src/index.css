@@ -57,6 +57,9 @@
     --accent-soft: #ebe3c8; /* sand chip */
     --accent-inverse: #d6c89a; /* sand accent text on inverse bands */
     --link: #245a91;
+    /* Process steps not yet scrolled to; each passes 4.5:1 on --bg-surface. */
+    --step-dim-text: #5f6b7c;
+    --step-dim-accent: #7d6628;
     --link-inverse: #6ea8e6; /* link, status and focus on inverse bands */
     --border-subtle: rgb(15 30 51 / 0.12);
     --border-strong: rgb(15 30 51 / 0.22);
@@ -87,6 +90,8 @@
     --accent-soft: #1f2c44;
     --accent-inverse: #d6c89a;
     --link: #6ea8e6;
+    --step-dim-text: #8190a8;
+    --step-dim-accent: #a89c75;
     --link-inverse: #6ea8e6;
     --border-subtle: rgb(255 255 255 / 0.12);
     --border-strong: rgb(255 255 255 / 0.2);
