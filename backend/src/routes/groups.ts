@@ -11,6 +11,7 @@ import {
   feeSetValues,
   parsePagination,
 } from "../lib/admin-crud";
+import { kickJob } from "../lib/coalesced-runner";
 import { errors } from "../lib/errors";
 import { parseBody } from "../lib/validation";
 import { isWorkspace, type Workspace } from "../lib/workspace";
@@ -97,6 +98,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
         })
         .returning();
 
+      kickJob("portalMirror");
       return res.status(201).send(formatGroupResponse(group));
     }
   );
@@ -174,6 +176,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
       if (!updated) {
         throw errors.notFound("Group");
       }
+      kickJob("portalMirror");
       return res.status(200).send(formatGroupResponse(updated));
     }
   );
@@ -190,6 +193,7 @@ const groupRoutes: FastifyPluginAsync = async (app) => {
       if (deleted.length === 0) {
         return res.status(404).send({ error: "Group not found." });
       }
+      kickJob("portalMirror");
       return res.status(204).send();
     }
   );

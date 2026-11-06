@@ -13,6 +13,8 @@ import {
 } from "drizzle-orm";
 import { db } from "../db/client";
 import { clientGroups, clients, paymentLedger, portalMirrorRows } from "../db/schema";
+import { createCoalescedRunner, registerKickable } from "./coalesced-runner";
+import { KICK_DEBOUNCE_MS } from "./constants";
 import {
   AuthBackoff,
   intVar,
@@ -543,30 +545,15 @@ export function startPortalMirror(
     return null;
   }
 
-  let running: Promise<unknown> | null = null;
-  let again = false;
-  let stopped = false;
-  const run = () => {
-    running = runPortalMirrorCycle({ logger, env })
-      .catch((error: unknown) => {
-        logger.error({ errorName: (error as Error)?.name }, "Portal mirror cycle crashed.");
-      })
-      .finally(() => {
-        running = null;
-        if (again && !stopped) {
-          again = false;
-          run();
-        }
-      });
-  };
-  const trigger = () => {
-    if (stopped) return;
-    if (running) {
-      again = true;
-      return;
-    }
-    run();
-  };
+  const runner = createCoalescedRunner({
+    name: "portal-mirror",
+    logger,
+    cycle: () => runPortalMirrorCycle({ logger, env }),
+    isBusy: (r) => (r as PortalMirrorResult).status === "busy",
+    debounceMs: KICK_DEBOUNCE_MS,
+  });
+  const { trigger } = runner;
+  const unregister = registerKickable("portalMirror", runner);
   const timer = setInterval(trigger, config.settings.intervalMs);
   timer.unref();
   trigger();
@@ -577,9 +564,9 @@ export function startPortalMirror(
   return {
     trigger,
     async stop() {
-      stopped = true;
+      unregister();
       clearInterval(timer);
-      while (running) await running;
+      await runner.stop();
     },
   };
 }

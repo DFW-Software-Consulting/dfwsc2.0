@@ -11,6 +11,7 @@ import {
   parsePagination,
 } from "../lib/admin-crud";
 import { forgetBadApiKey } from "../lib/auth";
+import { kickJob } from "../lib/coalesced-runner";
 import { normalizeRedirectOrigin } from "../lib/connect-redirect";
 import { errors, isUniqueViolation } from "../lib/errors";
 import { errorLogFields } from "../lib/safe-error-log";
@@ -356,6 +357,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
       }
 
       const updatedClient = updatedClients[0];
+      kickJob("portalMirror");
 
       // A client switched back to active must not keep being refused from the short-lived record
       // of its key having had no active client.
@@ -389,6 +391,7 @@ const clientRoutes: FastifyPluginAsync = async (app) => {
         if (!updated) {
           return res.status(404).send({ error: "Client not found." });
         }
+        kickJob("portalMirror");
         return res.status(204).send();
       } catch (error) {
         req.log.error(errorLogFields(error), "Error deleting client");

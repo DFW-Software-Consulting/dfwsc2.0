@@ -18,6 +18,7 @@ import {
   withStripeCircuit,
 } from "../lib/circuit-breakers";
 import { getClientIp } from "../lib/client-ip";
+import { kickJob } from "../lib/coalesced-runner";
 import {
   appendCheckoutSessionId,
   resolveDefaultPaymentCancelUrl,
@@ -369,7 +370,10 @@ async function insertPaymentLedger(row: {
     .values(row)
     .onConflictDoNothing()
     .returning({ id: paymentLedger.id });
-  if (inserted.length > 0) return "recorded";
+  if (inserted.length > 0) {
+    kickJob("portalMirror");
+    return "recorded";
+  }
 
   const [existing] = await db
     .select({ stripeSessionId: paymentLedger.stripeSessionId })

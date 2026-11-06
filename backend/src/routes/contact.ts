@@ -6,6 +6,7 @@ import { errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { transportErrorFields } from "../lib/safe-error-log";
+import { triggerSalesLeadSync } from "../lib/sales-lead-sync";
 import { parseBody } from "../lib/validation";
 import { formatVisitContext, visitContextSchema } from "../lib/visit-context";
 import {
@@ -112,6 +113,9 @@ export default async function contactRoutes(fastify: FastifyInstance) {
       results.forEach((result, i) => {
         if (result.status === "fulfilled") {
           delivered = true;
+          // The lead is in the New Lead form: have the poller pick it up now, not at the next
+          // tick. Fire and forget; it never fails the request.
+          if (channels[i].name === "lead") triggerSalesLeadSync();
           return;
         }
         // Never log the message body or the submitter's details.

@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { type DbOrTx, db } from "../db/client";
 import { apiKeyRegenerationTokens, clients } from "../db/schema";
 import { hashApiKey, sha256Lookup } from "./auth";
+import { kickJob } from "./coalesced-runner";
 import { errors } from "./errors";
 
 const REGENERATION_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -167,5 +168,6 @@ export async function validateAndRegenerate(rawToken: string): Promise<string> {
     throw errors.badRequest("This regeneration link has already been used.");
   }
 
+  kickJob("portalMirror");
   return newApiKey;
 }
