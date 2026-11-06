@@ -14,6 +14,7 @@ import {
 } from "../components/motion/ScrollFx.jsx";
 import SectionHeading from "../components/motion/SectionHeading.jsx";
 import { useSpotlight } from "../components/motion/useTilt.js";
+import PricingHeroArt from "../components/PricingHeroArt.jsx";
 import { faqItems, hostingPlans, retainer } from "../content/pricing.js";
 import "../styles/studio.css";
 import "./Pricing.css";
@@ -27,6 +28,7 @@ export default function Pricing() {
     <MotionRoot>
       <div className="studio studio-page">
         <section className="studio-page-hero">
+          <PricingHeroArt />
           <ScrollFx offset={LEAVE} fx={PAGE_HERO}>
             <RevealGroup mount className="page-wrap">
               <HeroHeading

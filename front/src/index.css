@@ -320,3 +320,25 @@
     @apply shadow-[0_0_40px_-10px_rgba(44,109,175,0.5)];
   }
 }
+
+/* View transitions. Both are opt-in per transition through a class that utils/viewTransition.js
+   puts on <html> while it runs, so nothing here applies without the API or with reduced motion. */
+
+/* Theme switch: the new theme grows as a circle from the toggle (the clip-path is animated in
+   JS). Plain stacking, no cross-fade, and no per-element color transitions fighting it. */
+html.theme-vt::view-transition-old(root),
+html.theme-vt::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+html.theme-vt::view-transition-new(root) { z-index: 2; }
+html.theme-vt *,
+html.theme-vt *::before,
+html.theme-vt *::after { transition: none !important; }
+
+/* Route change: only <main> (the page) moves; header and footer stay in the root layer. */
+html.route-vt main { view-transition-name: page; }
+html.route-vt::view-transition-old(page) { animation: route-out 160ms ease-in both; }
+html.route-vt::view-transition-new(page) { animation: route-in 320ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both; }
+@keyframes route-out { to { opacity: 0; } }
+@keyframes route-in { from { opacity: 0; transform: translateY(14px); } }

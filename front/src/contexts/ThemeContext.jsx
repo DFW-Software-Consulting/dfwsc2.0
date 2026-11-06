@@ -7,6 +7,8 @@ import {
   useMemo,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
+import { runViewTransition } from "../utils/viewTransition.js";
 
 const ThemeContext = createContext();
 
@@ -61,9 +63,23 @@ export function ThemeProvider({ children, hydrating = false }) {
     }
   }, [chosen]);
 
-  const toggleTheme = useCallback(() => {
-    setChosen(theme === "dark" ? "light" : "dark");
-  }, [theme]);
+  // Called as a click handler (the circle grows from the button) or bare.
+  const toggleTheme = useCallback(
+    (event) => {
+      const next = theme === "dark" ? "light" : "dark";
+      runViewTransition(
+        () => {
+          // Class first so the new snapshot is already themed; the effect above repeats it.
+          const root = window.document.documentElement;
+          root.classList.remove("light", "dark");
+          root.classList.add(next);
+          flushSync(() => setChosen(next));
+        },
+        { className: "theme-vt", origin: event?.currentTarget }
+      );
+    },
+    [theme]
+  );
 
   const value = useMemo(() => ({ theme, toggleTheme }), [theme, toggleTheme]);
 
