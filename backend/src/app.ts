@@ -11,6 +11,7 @@ import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
 import connectRoutes from "./routes/connect";
+import connectClientRoutes from "./routes/connect-client";
 import connectInvoicingRoutes from "./routes/connect-invoicing";
 import contactRoutes from "./routes/contact";
 import groupRoutes from "./routes/groups";
@@ -67,8 +68,13 @@ function resolveRequestId(header: string | string[] | undefined): string {
   return value && REQUEST_ID_HEADER_PATTERN.test(value) ? value : crypto.randomUUID();
 }
 
-export async function buildServer() {
-  const logger = process.env.NODE_ENV === "test" ? { level: "silent" } : true;
+export async function buildServer(opts: { logStream?: { write(line: string): void } } = {}) {
+  // `logStream` lets a test capture every log line, at every level, including child loggers.
+  const logger = opts.logStream
+    ? { level: "trace", stream: opts.logStream }
+    : process.env.NODE_ENV === "test"
+      ? { level: "silent" }
+      : true;
   const trustProxy = parseTrustProxy();
   const server = fastify({
     logger,
@@ -215,6 +221,7 @@ export async function buildServer() {
   server.register(healthRoutes, { prefix: "/api/v1" });
   server.register(authRoutes, { prefix: "/api/v1" });
   server.register(connectRoutes, { prefix: "/api/v1" });
+  server.register(connectClientRoutes, { prefix: "/api/v1" });
   server.register(contactRoutes, { prefix: "/api/v1" });
   // Connected-account invoicing: only the exact value "true" registers the routes (else 404).
   if (process.env.CONNECT_INVOICING === "true") {

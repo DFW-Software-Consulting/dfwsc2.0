@@ -1,0 +1,1 @@
+ALTER TABLE "clients" ADD COLUMN "connect_redirect_origins" text[] DEFAULT '{}' NOT NULL;
