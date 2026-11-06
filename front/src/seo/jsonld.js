@@ -50,7 +50,11 @@ function pricingPage() {
       unitCode: "MON",
       billingDuration: 1,
     },
-    itemOffered: { "@type": "Service", name: plan.name, audience: plan.idealFor },
+    itemOffered: {
+      "@type": "Service",
+      name: plan.name,
+      audience: { "@type": "Audience", audienceType: plan.idealFor },
+    },
   }));
   return {
     organization: {
@@ -59,11 +63,11 @@ function pricingPage() {
         name: "Hosting and maintenance plans",
         itemListElement: [
           ...planOffers,
+          // Intentionally unpriced: the retainer is quoted, so it is a Service, not an Offer.
           {
-            "@type": "Offer",
+            "@type": "Service",
             name: retainer.name,
             description: retainer.includes,
-            itemOffered: { "@type": "Service", name: retainer.name },
           },
         ],
       },
