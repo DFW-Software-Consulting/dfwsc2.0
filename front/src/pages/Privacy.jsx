@@ -57,8 +57,15 @@ export default function Privacy() {
 
           <h2>Storage on your device</h2>
           <p>
-            We keep only your light or dark theme preference in your browser. It stays on your
-            device and is never sent to us.
+            We keep your light or dark theme preference in your browser. It stays on your device and
+            is never sent to us.
+          </p>
+          <p>
+            If a page fails to load because we released an update while you had the site open, the
+            site reloads once to recover. To avoid reloading in a loop, it notes the time of that
+            reload in your browser&apos;s session storage. This short-lived technical flag is just a
+            timestamp with no personal data, it is never sent to us, and the browser clears it when
+            you close the tab.
           </p>
 
           <h2>Payments</h2>

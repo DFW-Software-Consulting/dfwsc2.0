@@ -18,6 +18,13 @@ describe("Privacy", () => {
     );
   });
 
+  it("discloses the theme preference and the session-storage reload flag", () => {
+    renderWithProviders(<Privacy />, { initialEntries: ["/privacy"] });
+    expect(screen.getByText(/light or dark theme preference/)).toBeInTheDocument();
+    expect(screen.getByText(/session storage/)).toBeInTheDocument();
+    expect(screen.getByText(/clears it\s+when you close the tab/)).toBeInTheDocument();
+  });
+
   it("states that no analytics or tracking is used", () => {
     renderWithProviders(<Privacy />, { initialEntries: ["/privacy"] });
     expect(
