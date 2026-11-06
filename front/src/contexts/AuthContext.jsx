@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-export const AuthContext = createContext(null);
+const AuthContext = createContext(null);
 
 // Module-level ref so QueryCache onError can call logout outside React render
 export const authLogoutRef = { current: null };

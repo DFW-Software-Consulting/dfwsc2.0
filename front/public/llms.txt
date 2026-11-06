@@ -1,0 +1,26 @@
+# DFW Software Consulting
+
+> DFW Software Consulting is your development team for websites, custom software, and simpler workflows. Based in Dallas–Fort Worth, we work with small businesses everywhere: one project or an ongoing partnership, starting with understanding your business. You own the finished code, and you can keep us as your development team or choose a documented handoff.
+
+## Services
+
+- [Home and services](https://dfwsc.com/): Websites and landing pages, custom applications (client portals, dashboards, internal tools), automation and integrations, and ongoing development with hosting and maintenance.
+
+## Pricing
+
+- [Pricing and hosting plans](https://dfwsc.com/pricing): Defined projects are quoted for your project. Hosting plans include a maintenance retainer: Basic Hosting $40/month, Pro Hosting $100/month, Business Hosting $200/month. A custom Dev Retainer provides an ongoing dev team. Additional development is billed at $100–$150/hr. Includes answers to common questions about storage, data transfer, and project pricing.
+
+## Team
+
+- [Our team](https://dfwsc.com/team): A small team of full-stack, DevOps, and network engineers: Jeremy Ashley (Founder & CTO), Diego Espino (Full Stack & DevOps Engineer), and Hector Oropesa (Full Stack Developer, DevOps & Network Engineer).
+
+## Developer documentation
+
+- [Payment API documentation](https://dfwsc.com/docs): Reference for the DFWSC payment platform: create a payment, redirect to Stripe Checkout, and confirm the payment from your backend.
+
+## Contact
+
+- Phone: (214) 326-0128
+- Email: mail@dfwsc.com
+- [GitHub](https://github.com/DFW-Software-Consulting)
+- [Contact form](https://dfwsc.com/#contact)

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { usePageTitle } from "../hooks/usePageTitle.js";
 import { scrollToSection } from "../utils/scrollToSection.js";
 
 const sidebarSections = [
@@ -359,7 +358,6 @@ const STATUS_ROWS = [
 ];
 
 export default function Docs() {
-  usePageTitle("API Docs");
   const [activeLang, setActiveLang] = useState("node");
 
   const handleSidebarClick = (id) => {
