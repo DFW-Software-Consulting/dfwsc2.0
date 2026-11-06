@@ -1,10 +1,7 @@
 import { useEffect } from "react";
-import { usePageTitle } from "../hooks/usePageTitle.js";
 import "../styles/studio.css";
 
-// DRAFT copy: owner to review and approve before release.
 export default function Privacy() {
-  usePageTitle("Privacy");
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, []);
@@ -14,7 +11,7 @@ export default function Privacy() {
         <div className="page-wrap">
           <p className="studio-eyebrow">PRIVACY</p>
           <h1>How we handle your information.</h1>
-          <p>Last updated: October 31, 2026</p>
+          <p>Last updated: November 5, 2026</p>
         </div>
       </section>
       <section className="studio-section page-wrap">
@@ -51,10 +48,11 @@ export default function Privacy() {
             delivered through our email provider, Resend.
           </p>
 
-          <h2>Analytics</h2>
+          <h2>Analytics and cookies</h2>
           <p>
-            If enabled, we use Plausible Analytics, a privacy-friendly service that does not use
-            cookies.
+            We don&apos;t use analytics, tracking scripts, or tracking cookies. The visit context
+            described above (referrer, campaign tags, and the pages you viewed on this site) is kept
+            only in memory in your browser, and it is attached only if you submit the contact form.
           </p>
 
           <h2>Storage on your device</h2>

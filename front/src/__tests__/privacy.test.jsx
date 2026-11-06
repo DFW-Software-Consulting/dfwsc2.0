@@ -11,11 +11,19 @@ describe("Privacy", () => {
   it("renders the page, sets the title and links the contact address", () => {
     renderWithProviders(<Privacy />, { initialEntries: ["/privacy"] });
     expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
-    expect(screen.getByText(/last updated: october 31, 2026/i)).toBeInTheDocument();
-    expect(document.title).toBe("Privacy - DFW Software Consulting");
+    expect(screen.getByText(/last updated: november 5, 2026/i)).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: "mail@dfwsc.com" })[0]).toHaveAttribute(
       "href",
       "mailto:mail@dfwsc.com"
     );
+  });
+
+  it("states that no analytics or tracking is used", () => {
+    renderWithProviders(<Privacy />, { initialEntries: ["/privacy"] });
+    expect(
+      screen.getByText(/We don't use analytics, tracking scripts, or tracking cookies\./)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/kept\s+only in memory in your browser/)).toBeInTheDocument();
+    expect(screen.queryByText(/plausible/i)).not.toBeInTheDocument();
   });
 });
