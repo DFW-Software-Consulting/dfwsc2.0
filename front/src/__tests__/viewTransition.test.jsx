@@ -81,10 +81,29 @@ describe("theme toggle with view transitions", () => {
 });
 
 describe("runViewTransition", () => {
-  it("runs update once and reports false when unsupported", () => {
+  it("runs update once when unsupported", () => {
     const update = vi.fn();
-    expect(runViewTransition(update, { className: "x" })).toBe(false);
+    runViewTransition(update, { className: "x" });
     expect(update).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the class until the newest overlapping transition finishes", async () => {
+    mockReducedMotion(false);
+    const finishers = [];
+    document.startViewTransition = vi.fn((update) => {
+      update();
+      return {
+        ready: Promise.resolve(),
+        finished: new Promise((resolve, reject) => finishers.push({ resolve, reject })),
+      };
+    });
+    runViewTransition(() => {}, { className: "route-vt" });
+    runViewTransition(() => {}, { className: "route-vt" });
+    // The first is skipped by the second and settles (here: rejects) while the second runs.
+    await act(async () => finishers[0].reject(new Error("skipped")));
+    expect(document.documentElement).toHaveClass("route-vt");
+    await act(async () => finishers[1].resolve());
+    expect(document.documentElement).not.toHaveClass("route-vt");
   });
 });
 

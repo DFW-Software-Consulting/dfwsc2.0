@@ -27,7 +27,7 @@ export default function Pricing() {
   return (
     <MotionRoot>
       <div className="studio studio-page">
-        <section className="studio-page-hero">
+        <section className="studio-page-hero studio-pricing-hero">
           <PricingHeroArt />
           <ScrollFx offset={LEAVE} fx={PAGE_HERO}>
             <RevealGroup mount className="page-wrap">

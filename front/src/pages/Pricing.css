@@ -68,7 +68,7 @@
 
 /* Hero art (components/PricingHeroArt.jsx): wide screens only, absolutely placed so it
    reserves nothing and cannot shift layout. Only transform and opacity animate. */
-.studio-page-hero { position: relative; overflow: hidden; }
+.studio-pricing-hero { position: relative; overflow: hidden; }
 .studio-hero-art { display: none; }
 @media (min-width: 1100px) {
   .studio-hero-art { display: block; position: absolute; top: 50%; right: max(40px, calc((100% - 1180px) / 2)); width: 330px; translate: 0 -50%; pointer-events: none; }

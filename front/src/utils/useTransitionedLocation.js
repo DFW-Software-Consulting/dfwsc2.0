@@ -28,13 +28,18 @@ export function useTransitionedLocation(location) {
   useEffect(() => {
     if (!hold) return undefined;
     let cancelled = false;
-    const wait = new Promise((resolve) => setTimeout(resolve, MAX_WAIT_MS));
+    let timer;
+    const wait = new Promise((resolve) => {
+      timer = setTimeout(resolve, MAX_WAIT_MS);
+    });
     Promise.race([preloadRoute(location.pathname).catch(() => {}), wait]).then(() => {
+      clearTimeout(timer);
       if (cancelled) return;
       runViewTransition(() => flushSync(() => setShown(location)), { className: "route-vt" });
     });
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [hold, location]);
 

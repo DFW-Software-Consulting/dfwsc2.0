@@ -108,4 +108,40 @@ describe("useTransitionedLocation", () => {
     await flush();
     expect(result.current.pathname).toBe("/privacy");
   });
+
+  it("still navigates when the preload rejects, without a stuck cap timer", async () => {
+    mockMotion();
+    preloadRoute.mockRejectedValue(new TypeError("Failed to fetch dynamically imported module"));
+    const { result, rerender } = renderHook(({ l }) => useTransitionedLocation(l), {
+      initialProps: { l: loc("/") },
+    });
+    rerender({ l: loc("/pricing") });
+    await flush();
+    expect(result.current.pathname).toBe("/pricing");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not transition for a hash or same-path navigation", async () => {
+    mockMotion();
+    const { result, rerender } = renderHook(({ l }) => useTransitionedLocation(l), {
+      initialProps: { l: loc("/pricing") },
+    });
+    const next = { pathname: "/pricing", hash: "#hosting", key: "k2" };
+    rerender({ l: next });
+    expect(result.current).toBe(next);
+    expect(preloadRoute).not.toHaveBeenCalled();
+    expect(document.startViewTransition).not.toHaveBeenCalled();
+  });
+
+  it("runs one transition per settled navigation, not one per click", async () => {
+    mockMotion();
+    preloadRoute.mockResolvedValue();
+    const { rerender } = renderHook(({ l }) => useTransitionedLocation(l), {
+      initialProps: { l: loc("/") },
+    });
+    rerender({ l: loc("/pricing") });
+    rerender({ l: loc("/team") });
+    await flush();
+    expect(document.startViewTransition).toHaveBeenCalledOnce();
+  });
 });

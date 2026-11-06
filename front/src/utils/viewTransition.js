@@ -34,22 +34,32 @@ function circleReveal(origin) {
   );
 }
 
-/** Returns true when the change was animated. */
+// Latest run per class: an older transition that gets skipped must not strip the class a
+// newer one still needs.
+const latest = new Map();
+
 export function runViewTransition(update, { className, origin } = {}) {
   if (!canAnimate()) {
     update();
-    return false;
+    return;
   }
   const root = document.documentElement;
-  if (className) root.classList.add(className);
+  const token = {};
+  if (className) {
+    latest.set(className, token);
+    root.classList.add(className);
+  }
   const transition = document.startViewTransition(update);
   if (origin)
     transition.ready.then(
       () => circleReveal(origin),
       () => {}
     );
-  transition.finished.finally(() => {
-    if (className) root.classList.remove(className);
-  });
-  return true;
+  const cleanup = () => {
+    if (className && latest.get(className) === token) {
+      latest.delete(className);
+      root.classList.remove(className);
+    }
+  };
+  transition.finished.then(cleanup, cleanup);
 }
