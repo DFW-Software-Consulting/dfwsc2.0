@@ -247,6 +247,36 @@ describe("Clients API Integration", () => {
       expect(response.json().error).toBe("Client not found.");
     });
 
+    it("normalizes and stores connectRedirectOrigins, rejecting non-origins", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Origins Client",
+        email: `origins-${clientId}@example.com`,
+        workspace,
+        status: "active",
+      });
+      const patch = (connectRedirectOrigins: string[]) =>
+        app.inject({
+          method: "PATCH",
+          url: `/api/v1/clients/${clientId}`,
+          headers: {
+            authorization: `Bearer ${makeAdminToken()}`,
+            "content-type": "application/json",
+          },
+          payload: { connectRedirectOrigins },
+        });
+
+      const ok = await patch(["https://App.Example.com", "https://app.example.com:443"]);
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json().connectRedirectOrigins).toEqual(["https://app.example.com"]);
+
+      for (const bad of ["https://app.example.com/path", "http://app.example.com", "not a url"]) {
+        expect((await patch([bad])).statusCode).toBe(400);
+      }
+    });
+
     it("returns 400 when status is invalid", async () => {
       const clientId = randomUUID();
       cleanupIds.push(clientId);
