@@ -37,7 +37,7 @@ function mockEnvironment({ wide = true, reduced = false, webgl = true } = {}) {
 }
 
 // Fresh module graph per test, with the scene module mocked right before the import.
-async function renderBackdrop() {
+async function renderBackdrop(props = {}) {
   vi.doMock("../components/HeroScene.jsx", () => {
     sceneLoaded();
     return { default: () => <canvas data-testid="scene" /> };
@@ -45,7 +45,7 @@ async function renderBackdrop() {
   ({ default: HeroBackdrop } = await import("../components/HeroBackdrop.jsx"));
   let utils;
   await act(async () => {
-    utils = render(<HeroBackdrop />);
+    utils = render(<HeroBackdrop {...props} />);
   });
   return utils;
 }
@@ -92,6 +92,24 @@ describe("HeroBackdrop", () => {
     await flush();
     expect(container.querySelector('[data-scene="3d"]')).toBeInTheDocument();
     expect(sceneLoaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads the scene from a custom loader instead of the Home nodes scene", async () => {
+    mockEnvironment();
+    const { container } = await renderBackdrop({
+      load: async () => ({ default: () => <canvas data-testid="terrain" /> }),
+    });
+    await flush();
+    expect(container.querySelector('[data-testid="terrain"]')).toBeInTheDocument();
+    expect(sceneLoaded).not.toHaveBeenCalled();
+  });
+
+  it("never calls a custom loader when gating fails", async () => {
+    mockEnvironment({ reduced: true });
+    const load = vi.fn();
+    await renderBackdrop({ load });
+    await flush();
+    expect(load).not.toHaveBeenCalled();
   });
 
   it("drops the scene and restores the fallback when the viewport narrows", async () => {

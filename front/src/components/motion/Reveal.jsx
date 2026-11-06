@@ -105,19 +105,41 @@ export function RevealGroup({ as = "div", stagger = 0.08, mount = false, ...prop
   );
 }
 
-export function RevealItem({ as = "div", y = OFFSET, ...props }) {
+// Photo wipe: the frame opens from one edge while it settles from a slight zoom.
+const WIPE = { left: "inset(0 100% 0 0)", right: "inset(0 0 0 100%)" };
+
+/**
+ * Staggered child of a <RevealGroup>. `x`/`y` set the entry offset (numbers or "105%"
+ * strings, for text rising out of a <MaskLine>); `wipe` ("left" | "right") swaps the fade
+ * for a clip-path wipe with a 1.08 -> 1 scale settle, opening from that edge.
+ */
+export function RevealItem({ as = "div", y = OFFSET, x = 0, wipe, ...props }) {
   const [Tag, animated, ref] = useMotionTag(as);
   if (!animated) return <Tag key="plain" ref={ref} {...props} />;
+  const variants = wipe
+    ? {
+        hidden: { clipPath: WIPE[wipe], scale: 1.08 },
+        show: {
+          clipPath: "inset(0 0 0 0)",
+          scale: 1,
+          transition: { duration: 0.9, ease: EASE },
+        },
+      }
+    : {
+        hidden: { opacity: 0, x, y },
+        show: { opacity: 1, x: 0, y: 0, transition: { duration: 0.5, ease: EASE } },
+      };
+  return <Tag key="animated" ref={ref} {...props} variants={variants} />;
+}
+
+/** One line of a heading that rises from behind a clip mask (inside a <RevealGroup>). */
+export function MaskLine({ children }) {
   return (
-    <Tag
-      key="animated"
-      ref={ref}
-      {...props}
-      variants={{
-        hidden: { opacity: 0, y },
-        show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: EASE } },
-      }}
-    />
+    <span className="studio-mask">
+      <RevealItem as="span" y="105%">
+        {children}
+      </RevealItem>
+    </span>
   );
 }
 

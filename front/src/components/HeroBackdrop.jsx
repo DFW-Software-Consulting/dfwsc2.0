@@ -33,8 +33,15 @@ function whenIdle(callback) {
   return () => window.clearTimeout(id);
 }
 
-/** `progress`: optional MotionValue (0..1) of the hero scrolling out; the scene drifts with it. */
-export default function HeroBackdrop({ progress }) {
+// Scene loaders. Each is a dynamic import so every scene is its own lazy chunk.
+const loadNodes = () => import("./HeroScene.jsx");
+export const loadTerrain = () => import("./TeamScene.jsx");
+
+/**
+ * `progress`: optional MotionValue (0..1) of the hero scrolling out; the scene drifts with it.
+ * `load`: returns the scene module (default: Home's node field). Must be a stable reference.
+ */
+export default function HeroBackdrop({ progress, load = loadNodes }) {
   const [Scene, setScene] = useState(null);
   const dropScene = useCallback(() => setScene(null), []);
 
@@ -57,7 +64,7 @@ export default function HeroBackdrop({ progress }) {
         if (webgl === undefined) webgl = hasWebGL();
         if (!webgl) return;
         try {
-          const mod = await import("./HeroScene.jsx");
+          const mod = await load();
           if (!cancelled && matches(WIDE) && !matches(REDUCED)) setScene(() => mod.default);
         } catch {
           // Chunk failed to load: keep the static fallback.
@@ -74,7 +81,7 @@ export default function HeroBackdrop({ progress }) {
       wide.removeEventListener("change", evaluate);
       reduced.removeEventListener("change", evaluate);
     };
-  }, []);
+  }, [load]);
 
   return (
     <div className="studio-backdrop" aria-hidden="true" data-scene={Scene ? "3d" : "static"}>
