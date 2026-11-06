@@ -154,6 +154,9 @@ export function ScrollProgressBar() {
 }
 
 const PROCESS = ["start 0.85", "end 0.6"];
+// Steps not yet reached sit at this opacity. Any lower and their text (bronze numbers,
+// muted copy) falls under the WCAG AA 4.5:1 contrast ratio on the tinted band in light mode.
+const STEP_MIN_OPACITY = 0.94;
 
 /** Numbered steps (`[number, title, copy]`) under a line that fills as you scroll; steps light up in turn. */
 export function ProcessGrid({ steps }) {
@@ -161,7 +164,15 @@ export function ProcessGrid({ steps }) {
     <ScrollGroup className="studio-process-grid" offset={PROCESS}>
       <ScrollLine />
       {steps.map(([number, title, copy], index) => (
-        <ScrollItem as="article" key={number} index={index} step={0.3} span={0.25} y={0} min={0.4}>
+        <ScrollItem
+          as="article"
+          key={number}
+          index={index}
+          step={0.3}
+          span={0.25}
+          y={0}
+          min={STEP_MIN_OPACITY}
+        >
           <span>{number}</span>
           <h3>{title}</h3>
           <p>{copy}</p>

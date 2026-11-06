@@ -36,6 +36,7 @@ export default defineConfig({
   build: {
     outDir: 'build-dist',
     emptyOutDir: true,
+    manifest: true, // read by the prerender step to link each page's CSS and JS chunks (removed after)
     chunkSizeWarningLimit: 560, // sized just above the lazy three.js HeroScene chunk (~535 kB); other chunks still warn
   },
   // The prerender build (`vite build --ssr`) bundles everything, including CSS-importing

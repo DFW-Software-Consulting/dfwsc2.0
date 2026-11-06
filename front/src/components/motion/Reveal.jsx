@@ -32,6 +32,11 @@ const inViewport = (element) => {
  * are `mount` reveals) stay plain so nothing visible vanishes and fades back in; only
  * content below the fold gets the scroll reveal. Elements mounted later (client-side
  * navigation) animate as usual.
+ *
+ * Switching between plain and animated changes the element `key`, so the whole subtree
+ * below a below-the-fold helper unmounts and remounts once after hydration. Children of
+ * Reveal, RevealGroup and RevealItem must therefore be stateless at hydration time (no
+ * forms, embeds or other state that must survive).
  */
 function useMotionTag(as, mount = false) {
   const allowed = useMotionAllowed();

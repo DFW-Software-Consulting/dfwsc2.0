@@ -4,18 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { verifyBuild } from "../../scripts/verify-build.mjs";
-import { PUBLIC_ROUTES } from "../seo/meta.js";
+import { fileFor, PUBLIC_ROUTES } from "../seo/meta.js";
 
+const PAGE = '<link rel="canonical" href="https://dfwsc.com/"><h1>x</h1>';
 const dirs = [];
 async function buildDir(files) {
   const dir = await mkdtemp(join(tmpdir(), "verify-build-"));
   dirs.push(dir);
-  for (const file of files) await writeFile(join(dir, file), "<h1>x</h1>");
+  for (const file of files) await writeFile(join(dir, file), PAGE);
   return dir;
 }
-const pageFiles = Object.keys(PUBLIC_ROUTES).map((p) =>
-  p === "/" ? "index.html" : `${p.slice(1)}.html`
-);
+const pageFiles = Object.keys(PUBLIC_ROUTES).map(fileFor);
 const others = ["spa.html", "404.html", "sitemap.xml"];
 
 afterEach(async () => {
