@@ -21,7 +21,7 @@ export const demos = [
   {
     name: "DFW Landscaping Co.",
     industry: "Landscaping",
-    description: "Lawn and yard services, past projects and a simple way to request a quote.",
+    description: "Lawn and yard services, past projects and a quote request.",
     url: "https://dfw-software-consulting.github.io/landscaping-dfw/",
     icon: "leaf",
     image: null,

@@ -3,17 +3,20 @@ import { Link } from "react-router-dom";
 import DiegoEspinoImage from "../assets/diego-espino.jpg";
 import HectorOropesaImage from "../assets/hector-oropesa.webp";
 import JeremyAshleyImage from "../assets/jeremy-ashley.jpg";
+import CtaStrip from "../components/CtaStrip.jsx";
+import Disclosure from "../components/Disclosure.jsx";
 import HeroBackdrop, { loadTerrain } from "../components/HeroBackdrop.jsx";
-import { MaskLine, MotionRoot, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
+import HeroHeading from "../components/motion/HeroHeading.jsx";
+import { MotionRoot, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
 import {
   LEAVE,
   PAGE_HERO,
-  ProcessGrid,
   RISE,
   ScrollFx,
   ScrollRule,
   useSectionProgress,
 } from "../components/motion/ScrollFx.jsx";
+import SectionHeading from "../components/motion/SectionHeading.jsx";
 import { useTilt } from "../components/motion/useTilt.js";
 import { teamMembers } from "../content/team.js";
 import "../styles/studio.css";
@@ -24,24 +27,6 @@ const memberImages = {
   "Diego Espino": DiegoEspinoImage,
   "Hector Oropesa": HectorOropesaImage,
 };
-
-const processSteps = [
-  [
-    "01",
-    "A conversation first.",
-    "We learn how your team works, what’s getting in the way, and what a useful outcome looks like.",
-  ],
-  [
-    "02",
-    "Progress you can see.",
-    "Early previews and regular check-ins let you give feedback while the solution is taking shape.",
-  ],
-  [
-    "03",
-    "A plan for what’s next.",
-    "We discuss ongoing support and handoff options so you know how the work will be maintained.",
-  ],
-];
 
 const LINKEDIN_PATH =
   "M20.447 20.452h-3.554v-5.569c0-1.328-.024-3.037-1.852-3.037-1.853 0-2.137 1.447-2.137 2.941v5.665H9.35V9h3.414v1.561h.048c.476-.9 1.637-1.85 3.37-1.85 3.602 0 4.268 2.371 4.268 5.455zm-15.34-12.27a2.062 2.062 0 1 1 .002-4.124 2.062 2.062 0 0 1-.002 4.124zm1.779 12.27H3.33V9h3.556z";
@@ -90,26 +75,6 @@ export function MemberPhoto({ name, image, linkedin, wipe }) {
   );
 }
 
-/** Section heading whose two lines rise from behind a mask, with the eyebrow and copy staggering in. */
-function SectionHeading({ eyebrow, lead, accent, children }) {
-  return (
-    <RevealGroup className="studio-section-heading">
-      <div>
-        <RevealItem as="p" className="studio-eyebrow">
-          {eyebrow}
-        </RevealItem>
-        <h2>
-          <MaskLine>{lead}</MaskLine>
-          <MaskLine>
-            <em>{accent}</em>
-          </MaskLine>
-        </h2>
-      </div>
-      <RevealItem as="p">{children}</RevealItem>
-    </RevealGroup>
-  );
-}
-
 /**
  * A member card that rises into place on scroll, tilts toward a fine pointer, wipes its
  * photo open from its own edge, and slides the copy in from that side, line by line.
@@ -121,7 +86,7 @@ function TeamMember({ member, index }) {
   const x = photoRight ? 28 : -28;
   return (
     <ScrollFx className="studio-member-item" fx={RISE} {...tilt}>
-      <RevealGroup as="article" className="studio-member" stagger={0.09}>
+      <RevealGroup as="article" className="studio-member studio-spot" stagger={0.09}>
         <MemberPhoto
           name={member.name}
           image={memberImages[member.name]}
@@ -138,8 +103,17 @@ function TeamMember({ member, index }) {
           <RevealItem as="p" x={x} y={0} className="studio-member-intro">
             {member.intro}
           </RevealItem>
-          <RevealItem as="p" x={x} y={0} className="studio-member-bio">
-            {member.bio}
+          <RevealItem x={x} y={0}>
+            <Disclosure
+              summary={
+                <>
+                  Read more<span className="sr-only"> about {member.name}</span>
+                </>
+              }
+              className="studio-member-bio"
+            >
+              <p>{member.bio}</p>
+            </Disclosure>
           </RevealItem>
           <dl className="studio-member-focus">
             <RevealItem as="dt">FOCUS</RevealItem>
@@ -164,15 +138,11 @@ export default function Team() {
           <HeroBackdrop progress={heroProgress} load={loadTerrain} />
           <ScrollFx progress={heroProgress} fx={PAGE_HERO} className="studio-team-hero-content">
             <RevealGroup mount className="page-wrap">
-              <RevealItem as="p" className="studio-eyebrow">
-                SMALL TEAM. DIRECT CONNECTION.
-              </RevealItem>
-              <h1>
-                <MaskLine>Good software.</MaskLine>
-                <MaskLine>
-                  <em>Real people.</em>
-                </MaskLine>
-              </h1>
+              <HeroHeading
+                eyebrow="SMALL TEAM. DIRECT CONNECTION."
+                lead="Good software."
+                accent="Real people."
+              />
               <RevealItem as="p">
                 We’re the people who turn your business challenges into a plan, a working
                 application, and the support to keep improving.
@@ -207,44 +177,7 @@ export default function Team() {
             ))}
           </div>
         </section>
-        <section className="studio-band">
-          <div className="page-wrap">
-            <SectionHeading
-              eyebrow="HOW WE WORK WITH YOU"
-              lead="A shared goal."
-              accent="A clear way forward."
-            >
-              You bring the knowledge of your business. We bring the technical perspective and
-              explain the choices along the way.
-            </SectionHeading>
-            <ProcessGrid steps={processSteps} />
-          </div>
-        </section>
-        <section className="studio-contact studio-inverse">
-          <RevealGroup className="page-wrap">
-            <RevealItem as="p" className="studio-eyebrow">
-              YOUR NEXT PROJECT STARTS WITH A CONVERSATION
-            </RevealItem>
-            <h2>
-              <MaskLine>Let’s put a team</MaskLine>
-              <MaskLine>
-                <em>behind your idea.</em>
-              </MaskLine>
-            </h2>
-            <RevealItem as="p">
-              Whether you have a detailed plan or a problem you’re still sorting out, tell us where
-              you’d like to go.
-            </RevealItem>
-            <RevealItem className="studio-actions">
-              <Link className="studio-button" to="/" state={{ scrollTo: "contact" }}>
-                Talk about your project <span aria-hidden="true">↗</span>
-              </Link>
-              <Link className="studio-text-link" to="/pricing">
-                Explore ways to work together <span aria-hidden="true">↗</span>
-              </Link>
-            </RevealItem>
-          </RevealGroup>
-        </section>
+        <CtaStrip title="Let’s put a team behind your idea." label="Talk about your project" />
       </div>
     </MotionRoot>
   );

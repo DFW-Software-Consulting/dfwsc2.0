@@ -5,7 +5,7 @@
 .studio-member { position: relative; display: grid; grid-template-columns: .85fr 1.15fr; border: 1px solid var(--border-subtle); border-radius: 12px; overflow: hidden; background: var(--bg-card); }
 .studio-member-item:nth-child(even) .studio-member { grid-template-columns: 1.15fr .85fr; }
 .studio-member-item:nth-child(even) .studio-member-photo { order: 2; }
-.studio-member-photo { position: relative; min-height: 430px; }
+.studio-member-photo { position: relative; min-height: 320px; }
 .studio-member-photo img { width: 100%; height: 100%; object-fit: cover; object-position: center 30%; position: absolute; filter: saturate(.75); }
 .studio-member-badge { position: absolute; bottom: 20px; left: 24px; background: var(--photo-label-bg); color: var(--sticker-text); border-radius: 4px; padding: 7px 12px; font-size: 12px; font-weight: 600; letter-spacing: .12em; display: inline-flex; align-items: center; gap: 8px; }
 .studio-member-badge-icon { width: 13px; height: 13px; flex-shrink: 0; fill: currentColor; }
@@ -17,11 +17,12 @@
   .studio-member-photo-link img { transition: transform .6s cubic-bezier(.2, .7, .2, 1); }
   .studio-member-photo-link:hover img { transform: scale(1.03); }
 }
-.studio-member-copy { padding: 48px; align-self: center; }
+.studio-member-copy { padding: 36px 40px; align-self: center; }
 .studio-member-copy h3 { font-size: clamp(30px, 4vw, 43px); font-weight: 600; letter-spacing: -.045em; margin: 16px 0 20px; }
-.studio-member-intro { font-size: 20px; line-height: 1.5; margin-bottom: 18px; }
-.studio-member-bio { font-size: 16px; line-height: 1.8; color: var(--text-muted); }
-.studio-member-focus { border-top: 1px solid var(--border-subtle); margin-top: 28px; padding-top: 20px; }
+.studio-member-intro { font-size: 20px; line-height: 1.5; margin-bottom: 14px; }
+.studio-member-bio > summary { display: inline-flex; font-size: 15px; font-weight: 600; color: var(--link); gap: 12px; }
+.studio-member-bio p { font-size: 16px; line-height: 1.8; color: var(--text-muted); margin-top: 12px; }
+.studio-member-focus { border-top: 1px solid var(--border-subtle); margin-top: 20px; padding-top: 16px; }
 .studio-member-focus dt { font-size: 12px; letter-spacing: .12em; color: var(--accent); font-weight: 700; }
 .studio-member-focus dd { font-size: 14px; color: var(--text-muted); line-height: 1.7; margin-top: 6px; }
 
@@ -31,16 +32,9 @@
 @media (max-width: 650px) {
   .studio-member, .studio-member-item:nth-child(even) .studio-member { grid-template-columns: 1fr; }
   .studio-member-item:nth-child(even) .studio-member-photo { order: 0; }
-  .studio-member-photo { min-height: 340px; }
+  .studio-member-photo { min-height: 260px; }
   .studio-member-copy { padding: 26px; }
 }
 @media (max-width: 480px) {
-  .studio-member-photo { min-height: 300px; }
-}
-
-/* Hover spotlight for the tilting cards (useTilt sets --mx/--my). Fine pointers only. */
-@media (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  .studio-member::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .35s ease;
-    background: radial-gradient(520px circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--link) 14%, transparent), transparent 62%); }
-  .studio-member:hover::after { opacity: 1; }
+  .studio-member-photo { min-height: 240px; }
 }

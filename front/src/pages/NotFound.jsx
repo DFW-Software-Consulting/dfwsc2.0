@@ -1,36 +1,47 @@
 import { Link } from "react-router-dom";
+import "../styles/studio.css";
+import "./NotFound.css";
+
+// A route that draws itself and then breaks off. pathLength="1" lets the CSS draw it without
+// measuring; with reduced motion the finished drawing is shown as is.
+function LostRoute() {
+  return (
+    <svg
+      className="studio-lost-route"
+      viewBox="0 0 240 150"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path className="lost-grid" d="M0 50h240M0 100h240M60 0v150M120 0v150M180 0v150" />
+      <path className="lost-line" pathLength="1" d="M24 118C58 118 56 66 92 66S130 104 156 84" />
+      <path className="lost-gap" d="M156 84C170 73 178 62 196 50" />
+      <circle className="lost-start" cx="24" cy="118" r="7" />
+      <path className="lost-x" d="M190 36l16 16m0-16l-16 16" />
+    </svg>
+  );
+}
 
 export default function NotFound() {
   return (
-    <div className="min-h-[90vh] flex items-center justify-center transition-colors duration-300">
-      <div className="text-center max-w-2xl mx-auto px-6" role="status" aria-live="polite">
-        <div className="w-16 h-16 mx-auto mb-6 flex items-center justify-center rounded-full bg-slate-500/10 border border-slate-500/20">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="h-10 w-10 text-slate-500"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-            aria-hidden="true"
-          >
-            <path
-              fillRule="evenodd"
-              d="M18 10A8 8 0 11.001 10 8 8 0 0118 10zM9 6a1 1 0 012 0v4a1 1 0 11-2 0V6zm1 9a1.25 1.25 0 100-2.5A1.25 1.25 0 0010 15z"
-              clipRule="evenodd"
-            />
-          </svg>
+    <div className="studio studio-notfound">
+      <div className="page-wrap studio-notfound-grid" role="status" aria-live="polite">
+        <div>
+          <p className="studio-eyebrow">404</p>
+          <h1>
+            Page not found. <em>Let’s get you back on the map.</em>
+          </h1>
+          <p>The page you are looking for does not exist or has been moved.</p>
+          <div className="studio-actions">
+            <Link className="studio-button" to="/">
+              Back to home <span aria-hidden="true">↗</span>
+            </Link>
+            <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
+              Contact us <span aria-hidden="true">↗</span>
+            </Link>
+          </div>
         </div>
-        <h1 className="text-3xl font-bold text-fg mb-4 transition-colors">Page Not Found</h1>
-        <p className="text-fg-muted text-lg mb-6 transition-colors">
-          The page you are looking for does not exist or has been moved.
-        </p>
-        <Link
-          to="/"
-          className="inline-flex items-center justify-center rounded-full bg-brand-500 hover:bg-brand-600
-                     text-white font-semibold py-2.5 px-6 shadow-glow
-                     transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-400"
-        >
-          Go Home
-        </Link>
+        <LostRoute />
       </div>
     </div>
   );

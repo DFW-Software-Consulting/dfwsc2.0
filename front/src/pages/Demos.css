@@ -9,3 +9,5 @@
 .demo-card .studio-text-link { margin-top: auto; padding-top: 8px; }
 @media (max-width: 960px) { .demo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .demo-grid { grid-template-columns: 1fr; } }
+.demo-cta { padding-bottom: 72px; }
+.demo-section { padding-bottom: 40px; }

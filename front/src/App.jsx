@@ -13,7 +13,7 @@ export default function App() {
       <Seo />
       <Analytics />
       <RouteTracker />
-      <div className="min-h-screen relative isolate bg-[var(--bg-main)] text-[var(--text-main)] selection:bg-brand-500/30 transition-colors duration-300">
+      <div className="min-h-screen flex flex-col relative isolate bg-[var(--bg-main)] text-[var(--text-main)] selection:bg-brand-500/30 transition-colors duration-300">
         {/* Background glow effects */}
         <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-brand-500/10 blur-[120px] animate-pulse-slow opacity-50 dark:opacity-100" />
@@ -21,7 +21,7 @@ export default function App() {
         </div>
 
         <Navbar />
-        <main className="relative z-10">
+        <main className="relative z-10 flex flex-1 flex-col">
           <Suspense
             fallback={
               <div className="flex items-center justify-center min-h-[50vh]">

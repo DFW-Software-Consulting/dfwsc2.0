@@ -2,7 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import Contact from "../components/Contact.jsx";
 import HeroBackdrop from "../components/HeroBackdrop.jsx";
-import { MotionRoot, Reveal, RevealGroup, RevealItem, Swap } from "../components/motion/Reveal.jsx";
+import {
+  MaskLine,
+  MotionRoot,
+  Reveal,
+  RevealGroup,
+  RevealItem,
+  Swap,
+} from "../components/motion/Reveal.jsx";
 import {
   LEAVE,
   PASS,
@@ -12,6 +19,7 @@ import {
   ScrollItem,
   useSectionProgress,
 } from "../components/motion/ScrollFx.jsx";
+import { useSpotlight } from "../components/motion/useTilt.js";
 import { scrollToSection } from "../utils/scrollToSection.js";
 import "../styles/studio.css";
 import "./Home.css";
@@ -140,6 +148,7 @@ export default function Home() {
   const [active, setActive] = useState(0);
   const [switched, setSwitched] = useState(false);
   const workflow = workflows[active];
+  const spotlight = useSpotlight();
   const heroRef = useRef(null);
   const heroProgress = useSectionProgress(heroRef, LEAVE);
   const location = useLocation();
@@ -164,15 +173,11 @@ export default function Home() {
                   <span className="studio-status" /> SMALL BUSINESS. BIG POSSIBILITIES.
                 </RevealItem>
                 <h1>
-                  <RevealItem as="span" className="studio-line">
-                    Your business.
-                  </RevealItem>
-                  <RevealItem as="span" className="studio-line">
-                    Our expertise.
-                  </RevealItem>
-                  <RevealItem as="span" className="studio-line">
+                  <MaskLine>Your business.</MaskLine>
+                  <MaskLine>Our expertise.</MaskLine>
+                  <MaskLine>
                     <em>One dev team.</em>
-                  </RevealItem>
+                  </MaskLine>
                 </h1>
                 <RevealItem as="p" className="studio-intro">
                   Your development team for websites, software, and simpler workflows.
@@ -311,10 +316,11 @@ export default function Home() {
             {services.map(([number, title, category, description], index) => (
               <ScrollItem
                 as="article"
-                className="studio-service-card"
+                className="studio-service-card studio-spot studio-lift"
                 key={number}
                 index={index}
                 count={services.length}
+                {...spotlight}
               >
                 <div className="studio-card-top">
                   <span>{number}</span>

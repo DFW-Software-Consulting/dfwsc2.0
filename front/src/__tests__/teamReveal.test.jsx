@@ -75,7 +75,7 @@ describe("Team member reveal", () => {
     renderWithProviders(<Team />, { initialEntries: ["/team"] });
     const card = screen.getByRole("heading", { name: "Jeremy Ashley" }).closest("article");
     const photo = card.querySelector("a.studio-member-photo");
-    const copy = [...card.querySelectorAll(".studio-member-copy p, .studio-member-copy h3")];
+    const copy = [...card.querySelectorAll(".studio-member-copy > p, .studio-member-copy h3")];
     const hidden = () =>
       [photo, ...copy].filter(
         (el) => el.style.opacity === "0" || el.style.clipPath.includes("100%")

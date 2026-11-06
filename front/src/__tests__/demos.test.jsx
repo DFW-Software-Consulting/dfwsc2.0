@@ -13,7 +13,7 @@ describe("Demos", () => {
   it("renders a heading and one external link per demo", () => {
     renderWithProviders(<Demos />, { initialEntries: ["/demos"] });
     expect(screen.getByRole("heading", { level: 1 })).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(demos.length + 1);
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(demos.length);
     for (const demo of demos) {
       const link = screen.getByRole("link", { name: new RegExp(demo.name) });
       expect(link).toHaveAttribute("href", demo.url);

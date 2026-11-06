@@ -1,18 +1,25 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
-import { MotionRoot, Reveal, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
+import CtaStrip from "../components/CtaStrip.jsx";
+import Disclosure from "../components/Disclosure.jsx";
+import HeroHeading from "../components/motion/HeroHeading.jsx";
+import { MotionRoot, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
 import {
   LEAVE,
   PAGE_HERO,
   ScrollFx,
   ScrollGroup,
   ScrollItem,
+  ScrollRule,
 } from "../components/motion/ScrollFx.jsx";
+import SectionHeading from "../components/motion/SectionHeading.jsx";
+import { useSpotlight } from "../components/motion/useTilt.js";
 import { faqItems, hostingPlans, retainer } from "../content/pricing.js";
 import "../styles/studio.css";
 import "./Pricing.css";
 
 export default function Pricing() {
+  const spotlight = useSpotlight();
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, []);
@@ -22,14 +29,11 @@ export default function Pricing() {
         <section className="studio-page-hero">
           <ScrollFx offset={LEAVE} fx={PAGE_HERO}>
             <RevealGroup mount className="page-wrap">
-              <RevealItem as="p" className="studio-eyebrow">
-                A GOOD FIT STARTS WITH A CLEAR PLAN
-              </RevealItem>
-              <RevealItem as="h1">
-                The right support.
-                <br />
-                <em>Room to grow.</em>
-              </RevealItem>
+              <HeroHeading
+                eyebrow="A GOOD FIT STARTS WITH A CLEAR PLAN"
+                lead="The right support."
+                accent="Room to grow."
+              />
               <RevealItem as="p">
                 From a single project to your ongoing development team, choose the kind of
                 partnership your business needs.
@@ -46,22 +50,23 @@ export default function Pricing() {
           </ScrollFx>
         </section>
         <section className="studio-section page-wrap">
-          <Reveal className="studio-section-heading">
-            <div>
-              <p className="studio-eyebrow">TWO WAYS TO BUILD WITH US</p>
-              <h2>
-                A project today.
-                <br />
-                <em>A partner tomorrow.</em>
-              </h2>
-            </div>
-            <p>
-              Start with a defined piece of work, or make us part of your team. We’ll discuss scope,
-              priorities, and costs before work begins.
-            </p>
-          </Reveal>
+          <SectionHeading
+            eyebrow="TWO WAYS TO BUILD WITH US"
+            lead="A project today."
+            accent="A partner tomorrow."
+          >
+            Start with a defined piece of work, or make us part of your team. We’ll discuss scope,
+            priorities, and costs before work begins.
+          </SectionHeading>
+          <ScrollRule />
           <ScrollGroup className="studio-engagement-grid">
-            <ScrollItem as="article" className="studio-engagement-card" index={0} count={2}>
+            <ScrollItem
+              as="article"
+              className="studio-engagement-card studio-spot studio-lift"
+              index={0}
+              count={2}
+              {...spotlight}
+            >
               <p className="studio-mini-label">A DEFINED PROJECT</p>
               <h3>
                 Let’s build
@@ -73,18 +78,14 @@ export default function Pricing() {
               <ul>
                 <li>Discovery to understand the problem</li>
                 <li>Agreed scope and delivery plan</li>
-                <li>Previews and clear communication</li>
-                <li>Documentation and a handoff plan</li>
               </ul>
-              <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
-                Tell us what you have in mind <span aria-hidden="true">↗</span>
-              </Link>
             </ScrollItem>
             <ScrollItem
               as="article"
-              className="studio-engagement-card studio-engagement-featured studio-inverse"
+              className="studio-engagement-card studio-engagement-featured studio-inverse studio-spot studio-lift"
               index={1}
               count={2}
+              {...spotlight}
             >
               <p className="studio-mini-label">{retainer.name} · AN ONGOING PARTNERSHIP</p>
               <h3>
@@ -96,134 +97,77 @@ export default function Pricing() {
               <div className="studio-engagement-price">
                 {retainer.price} <small>based on your needs</small>
               </div>
-              <p className="studio-engagement-detail">
-                For growing products that need a consistent team. We’ll work through priorities,
-                available hours, and the right scope together.
-              </p>
-              <Link className="studio-button" to="/" state={{ scrollTo: "contact" }}>
-                Let’s talk about your team <span aria-hidden="true">↗</span>
-              </Link>
+              <ul>
+                <li>For growing products that need a consistent team</li>
+                <li>Priorities, available hours, and scope worked through together</li>
+              </ul>
             </ScrollItem>
           </ScrollGroup>
         </section>
         <section id="hosting" className="studio-band">
           <div className="page-wrap">
-            <Reveal className="studio-section-heading">
-              <div>
-                <p className="studio-eyebrow">HOSTING & MAINTENANCE</p>
-                <h2>
-                  A home for
-                  <br />
-                  <em>what you build.</em>
-                </h2>
-              </div>
-              <p>
-                Each monthly price includes hosting and a maintenance retainer for repairs and fixes
-                to your existing website or application. New builds and features are quoted
-                separately.
-              </p>
-            </Reveal>
-            <p className="studio-allowance-draft">
-              Proposed allowances for review. Final storage, data transfer, and processing limits
-              will be confirmed in your hosting proposal.
-            </p>
+            <SectionHeading
+              eyebrow="HOSTING & MAINTENANCE"
+              lead="A home for"
+              accent="what you build."
+            >
+              Each monthly price includes hosting and a maintenance retainer for repairs and fixes
+              to your existing website or application. New builds and features are quoted
+              separately.
+            </SectionHeading>
             <ScrollGroup className="studio-plan-grid">
               {hostingPlans.map((plan, index) => (
                 <ScrollItem
                   as="article"
-                  className="studio-plan-card"
+                  className="studio-plan-card studio-spot studio-lift"
                   key={plan.name}
                   index={index}
-                  count={hostingPlans.length + 1}
+                  count={hostingPlans.length}
+                  {...spotlight}
                 >
                   <h3>{plan.name}</h3>
                   <p className="studio-plan-price">
                     {plan.price} <span>/ month</span>
                   </p>
-                  <p className="studio-mini-label">Hosting + maintenance retainer</p>
                   <p className="studio-plan-fit">{plan.idealFor}</p>
-                  <dl className="studio-plan-specs">
-                    {plan.specs.map(([label, value]) => (
-                      <div key={label}>
-                        <dt>{label}</dt>
-                        <dd>{value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <p className="studio-plan-includes">{plan.includes}</p>
-                  <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
-                    Discuss this plan <span aria-hidden="true">↗</span>
-                  </Link>
                 </ScrollItem>
               ))}
-              <ScrollItem
-                as="article"
-                className="studio-plan-help"
-                index={hostingPlans.length}
-                count={hostingPlans.length + 1}
-              >
-                <span aria-hidden="true">↗</span>
-                <h3>
-                  Not sure where
-                  <br />
-                  you fit?
-                </h3>
-                <p>
-                  Tell us what you’re running and what you need. We’ll help you compare the options.
-                </p>
-                <Link className="studio-text-link" to="/" state={{ scrollTo: "contact" }}>
-                  Ask us about hosting <span aria-hidden="true">↗</span>
-                </Link>
-              </ScrollItem>
             </ScrollGroup>
-            <p className="studio-pricing-note">
-              All plans include hosting, SSL, monitoring, incident response, and a maintenance
-              retainer for repairs and fixes to existing functionality. Your proposal defines the
-              retainer coverage and included maintenance work. New features, redesigns, and work
-              outside that scope are quoted separately, with additional development billed at{" "}
-              <strong>$100–$150/hr</strong>.
-            </p>
+            <Disclosure summary="Compare allowances" className="studio-allowances">
+              <div className="studio-allowance-grid">
+                {hostingPlans.map((plan) => (
+                  <section key={plan.name}>
+                    <h3>{plan.name}</h3>
+                    <dl className="studio-plan-specs">
+                      {plan.specs.map(([label, value]) => (
+                        <div key={label}>
+                          <dt>{label}</dt>
+                          <dd>{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    <p className="studio-plan-includes">{plan.includes}</p>
+                  </section>
+                ))}
+              </div>
+            </Disclosure>
           </div>
         </section>
         <section className="studio-section page-wrap">
-          <Reveal className="studio-section-heading">
-            <div>
-              <p className="studio-eyebrow">BEFORE WE GET STARTED</p>
-              <h2>
-                A little clarity
-                <br />
-                <em>goes a long way.</em>
-              </h2>
-            </div>
-          </Reveal>
-          <Reveal className="studio-faq">
+          <SectionHeading
+            eyebrow="BEFORE WE GET STARTED"
+            lead="A little clarity"
+            accent="goes a long way."
+          />
+          <div className="studio-faq">
             {faqItems.map(({ question, answer }) => (
-              <details key={question}>
-                <summary>{question}</summary>
+              <Disclosure key={question} summary={question}>
                 <p>{answer}</p>
-              </details>
+              </Disclosure>
             ))}
-          </Reveal>
+          </div>
         </section>
-        <section className="studio-contact studio-inverse">
-          <Reveal className="page-wrap">
-            <p className="studio-eyebrow">LET’S FIND THE RIGHT STARTING POINT</p>
-            <h2>
-              What do you need
-              <br />
-              <em>to move forward?</em>
-            </h2>
-            <p>
-              Bring the problem, the idea, or the process that isn’t working. We’ll help you explore
-              your options.
-            </p>
-            <div className="studio-actions">
-              <Link className="studio-button" to="/" state={{ scrollTo: "contact" }}>
-                Start the conversation <span aria-hidden="true">↗</span>
-              </Link>
-            </div>
-          </Reveal>
-        </section>
+        <CtaStrip title="What do you need to move forward?" label="Start the conversation" />
       </div>
     </MotionRoot>
   );

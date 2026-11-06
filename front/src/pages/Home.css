@@ -73,8 +73,7 @@
 .studio-promise-strip > div { display: flex; justify-content: space-between; padding-block: 22px; gap: 16px; font-size: 14px; font-weight: 600; }
 
 .studio-service-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.studio-service-card { padding: 26px 24px 30px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 10px; transition: transform .2s, box-shadow .2s; }
-.studio-service-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-card); }
+.studio-service-card { padding: 26px 24px 30px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 10px; }
 .studio-card-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--accent); margin-bottom: 40px; }
 .studio-service-card h3 { font-size: 23px; letter-spacing: -.035em; line-height: 1.16; font-weight: 600; margin: 12px 0 16px; }
 .studio-service-card > p:last-child { font-size: 15px; line-height: 1.7; color: var(--text-muted); }
