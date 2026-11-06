@@ -554,7 +554,11 @@ The timed jobs stay as the safety net; events start a cycle at once. `lib/coales
 | Sales lead (§9) | `POST /webhooks/nextcloud/sales-lead`; `POST /contact` after the lead is submitted to the New Lead form |
 | Client onboarding (§10), billing requests (§14) | Their own webhooks (unchanged) |
 | Billing mirror (§13) | `markCustomerDirty` (Stripe billing webhook, billing request sync); a new `billing_customers` link |
-| Portal mirror (§12) | Client create/update/archive, Connect onboarding callback and lazy account creation, `account.updated`, API key regeneration, `payment_ledger` writes from checkout creation and Stripe webhooks |
+| Portal mirror (§12) | Client create/update/archive, group create/update/delete, Connect onboarding callback and lazy account creation, `account.updated`, API key regeneration, `payment_ledger` writes from checkout creation and Stripe webhooks |
 | Stripe ID write-back (§15) | A new `billing_customers` link (`ensureBillingCustomer`, pinned link, so every path including onboarding) |
+
+**Timer ticks.** A job's own timer tick skips while a cycle is running (sales lead uses `triggerIfIdle`; the mirrors and write-back already queued a follow-up before this change). Webhook and write kicks still coalesce and queue.
+
+**Group delete.** Deleting a group nulls `clients.group_id` through the FK without bumping the clients' `updated_at`, so the kick runs a cycle that finds nothing dirty for those clients; the daily reconcile picks them up.
 
 **Safety-net intervals at rollout.** The code defaults are unchanged; set them by env when the kicks are live: `CONTACT_STRIPE_SYNC_INTERVAL_MS=30000` (contact to Stripe has no event source, Nextcloud Contacts has no webhook, so this one stays short), and about 15 minutes (`900000`) for `SALES_POLL_INTERVAL_MS`, `CLIENT_ONBOARDING_POLL_INTERVAL_MS`, `BILLING_REQUESTS_POLL_INTERVAL_MS`, `PORTAL_MIRROR_INTERVAL_MS` and `STRIPE_ID_WRITEBACK_INTERVAL_MS`. `BILLING_SWEEP_INTERVAL_MS` is unaffected.

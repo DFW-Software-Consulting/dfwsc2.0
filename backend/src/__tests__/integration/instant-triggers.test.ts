@@ -61,7 +61,12 @@ beforeEach(() => {
   for (const job of jobs) {
     kicks[job].mockClear();
     unregister.push(
-      registerKickable(job, { trigger: vi.fn(), kick: kicks[job], stop: async () => {} })
+      registerKickable(job, {
+        trigger: vi.fn(),
+        triggerIfIdle: vi.fn(),
+        kick: kicks[job],
+        stop: async () => {},
+      })
     );
   }
 });
@@ -101,6 +106,33 @@ describe("portal mirror kicks", () => {
     });
     expect(del.statusCode).toBe(204);
     expect(kicks.portalMirror).toHaveBeenCalledTimes(2);
+  });
+
+  it("group insert, update and delete", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/groups",
+      headers: admin(),
+      payload: { name: "Wire group", workspace: "client_portal" },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(kicks.portalMirror).toHaveBeenCalledTimes(1);
+    const { id } = created.json();
+    const patch = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/groups/${id}`,
+      headers: admin(),
+      payload: { name: "Wire group 2" },
+    });
+    expect(patch.statusCode).toBe(200);
+    expect(kicks.portalMirror).toHaveBeenCalledTimes(2);
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/groups/${id}`,
+      headers: admin(),
+    });
+    expect(del.statusCode).toBe(204);
+    expect(kicks.portalMirror).toHaveBeenCalledTimes(3);
   });
 
   it("readiness sync from a live account object and a live status refresh", async () => {
