@@ -64,7 +64,7 @@ describe("theme toggle with view transitions", () => {
     });
     document.startViewTransition = vi.fn((update) => {
       update();
-      return { ready: Promise.resolve(), finished };
+      return { ready: Promise.resolve(), updateCallbackDone: Promise.resolve(), finished };
     });
     document.documentElement.animate = vi.fn();
     renderToggle();
@@ -94,6 +94,7 @@ describe("runViewTransition", () => {
       update();
       return {
         ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
         finished: new Promise((resolve, reject) => finishers.push({ resolve, reject })),
       };
     });
@@ -104,6 +105,43 @@ describe("runViewTransition", () => {
     expect(document.documentElement).toHaveClass("route-vt");
     await act(async () => finishers[1].resolve());
     expect(document.documentElement).not.toHaveClass("route-vt");
+  });
+});
+
+describe("runViewTransition with a skipped transition", () => {
+  const unhandled = vi.fn();
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const skipped = () => new DOMException("Transition was skipped", "AbortError");
+
+  afterEach(() => process.off("unhandledRejection", unhandled));
+
+  function run(error, options) {
+    unhandled.mockClear();
+    process.on("unhandledRejection", unhandled);
+    mockReducedMotion(false);
+    document.startViewTransition = vi.fn(() => ({
+      ready: Promise.reject(error),
+      updateCallbackDone: Promise.reject(error),
+      finished: Promise.reject(error),
+    }));
+    runViewTransition(() => {}, options);
+  }
+
+  it("swallows the AbortError on ready and updateCallbackDone and still cleans up", async () => {
+    run(skipped(), { className: "route-vt", origin: document.body });
+    expect(document.documentElement).toHaveClass("route-vt");
+    await act(settle);
+    expect(unhandled).not.toHaveBeenCalled();
+    expect(document.documentElement).not.toHaveClass("route-vt");
+  });
+
+  it("still surfaces a real error thrown by the update callback", async () => {
+    const boom = new Error("update failed");
+    run(boom, { className: "theme-vt" });
+    await act(settle);
+    expect(unhandled).toHaveBeenCalledTimes(1);
+    expect(unhandled.mock.calls[0][0]).toBe(boom);
+    expect(document.documentElement).not.toHaveClass("theme-vt");
   });
 });
 

@@ -50,11 +50,19 @@ export function runViewTransition(update, { className, origin } = {}) {
     root.classList.add(className);
   }
   const transition = document.startViewTransition(update);
-  if (origin)
-    transition.ready.then(
-      () => circleReveal(origin),
-      () => {}
-    );
+  // A skipped transition (a newer one started) rejects ready, updateCallbackDone and finished
+  // with an AbortError. ready also rejects with the update callback's own error, which
+  // updateCallbackDone reports, so ready is always safe to swallow. updateCallbackDone only
+  // swallows the AbortError: a real error from `update` still surfaces as unhandled.
+  transition.ready.then(
+    () => {
+      if (origin) circleReveal(origin);
+    },
+    () => {}
+  );
+  transition.updateCallbackDone.catch((error) => {
+    if (error?.name !== "AbortError") throw error;
+  });
   const cleanup = () => {
     if (className && latest.get(className) === token) {
       latest.delete(className);
