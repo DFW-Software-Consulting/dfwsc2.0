@@ -33,6 +33,7 @@ This document details the frontend implementation, state management, and UI patt
 | `/pricing` | `Pricing` | Pricing tiers |
 | `/team` | `Team` | Team members |
 | `/privacy` | `Privacy` | Privacy policy (prerendered, indexable) |
+| `/demos` | `Demos` | Unlisted sample-sites page for prospects: unlinked, noindex, not in the sitemap (a private route) |
 | `/onboard` | `OnboardClient` | Token-based client onboarding |
 | `/admin` | `AdminPage` | Admin dashboard (login-gated) |
 | `/payment-success` | `PaymentSuccess` | Post-payment success screen |

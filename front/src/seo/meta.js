@@ -40,6 +40,7 @@ export const PUBLIC_ROUTES = {
 /** Portal and utility routes: served as the SPA shell and kept out of search indexes. */
 const PRIVATE_ROUTES = {
   "/admin": privatePage("Admin"),
+  "/demos": privatePage("Sample Sites"),
   "/onboard": privatePage("Client Onboarding"),
   "/payment-success": privatePage("Payment Status"),
   "/payment-cancel": privatePage("Payment Canceled"),
