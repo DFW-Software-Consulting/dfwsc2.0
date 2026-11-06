@@ -347,6 +347,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
             followUpAt: payload.followUpAt ?? existing?.followUpAt ?? null,
             chargesEnabled: payload.chargesEnabled ?? existing?.chargesEnabled ?? false,
             cardPaymentsStatus: payload.cardPaymentsStatus ?? existing?.cardPaymentsStatus ?? null,
+            achPaymentsStatus: payload.achPaymentsStatus ?? existing?.achPaymentsStatus ?? null,
             payoutsEnabled: payload.payoutsEnabled ?? existing?.payoutsEnabled ?? false,
             detailsSubmitted: payload.detailsSubmitted ?? existing?.detailsSubmitted ?? false,
             createdAt: existing?.createdAt ?? new Date(),
