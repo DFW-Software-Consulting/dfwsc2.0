@@ -334,6 +334,13 @@ export interface ContactDirectory {
     person: ContactPerson,
     ownUid: string
   ): Promise<{ own: StoredCard | null; matches: StoredCard[] }>;
+  /** The card with this UID from any visible address book (read-only ones included), or null. */
+  findByUid(uid: string): Promise<StoredCard | null>;
+  /**
+   * Every card holding this email (case-insensitive) in the books the account can WRITE to;
+   * cards in read-only books are not considered. Failures are reported as in `find`.
+   */
+  findByEmail(email: string): Promise<StoredCard[]>;
 }
 
 /**
@@ -372,28 +379,64 @@ export function createContactDirectory(
     return listed;
   }
 
+  /** Visits every card of every visible book until `visit` returns true. */
+  async function scan(visit: (card: StoredCard) => boolean, writableOnly = false): Promise<void> {
+    let current: string | null = null;
+    try {
+      books ??= await listAddressbooks(nc, configuredAddressbook);
+      for (const book of books) {
+        if (writableOnly && book.readOnly) continue;
+        current = book.name;
+        for (const card of await cardsOf(book)) {
+          if (visit(card)) return;
+        }
+      }
+    } catch (error) {
+      if (error instanceof NextcloudCircuitOpenError) throw error;
+      if (error instanceof AddressbookDiscoveryError) throw error;
+      throw new AddressbookDiscoveryError(error, current);
+    }
+  }
+
   return {
     invalidate(addressbook) {
       cards.delete(addressbook);
     },
     async find(person, ownUid) {
       const matches: StoredCard[] = [];
-      let current: string | null = null;
-      try {
-        books ??= await listAddressbooks(nc, configuredAddressbook);
-        for (const book of books) {
-          current = book.name;
-          for (const card of await cardsOf(book)) {
-            if (vCardUid(card.data) === ownUid) return { own: card, matches: [] };
-            if (vCardMatches(card.data, person)) matches.push(card);
-          }
+      let own: StoredCard | null = null;
+      await scan((card) => {
+        if (vCardUid(card.data) === ownUid) {
+          own = card;
+          return true;
         }
-      } catch (error) {
-        if (error instanceof NextcloudCircuitOpenError) throw error;
-        if (error instanceof AddressbookDiscoveryError) throw error;
-        throw new AddressbookDiscoveryError(error, current);
-      }
-      return { own: null, matches };
+        if (vCardMatches(card.data, person)) matches.push(card);
+        return false;
+      });
+      return own ? { own, matches: [] } : { own: null, matches };
+    },
+    async findByUid(uid) {
+      let found: StoredCard | null = null;
+      await scan((card) => {
+        if (vCardUid(card.data) !== uid) return false;
+        found = card;
+        return true;
+      });
+      return found;
+    },
+    async findByEmail(email) {
+      const wanted = email.trim().toLowerCase();
+      const matches: StoredCard[] = [];
+      await scan((card) => {
+        if (
+          wanted &&
+          textValues(parseLines(card.data), "EMAIL").some((e) => e.trim().toLowerCase() === wanted)
+        ) {
+          matches.push(card);
+        }
+        return false;
+      }, true);
+      return matches;
     },
   };
 }
@@ -457,7 +500,7 @@ export function hasLabel(lines: VCardLine[], line: VCardLine, label: string): bo
 }
 
 /** The next group Nextcloud Contacts would use ("NEXTCLOUD1", ...) that the card has not used. */
-function nextGroup(lines: VCardLine[]): string {
+export function nextGroup(lines: VCardLine[]): string {
   const used = new Set(lines.map((l) => lineGroup(l.raw)).filter((g): g is string => g !== null));
   let n = 1;
   while (used.has(`nextcloud${n}`)) n++;

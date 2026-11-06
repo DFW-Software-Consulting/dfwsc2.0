@@ -114,6 +114,9 @@ One row per submission of the "New invoice" Nextcloud Form (docs/BACKEND.md sect
 ### `billing_request_sync_state`
 Per-form baseline (`form_id` PK, `baseline_submission_id`): submissions up to that id existed before the automation was first enabled and are never processed.
 
+### `stripe_id_writebacks`
+Bookkeeping for the Stripe ID write-back (`STRIPE_ID_WRITEBACK=true`, docs/BACKEND.md section 15; migration 0041). **PK** (`target`, `targetKey`); `target` is `project_row` (key = client code) or `contact_card` (key = contact UID, or `client:<code>` when the card is found by email). `ncRowId`, `addressbook`, `cardHref` (where it was last found), `desiredHash` (what `billing_customers` wants now), `writtenHash` (what was last confirmed in Nextcloud; an equal pair means no Nextcloud call), `writtenAt`, `verifiedAt` (daily verify pass), `status` (`ok`, `not_found`, `ambiguous`, `read_only`, `forbidden`, `error`), `attempts`, `nextAttemptAt` (backoff), `lastError` (a code, never a message or PII), `updatedAt`. CHECK constraints on `target` and `status`. Derived and rebuildable: deleting a row only costs a re-compare.
+
 ### `connect_customers`
 Customers created on a client's connected account for connected-account invoicing (migration `0035_connect_invoicing_schema`). Written by `POST /customers`. PK `id` (text uuid); `client_id` (FK → `clients.id`, cascade), `connected_account_id`, `stripe_customer_id`, `external_ref` (nullable opaque integrator reference, max 100 chars, no PII), `idempotency_key`, `created_at`. No PII is stored: the Customer itself lives on the connected account. Never mixed with `billing_customers` (platform account).
 

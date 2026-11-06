@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import Contact from "../components/Contact";
 import { renderWithProviders } from "../test/renderWithProviders";
 
+import { initVisitContext } from "../utils/visitContext";
+
 global.fetch = vi.fn();
 
 const fillRequiredFields = ({
@@ -20,6 +22,7 @@ const fillRequiredFields = ({
 describe("Contact", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    initVisitContext();
   });
 
   it("submits trimmed form data and confirms a successful submission", async () => {
@@ -47,12 +50,21 @@ describe("Contact", () => {
       email: "ada@example.com",
       company,
       message: "Build a portal",
+      context: expect.objectContaining({ secondsOnSite: expect.any(Number) }),
       _hp: "",
     });
     const confirmation = await screen.findByText(/thanks — we'll be in touch/i);
     expect(confirmation).toHaveAttribute("aria-live", "polite");
     expect(confirmation).toHaveFocus();
     expect(screen.queryByRole("button", { name: /send message/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the visit-context notice with a privacy link", () => {
+    renderWithProviders(<Contact />);
+    expect(
+      screen.getByText(/we include the pages you viewed on this site with your message/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /privacy/i })).toHaveAttribute("href", "/privacy");
   });
 
   it("requires every visible field and ties errors to inputs", async () => {

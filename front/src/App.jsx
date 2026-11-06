@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import Analytics from "./components/Analytics.jsx";
 import Footer from "./components/Footer.jsx";
 import Navbar from "./components/Navbar.jsx";
+import RouteTracker from "./components/RouteTracker.jsx";
 import { routes } from "./routes.js";
 import Seo from "./seo/Seo.jsx";
 
@@ -11,6 +12,7 @@ export default function App() {
     <>
       <Seo />
       <Analytics />
+      <RouteTracker />
       <div className="min-h-screen relative isolate bg-[var(--bg-main)] text-[var(--text-main)] selection:bg-brand-500/30 transition-colors duration-300">
         {/* Background glow effects */}
         <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">

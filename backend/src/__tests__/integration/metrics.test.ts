@@ -1,7 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
-import { clientOnboardingSubmissions, salesLeadSubmissions } from "../../db/schema";
+import {
+  clientOnboardingSubmissions,
+  salesLeadSubmissions,
+  stripeIdWritebacks,
+} from "../../db/schema";
 import { resetCircuitBreakersForTests } from "../../lib/circuit-breakers";
 import { ensureBaseEnv } from "../helpers/env";
 
@@ -142,6 +146,39 @@ describe("Metrics API Integration", () => {
       expect(response.body).toContain("dfwsc_client_onboarding_last_cycle_timestamp_seconds 0");
     } finally {
       await db.delete(clientOnboardingSubmissions);
+    }
+  });
+  it("reports Stripe ID write-back records by target and status, zero-filled", async () => {
+    process.env.METRICS_TOKEN = "secret-metrics-token";
+    await db.delete(stripeIdWritebacks);
+    await db.insert(stripeIdWritebacks).values([
+      { target: "project_row", targetKey: "CP-001", status: "ok" },
+      { target: "project_row", targetKey: "CP-002", status: "ok" },
+      { target: "project_row", targetKey: "CP-003", status: "forbidden" },
+      { target: "contact_card", targetKey: "dfwsc-client-2-5", status: "ambiguous" },
+    ]);
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/metrics",
+        headers: { authorization: "Bearer secret-metrics-token" },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain(
+        'dfwsc_stripe_id_writeback{target="project_row",status="ok"} 2'
+      );
+      expect(response.body).toContain(
+        'dfwsc_stripe_id_writeback{target="project_row",status="forbidden"} 1'
+      );
+      expect(response.body).toContain(
+        'dfwsc_stripe_id_writeback{target="contact_card",status="ambiguous"} 1'
+      );
+      expect(response.body).toContain(
+        'dfwsc_stripe_id_writeback{target="contact_card",status="not_found"} 0'
+      );
+      expect(response.body).toContain("dfwsc_stripe_id_writeback_last_cycle_ok 0");
+    } finally {
+      await db.delete(stripeIdWritebacks);
     }
   });
 });

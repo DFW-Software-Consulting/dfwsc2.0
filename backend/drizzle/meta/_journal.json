@@ -288,6 +288,13 @@
       "when": 1793941616311,
       "tag": "0040_cerebo_module",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793942488779,
+      "tag": "0041_stripe_id_writeback",
+      "breakpoints": true
     }
   ]
 }
