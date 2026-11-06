@@ -152,13 +152,6 @@ const billingMirrorBreaker = new CircuitBreaker(send, {
   ...breakerOptions,
 });
 
-// The ledger sync (lib/ledger-sync.ts) runs inside the Stripe billing webhook and has its own
-// breaker too: a NextLedger outage must not pause the mirrors or the lead and onboarding syncs.
-const ledgerSyncBreaker = new CircuitBreaker(send, {
-  name: "nextcloud-ledger-sync",
-  ...breakerOptions,
-});
-
 // Cerebo (cerebo/nextcloud.ts) has its own as well: a project view fans out one Deck call per
 // board, and a failing Deck must never open the breaker that admin login depends on.
 const cereboBreaker = new CircuitBreaker(send, { name: "nextcloud-cerebo", ...breakerOptions });
@@ -184,14 +177,6 @@ export function billingMirrorRequest(
   request: NextcloudRequest
 ): Promise<NextcloudResponse> {
   return fire(billingMirrorBreaker, config, request);
-}
-
-/** Same as nextcloudRequest, through the ledger sync's own breaker. */
-export function ledgerSyncRequest(
-  config: NextcloudConfig,
-  request: NextcloudRequest
-): Promise<NextcloudResponse> {
-  return fire(ledgerSyncBreaker, config, request);
 }
 
 /** Same as nextcloudRequest, through Cerebo's own breaker. */
@@ -239,7 +224,6 @@ export function resetNextcloudBreakerForTests() {
   breaker.close();
   mirrorBreaker.close();
   billingMirrorBreaker.close();
-  ledgerSyncBreaker.close();
   cereboBreaker.close();
 }
 
