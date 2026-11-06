@@ -49,7 +49,7 @@ export function ScrollFx({ as = "div", progress, offset = ENTER, fx, ...props })
   const own = useSectionProgress(ref, offset);
   const style = useFxStyle(progress ?? own, fx);
   const Tag = m[as];
-  return <Tag ref={ref} {...props} {...(allowed ? { style } : {})} />;
+  return <Tag ref={ref} {...props} {...(allowed ? { style: { ...props.style, ...style } } : {})} />;
 }
 
 const GroupContext = createContext(null);
@@ -158,6 +158,20 @@ export function ScrollProgressBar() {
       aria-hidden="true"
       style={{ scaleX: scrollYProgress }}
     />
+  );
+}
+
+const RULE = ["start 0.95", "start 0.55"];
+
+/** An accent rule that draws left to right (scaleX) as it scrolls into view. Static and full under reduced motion. */
+export function ScrollRule({ className = "" }) {
+  const allowed = useMotionAllowed();
+  const ref = useRef(null);
+  const scaleX = useSectionProgress(ref, RULE);
+  return (
+    <span ref={ref} className={`studio-rule ${className}`} aria-hidden="true">
+      <m.span className="studio-rule-fill" style={allowed ? { scaleX } : undefined} />
+    </span>
   );
 }
 

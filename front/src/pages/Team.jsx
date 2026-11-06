@@ -1,10 +1,20 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import DiegoEspinoImage from "../assets/diego-espino.jpg";
 import HectorOropesaImage from "../assets/hector-oropesa.webp";
 import JeremyAshleyImage from "../assets/jeremy-ashley.jpg";
-import { MotionRoot, Reveal, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
-import { LEAVE, PAGE_HERO, ProcessGrid, RISE, ScrollFx } from "../components/motion/ScrollFx.jsx";
+import HeroBackdrop, { loadTerrain } from "../components/HeroBackdrop.jsx";
+import { MaskLine, MotionRoot, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
+import {
+  LEAVE,
+  PAGE_HERO,
+  ProcessGrid,
+  RISE,
+  ScrollFx,
+  ScrollRule,
+  useSectionProgress,
+} from "../components/motion/ScrollFx.jsx";
+import { useTilt } from "../components/motion/useTilt.js";
 import { teamMembers } from "../content/team.js";
 import "../styles/studio.css";
 import "./Team.css";
@@ -40,7 +50,7 @@ const LINKEDIN_PATH =
  * A member's photo with its name badge. With a LinkedIn profile the whole frame is one
  * link (opens in a new tab); without one it stays a plain container.
  */
-export function MemberPhoto({ name, image, linkedin }) {
+export function MemberPhoto({ name, image, linkedin, wipe }) {
   const badge = (
     <span className="studio-member-badge" aria-hidden="true">
       {name}
@@ -58,14 +68,16 @@ export function MemberPhoto({ name, image, linkedin }) {
   );
   if (!linkedin) {
     return (
-      <div className="studio-member-photo">
+      <RevealItem wipe={wipe} className="studio-member-photo">
         <img src={image} alt={name} loading="lazy" />
         {badge}
-      </div>
+      </RevealItem>
     );
   }
   return (
-    <a
+    <RevealItem
+      as="a"
+      wipe={wipe}
       className="studio-member-photo studio-member-photo-link"
       href={linkedin}
       target="_blank"
@@ -74,28 +86,93 @@ export function MemberPhoto({ name, image, linkedin }) {
     >
       <img src={image} alt="" loading="lazy" />
       {badge}
-    </a>
+    </RevealItem>
+  );
+}
+
+/** Section heading whose two lines rise from behind a mask, with the eyebrow and copy staggering in. */
+function SectionHeading({ eyebrow, lead, accent, children }) {
+  return (
+    <RevealGroup className="studio-section-heading">
+      <div>
+        <RevealItem as="p" className="studio-eyebrow">
+          {eyebrow}
+        </RevealItem>
+        <h2>
+          <MaskLine>{lead}</MaskLine>
+          <MaskLine>
+            <em>{accent}</em>
+          </MaskLine>
+        </h2>
+      </div>
+      <RevealItem as="p">{children}</RevealItem>
+    </RevealGroup>
+  );
+}
+
+/**
+ * A member card that rises into place on scroll, tilts toward a fine pointer, wipes its
+ * photo open from its own edge, and slides the copy in from that side, line by line.
+ * Cards alternate sides (the even ones have the photo on the right).
+ */
+function TeamMember({ member, index }) {
+  const tilt = useTilt();
+  const photoRight = index % 2 === 1;
+  const x = photoRight ? 28 : -28;
+  return (
+    <ScrollFx className="studio-member-item" fx={RISE} {...tilt}>
+      <RevealGroup as="article" className="studio-member" stagger={0.09}>
+        <MemberPhoto
+          name={member.name}
+          image={memberImages[member.name]}
+          linkedin={member.linkedin}
+          wipe={photoRight ? "right" : "left"}
+        />
+        <div className="studio-member-copy">
+          <RevealItem as="p" x={x} y={0} className="studio-mini-label">
+            {member.role}
+          </RevealItem>
+          <RevealItem as="h3" x={x} y={0}>
+            {member.name}
+          </RevealItem>
+          <RevealItem as="p" x={x} y={0} className="studio-member-intro">
+            {member.intro}
+          </RevealItem>
+          <RevealItem as="p" x={x} y={0} className="studio-member-bio">
+            {member.bio}
+          </RevealItem>
+          <dl className="studio-member-focus">
+            <RevealItem as="dt">FOCUS</RevealItem>
+            <RevealItem as="dd">{member.focus}</RevealItem>
+          </dl>
+        </div>
+      </RevealGroup>
+    </ScrollFx>
   );
 }
 
 export default function Team() {
+  const heroRef = useRef(null);
+  const heroProgress = useSectionProgress(heroRef, LEAVE);
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, []);
   return (
     <MotionRoot>
       <div className="studio studio-page">
-        <section className="studio-page-hero studio-team-hero">
-          <ScrollFx offset={LEAVE} fx={PAGE_HERO}>
+        <section className="studio-page-hero studio-team-hero" ref={heroRef}>
+          <HeroBackdrop progress={heroProgress} load={loadTerrain} />
+          <ScrollFx progress={heroProgress} fx={PAGE_HERO} className="studio-team-hero-content">
             <RevealGroup mount className="page-wrap">
               <RevealItem as="p" className="studio-eyebrow">
                 SMALL TEAM. DIRECT CONNECTION.
               </RevealItem>
-              <RevealItem as="h1">
-                Good software.
-                <br />
-                <em>Real people.</em>
-              </RevealItem>
+              <h1>
+                <MaskLine>Good software.</MaskLine>
+                <MaskLine>
+                  <em>Real people.</em>
+                </MaskLine>
+              </h1>
               <RevealItem as="p">
                 We’re the people who turn your business challenges into a plan, a working
                 application, and the support to keep improving.
@@ -115,82 +192,58 @@ export default function Team() {
           </ScrollFx>
         </section>
         <section id="people" className="studio-section page-wrap">
-          <Reveal className="studio-section-heading">
-            <div>
-              <p className="studio-eyebrow">THE PEOPLE BEHIND THE WORK</p>
-              <h2>
-                Meet your
-                <br />
-                <em>development team.</em>
-              </h2>
-            </div>
-            <p>
-              Business understanding, application development, and the systems behind it—all part of
-              the same conversation.
-            </p>
-          </Reveal>
+          <SectionHeading
+            eyebrow="THE PEOPLE BEHIND THE WORK"
+            lead="Meet your"
+            accent="development team."
+          >
+            Business understanding, application development, and the systems behind it—all part of
+            the same conversation.
+          </SectionHeading>
+          <ScrollRule />
           <div className="studio-member-list">
-            {teamMembers.map((member) => (
-              <ScrollFx as="article" className="studio-member" key={member.name} fx={RISE}>
-                <MemberPhoto
-                  name={member.name}
-                  image={memberImages[member.name]}
-                  linkedin={member.linkedin}
-                />
-                <div className="studio-member-copy">
-                  <p className="studio-mini-label">{member.role}</p>
-                  <h3>{member.name}</h3>
-                  <p className="studio-member-intro">{member.intro}</p>
-                  <p className="studio-member-bio">{member.bio}</p>
-                  <dl className="studio-member-focus">
-                    <dt>FOCUS</dt>
-                    <dd>{member.focus}</dd>
-                  </dl>
-                </div>
-              </ScrollFx>
+            {teamMembers.map((member, index) => (
+              <TeamMember key={member.name} member={member} index={index} />
             ))}
           </div>
         </section>
         <section className="studio-band">
           <div className="page-wrap">
-            <Reveal className="studio-section-heading">
-              <div>
-                <p className="studio-eyebrow">HOW WE WORK WITH YOU</p>
-                <h2>
-                  A shared goal.
-                  <br />
-                  <em>A clear way forward.</em>
-                </h2>
-              </div>
-              <p>
-                You bring the knowledge of your business. We bring the technical perspective and
-                explain the choices along the way.
-              </p>
-            </Reveal>
+            <SectionHeading
+              eyebrow="HOW WE WORK WITH YOU"
+              lead="A shared goal."
+              accent="A clear way forward."
+            >
+              You bring the knowledge of your business. We bring the technical perspective and
+              explain the choices along the way.
+            </SectionHeading>
             <ProcessGrid steps={processSteps} />
           </div>
         </section>
         <section className="studio-contact studio-inverse">
-          <Reveal className="page-wrap">
-            <p className="studio-eyebrow">YOUR NEXT PROJECT STARTS WITH A CONVERSATION</p>
+          <RevealGroup className="page-wrap">
+            <RevealItem as="p" className="studio-eyebrow">
+              YOUR NEXT PROJECT STARTS WITH A CONVERSATION
+            </RevealItem>
             <h2>
-              Let’s put a team
-              <br />
-              <em>behind your idea.</em>
+              <MaskLine>Let’s put a team</MaskLine>
+              <MaskLine>
+                <em>behind your idea.</em>
+              </MaskLine>
             </h2>
-            <p>
+            <RevealItem as="p">
               Whether you have a detailed plan or a problem you’re still sorting out, tell us where
               you’d like to go.
-            </p>
-            <div className="studio-actions">
+            </RevealItem>
+            <RevealItem className="studio-actions">
               <Link className="studio-button" to="/" state={{ scrollTo: "contact" }}>
                 Talk about your project <span aria-hidden="true">↗</span>
               </Link>
               <Link className="studio-text-link" to="/pricing">
                 Explore ways to work together <span aria-hidden="true">↗</span>
               </Link>
-            </div>
-          </Reveal>
+            </RevealItem>
+          </RevealGroup>
         </section>
       </div>
     </MotionRoot>
