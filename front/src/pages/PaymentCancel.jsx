@@ -1,8 +1,4 @@
-import { usePageTitle } from "../hooks/usePageTitle";
-
 export default function PaymentCancel() {
-  usePageTitle("Payment Canceled");
-
   return (
     <div className="min-h-[90vh] flex items-center justify-center transition-colors duration-300">
       <div className="text-center max-w-2xl mx-auto px-6">
