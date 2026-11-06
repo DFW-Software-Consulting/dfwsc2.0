@@ -12,6 +12,7 @@ vi.mock("../../lib/website-lead", () => ({
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../../app";
+import { registerKickable } from "../../lib/coalesced-runner";
 import { sendMail } from "../../lib/mailer";
 import { hitBuckets } from "../../lib/rate-limit";
 import {
@@ -230,6 +231,42 @@ describe("POST /api/v1/contact", () => {
         name: "Jane Doe",
         email: "jane@example.com",
         message: "Hello, I would like a quote.",
+      });
+    });
+
+    describe("kicks the sales lead poller", () => {
+      const kick = vi.fn();
+      let unregister: () => void;
+      beforeEach(() => {
+        kick.mockReset();
+        unregister = registerKickable("salesLead", {
+          trigger: vi.fn(),
+          kick,
+          stop: async () => {},
+        });
+      });
+      afterEach(() => unregister());
+
+      it("once the lead is in the form", async () => {
+        expect((await post()).statusCode).toBe(201);
+        expect(kick).toHaveBeenCalledTimes(1);
+      });
+
+      it("not when the lead channel failed or was off", async () => {
+        (submitWebsiteLead as any).mockRejectedValueOnce(new Error("nextcloud down"));
+        expect((await post()).statusCode).toBe(201);
+        (isWebsiteLeadEnabled as any).mockReturnValue(false);
+        expect((await post()).statusCode).toBe(201);
+        expect(kick).not.toHaveBeenCalled();
+      });
+
+      it("and a throwing kick never fails the request", async () => {
+        kick.mockImplementation(() => {
+          throw new Error("boom");
+        });
+        const response = await post();
+        expect(response.statusCode).toBe(201);
+        expect(response.json()).toEqual({ ok: true });
       });
     });
 

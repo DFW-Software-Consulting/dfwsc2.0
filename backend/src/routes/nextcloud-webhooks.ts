@@ -6,8 +6,10 @@ import {
   BILLING_REQUESTS_WEBHOOK_RATE_LIMIT_MAX,
   CLIENT_ONBOARDING_WEBHOOK_RATE_LIMIT_MAX,
   RATE_LIMIT_WINDOW_MS,
+  SALES_LEAD_WEBHOOK_RATE_LIMIT_MAX,
 } from "../lib/constants";
 import { rateLimit } from "../lib/rate-limit";
+import { getSalesLeadWebhook } from "../lib/sales-lead-sync";
 
 /**
  * Compares `Authorization: Bearer <secret>` with the configured secret in constant
@@ -99,6 +101,37 @@ export default async function nextcloudWebhookRoutes(fastify: FastifyInstance) {
     },
     async (_request, reply) => {
       const webhook = getBillingRequestsWebhook();
+      if (!webhook) return reply.status(404).send({ error: "Not Found" });
+      webhook.trigger();
+      return reply.status(202).send({ accepted: true });
+    }
+  );
+
+  // ── POST /webhooks/nextcloud/sales-lead ─────────────────────────────────────
+  // Same contract as the two webhooks above, for the "New Lead" form: called by
+  // webhook_listeners on OCA\Forms\Events\FormSubmittedEvent, the body is never read, it only
+  // starts (or queues) a cycle that re-reads the submissions from the Forms API. 404 when sales
+  // lead automation or its webhook secret are not configured; 401 on a wrong secret.
+  fastify.post(
+    "/webhooks/nextcloud/sales-lead",
+    {
+      onRequest: [
+        rateLimit({
+          max: SALES_LEAD_WEBHOOK_RATE_LIMIT_MAX,
+          windowMs: RATE_LIMIT_WINDOW_MS,
+        }),
+        async (request, reply) => {
+          const webhook = getSalesLeadWebhook();
+          if (!webhook) return reply.status(404).send({ error: "Not Found" });
+          if (!isAuthorizedWebhook(request.headers.authorization, webhook.secret)) {
+            request.log.warn("Nextcloud sales lead webhook rejected: bad or missing secret.");
+            return reply.status(401).send({ error: "Unauthorized" });
+          }
+        },
+      ],
+    },
+    async (_request, reply) => {
+      const webhook = getSalesLeadWebhook();
       if (!webhook) return reply.status(404).send({ error: "Not Found" });
       webhook.trigger();
       return reply.status(202).send({ accepted: true });

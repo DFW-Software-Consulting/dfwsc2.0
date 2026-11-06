@@ -3,6 +3,7 @@ import { and, eq, max, sql } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import { db } from "../db/client";
 import { salesLeadSubmissions, salesLeadSyncState } from "../db/schema";
+import { createCoalescedRunner, kickJob, registerKickable } from "./coalesced-runner";
 import {
   SALES_LEAD_CLAIM_LEASE_MS,
   SALES_LEAD_DEFAULT_POLL_INTERVAL_MS,
@@ -11,6 +12,7 @@ import {
   SALES_LEAD_MAX_FOLDER_SUFFIX,
   SALES_LEAD_MAX_PER_CYCLE,
   SALES_LEAD_MIN_POLL_INTERVAL_MS,
+  SALES_LEAD_MIN_WEBHOOK_SECRET_LENGTH,
   SALES_LEAD_RETRY_BASE_MS,
   SALES_LEAD_RETRY_MAX_MS,
 } from "./constants";
@@ -73,6 +75,8 @@ type Logger = Pick<FastifyBaseLogger, "info" | "warn" | "error">;
 
 interface SalesLeadSettings extends SalesLeadTargets {
   pollIntervalMs: number;
+  /** Bearer secret of POST /webhooks/nextcloud/sales-lead; null = webhook off, poll only. */
+  webhookSecret: string | null;
 }
 
 export type SalesLeadConfigResult =
@@ -128,13 +132,21 @@ export function loadSalesLeadConfig(env: NodeJS.ProcessEnv = process.env): Sales
     }
   }
 
+  // Not trimmed: the secret is compared byte for byte with the header Nextcloud sends.
+  const webhookSecret = env.SALES_LEAD_WEBHOOK_SECRET || null;
+  if (webhookSecret !== null && webhookSecret.length < SALES_LEAD_MIN_WEBHOOK_SECRET_LENGTH) {
+    problems.push(
+      `SALES_LEAD_WEBHOOK_SECRET must be at least ${SALES_LEAD_MIN_WEBHOOK_SECRET_LENGTH} characters`
+    );
+  }
+
   if (!nc.ok || problems.length || formId === undefined || tableId === undefined || !leadsFolder) {
     return { status: "invalid", problems };
   }
   return {
     status: "ready",
     nextcloud: nc.config,
-    settings: { formId, tableId, addressbookPath, leadsFolder, pollIntervalMs },
+    settings: { formId, tableId, addressbookPath, leadsFolder, pollIntervalMs, webhookSecret },
   };
 }
 
@@ -711,8 +723,22 @@ function finish(result: CycleResult): CycleResult {
 // ── Poller ───────────────────────────────────────────────────────────────────
 
 export interface SalesLeadPoller {
+  /** Starts a cycle now, or queues one behind the running cycle. */
+  trigger(): void;
   /** Stops the timer and waits for a running cycle to finish. */
   stop(): Promise<void>;
+}
+
+let activeWebhook: { secret: string; trigger: () => void } | null = null;
+
+/** The running poller's webhook secret and trigger; null when the poller or webhook is off. */
+export function getSalesLeadWebhook(): { secret: string; trigger: () => void } | null {
+  return activeWebhook;
+}
+
+/** Asks the running poller for a cycle now; a no-op when automation is off. Never throws. */
+export function triggerSalesLeadSync(): void {
+  kickJob("salesLead");
 }
 
 /**
@@ -734,17 +760,18 @@ export function startSalesLeadPoller(
     return null;
   }
 
-  let running: Promise<unknown> | null = null;
-  const tick = () => {
-    if (running) return;
-    running = runSalesLeadCycle({ logger, env })
-      .catch((error: unknown) => {
-        logger.error({ errorName: (error as Error)?.name }, "Sales lead cycle crashed.");
-      })
-      .finally(() => {
-        running = null;
-      });
-  };
+  // No debounce: a form submission is a single event.
+  const runner = createCoalescedRunner({
+    name: "sales-lead",
+    logger,
+    cycle: () => runSalesLeadCycle({ logger, env }),
+  });
+  const tick = runner.trigger;
+  const unregister = registerKickable("salesLead", runner);
+  const webhook = config.settings.webhookSecret
+    ? { secret: config.settings.webhookSecret, trigger: tick }
+    : null;
+  activeWebhook = webhook;
   const timer = setInterval(tick, config.settings.pollIntervalMs);
   timer.unref();
   tick();
@@ -754,9 +781,12 @@ export function startSalesLeadPoller(
   );
 
   return {
+    trigger: tick,
     async stop() {
+      if (activeWebhook === webhook) activeWebhook = null;
+      unregister();
       clearInterval(timer);
-      if (running) await running;
+      await runner.stop();
     },
   };
 }

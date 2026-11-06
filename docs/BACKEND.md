@@ -213,6 +213,7 @@ Write limits: `POST /invoices` takes one token from the write bucket (keyed `str
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | POST | `/webhooks/nextcloud/client-onboarding` | Trigger for the client onboarding (§10): starts a cycle, answers 202. The body is ignored. 404 when the onboarding or its webhook secret is not configured | `Authorization: Bearer <CLIENT_ONBOARDING_WEBHOOK_SECRET>` (rate-limited) |
+| POST | `/webhooks/nextcloud/sales-lead` | Trigger for the "New Lead" form (§9): starts a cycle, answers 202. The body is ignored. 404 when sales automation or its webhook secret are not configured | `Authorization: Bearer <SALES_LEAD_WEBHOOK_SECRET>` (rate-limited) |
 | POST | `/webhooks/nextcloud/billing-request` | Trigger for the "New invoice" form (§14): starts a cycle, answers 202. The body is ignored. 404 when billing requests or their webhook secret are not configured | `Authorization: Bearer <BILLING_REQUESTS_WEBHOOK_SECRET>` (rate-limited) |
 
 ## 8. Swagger
@@ -230,7 +231,7 @@ When an operator submits the Nextcloud Form **DFWSC — New Lead**, the API crea
    The service account must be able to see (own or be shared) every address book it should dedupe against; `contacts` is shared read-only with `dfwsc-admin` as of 2026-10-31, so its cards are detected but not modified.
 3. a folder `<SALES_LEADS_FOLDER>/<Company>/`, then fills the row's **Contact Card** and **Notes / Files** links.
 
-**How it runs.** An in-process poller (`lib/sales-lead-sync.ts`, started from `index.ts` and stopped before the DB pool closes on shutdown) reads the form's submissions every `SALES_POLL_INTERVAL_MS`. There is no webhook route: Forms itself is the queue, so nothing is lost while Nextcloud or the API is down. On its first cycle for a form it records a baseline (`sales_lead_sync_state`), and submissions at or below it are never processed. Progress per submission lives in `sales_lead_submissions`. Each step's output (row id, contact UID, folder name, folder file id) is saved as soon as that step succeeds, so a retry resumes at the first missing step. Rows are claimed with a 10-minute lease (`FOR UPDATE SKIP LOCKED`), so overlapping cycles or replicas never process the same submission twice. Answers are never stored in Postgres; each attempt re-reads them from Forms.
+**How it runs.** An in-process poller (`lib/sales-lead-sync.ts`, started from `index.ts` and stopped before the DB pool closes on shutdown) reads the form's submissions every `SALES_POLL_INTERVAL_MS`. A Nextcloud webhook (`POST /webhooks/nextcloud/sales-lead`, below) and `POST /contact` start a cycle at once; the poll stays as the safety net. Forms itself is the queue, so nothing is lost while Nextcloud or the API is down. On its first cycle for a form it records a baseline (`sales_lead_sync_state`), and submissions at or below it are never processed. Progress per submission lives in `sales_lead_submissions`. Each step's output (row id, contact UID, folder name, folder file id) is saved as soon as that step succeeds, so a retry resumes at the first missing step. Rows are claimed with a 10-minute lease (`FOR UPDATE SKIP LOCKED`), so overlapping cycles or replicas never process the same submission twice. Answers are never stored in Postgres; each attempt re-reads them from Forms.
 
 **Exactly-once per step.**
 - *Row*: the row's hidden **Lead Ref** column holds `<formId>:<submissionId>`. It is searched before every create, so a create whose response was lost is adopted rather than repeated.
@@ -257,12 +258,25 @@ When an operator submits the Nextcloud Form **DFWSC — New Lead**, the API crea
 | `SALES_ADDRESSBOOK_PATH` | `dfwsc-sales_shared_by_messyginger0804` | The address book's collection name as the service account sees it |
 | `SALES_LEADS_FOLDER` | `DFWSC Sales/Leads` | Relative to the service account's files root |
 | `SALES_POLL_INTERVAL_MS` | `120000` | Default 120000, minimum 30000 |
+| `SALES_LEAD_WEBHOOK_SECRET` | `openssl rand -hex 32` | At least 32 characters. Unset: the webhook answers 404 and only the poll (and the `/contact` kick) runs |
 
 **Nextcloud prerequisites.**
 - The form owner shares the form with the service account with the **`results`** permission (Forms → Share → the user → enable "View responses"). Being a Nextcloud admin does not grant this.
 - A **manage** share on the Sales Pipeline table, and a text column **Lead Ref** on it (it can be hidden from views).
 - **Read-write** shares of the `dfwsc-sales` address book and the sales folder to the service account, accepted if shares need acceptance. Check the paths as the service account with `PROPFIND /remote.php/dav/addressbooks/users/<user>/` and `PROPFIND /remote.php/dav/files/<user>/` (a folder share may sit under `Shared/`).
 - Nextcloud **cron** (background jobs) running normally. The poller does not depend on it, but share and file-cache maintenance does.
+- **Webhook** (optional, needs `SALES_LEAD_WEBHOOK_SECRET`): register the listener as an admin, with the New Lead form id (`SALES_LEAD_FORM_ID`):
+  ```sh
+  curl -u <admin>:<app-password> -H 'OCS-APIRequest: true' -H 'Content-Type: application/json' \
+    -X POST 'https://cloud.dfwsc.com/ocs/v2.php/apps/webhook_listeners/api/v1/webhooks' \
+    -d '{"httpMethod":"POST",
+         "uri":"https://<api-host>/api/v1/webhooks/nextcloud/sales-lead",
+         "event":"OCA\\Forms\\Events\\FormSubmittedEvent",
+         "eventFilter":{"event.form.id":<SALES_LEAD_FORM_ID>},
+         "authMethod":"header",
+         "authData":{"Authorization":"Bearer <SALES_LEAD_WEBHOOK_SECRET>"}}'
+  ```
+  Check it with `occ webhook_listeners:list`. Delivery timing is as described in section 10 step 7; the poll covers a late or missing call.
 
 **Ops runbook.**
 - *Watch*: `GET /api/v1/metrics` exposes `dfwsc_sales_lead_submissions{status=...}`, `dfwsc_sales_lead_last_cycle_ok`, `dfwsc_sales_lead_last_cycle_timestamp_seconds` and `dfwsc_nextcloud_circuit_open`. Alert on `failed` > 0 or a stale last cycle.
@@ -531,3 +545,16 @@ When a DFWSC billing client is linked to a Stripe Customer (`billing_customers.s
   - Retry now after fixing the cause: `UPDATE stripe_id_writebacks SET next_attempt_at = now() WHERE status <> 'ok';`
   - Force a full re-check of one client: `DELETE FROM stripe_id_writebacks WHERE target_key = 'CP-004' OR target_key = 'client:CP-004';` (bookkeeping only; the next cycle recomputes and compares with Nextcloud, writing only what differs).
   - Statuses: `not_found` (row, or card, missing), `ambiguous` (several rows with the code, or the email on several cards), `read_only` (card in a read-only book), `forbidden` (the Stripe Customer ID column is missing and could not be created), `error` (retried with backoff, 1 min doubling to 1 h; `last_error` is a code, never a message). Card keys are the contact UID, or `client:<code>` for the email fallback.
+
+## 16. Event-driven triggers
+The timed jobs stay as the safety net; events start a cycle at once. `lib/coalesced-runner.ts` is the shared helper: a burst of kicks becomes one cycle plus one follow-up, a kick never throws into its caller, and it is a no-op when the job's flag is off or the job has not started. Kicks of the mirrors are debounced by 1.5 s (`KICK_DEBOUNCE_MS`). A kicked cycle that returns `busy` (another process holds the job's advisory lock) is retried once after 5 s (`KICK_BUSY_RETRY_MS`) instead of being dropped.
+
+| Job | Kicked from |
+|---|---|
+| Sales lead (§9) | `POST /webhooks/nextcloud/sales-lead`; `POST /contact` after the lead is submitted to the New Lead form |
+| Client onboarding (§10), billing requests (§14) | Their own webhooks (unchanged) |
+| Billing mirror (§13) | `markCustomerDirty` (Stripe billing webhook, billing request sync); a new `billing_customers` link |
+| Portal mirror (§12) | Client create/update/archive, Connect onboarding callback and lazy account creation, `account.updated`, API key regeneration, `payment_ledger` writes from checkout creation and Stripe webhooks |
+| Stripe ID write-back (§15) | A new `billing_customers` link (`ensureBillingCustomer`, pinned link, so every path including onboarding) |
+
+**Safety-net intervals at rollout.** The code defaults are unchanged; set them by env when the kicks are live: `CONTACT_STRIPE_SYNC_INTERVAL_MS=30000` (contact to Stripe has no event source, Nextcloud Contacts has no webhook, so this one stays short), and about 15 minutes (`900000`) for `SALES_POLL_INTERVAL_MS`, `CLIENT_ONBOARDING_POLL_INTERVAL_MS`, `BILLING_REQUESTS_POLL_INTERVAL_MS`, `PORTAL_MIRROR_INTERVAL_MS` and `STRIPE_ID_WRITEBACK_INTERVAL_MS`. `BILLING_SWEEP_INTERVAL_MS` is unaffected.
