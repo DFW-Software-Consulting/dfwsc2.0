@@ -1,10 +1,7 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { useAuth } from "../../contexts/AuthContext";
-import { useSetupStatus } from "../../hooks/useSetupStatus";
 import AddClientModal from "./AddClientModal";
 import AdminLogin from "./AdminLogin";
-import AdminSetup from "./AdminSetup";
 import ClientList from "./ClientList";
 import GroupPanel from "./GroupPanel";
 import PaymentReports from "./PaymentReports";
@@ -20,9 +17,7 @@ const TABS = [
 ];
 
 export default function AdminDashboard() {
-  const { isLoggedIn, logout, token, bootstrapPending, clearBootstrapPending } = useAuth();
-  const { requiresSetup, isLoading: statusLoading, error: statusError } = useSetupStatus();
-  const queryClient = useQueryClient();
+  const { isLoggedIn, logout } = useAuth();
 
   const [activeTab, setActiveTab] = useState("clients");
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
@@ -36,63 +31,15 @@ export default function AdminDashboard() {
     setToast({ show: false, message: "", type: "" });
   }, []);
 
-  const handleSetupComplete = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["setup-status"] });
-  }, [queryClient]);
-
   const handleLogout = useCallback(() => {
     logout();
     setActiveTab("clients");
   }, [logout]);
 
   if (!isLoggedIn) {
-    if (statusLoading) {
-      return (
-        <div className="flex justify-center items-center py-8">
-          <div className="text-fg-muted">Loading...</div>
-        </div>
-      );
-    }
-
-    if (statusError) {
-      return (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-500 rounded-lg p-4 mb-6">
-          <p className="text-red-700 dark:text-red-400 text-sm font-medium">
-            Error: Could not connect to the backend. Please check if the API server is running and
-            configured correctly.
-          </p>
-          <p className="text-red-700 dark:text-red-300 text-xs mt-1">{statusError.message}</p>
-        </div>
-      );
-    }
-
-    const showSetup = requiresSetup;
-
     return (
       <>
-        {showSetup ? (
-          <AdminSetup
-            onSetupComplete={handleSetupComplete}
-            showToast={showToast}
-            isBootstrapPending={false}
-          />
-        ) : (
-          <AdminLogin showToast={showToast} />
-        )}
-        <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
-      </>
-    );
-  }
-
-  if (bootstrapPending) {
-    return (
-      <>
-        <AdminSetup
-          isBootstrapPending
-          token={token}
-          showToast={showToast}
-          onSetupComplete={clearBootstrapPending}
-        />
+        <AdminLogin showToast={showToast} />
         <Toast show={toast.show} message={toast.message} type={toast.type} onClose={hideToast} />
       </>
     );

@@ -2,6 +2,7 @@ import path from "node:path";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client";
+import { errorLogFields } from "./safe-error-log";
 
 const migrationsFolder = path.join(__dirname, "..", "..", "drizzle");
 
@@ -10,7 +11,7 @@ export async function runMigrations(server: FastifyInstance): Promise<void> {
     await migrate(db, { migrationsFolder });
     server.log.info("Database migrations executed (noop if already up to date).");
   } catch (error) {
-    server.log.error({ err: error }, "Failed to execute database migrations.");
+    server.log.error(errorLogFields(error), "Failed to execute database migrations.");
     throw error;
   }
 }

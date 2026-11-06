@@ -19,6 +19,7 @@ describe("Docs page", () => {
     for (const code of [
       "INVALID_REQUEST",
       "CARD_DECLINED",
+      "CARD_PAYMENTS_NOT_ACTIVE",
       "IDEMPOTENCY_KEY_REUSED",
       "IDEMPOTENCY_KEY_IN_USE",
       "RATE_LIMITED",
@@ -144,5 +145,21 @@ describe("Docs page", () => {
       expect(container.textContent).toMatch(/idempotency_?key/i);
       expect(container.textContent).not.toMatch(/randomUUID\(\),|uuid\.uuid4\(\)\),|random_bytes/);
     }
+  });
+
+  it("lists the optional invoicing and customers endpoints", () => {
+    const { container } = render(<Docs />, { wrapper: MemoryRouter });
+
+    for (const endpoint of [
+      "POST /api/v1/customers",
+      "POST /api/v1/invoices",
+      "POST /api/v1/invoices/{id}/finalize",
+      "POST /api/v1/invoices/{id}/send",
+      "POST /api/v1/invoices/{id}/void",
+      "DELETE /api/v1/invoices/{id}",
+    ]) {
+      expect(container.textContent).toContain(endpoint);
+    }
+    expect(container.textContent).toContain("INVOICING_NOT_ENABLED");
   });
 });

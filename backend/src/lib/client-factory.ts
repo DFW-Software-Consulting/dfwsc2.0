@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import validator from "validator";
 import { type DbOrTx, db } from "../db/client";
@@ -23,16 +23,21 @@ interface CreateClientWithOnboardingTokenOptions {
   groupId?: string;
 }
 
-interface ClientWithToken {
+export interface PreparedClientWithOnboardingToken {
   clientId: string;
   apiKey: string;
   token: string;
+  onboardingTokenId: string;
+  client: typeof clients.$inferInsert;
+  onboardingToken: typeof onboardingTokens.$inferInsert;
 }
 
-export async function createClientWithOnboardingToken(
-  { name, email, workspace, groupId }: CreateClientWithOnboardingTokenOptions,
-  dbOrTx: DbOrTx = db
-): Promise<ClientWithToken> {
+export async function prepareClientWithOnboardingToken({
+  name,
+  email,
+  workspace,
+  groupId,
+}: CreateClientWithOnboardingTokenOptions): Promise<PreparedClientWithOnboardingToken> {
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     throw Object.assign(new Error("Name is required and must be a non-empty string"), {
       statusCode: 400,
@@ -41,22 +46,6 @@ export async function createClientWithOnboardingToken(
 
   if (!email || typeof email !== "string" || !validator.isEmail(email)) {
     throw Object.assign(new Error("Valid email is required"), { statusCode: 400 });
-  }
-
-  if (groupId) {
-    const [group] = await dbOrTx
-      .select({ id: clientGroups.id, workspace: clientGroups.workspace })
-      .from(clientGroups)
-      .where(eq(clientGroups.id, groupId))
-      .limit(1);
-    if (!group) {
-      throw Object.assign(new Error("Invalid groupId."), { statusCode: 400 });
-    }
-    if (group.workspace !== workspace) {
-      throw Object.assign(new Error("groupId workspace does not match client workspace."), {
-        statusCode: 400,
-      });
-    }
   }
 
   const clientId = uuidv4();
@@ -68,25 +57,75 @@ export async function createClientWithOnboardingToken(
   const tokenLookup = hashOnboardingToken(token);
   const onboardingTokenId = uuidv4();
 
+  return {
+    clientId,
+    apiKey,
+    token,
+    onboardingTokenId,
+    client: {
+      id: clientId,
+      workspace,
+      name,
+      email,
+      apiKeyHash,
+      apiKeyLookup,
+      ...(groupId ? { groupId } : {}),
+    },
+    onboardingToken: {
+      id: onboardingTokenId,
+      clientId,
+      token: tokenLookup,
+      status: "pending",
+      email,
+    },
+  };
+}
+
+/**
+ * Read-only duplicate check, run before external side effects (e.g. Stripe account creation).
+ * The `clients_email_workspace_unique` constraint stays authoritative at insert time.
+ */
+export async function assertClientEmailAvailable(
+  email: string,
+  workspace: Workspace,
+  dbOrTx: DbOrTx = db
+): Promise<void> {
+  const [existing] = await dbOrTx
+    .select({ id: clients.id })
+    .from(clients)
+    .where(and(eq(clients.email, email), eq(clients.workspace, workspace)))
+    .limit(1);
+  if (existing) {
+    throw errors.conflict("A client with this email already exists.");
+  }
+}
+
+export async function persistPreparedClientWithOnboardingToken(
+  prepared: PreparedClientWithOnboardingToken,
+  dbOrTx: DbOrTx = db
+): Promise<void> {
+  const { client, onboardingToken } = prepared;
+
+  if (client.groupId) {
+    const [group] = await dbOrTx
+      .select({ id: clientGroups.id, workspace: clientGroups.workspace })
+      .from(clientGroups)
+      .where(eq(clientGroups.id, client.groupId))
+      .limit(1);
+    if (!group) {
+      throw Object.assign(new Error("Invalid groupId."), { statusCode: 400 });
+    }
+    if (group.workspace !== client.workspace) {
+      throw Object.assign(new Error("groupId workspace does not match client workspace."), {
+        statusCode: 400,
+      });
+    }
+  }
+
   try {
     await dbOrTx.transaction(async (tx) => {
-      await tx.insert(clients).values({
-        id: clientId,
-        workspace,
-        name,
-        email,
-        apiKeyHash,
-        apiKeyLookup,
-        ...(groupId ? { groupId } : {}),
-      });
-
-      await tx.insert(onboardingTokens).values({
-        id: onboardingTokenId,
-        clientId,
-        token: tokenLookup,
-        status: "pending",
-        email,
-      });
+      await tx.insert(clients).values(client);
+      await tx.insert(onboardingTokens).values(onboardingToken);
     });
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -98,6 +137,13 @@ export async function createClientWithOnboardingToken(
     }
     throw err;
   }
+}
 
-  return { clientId, apiKey, token };
+export async function createClientWithOnboardingToken(
+  options: CreateClientWithOnboardingTokenOptions,
+  dbOrTx: DbOrTx = db
+): Promise<PreparedClientWithOnboardingToken> {
+  const prepared = await prepareClientWithOnboardingToken(options);
+  await persistPreparedClientWithOnboardingToken(prepared, dbOrTx);
+  return prepared;
 }

@@ -1,6 +1,7 @@
 node_modules
 dist
 build-dist
+build-ssr
 *.log
 .git
 .gitignore

@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
 
 // Mock Stripe before importing other modules
 vi.mock("../../lib/stripe", async () => {
@@ -26,6 +26,16 @@ import { clients, onboardingTokens } from "../../db/schema";
 import { hashOnboardingToken } from "../../lib/client-factory";
 import { OAUTH_STATE_EXPIRY_MS } from "../../lib/constants";
 import { hitBuckets } from "../../lib/rate-limit";
+import { captureAppLogs, expectNoPlanted, plantedStripeError } from "../helpers/log-capture";
+
+// The vi.mock above swaps lib/stripe for plain spies, so type the three used methods as Mocks
+// (the real SDK methods are overloaded and have no mock helpers).
+type StripeSpies = {
+  accounts: { create: Mock; retrieve: Mock };
+  accountLinks: { create: Mock };
+};
+const mockedStripe = async () =>
+  (await import("../../lib/stripe")).stripe as unknown as StripeSpies;
 
 // Constants for test values
 const TEST_STRIPE_ACCOUNT = "acct_test123456789";
@@ -42,13 +52,14 @@ describe("Connect Callback State Validation Integration", () => {
     process.env.API_BASE_URL = "http://localhost:4242";
 
     // Mock Stripe methods
-    const { stripe } = await import("../../lib/stripe");
+    const stripe = await mockedStripe();
     stripe.accounts.create.mockResolvedValue({ id: "acct_test123456789" });
     stripe.accounts.retrieve.mockResolvedValue({
       type: "express",
       details_submitted: true,
       charges_enabled: true,
       payouts_enabled: true,
+      capabilities: { card_payments: "active", transfers: "active" },
     });
     stripe.accountLinks.create.mockResolvedValue({ url: "https://connect.stripe.com/setup/mock" });
 
@@ -144,6 +155,8 @@ describe("Connect Callback State Validation Integration", () => {
     // Verify that the stripeAccountId was updated in the database
     const [updatedClient] = await db.select().from(clients).where(eq(clients.id, clientId));
     expect(updatedClient.stripeAccountId).toBe(testStripeAccount);
+    expect(updatedClient.chargesEnabled).toBe(true);
+    expect(updatedClient.cardPaymentsStatus).toBe("active");
 
     // Verify status changed to 'completed'
     [tokenRecord] = await db
@@ -557,7 +570,7 @@ describe("Connect Callback State Validation Integration", () => {
   });
 
   it("should invalidate the state nonce even when the callback leaves the token in_progress", async () => {
-    const { stripe } = await import("../../lib/stripe");
+    const stripe = await mockedStripe();
     // Override the shared "completed" mock for just this call: details not
     // yet submitted, so the callback resolves to in_progress rather than
     // completed. Using mockResolvedValueOnce (not mockResolvedValue) so this
@@ -627,5 +640,86 @@ describe("Connect Callback State Validation Integration", () => {
     // Clean up
     await db.delete(clients).where(eq(clients.id, clientId));
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenId));
+  });
+
+  it("logs only identifiers when account link creation fails with customer data in the message", async () => {
+    const stripe = await mockedStripe();
+    const clientId = randomUUID();
+    const email = `test-${randomUUID()}@example.com`;
+    const testToken = `test_token_${randomUUID().replace(/-/g, "")}`;
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Log Client",
+      email,
+      status: "active",
+      workspace: "client_portal",
+    });
+    const tokenId = randomUUID();
+    await db.insert(onboardingTokens).values({
+      id: tokenId,
+      clientId,
+      token: hashOnboardingToken(testToken),
+      status: "pending",
+      email,
+    });
+    stripe.accountLinks.create.mockRejectedValueOnce(plantedStripeError());
+    const logs = captureAppLogs(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/onboard-client",
+      payload: { token: testToken },
+    });
+    logs.restore();
+
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+    expect(logs.find("Stripe accountLinks.create failed")?.fields).toMatchObject({
+      errType: "StripeInvalidRequestError",
+      errCode: "resource_missing",
+      errRequestId: "req_planted",
+    });
+    expectNoPlanted(logs.text());
+    await db.delete(clients).where(eq(clients.id, clientId));
+    await db.delete(onboardingTokens).where(eq(onboardingTokens.id, tokenId));
+  });
+
+  it("logs only identifiers when the callback cannot verify the account with Stripe", async () => {
+    const stripe = await mockedStripe();
+    const clientId = randomUUID();
+    const email = `test-${randomUUID()}@example.com`;
+    const account = `acct_${randomUUID().replace(/-/g, "")}`;
+    const state = `test_state_${randomUUID().replace(/-/g, "")}`;
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Log Client",
+      email,
+      status: "active",
+      workspace: "client_portal",
+    });
+    const tokenId = randomUUID();
+    await db.insert(onboardingTokens).values({
+      id: tokenId,
+      clientId,
+      token: `test_token_${randomUUID().replace(/-/g, "")}`,
+      status: "in_progress",
+      email,
+      state,
+      stateExpiresAt: new Date(Date.now() + OAUTH_STATE_EXPIRY_MS),
+    });
+    stripe.accounts.retrieve.mockRejectedValueOnce(plantedStripeError());
+    const logs = captureAppLogs(app);
+
+    await app.inject({
+      method: "GET",
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=${account}&state=${state}`,
+    });
+    logs.restore();
+
+    expect(
+      logs.find("Failed to verify account with Stripe; leaving token in_progress")?.fields
+    ).toMatchObject({ errType: "StripeInvalidRequestError", errRequestId: "req_planted" });
+    expectNoPlanted(logs.text());
+    await db.delete(clients).where(eq(clients.id, clientId));
+    await db.delete(onboardingTokens).where(eq(onboardingTokens.id, tokenId));
   });
 });

@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 import { useRequestApiKeyRegeneration } from "../hooks/useApiKey";
-import { usePageTitle } from "../hooks/usePageTitle";
 import logger from "../utils/logger";
 import { validateEmail } from "../utils/validation";
 
@@ -9,7 +8,6 @@ export default function RequestApiKeyRegeneration() {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState("");
   const { mutate, isPending } = useRequestApiKeyRegeneration();
-  usePageTitle("Regenerate API Key");
 
   const handleSubmit = useCallback(
     (e) => {

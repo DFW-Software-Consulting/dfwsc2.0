@@ -6,18 +6,22 @@ import fastifyRawBody from "fastify-raw-body";
 import { logMaskedEnvSummary, validateEnv } from "./lib/env";
 import { AppError } from "./lib/errors";
 import { warnIfInMemoryRateLimit } from "./lib/rate-limit";
+import { errorLogFields } from "./lib/safe-error-log";
 import authRoutes from "./routes/auth";
 import clientRoutes from "./routes/clients";
 import configRoutes from "./routes/config";
 import connectRoutes from "./routes/connect";
+import connectInvoicingRoutes from "./routes/connect-invoicing";
 import contactRoutes from "./routes/contact";
 import groupRoutes from "./routes/groups";
 import healthRoutes from "./routes/health";
 import metricsRoutes from "./routes/metrics";
+import nextcloudWebhookRoutes from "./routes/nextcloud-webhooks";
 import paymentsRoutes from "./routes/payments";
 import productRoutes from "./routes/products";
 import settingsRoutes from "./routes/settings";
 import webhooksRoute from "./routes/webhooks";
+import billingWebhookRoute from "./routes/webhooks-billing";
 
 // Resolve trustProxy from TRUST_PROXY env. Fastify 5.12 no longer supports
 // numeric hop counts (a hop count can't validate the immediate peer, so it fails
@@ -159,7 +163,11 @@ export async function buildServer() {
       return;
     }
 
-    request.log.error(fastifyError, fastifyError.message);
+    // Client errors (4xx) keep their message as the log line. A 5xx message can quote SQL or
+    // provider text, so those log a fixed line and errorLogFields supplies the diagnostics.
+    const logMessage =
+      statusCode < 500 ? fastifyError.message : "Request failed with a server error";
+    request.log.error(errorLogFields(fastifyError), logMessage);
 
     const safeMessage =
       statusCode < 500 && fastifyError.message ? fastifyError.message : "Internal Server Error";
@@ -208,8 +216,14 @@ export async function buildServer() {
   server.register(authRoutes, { prefix: "/api/v1" });
   server.register(connectRoutes, { prefix: "/api/v1" });
   server.register(contactRoutes, { prefix: "/api/v1" });
+  // Connected-account invoicing: only the exact value "true" registers the routes (else 404).
+  if (process.env.CONNECT_INVOICING === "true") {
+    server.register(connectInvoicingRoutes, { prefix: "/api/v1" });
+  }
   server.register(paymentsRoutes, { prefix: "/api/v1" });
   server.register(webhooksRoute, { prefix: "/api/v1" });
+  server.register(billingWebhookRoute, { prefix: "/api/v1" });
+  server.register(nextcloudWebhookRoutes, { prefix: "/api/v1" });
   server.register(clientRoutes, { prefix: "/api/v1" });
   server.register(groupRoutes, { prefix: "/api/v1" });
   server.register(productRoutes, { prefix: "/api/v1" });

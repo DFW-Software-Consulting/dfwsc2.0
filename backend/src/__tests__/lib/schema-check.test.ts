@@ -20,9 +20,9 @@ vi.mock("drizzle-orm", async (importOriginal) => {
 });
 
 import { db } from "../../db/client";
-import { verifyDatabaseSchema } from "../../lib/schema-check";
+import { REQUIRED_TABLES, verifyDatabaseSchema } from "../../lib/schema-check";
 
-const mockDb = db as { execute: ReturnType<typeof vi.fn> };
+const mockDb = db as unknown as { execute: ReturnType<typeof vi.fn> };
 
 describe("verifyDatabaseSchema", () => {
   beforeEach(() => {
@@ -48,10 +48,12 @@ describe("verifyDatabaseSchema", () => {
             { column_name: "stripe_customer_id" },
             { column_name: "status" },
             { column_name: "charges_enabled" },
+            { column_name: "card_payments_status" },
             { column_name: "payouts_enabled" },
             { column_name: "details_submitted" },
             { column_name: "workspace" },
             { column_name: "group_id" },
+            { column_name: "invoicing_enabled" },
             { column_name: "created_at" },
             { column_name: "updated_at" },
             // webhook_events columns
@@ -110,6 +112,86 @@ describe("verifyDatabaseSchema", () => {
             // sales_lead_sync_state columns
             { column_name: "baseline_submission_id" },
             { column_name: "baselined_at" },
+            // contact_stripe_sync_* columns
+            { column_name: "addressbook" },
+            { column_name: "sync_token" },
+            { column_name: "synced_at" },
+            { column_name: "contact_uid" },
+            { column_name: "client_code" },
+            { column_name: "href" },
+            { column_name: "etag" },
+            { column_name: "last_hash" },
+            { column_name: "field_hashes" },
+            { column_name: "baseline_at" },
+            { column_name: "baseline_reset_at" },
+            { column_name: "last_pushed_at" },
+            { column_name: "last_error" },
+            { column_name: "last_error_hash" },
+            // client_onboarding_submissions columns (others are listed above)
+            { column_name: "contact_status" },
+            { column_name: "project_number" },
+            { column_name: "project_code" },
+            { column_name: "page_id" },
+            { column_name: "page_url" },
+            { column_name: "page_content_at" },
+            { column_name: "team_id" },
+            { column_name: "team_members_at" },
+            { column_name: "collective_id" },
+            { column_name: "collective_content_at" },
+            { column_name: "folder_share_id" },
+            { column_name: "lead_status" },
+            { column_name: "lead_row_id" },
+            // billing_request_submissions columns (others are listed above)
+            ...[
+              "requested_by",
+              "submitted_at",
+              "kind",
+              "amount_cents",
+              "plan_interval",
+              "plan_payments",
+              "plan_start_date",
+              "stripe_started_at",
+              "stripe_product_id",
+              "stripe_invoice_id",
+              "stripe_invoice_item_id",
+              "stripe_schedule_id",
+              "invoice_finalized_at",
+              "invoice_sent_at",
+              "outcome",
+              "nc_row_id",
+              "nc_row_hash",
+            ].map((column_name) => ({ column_name })),
+            // connect_customers / connect_invoices columns (others are listed above)
+            ...[
+              "external_ref",
+              "idempotency_key",
+              "request_hash",
+              "creation_state",
+              "stripe_fee_item_id",
+              "line_item_ids",
+              "subtotal_cents",
+              "total_cents",
+              "amount_paid_cents",
+              "amount_remaining_cents",
+              "number",
+              "due_date",
+              "hosted_invoice_url",
+              "invoice_pdf",
+              "description",
+              "metadata",
+              "send_count",
+              // connect_invoice_sends
+              "invoice_id",
+              "key_hash",
+              "state",
+              "claimed_at",
+              "finalized_at",
+              "sent_at",
+              "paid_at",
+              "voided_at",
+              "last_synced_at",
+              "updated_at",
+            ].map((column_name) => ({ column_name })),
           ],
         };
       }
@@ -118,7 +200,25 @@ describe("verifyDatabaseSchema", () => {
     });
 
     await expect(verifyDatabaseSchema()).resolves.toBeUndefined();
-    expect(mockDb.execute).toHaveBeenCalledTimes(10);
+    expect(mockDb.execute).toHaveBeenCalledTimes(19);
+  });
+
+  it("requires the connected-account invoicing tables and the clients flag", () => {
+    const byTable = new Map(REQUIRED_TABLES.map((t) => [t.table, t.columns]));
+    expect(byTable.get("clients")).toContain("invoicing_enabled");
+    expect(byTable.get("connect_customers")).toEqual(
+      expect.arrayContaining(["client_id", "connected_account_id", "stripe_customer_id"])
+    );
+    expect(byTable.get("connect_invoices")).toEqual(
+      expect.arrayContaining(["client_id", "stripe_invoice_id", "creation_state", "send_count"])
+    );
+  });
+
+  it("requires the connect_invoice_sends table", () => {
+    const byTable = new Map(REQUIRED_TABLES.map((t) => [t.table, t.columns]));
+    expect(byTable.get("connect_invoice_sends")).toEqual(
+      expect.arrayContaining(["invoice_id", "client_id", "key_hash", "state", "claimed_at"])
+    );
   });
 
   it("throws when a table is missing required columns", async () => {
@@ -135,10 +235,12 @@ describe("verifyDatabaseSchema", () => {
           { column_name: "stripe_customer_id" },
           { column_name: "status" },
           { column_name: "charges_enabled" },
+          { column_name: "card_payments_status" },
           { column_name: "payouts_enabled" },
           { column_name: "details_submitted" },
           { column_name: "workspace" },
           { column_name: "group_id" },
+          { column_name: "invoicing_enabled" },
           { column_name: "created_at" },
           { column_name: "updated_at" },
         ],
@@ -182,10 +284,12 @@ describe("verifyDatabaseSchema", () => {
               { column_name: "stripe_customer_id" },
               { column_name: "status" },
               { column_name: "charges_enabled" },
+              { column_name: "card_payments_status" },
               { column_name: "payouts_enabled" },
               { column_name: "details_submitted" },
               { column_name: "workspace" },
               { column_name: "group_id" },
+              { column_name: "invoicing_enabled" },
               { column_name: "created_at" },
               { column_name: "updated_at" },
             ],
@@ -248,10 +352,12 @@ describe("verifyDatabaseSchema", () => {
           { column_name: "stripe_customer_id" },
           { column_name: "status" },
           { column_name: "charges_enabled" },
+          { column_name: "card_payments_status" },
           { column_name: "payouts_enabled" },
           { column_name: "details_submitted" },
           { column_name: "workspace" },
           { column_name: "group_id" },
+          { column_name: "invoicing_enabled" },
           { column_name: "created_at" },
           { column_name: "updated_at" },
         ],
@@ -329,10 +435,12 @@ describe("verifyDatabaseSchema", () => {
               { column_name: "stripe_customer_id" },
               { column_name: "status" },
               { column_name: "charges_enabled" },
+              { column_name: "card_payments_status" },
               { column_name: "payouts_enabled" },
               { column_name: "details_submitted" },
               { column_name: "workspace" },
               { column_name: "group_id" },
+              { column_name: "invoicing_enabled" },
               { column_name: "created_at" },
               { column_name: "updated_at" },
             ],
@@ -395,5 +503,25 @@ describe("verifyDatabaseSchema", () => {
         await verifyDatabaseSchema();
       })()
     ).rejects.toThrow(/Missing columns: token, status/);
+  });
+
+  it("checks every table's own columns, in order, and names the table and column that is missing", async () => {
+    for (let target = 0; target < REQUIRED_TABLES.length; target++) {
+      const { table, columns } = REQUIRED_TABLES[target];
+      const dropped = columns[columns.length - 1];
+      let call = 0;
+      mockDb.execute.mockReset();
+      mockDb.execute.mockImplementation(async () => {
+        const wanted = REQUIRED_TABLES[call++];
+        const cols = wanted.table === table ? wanted.columns.slice(0, -1) : wanted.columns;
+        return { rows: cols.map((column_name) => ({ column_name })) };
+      });
+      await expect(verifyDatabaseSchema()).rejects.toThrow(
+        new RegExp(`table "${table}"\\. Missing columns: ${dropped}`)
+      );
+    }
+    expect(REQUIRED_TABLES.map((t) => t.table)).toEqual(
+      expect.arrayContaining(["contact_stripe_sync_books", "contact_stripe_sync_cards"])
+    );
   });
 });

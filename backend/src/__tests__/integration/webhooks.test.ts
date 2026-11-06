@@ -9,27 +9,6 @@ vi.mock("../../lib/stripe", () => ({
     accounts: { create: vi.fn(), retrieve: vi.fn() },
     accountLinks: { create: vi.fn() },
     charges: { retrieve: vi.fn() },
-    subscriptions: {
-      retrieve: vi.fn().mockResolvedValue({
-        id: "sub_test",
-        metadata: { paymentsMade: "0" },
-      }),
-      update: vi.fn().mockResolvedValue({ id: "sub_test" }),
-    },
-    invoices: {
-      // Idempotent invoice.paid derives the paid count from this listing.
-      list: vi.fn().mockResolvedValue({
-        data: [{ id: "in_test1", status: "paid" }],
-        has_more: false,
-      }),
-    },
-    subscriptionSchedules: {
-      retrieve: vi.fn().mockResolvedValue({
-        id: "sched_test",
-        metadata: { paymentsMade: "0" },
-      }),
-      update: vi.fn().mockResolvedValue({ id: "sched_test" }),
-    },
   },
 }));
 
@@ -260,6 +239,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
       details_submitted: true,
       charges_enabled: true,
       payouts_enabled: true,
+      capabilities: { card_payments: "active", transfers: "active" },
     });
 
     const response = await sendWebhook(app, event);
@@ -275,6 +255,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
     expect(updatedClient.name).toBe("Webhook Test Client");
     expect(updatedClient.email).toBe("webhooktest@example.com");
     expect(updatedClient.chargesEnabled).toBe(true);
+    expect(updatedClient.cardPaymentsStatus).toBe("active");
     expect(updatedClient.payoutsEnabled).toBe(true);
     expect(updatedClient.detailsSubmitted).toBe(true);
 
@@ -323,6 +304,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     expect(updatedClient.detailsSubmitted).toBe(false);
     expect(updatedClient.chargesEnabled).toBe(false);
+    expect(updatedClient.cardPaymentsStatus).toBe("unrequested");
     expect(updatedClient.payoutsEnabled).toBe(false);
 
     // Clean up
@@ -479,52 +461,39 @@ describe("POST /api/v1/webhooks/stripe", () => {
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
-  it("returns 200 for invoice.paid event with subscription and updates payment count", async () => {
-    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const event = makeStripeEvent("invoice.paid", {
-      id: "inv_paid123",
-      parent: { subscription_details: { subscription: subscriptionId } },
-      metadata: { clientId: "client_123" },
-    });
-    mockConstructEvent.mockReturnValueOnce(event);
+  it("never touches subscriptions or schedules on the Connect endpoint (invoice.paid, schedule.completed)", async () => {
+    const stripeMock = stripe as unknown as Record<string, unknown>;
+    // The Connect handler no longer has any subscription code: the mock exposes none.
+    expect(stripeMock.subscriptions).toBeUndefined();
+    expect(stripeMock.subscriptionSchedules).toBeUndefined();
 
-    const response = await sendWebhook(app, event);
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ received: true });
-
-    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
-  });
-
-  it("returns 500 for invoice.paid when subscription update fails (so Stripe retries)", async () => {
-    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const retrieveMock = stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>;
-    retrieveMock.mockRejectedValueOnce(new Error("stripe retrieve failed"));
-
-    const event = makeStripeEvent("invoice.paid", {
-      id: "inv_paid_failure_branch",
-      parent: { subscription_details: { subscription: subscriptionId } },
-      metadata: { clientId: "client_123" },
-    });
-    mockConstructEvent.mockReturnValueOnce(event);
-
-    const response = await sendWebhook(app, event);
-
-    // Error must propagate so processedAt is NOT set and Stripe will retry
-    expect(response.statusCode).toBe(500);
-
-    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    for (const [type, object] of [
+      [
+        "invoice.paid",
+        {
+          id: "inv_paid123",
+          parent: { subscription_details: { subscription: "sub_x" } },
+          metadata: { clientId: "client_123" },
+        },
+      ],
+      ["subscription_schedule.completed", { id: "sched_x", metadata: {} }],
+    ] as const) {
+      const event = makeStripeEvent(type, object);
+      mockConstructEvent.mockReturnValueOnce(event);
+      const response = await sendWebhook(app, event);
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ received: true });
+      await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    }
   });
 
   it("does not reprocess duplicate webhook events", async () => {
-    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const retrieveMock = stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>;
-    const updateMock = stripe.subscriptions.update as ReturnType<typeof vi.fn>;
+    const retrieveMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+    retrieveMock.mockReset();
 
-    const event = makeStripeEvent("invoice.paid", {
-      id: `evt_duplicate_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
-      parent: { subscription_details: { subscription: subscriptionId } },
-      metadata: { clientId: "client_123" },
+    const event = makeStripeEvent("charge.dispute.created", {
+      id: `dp_duplicate_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      charge: "ch_duplicate_test",
     });
 
     // Gate the winner's first Stripe call so it parks mid-processing with its
@@ -537,7 +506,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
     });
     retrieveMock.mockImplementationOnce(async () => {
       await gate;
-      return { id: "sub_test", metadata: { paymentsMade: "0" } };
+      return { id: "ch_duplicate_test" };
     });
 
     mockConstructEvent.mockReturnValue(event);
@@ -559,7 +528,6 @@ describe("POST /api/v1/webhooks/stripe", () => {
     const first = await firstPromise;
     expect(first.statusCode).toBe(200);
     expect(retrieveMock).toHaveBeenCalledTimes(1);
-    expect(updateMock).toHaveBeenCalledTimes(1);
 
     // A genuine Stripe retry after A completed should be idempotent: the event
     // is already marked processed, so it short-circuits with 200 and no new
@@ -568,18 +536,17 @@ describe("POST /api/v1/webhooks/stripe", () => {
     const retry = await sendWebhook(app, event);
     expect(retry.statusCode).toBe(200);
     expect(retrieveMock).toHaveBeenCalledTimes(1);
-    expect(updateMock).toHaveBeenCalledTimes(1);
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
   it("reclaims a stale lease (crashed processor) and processes the event", async () => {
-    const updateMock = stripe.subscriptions.update as ReturnType<typeof vi.fn>;
-    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const event = makeStripeEvent("invoice.paid", {
-      id: "inv_stale_lease",
-      parent: { subscription_details: { subscription: subscriptionId } },
-      metadata: { clientId: "client_123" },
+    const retrieveMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+    retrieveMock.mockReset();
+    retrieveMock.mockResolvedValue({ id: "ch_stale_lease" });
+    const event = makeStripeEvent("charge.dispute.created", {
+      id: "dp_stale_lease",
+      charge: "ch_stale_lease",
     });
 
     // Simulate a crashed processor: a claim row exists, unprocessed, with a
@@ -588,7 +555,6 @@ describe("POST /api/v1/webhooks/stripe", () => {
       id: randomUUID(),
       stripeEventId: event.id,
       type: event.type,
-      payload: JSON.parse(JSON.stringify(event)) as Record<string, unknown>,
       processedAt: null,
       claimedAt: new Date(Date.now() - 60 * 60 * 1000),
     });
@@ -598,7 +564,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     // The stale lease must be reclaimed and the event processed to completion.
     expect(response.statusCode).toBe(200);
-    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(retrieveMock).toHaveBeenCalledTimes(1);
 
     const [row] = await db
       .select()
@@ -609,15 +575,107 @@ describe("POST /api/v1/webhooks/stripe", () => {
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
+  describe("error logs never carry database or customer values", () => {
+    const URL_SECRET = "https://invoice.stripe.com/i/acct_1/live_secret";
+    const EMAIL = "jane@customer.example";
+
+    function loggedText(spy: ReturnType<typeof vi.spyOn>) {
+      return JSON.stringify(spy.mock.calls);
+    }
+
+    it("logs only SQLSTATE and constraint for a non-retryable unique violation", async () => {
+      const pg = Object.assign(new Error(`duplicate key (${EMAIL})`), {
+        code: "23505",
+        severity: "ERROR",
+        detail: `Key (email)=(${EMAIL}) already exists.`,
+        constraint: "uq_email",
+        table: "connect_invoices",
+      });
+      const drizzleErr = new Error(`Failed query: insert ... params: ${URL_SECRET},${EMAIL}`, {
+        cause: pg,
+      });
+      drizzleErr.name = "DrizzleQueryError";
+      const retrieveMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+      retrieveMock.mockReset();
+      retrieveMock.mockRejectedValueOnce(drizzleErr);
+      const errorSpy = vi.spyOn(app.log, "error");
+      const event = makeStripeEvent("charge.dispute.created", {
+        id: "dp_unique_log",
+        charge: "ch_unique_log",
+      });
+      mockConstructEvent.mockReturnValueOnce(event);
+
+      const res = await sendWebhook(app, event);
+      expect(res.statusCode).toBe(200);
+
+      const call = errorSpy.mock.calls.find((c) => String(c[1]).includes("non-retryable"));
+      expect(call).toBeDefined();
+      expect(call?.[0]).toMatchObject({ errCode: "23505", errConstraint: "uq_email" });
+      const text = loggedText(errorSpy);
+      expect(text).not.toContain(EMAIL);
+      expect(text).not.toContain(URL_SECRET);
+      expect(text).not.toContain("Failed query");
+      expect(text).not.toContain("already exists");
+      errorSpy.mockRestore();
+      await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    });
+
+    it("logs only identifiers when signature verification fails", async () => {
+      const errorSpy = vi.spyOn(app.log, "error");
+      mockConstructEvent.mockImplementationOnce(() => {
+        throw Object.assign(new Error(`bad signature for ${EMAIL}`), {
+          type: "StripeSignatureVerificationError",
+        });
+      });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/webhooks/stripe",
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json", "stripe-signature": "bad" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(errorSpy.mock.calls[0][0]).toMatchObject({
+        errType: "StripeSignatureVerificationError",
+      });
+      expect(loggedText(errorSpy)).not.toContain(EMAIL);
+      errorSpy.mockRestore();
+    });
+
+    it("logs only identifiers when the account state retrieve fails", async () => {
+      const warnSpy = vi.spyOn(app.log, "warn");
+      const accountsRetrieveMock = stripe.accounts.retrieve as ReturnType<typeof vi.fn>;
+      accountsRetrieveMock.mockRejectedValueOnce(
+        Object.assign(new Error(`No such account for ${EMAIL}`), {
+          type: "StripeInvalidRequestError",
+          code: "resource_missing",
+        })
+      );
+      const event = makeStripeEvent("account.updated", { id: "acct_log_retrieve" });
+      mockConstructEvent.mockReturnValueOnce(event);
+
+      const res = await sendWebhook(app, event);
+      expect(res.statusCode).toBe(200);
+      const call = warnSpy.mock.calls.find((c) => String(c[1]).includes("skipping sync"));
+      expect(call?.[0]).toMatchObject({
+        errCode: "resource_missing",
+        accountId: "acct_log_retrieve",
+      });
+      expect(loggedText(warnSpy)).not.toContain(EMAIL);
+      warnSpy.mockRestore();
+      await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    });
+  });
+
   it("releases the claim on a retryable failure so Stripe's retry re-processes the event", async () => {
-    const scheduleUpdateMock = stripe.subscriptionSchedules.update as ReturnType<typeof vi.fn>;
-    const event = makeStripeEvent("subscription_schedule.completed", {
-      id: "sched_completed_error_branch",
-      metadata: { clientId: "client_123" },
+    const scheduleUpdateMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+    scheduleUpdateMock.mockReset();
+    const event = makeStripeEvent("charge.dispute.created", {
+      id: "dp_error_branch",
+      charge: "ch_error_branch",
     });
 
     // First delivery: processing fails with a retryable error → 500.
-    scheduleUpdateMock.mockRejectedValueOnce(new Error("schedule update failed"));
+    scheduleUpdateMock.mockRejectedValueOnce(new Error("charge retrieve failed"));
     mockConstructEvent.mockReturnValueOnce(event);
     const first = await sendWebhook(app, event);
     expect(first.statusCode).toBe(500);
@@ -632,7 +690,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
     expect(afterFail).toHaveLength(0);
 
     // Stripe retry: processing now succeeds → 200, event re-processed and marked done.
-    scheduleUpdateMock.mockResolvedValueOnce({ id: "sched_test" });
+    scheduleUpdateMock.mockResolvedValueOnce({ id: "ch_error_branch" });
     mockConstructEvent.mockReturnValueOnce(event);
     const retry = await sendWebhook(app, event);
     expect(retry.statusCode).toBe(200);

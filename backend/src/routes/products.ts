@@ -7,6 +7,7 @@ import { db } from "../db/client";
 import { clients } from "../db/schema";
 import { requireAdminJwt } from "../lib/auth";
 import { withStripeCircuit } from "../lib/circuit-breakers";
+import { getChargeableAccountId } from "../lib/connected-account";
 import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { adminRateLimit } from "../lib/rate-limit";
@@ -61,12 +62,13 @@ async function resolveConnectedAccount(clientId: string): Promise<string> {
   if (!client) {
     throw errors.notFound("Client");
   }
-  if (!client.stripeAccountId || !client.chargesEnabled) {
+  const stripeAccountId = getChargeableAccountId(client);
+  if (!stripeAccountId) {
     throw errors.badRequest(
       "Client must have a connected Stripe account with charges enabled to manage products."
     );
   }
-  return client.stripeAccountId;
+  return stripeAccountId;
 }
 
 const productRoutes: FastifyPluginAsync = async (app) => {

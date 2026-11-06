@@ -159,7 +159,7 @@ describe("API Key Regeneration Routes", () => {
       expect(tokens.length).toBeGreaterThanOrEqual(1);
       const pendingToken = tokens.find((t: any) => t.status === "pending");
       expect(pendingToken).toBeDefined();
-      expect(pendingToken.email).toBe(clientEmail);
+      expect(pendingToken?.email).toBe(clientEmail);
     });
   });
 

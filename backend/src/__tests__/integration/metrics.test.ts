@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
-import { salesLeadSubmissions } from "../../db/schema";
+import { clientOnboardingSubmissions, salesLeadSubmissions } from "../../db/schema";
 import { resetCircuitBreakersForTests } from "../../lib/circuit-breakers";
 import { ensureBaseEnv } from "../helpers/env";
 
@@ -100,6 +100,48 @@ describe("Metrics API Integration", () => {
       expect(response.body).toContain("dfwsc_sales_lead_last_cycle_timestamp_seconds 0");
     } finally {
       await db.delete(salesLeadSubmissions);
+    }
+  });
+
+  it("reports client onboarding state, counting flagged leads and contacts", async () => {
+    process.env.METRICS_TOKEN = "secret-metrics-token";
+    await db.delete(clientOnboardingSubmissions);
+    await db.insert(clientOnboardingSubmissions).values([
+      {
+        formId: 2,
+        submissionId: 1,
+        status: "completed",
+        leadStatus: "won",
+        contactStatus: "created",
+      },
+      { formId: 2, submissionId: 2, status: "completed", leadStatus: "no_match" },
+      {
+        formId: 2,
+        submissionId: 3,
+        status: "completed",
+        leadStatus: "won",
+        contactStatus: "ambiguous",
+      },
+      { formId: 2, submissionId: 4, status: "failed" },
+      { formId: 2, submissionId: 5 },
+    ]);
+
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/v1/metrics",
+        headers: { authorization: "Bearer secret-metrics-token" },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain('dfwsc_client_onboarding_submissions{status="completed"} 3');
+      expect(response.body).toContain('dfwsc_client_onboarding_submissions{status="failed"} 1');
+      expect(response.body).toContain('dfwsc_client_onboarding_submissions{status="pending"} 1');
+      expect(response.body).toContain("dfwsc_client_onboarding_flagged 2");
+      expect(response.body).toContain("dfwsc_client_onboarding_last_cycle_ok 0");
+      expect(response.body).toContain("dfwsc_client_onboarding_last_cycle_timestamp_seconds 0");
+    } finally {
+      await db.delete(clientOnboardingSubmissions);
     }
   });
 });

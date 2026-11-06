@@ -27,8 +27,7 @@ function sdkError(
 
 const circuitOpen = { error: "open", code: "STRIPE_CIRCUIT_OPEN" };
 
-const REUSED_MESSAGE =
-  "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.";
+const REUSED_MESSAGE = "This Idempotency-Key was already used with a different request body.";
 
 describe("mapStripeError permanent errors", () => {
   it("maps StripeInvalidRequestError to 400 with Stripe's message and param", () => {

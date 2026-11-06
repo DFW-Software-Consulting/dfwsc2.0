@@ -79,13 +79,8 @@ describe("app.ts extra coverage", () => {
 
   it("handles server initialization when NOT in test mode (for coverage)", async () => {
     const originalNodeEnv = process.env.NODE_ENV;
-    const originalAdminPassword = process.env.ADMIN_PASSWORD;
     try {
       process.env.NODE_ENV = "production";
-      // Production boot now enforces a strong ADMIN_PASSWORD (see lib/env.ts);
-      // supply one so this test exercises the real index.ts-style boot path
-      // instead of failing on the (unrelated) weak-password guard.
-      process.env.ADMIN_PASSWORD = "a-sufficiently-strong-admin-password-!!";
 
       const server = await buildServer();
       expect(server).toBeDefined();
@@ -100,7 +95,6 @@ describe("app.ts extra coverage", () => {
       await server.close();
     } finally {
       process.env.NODE_ENV = originalNodeEnv;
-      process.env.ADMIN_PASSWORD = originalAdminPassword;
     }
   });
 

@@ -1,28 +1,16 @@
 import { Suspense } from "react";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import Analytics from "./components/Analytics.jsx";
 import Footer from "./components/Footer.jsx";
 import Navbar from "./components/Navbar.jsx";
 import RouteTracker from "./components/RouteTracker.jsx";
-import { lazyPage } from "./utils/lazyPage.js";
-
-const Home = lazyPage(() => import("./pages/Home.jsx"));
-const Pricing = lazyPage(() => import("./pages/Pricing.jsx"));
-const Team = lazyPage(() => import("./pages/Team.jsx"));
-const Privacy = lazyPage(() => import("./pages/Privacy.jsx"));
-const Docs = lazyPage(() => import("./pages/Docs.jsx"));
-const OnboardClient = lazyPage(() => import("./pages/OnboardClient"));
-const AdminPage = lazyPage(() => import("./pages/AdminPage"));
-const PaymentSuccess = lazyPage(() => import("./pages/PaymentSuccess"));
-const PaymentCancel = lazyPage(() => import("./pages/PaymentCancel"));
-const OnboardingSuccess = lazyPage(() => import("./pages/OnboardingSuccess"));
-const RegenerateApiKey = lazyPage(() => import("./pages/RegenerateApiKey"));
-const RequestApiKeyRegeneration = lazyPage(() => import("./pages/RequestApiKeyRegeneration"));
-const NotFound = lazyPage(() => import("./pages/NotFound"));
+import { routes } from "./routes.js";
+import Seo from "./seo/Seo.jsx";
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <>
+      <Seo />
       <Analytics />
       <RouteTracker />
       <div className="min-h-screen relative isolate bg-[var(--bg-main)] text-[var(--text-main)] selection:bg-brand-500/30 transition-colors duration-300">
@@ -42,24 +30,14 @@ export default function App() {
             }
           >
             <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/pricing" element={<Pricing />} />
-              <Route path="/team" element={<Team />} />
-              <Route path="/privacy" element={<Privacy />} />
-              <Route path="/docs" element={<Docs />} />
-              <Route path="/onboard" element={<OnboardClient />} />
-              <Route path="/admin" element={<AdminPage />} />
-              <Route path="/payment-success" element={<PaymentSuccess />} />
-              <Route path="/payment-cancel" element={<PaymentCancel />} />
-              <Route path="/onboarding-success" element={<OnboardingSuccess />} />
-              <Route path="/regenerate-key" element={<RegenerateApiKey />} />
-              <Route path="/request-key-regeneration" element={<RequestApiKeyRegeneration />} />
-              <Route path="*" element={<NotFound />} />
+              {routes.map((route) => (
+                <Route key={route.path} path={route.path} element={<route.Page />} />
+              ))}
             </Routes>
           </Suspense>
         </main>
         <Footer />
       </div>
-    </BrowserRouter>
+    </>
   );
 }

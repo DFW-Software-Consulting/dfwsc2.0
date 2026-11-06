@@ -5,6 +5,7 @@ import { RATE_LIMIT_WINDOW_MS, STRICT_RATE_LIMIT_MAX } from "../lib/constants";
 import { errors } from "../lib/errors";
 import { sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
+import { transportErrorFields } from "../lib/safe-error-log";
 import { parseBody } from "../lib/validation";
 import { formatVisitContext, visitContextSchema } from "../lib/visit-context";
 import {
@@ -115,7 +116,7 @@ export default async function contactRoutes(fastify: FastifyInstance) {
         }
         // Never log the message body or the submitter's details.
         request.log.error(
-          { err: result.reason, channel: channels[i].name },
+          { ...transportErrorFields(result.reason), channel: channels[i].name },
           "Contact form channel failed"
         );
       });

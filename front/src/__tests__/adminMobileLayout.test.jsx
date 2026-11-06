@@ -8,9 +8,6 @@ import { renderWithProviders } from "../test/renderWithProviders";
 // jsdom has no layout, so these pin the classes that keep the admin chrome from
 // widening the page at 375px (checked visually in a real browser).
 
-vi.mock("../hooks/useSetupStatus", () => ({
-  useSetupStatus: () => ({ requiresSetup: false, isLoading: false, error: null }),
-}));
 vi.mock("../components/admin/ClientList", () => ({ default: () => null }));
 vi.mock("../components/admin/Toast", () => ({ default: () => null }));
 vi.mock("../hooks/useGroups", () => {

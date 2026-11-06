@@ -1,4 +1,5 @@
 import { encodePathSegments, type NextcloudConfig, nextcloudRequest } from "./nextcloud";
+import { createContactDirectory, type StoredCard, updateCard } from "./nextcloud-contacts";
 import type {
   FormAnswer,
   FormQuestion,
@@ -30,7 +31,7 @@ export const SUBMISSION_PAGE_SIZE = 50;
 const ROW_PAGE_SIZE = 200;
 const MAX_ROW_PAGES = 50;
 
-class NextcloudBadResponseError extends Error {
+export class NextcloudBadResponseError extends Error {
   constructor(readonly label: string) {
     super(`Nextcloud sent an unexpected response for ${label}`);
     this.name = "NextcloudBadResponseError";
@@ -41,7 +42,7 @@ export function isBadResponseError(error: unknown): error is NextcloudBadRespons
   return error instanceof NextcloudBadResponseError;
 }
 
-function parseJson(body: string, label: string): unknown {
+export function parseJson(body: string, label: string): unknown {
   try {
     return JSON.parse(body) as unknown;
   } catch {
@@ -49,13 +50,13 @@ function parseJson(body: string, label: string): unknown {
   }
 }
 
-function ocsData(body: string, label: string): unknown {
+export function ocsData(body: string, label: string): unknown {
   const data = (parseJson(body, label) as { ocs?: { data?: unknown } } | null)?.ocs?.data;
   if (data === undefined) throw new NextcloudBadResponseError(label);
   return data;
 }
 
-function positiveInt(value: unknown, label: string): number {
+export function positiveInt(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
     throw new NextcloudBadResponseError(label);
   }
@@ -65,7 +66,7 @@ function positiveInt(value: unknown, label: string): number {
 export class SalesLeadNextcloud {
   constructor(
     private readonly nc: NextcloudConfig,
-    private readonly targets: SalesLeadTargets
+    readonly targets: SalesLeadTargets
   ) {}
 
   // ── Forms ──────────────────────────────────────────────────────────────────
@@ -302,12 +303,23 @@ export class SalesLeadNextcloud {
     return `${this.nc.baseUrl}/index.php/f/${fileId}`;
   }
 
+  /** Existing cards for this lead across every visible address book. */
+  /** A per-cycle view of every visible address book; see ContactDirectory. */
+  contactDirectory(onSkippedBook?: (addressbook: string, status: number) => void) {
+    return createContactDirectory(this.nc, this.targets.addressbookPath, onSkippedBook);
+  }
+
+  updateCard(card: StoredCard, vcard: string): Promise<void> {
+    return updateCard(this.nc, card, vcard);
+  }
+
   /**
    * Opens the contact in the Contacts app. The address book is addressed by its
    * owner-side URI, which is the sharee's collection name without "_shared_by_<owner>".
+   * Defaults to the configured book.
    */
-  contactLink(uid: string): string {
-    const ownerUri = this.targets.addressbookPath.replace(/_shared_by_.+$/, "");
+  contactLink(uid: string, addressbook: string = this.targets.addressbookPath): string {
+    const ownerUri = addressbook.replace(/_shared_by_.+$/, "");
     return `${this.nc.baseUrl}/index.php/apps/contacts/direct/contact/${encodeURIComponent(`${uid}~${ownerUri}`)}`;
   }
 }

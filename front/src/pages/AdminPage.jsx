@@ -1,9 +1,6 @@
 import AdminDashboard from "../components/admin/AdminDashboard";
-import { usePageTitle } from "../hooks/usePageTitle";
 
 export default function AdminPage() {
-  usePageTitle("Admin");
-
   return (
     <section className="min-h-[90vh] flex items-center justify-center p-4 transition-colors duration-300">
       <div className="w-full max-w-6xl mx-auto">

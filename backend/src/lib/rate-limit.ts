@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import Redis from "ioredis";
 import { getClientIp } from "./client-ip";
+import { errorLogFields } from "./safe-error-log";
 
 type RateLimitOptions = {
   max: number;
@@ -12,7 +13,7 @@ type RateLimitOptions = {
   maxGenerator?: (request: FastifyRequest) => number;
 };
 
-type AdminScopedRequest = FastifyRequest & { admin?: { id?: string } };
+type AdminScopedRequest = FastifyRequest & { admin?: { sub?: string; id?: string } };
 
 let redis: Redis | null = null;
 
@@ -55,7 +56,7 @@ function logRedisFailure(request: FastifyRequest, err: unknown): void {
   if (now - lastRedisErrorLogAt < REDIS_ERROR_LOG_INTERVAL_MS) return;
   lastRedisErrorLogAt = now;
   request.log.error(
-    { err },
+    errorLogFields(err),
     "Rate limiter Redis error; falling back to in-memory limits until Redis recovers"
   );
 }
@@ -439,7 +440,7 @@ export type FailureCharge =
 
 // Members of the failure limiters, per limiter key, for the in-memory fallback: member -> time it
 // was added. Entries are only ever appended, so the first one is the oldest.
-const failureSets = new Map<string, Map<string, number>>();
+export const failureSets = new Map<string, Map<string, number>>();
 
 // Atomic check-and-add of one member to a sliding-window set, on Redis's own clock (TIME).
 //   KEYS[1] sorted set of members (score = time added)
@@ -663,7 +664,7 @@ export function adminRateLimit(options: Omit<RateLimitOptions, "keyGenerator">) 
     ...options,
     keyGenerator: (request) => {
       const admin = (request as AdminScopedRequest).admin;
-      return `admin:${admin?.id ?? getClientIp(request)}`;
+      return `admin:${admin?.sub ?? admin?.id ?? getClientIp(request)}`;
     },
   });
 }

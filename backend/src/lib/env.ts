@@ -22,8 +22,7 @@ const OPTIONAL_ENV_VARS = [
   "DEFAULT_PAYMENT_CANCEL_URL",
   "DEFAULT_PROCESS_FEE_CENTS",
   "SMTP_FROM",
-  "ALLOW_ADMIN_SETUP",
-  "ADMIN_PASSWORD",
+  "ADMIN_NEXTCLOUD_GROUPS",
   "REDIS_URL",
   "CONTACT_INBOX",
   "NEXTCLOUD_BASE_URL",
@@ -35,6 +34,41 @@ const OPTIONAL_ENV_VARS = [
   "SALES_ADDRESSBOOK_PATH",
   "SALES_LEADS_FOLDER",
   "SALES_POLL_INTERVAL_MS",
+  "CLIENT_ONBOARDING_ENABLED",
+  "CLIENT_ONBOARDING_FORM_ID",
+  "CLIENT_ONBOARDING_WEBHOOK_SECRET",
+  "CLIENT_ONBOARDING_PROJECTS_TABLE_ID",
+  "CLIENT_ONBOARDING_PIPELINE_TABLE_ID",
+  "CLIENT_ONBOARDING_ADDRESSBOOK_PATH",
+  "CLIENT_ONBOARDING_CLIENTS_FOLDER",
+  "CLIENT_ONBOARDING_COLLECTIVE_ID",
+  "CLIENT_ONBOARDING_POLL_INTERVAL_MS",
+  "CLIENT_ONBOARDING_PROJECT_TEAMS",
+  "CLIENT_ONBOARDING_TEAM_ADMINS",
+  "CLIENT_ONBOARDING_BILLING_CUSTOMER",
+  "CONTACT_STRIPE_SYNC",
+  "CONTACT_STRIPE_SYNC_INTERVAL_MS",
+  "PORTAL_MIRROR",
+  "PORTAL_MIRROR_INTERVAL_MS",
+  "PORTAL_MIRROR_BATCH",
+  "PORTAL_MIRROR_SHARE_GROUPS",
+  "PORTAL_MIRROR_INCLUDE_ARCHIVED",
+  "PORTAL_ACCOUNTS_TABLE_ID",
+  "BILLING_MIRROR",
+  "BILLING_MIRROR_SHARE_GROUPS",
+  "BILLING_SWEEP_INTERVAL_MS",
+  "STRIPE_BILLING_WEBHOOK_SECRET",
+  "BILLING_REQUESTS_ENABLED",
+  "BILLING_REQUESTS_FORM_ID",
+  "BILLING_REQUESTS_WEBHOOK_SECRET",
+  "BILLING_REQUESTS_POLL_INTERVAL_MS",
+  "BILLING_REQUESTS_ALLOWED_GROUPS",
+  "BILLING_REQUESTS_SHARE_GROUPS",
+  "BILLING_REQUESTS_MAX_AGE_HOURS",
+  "BILLING_MAX_AMOUNT_CENTS",
+  "BILLING_AUTO_SEND",
+  "BILLING_DEFAULT_DAYS_UNTIL_DUE",
+  "CONNECT_INVOICING",
 ];
 
 // Vars whose values must never appear in logs, even partially — presence only.
@@ -44,7 +78,6 @@ const FULLY_SECRET_ENV_VARS = new Set([
   "JWT_SECRET",
   "SMTP_PASS",
   "DATABASE_URL",
-  "ADMIN_PASSWORD",
 ]);
 
 function isFullySecretKey(key: string): boolean {
@@ -55,8 +88,6 @@ function isFullySecretKey(key: string): boolean {
     key.endsWith("_KEY")
   );
 }
-
-const WEAK_ADMIN_PASSWORDS = new Set(["testpassword", "password", "changeme"]);
 
 export function validateEnv(): Record<string, string> {
   // Load dotenv only when validation is called
@@ -95,15 +126,6 @@ export function validateEnv(): Record<string, string> {
 
   // Set default for optional env vars
   env.JWT_EXPIRY = process.env.JWT_EXPIRY ?? "1h";
-
-  if (process.env.NODE_ENV === "production" && env.ADMIN_PASSWORD) {
-    const adminPassword = env.ADMIN_PASSWORD;
-    if (adminPassword.length < 12 || WEAK_ADMIN_PASSWORDS.has(adminPassword.toLowerCase())) {
-      throw new Error(
-        "ADMIN_PASSWORD is too weak for production. Use a value at least 12 characters long that is not a known default."
-      );
-    }
-  }
 
   return env;
 }

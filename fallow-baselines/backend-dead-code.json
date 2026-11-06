@@ -1,15 +1,6 @@
 {
-  "unused_files": [
-    "scripts/db-url-field.mjs",
-    "scripts/seed-test-data.ts"
-  ],
-  "unused_exports": [
-    "src/lib/auth.ts:verifyPassword",
-    "src/lib/errors.ts:errors",
-    "src/lib/mailer.ts:sendInvoiceEmail",
-    "src/lib/workspace.ts:WORKSPACES",
-    "src/lib/workspace.ts:isPortalWorkspace"
-  ],
+  "unused_files": [],
+  "unused_exports": [],
   "unused_types": [],
   "private_type_leaks": [],
   "unused_dependencies": [],
