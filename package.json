@@ -42,15 +42,15 @@
     "url": "git+https://github.com/DFW-Software-Consulting/dfwsc2.0.git"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.2",
+    "@biomejs/biome": "^2.6.4",
     "@commitlint/cli": "^20.4.4",
     "@commitlint/config-conventional": "^20.4.4",
     "@eslint/js": "^10.0.1",
     "@secretlint/secretlint-rule-preset-recommend": "^11.3.1",
-    "eslint": "^10.2.1",
+    "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "globals": "^17.5.0",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.14.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "secretlint": "^11.3.1"
