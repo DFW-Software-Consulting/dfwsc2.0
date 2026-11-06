@@ -1,12 +1,31 @@
 .demo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; list-style: none; padding: 0; margin: 0; }
-.demo-card { display: flex; flex-direction: column; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-card); overflow: hidden; }
-.demo-card-media { display: flex; align-items: center; justify-content: center; aspect-ratio: 16 / 9; background: radial-gradient(ellipse at 100% 100%, var(--hero-glow) 0, transparent 70%), var(--bg-surface); color: var(--accent); border-bottom: 1px solid var(--border-subtle); }
-.demo-card-media img { width: 100%; height: 100%; object-fit: cover; }
+.demo-grid > li { display: flex; }
+/* The whole card is the link. studio-spot/studio-lift (studio.css) add the spotlight and lift. */
+.demo-card { display: flex; flex-direction: column; width: 100%; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-card); overflow: hidden; color: inherit; text-decoration: none; }
+.studio .demo-card:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 4px; border-radius: 12px; }
+
+/* Browser mock-up: dots + address bar over a fixed-ratio viewport (no layout shift while images load). */
+.demo-card-frame { padding: 14px 14px 0; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); }
+.demo-card-bar { display: flex; align-items: center; gap: 12px; height: 32px; padding: 0 12px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-bottom: 0; border-radius: 8px 8px 0 0; }
+.demo-card-dots { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--border-subtle); box-shadow: 14px 0 var(--border-subtle), 28px 0 var(--border-subtle); margin-right: 28px; }
+.demo-card-address { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 10px; border-radius: 999px; background: var(--bg-surface); font-size: 12px; line-height: 18px; color: var(--text-muted); }
+.demo-card-media { position: relative; display: flex; align-items: center; justify-content: center; aspect-ratio: 16 / 10; overflow: hidden; background: radial-gradient(ellipse at 100% 100%, var(--hero-glow) 0, transparent 70%), var(--bg-surface); color: var(--accent); border: 1px solid var(--border-subtle); border-bottom: 0; }
+.demo-card-media img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; }
 .demo-card-media svg { width: 56px; height: 56px; }
+/* Tall capture, mounted on first hover/focus (Demos.jsx) and shown once loaded; scrolled with transform only. 2.5 = image height / width. */
+.demo-card-media .demo-card-scroll { position: absolute; inset: 0 0 auto 0; height: auto; opacity: 0; }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .demo-card-scroll { transition: opacity .3s ease, transform .4s ease; }
+  .demo-card:is(:hover, :focus-visible) .demo-card-scroll.is-ready { opacity: 1; transform: translateY(-70%); transition: opacity .3s ease, transform 7s cubic-bezier(.4, 0, .2, 1) .4s; }
+  .demo-card:is(:hover, :focus-visible) .demo-card-cta > span { transform: translate(3px, -3px); }
+}
+
 .demo-card-body { display: flex; flex-direction: column; gap: 10px; padding: 24px; flex: 1; }
 .demo-card .demo-card-title { font-size: 1.35rem; line-height: 1.2; letter-spacing: -.03em; font-weight: 600; }
 .demo-card p:not(.studio-mini-label) { font-size: 15px; line-height: 1.7; color: var(--text-muted); }
-.demo-card .studio-text-link { margin-top: auto; padding-top: 8px; }
+.demo-card-cta { margin-top: auto; padding-top: 8px; color: var(--link); font-size: 15px; font-weight: 600; }
+.demo-card-cta > span { display: inline-block; margin-left: 6px; transition: transform .25s cubic-bezier(.2, .7, .2, 1); }
+@media (prefers-reduced-motion: reduce) { .demo-card-cta > span { transition: none; } }
 @media (max-width: 960px) { .demo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .demo-grid { grid-template-columns: 1fr; } }
 .demo-cta { padding-bottom: 72px; }
