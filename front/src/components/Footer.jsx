@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { scrollToTop } from "../utils/scrollToSection.js";
+import { useIsClient } from "../utils/useIsClient.js";
 import Logo from "./Logo.jsx";
 
 const exploreLinks = [
@@ -53,7 +54,9 @@ const timeFormat = new Intl.DateTimeFormat("en-US", {
 });
 
 // Re-renders once per minute, on the minute, and stops on unmount.
+// Empty until hydration finishes: the prerendered HTML has no meaningful clock value.
 function useDallasTime() {
+  const isClient = useIsClient();
   const [time, setTime] = useState(() => timeFormat.format(new Date()));
 
   useEffect(() => {
@@ -66,7 +69,7 @@ function useDallasTime() {
     return () => clearTimeout(timer);
   }, []);
 
-  return time;
+  return isClient ? time : "";
 }
 
 export default function Footer() {
@@ -123,7 +126,7 @@ export default function Footer() {
         </div>
 
         <div className="site-footer-bar">
-          <p>© {year} DFW Software Consulting</p>
+          <p suppressHydrationWarning>© {year} DFW Software Consulting</p>
           <p className="site-footer-time">Dallas, TX · {time}</p>
           <button
             type="button"
