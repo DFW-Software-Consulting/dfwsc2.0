@@ -43,7 +43,7 @@ function DemoIcon({ name }) {
   );
 }
 
-export function DemoCard({ demo }) {
+function DemoCard({ demo }) {
   return (
     <li className="demo-card">
       <div className="demo-card-media">

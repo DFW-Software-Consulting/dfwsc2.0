@@ -5,7 +5,7 @@
 .demo-card-media svg { width: 56px; height: 56px; }
 .demo-card-body { display: flex; flex-direction: column; gap: 10px; padding: 24px; flex: 1; }
 .demo-card h2 { font-size: 24px; line-height: 1.2; letter-spacing: -.03em; font-weight: 600; }
-.demo-card p { font-size: 15px; line-height: 1.7; color: var(--text-muted); }
+.demo-card p:not(.studio-mini-label) { font-size: 15px; line-height: 1.7; color: var(--text-muted); }
 .demo-card .studio-text-link { margin-top: auto; padding-top: 8px; }
 @media (max-width: 960px) { .demo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .demo-grid { grid-template-columns: 1fr; } }
