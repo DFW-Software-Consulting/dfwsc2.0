@@ -234,6 +234,25 @@ describe("syncInvoicePaid under concurrent delivery (real advisory lock)", () =>
     expect(nc.incomes).toHaveLength(2);
   });
 
+  it("creates a new fiscal year once when two different invoices race to it", async () => {
+    nc = new FakeLedgerNextcloud({ fiscalYears: [], delayMs: 20 });
+    nc.install();
+    const a = invoiceObject("in_fy_a", { number: "FY-A" }) as unknown as Stripe.Invoice;
+    const b = invoiceObject("in_fy_b", { number: "FY-B" }) as unknown as Stripe.Invoice;
+    const results = await Promise.allSettled([
+      syncInvoicePaid(stripeClient, a, logger),
+      syncInvoicePaid(stripeClient, b, logger),
+    ]);
+    for (const r of results) {
+      if (r.status === "rejected") expect(r.reason).toBeInstanceOf(LedgerSyncBusyError);
+    }
+    // Stripe retries whichever delivery was turned away.
+    await syncInvoicePaid(stripeClient, a, logger);
+    await syncInvoicePaid(stripeClient, b, logger);
+    expect(nc.fiscalYears).toHaveLength(1);
+    expect(nc.incomes).toHaveLength(2);
+  });
+
   it("releases the lock after a failure so the retry can proceed", async () => {
     nc.failNext("POST", "/fiscal-years/1/incomes");
     await expect(syncInvoicePaid(stripeClient, invoice, logger)).rejects.toThrow();

@@ -285,6 +285,85 @@ describe("syncInvoicePaid", () => {
     expect(nc.calls.some((c) => c.url.includes("stripe_invoice_id=in_test123"))).toBe(true);
   });
 
+  it("finds an earlier booking when the server caps the page size below ours", async () => {
+    useNextcloud({ maxPageSize: 50 });
+    enableSync();
+    for (let i = 0; i < 120; i++) {
+      nc.incomes.push({ id: 1000 + i, description: `Stripe invoice in_other${i}; x` });
+    }
+    nc.incomes.push({ id: 5000, description: "Stripe invoice in_test123; x; paid via card" });
+    for (let i = 0; i < 120; i++) {
+      nc.expenses.push({ id: 7000 + i, description: `Processing fee for Stripe invoice in_o${i}` });
+    }
+    nc.expenses.push({ id: 9000, description: "Processing fee for Stripe invoice in_test123 (x)" });
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    expect(nc.posts("/incomes")).toHaveLength(0);
+    expect(nc.posts("/expenses")).toHaveLength(0);
+  });
+
+  it("finds the register object when the server caps the page size", async () => {
+    useNextcloud({ maxPageSize: 50 });
+    enableSync();
+    for (let i = 0; i < 120; i++) {
+      nc.register.push({ id: `old-${i}`, stripe_invoice_id: `in_old${i}`, status: "paid" });
+    }
+    nc.register.push({ id: "mine", stripe_invoice_id: "in_test123", status: "open" });
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    expect(nc.register).toHaveLength(121);
+  });
+
+  it("throws, booking nothing, when a real payment has no balance transaction, then books the fee on retry", async () => {
+    enableSync();
+    const noBalanceTx = fakeStripe({
+      paymentIntents: {
+        retrieve: vi.fn(async () => ({
+          latest_charge: { balance_transaction: null, payment_method_details: { type: "card" } },
+        })),
+      },
+    });
+    await expect(syncInvoicePaid(noBalanceTx, invoice(), logger)).rejects.toThrow(
+      /balance transaction not available/
+    );
+    expect(nc.posts("/incomes")).toHaveLength(0);
+    expect(nc.expenses).toHaveLength(0);
+
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    expect(nc.incomes).toHaveLength(1);
+    expect(nc.expenses).toHaveLength(1);
+  });
+
+  it("throws when the payment intent has no charge yet", async () => {
+    enableSync();
+    const noCharge = fakeStripe({
+      paymentIntents: { retrieve: vi.fn(async () => ({ latest_charge: null })) },
+    });
+    await expect(syncInvoicePaid(noCharge, invoice(), logger)).rejects.toThrow();
+    expect(nc.calls).toHaveLength(0);
+  });
+
+  it("reads Stripe before taking the lock, so a busy invoice holds no connection while waiting on Stripe", async () => {
+    enableSync();
+    lockState.busy = true;
+    const stripeClient = fakeStripe();
+    await expect(syncInvoicePaid(stripeClient, invoice(), logger)).rejects.toBeInstanceOf(
+      LedgerSyncBusyError
+    );
+    expect(stripeClient.invoicePayments.list).toHaveBeenCalled();
+    expect(nc.calls).toHaveLength(0);
+  });
+
+  it("falls back to the event time, not the clock, when paid_at is missing", async () => {
+    enableSync();
+    await syncInvoicePaid(
+      fakeStripe(),
+      invoice({ status_transitions: { paid_at: null } }),
+      logger,
+      null,
+      PAID_AT_2026
+    );
+    expect(nc.incomes[0].bookedAt).toBe(PAID_AT_2026);
+  });
+
   it("creates the fiscal year when none covers the payment date", async () => {
     useNextcloud({ fiscalYears: [] });
     enableSync();
@@ -366,12 +445,16 @@ describe("syncInvoiceLifecycle", () => {
     expect(logger.warn).toHaveBeenCalled();
   });
 
-  it("logs and skips when the invoice is busy", async () => {
+  it("logs a warning and skips when the invoice is busy", async () => {
     enableSync();
     lockState.busy = true;
     await expect(
       syncInvoiceLifecycle(invoice({ status: "open" }), logger)
     ).resolves.toBeUndefined();
     expect(nc.calls).toHaveLength(0);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ invoiceId: "in_test123" }),
+      expect.stringContaining("dropped")
+    );
   });
 });

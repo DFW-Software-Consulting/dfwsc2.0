@@ -23,6 +23,8 @@ export interface FakeLedgerOptions {
   fiscalYears?: Array<typeof FY_2026>;
   /** Ignore limit/offset/page and filters, like a server that does not know them. */
   ignorePaging?: boolean;
+  /** Cap the page size below what the caller asks for, like a server with a smaller maximum. */
+  maxPageSize?: number;
   /** Pause before answering a request, to interleave concurrent deliveries. */
   delayMs?: number;
 }
@@ -64,9 +66,14 @@ export class FakeLedgerNextcloud {
     return new Response(JSON.stringify(payload), { status });
   }
 
+  private limitOf(params: URLSearchParams, fallback: number): number {
+    const asked = Number(params.get("limit") ?? fallback) || 1;
+    return Math.min(asked, this.options.maxPageSize ?? asked);
+  }
+
   private page<T extends Row>(rows: T[], params: URLSearchParams): T[] {
     if (this.options.ignorePaging) return rows;
-    const limit = Number(params.get("limit") ?? rows.length);
+    const limit = this.limitOf(params, rows.length);
     const offset = params.has("page")
       ? (Number(params.get("page")) - 1) * limit
       : Number(params.get("offset") ?? 0);
@@ -114,7 +121,7 @@ export class FakeLedgerNextcloud {
           filter && !this.options.ignorePaging
             ? this.register.filter((o) => o.stripe_invoice_id === filter)
             : this.register;
-        const limit = Number(url.searchParams.get("limit") ?? matching.length) || 1;
+        const limit = this.limitOf(url.searchParams, matching.length);
         return this.json({
           results: this.page(matching, url.searchParams),
           pages: Math.max(1, Math.ceil(matching.length / limit)),

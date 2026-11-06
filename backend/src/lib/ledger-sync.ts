@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import type Stripe from "stripe";
 import { withStripeCircuit } from "./circuit-breakers";
+import { ConcurrencyLimitError, ConcurrencyLimiter } from "./concurrency-limiter";
 import { withMirrorLock } from "./mirror-table";
 import { getNextcloudConfig, ledgerSyncRequest, type NextcloudConfig } from "./nextcloud";
 
@@ -61,6 +62,26 @@ const FISCAL_TZ_OFFSET = "-06:00";
 const PAGE_SIZE = 200;
 const MAX_PAGES = 50;
 
+// Each sync pins a pg connection (the advisory lock) for its Nextcloud round trips, so at most a
+// few run at once per process and the rest wait briefly; a call that cannot get a slot is told to
+// retry. The pool has 10 connections; a fiscal-year creation briefly holds a second one.
+const ledgerSyncLimiter = new ConcurrencyLimiter({
+  maxConcurrent: 3,
+  maxWaiting: 20,
+  maxWaitMs: 10_000,
+});
+
+async function underLedgerLimit<T>(invoiceId: string, work: () => Promise<T>): Promise<T> {
+  try {
+    return await ledgerSyncLimiter.run(work);
+  } catch (err) {
+    if (err instanceof ConcurrencyLimitError) {
+      throw new LedgerSyncBusyError(invoiceId);
+    }
+    throw err;
+  }
+}
+
 export function resolveLedgerSyncConfig(
   env: NodeJS.ProcessEnv = process.env
 ): LedgerSyncConfig | null {
@@ -110,18 +131,22 @@ async function ncJson<T>(
 
 /**
  * Walks a paginated listing page by page until `matches` finds an item. Stops when a page is
- * short, empty, repeats only items already seen (the server ignored the paging parameters and
- * returned everything), or the server reports the last page. Running out of MAX_PAGES is never
+ * empty, repeats only items already seen (the server ignored the paging parameters and returned
+ * everything), or the server reports the last page. A short page is NOT the last page: a server
+ * may cap `limit` below ours. Running out of MAX_PAGES is never
  * read as "not found": that would book twice.
  */
 async function findInPages<T extends { id: string | number }>(
-  fetchPage: (page: number) => Promise<{ items: T[]; pages?: number }>,
+  fetchPage: (page: number, offset: number) => Promise<{ items: T[]; pages?: number }>,
   matches: (item: T) => boolean,
   label: string
 ): Promise<T | undefined> {
   const seen = new Set<string | number>();
+  let received = 0;
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const { items, pages } = await fetchPage(page);
+    // The offset counts what the server actually returned, so a smaller page cap loses nothing.
+    const { items, pages } = await fetchPage(page, received);
+    received += items.length;
     const found = items.find(matches);
     if (found) {
       return found;
@@ -130,7 +155,7 @@ async function findInPages<T extends { id: string | number }>(
     for (const item of fresh) {
       seen.add(item.id);
     }
-    if (fresh.length === 0 || items.length < PAGE_SIZE || (pages !== undefined && page >= pages)) {
+    if (items.length === 0 || fresh.length === 0 || (pages !== undefined && page >= pages)) {
       return undefined;
     }
   }
@@ -153,30 +178,58 @@ interface LedgerEntry {
   amountCents: number;
 }
 
-async function ensureFiscalYear(cfg: LedgerSyncConfig, paidAtSec: number): Promise<FiscalYear> {
-  const years = await ncJson<FiscalYear[]>(
+async function listFiscalYears(cfg: LedgerSyncConfig): Promise<FiscalYear[]> {
+  return ncJson<FiscalYear[]>(
     cfg,
     "GET",
     `${NEXTLEDGER_API}/fiscal-years`,
     "ledger.fiscal-years.list"
   );
-  const match = years.find((fy) => fy.dateStart <= paidAtSec && paidAtSec <= fy.dateEnd);
+}
+
+const coveringYear = (years: FiscalYear[], paidAtSec: number) =>
+  years.find((fy) => fy.dateStart <= paidAtSec && paidAtSec <= fy.dateEnd);
+
+async function ensureFiscalYear(
+  cfg: LedgerSyncConfig,
+  paidAtSec: number,
+  logger: FastifyBaseLogger,
+  invoiceId: string
+): Promise<FiscalYear> {
+  const match = coveringYear(await listFiscalYears(cfg), paidAtSec);
   if (match) {
     return match;
   }
   const year = new Date(paidAtSec * 1000).getUTCFullYear();
-  return ncJson<FiscalYear>(
-    cfg,
-    "POST",
-    `${NEXTLEDGER_API}/fiscal-years`,
-    "ledger.fiscal-years.create",
-    {
-      name: `FY ${year}`,
-      dateStart: Math.floor(Date.parse(`${year}-01-01T00:00:00${FISCAL_TZ_OFFSET}`) / 1000),
-      dateEnd: Math.floor(Date.parse(`${year}-12-31T23:59:59${FISCAL_TZ_OFFSET}`) / 1000),
-      isActive: false,
+  // The per-invoice lock does not stop two different invoices from creating the same year, so
+  // creation is serialized per year, and the list is read again once the lock is held.
+  const outcome = await withMirrorLock<FiscalYear | "busy">(
+    `ledger_sync:fiscal-year:${year}`,
+    logger,
+    "busy",
+    async () => {
+      const again = coveringYear(await listFiscalYears(cfg), paidAtSec);
+      if (again) {
+        return again;
+      }
+      return ncJson<FiscalYear>(
+        cfg,
+        "POST",
+        `${NEXTLEDGER_API}/fiscal-years`,
+        "ledger.fiscal-years.create",
+        {
+          name: `FY ${year}`,
+          dateStart: Math.floor(Date.parse(`${year}-01-01T00:00:00${FISCAL_TZ_OFFSET}`) / 1000),
+          dateEnd: Math.floor(Date.parse(`${year}-12-31T23:59:59${FISCAL_TZ_OFFSET}`) / 1000),
+          isActive: false,
+        }
+      );
     }
   );
+  if (outcome === "busy") {
+    throw new LedgerSyncBusyError(invoiceId);
+  }
+  return outcome;
 }
 
 /** True when `description` names this exact invoice id (not another id that it prefixes). */
@@ -196,11 +249,11 @@ function findBookedEntry(
   invoiceId: string
 ): Promise<LedgerEntry | undefined> {
   return findInPages<LedgerEntry>(
-    async (page) => {
+    async (_page, offset) => {
       const items = await ncJson<LedgerEntry[]>(
         cfg,
         "GET",
-        `${NEXTLEDGER_API}/fiscal-years/${fiscalYearId}/${kind}?limit=${PAGE_SIZE}&offset=${(page - 1) * PAGE_SIZE}`,
+        `${NEXTLEDGER_API}/fiscal-years/${fiscalYearId}/${kind}?limit=${PAGE_SIZE}&offset=${offset}`,
         `ledger.${kind}.list`
       );
       return { items: Array.isArray(items) ? items : [] };
@@ -217,8 +270,8 @@ interface PaymentDetails {
 
 /**
  * Resolve the charge behind a paid invoice and read the exact Stripe fee off
- * its balance transaction. Invoices marked paid out-of-band have no payment
- * objects and book with a zero fee.
+ * its balance transaction. Only invoices with no payment objects at all (marked paid
+ * out-of-band, or $0) book with a zero fee; a real payment without a balance transaction throws.
  */
 async function resolvePaymentDetails(
   stripeClient: Stripe,
@@ -255,11 +308,12 @@ async function resolvePaymentDetails(
 
   const balanceTx =
     charge && typeof charge.balance_transaction === "object" ? charge.balance_transaction : null;
-  if (!balanceTx) {
-    logger.warn(
-      { invoiceId },
-      "No balance transaction found for paid invoice; booking income without a fee expense."
-    );
+  const chargeBacked = paid.payment.type === "payment_intent" || paid.payment.type === "charge";
+  if (!balanceTx && chargeBacked) {
+    // A real payment whose fee cannot be read yet: booking income with a zero fee would lose the
+    // fee for good, so fail and let Stripe retry. (No payment objects at all returned above.)
+    logger.warn({ invoiceId }, "No balance transaction found for a paid invoice payment.");
+    throw new Error("Ledger sync: balance transaction not available for a paid invoice payment");
   }
   return {
     feeCents: balanceTx?.fee ?? 0,
@@ -381,14 +435,14 @@ async function upsertRegisterInvoice(
 
 async function bookPaidInvoice(
   cfg: LedgerSyncConfig,
-  stripeClient: Stripe,
   invoice: Stripe.Invoice,
   invoiceId: string,
+  paidAt: number,
+  payment: PaymentDetails,
   logger: FastifyBaseLogger
 ): Promise<void> {
-  const paidAt = invoice.status_transitions?.paid_at ?? Math.floor(Date.now() / 1000);
-  const { feeCents, paymentMethod } = await resolvePaymentDetails(stripeClient, invoiceId, logger);
-  const fiscalYear = await ensureFiscalYear(cfg, paidAt);
+  const { feeCents, paymentMethod } = payment;
+  const fiscalYear = await ensureFiscalYear(cfg, paidAt, logger, invoiceId);
   const label = invoiceLabel(invoice);
 
   if (await findBookedEntry(cfg, fiscalYear.id, "incomes", invoiceId)) {
@@ -455,7 +509,8 @@ export async function syncInvoicePaid(
   stripeClient: Stripe,
   invoice: Stripe.Invoice,
   logger: FastifyBaseLogger,
-  connectedAccount?: string | null
+  connectedAccount?: string | null,
+  eventCreated?: number
 ): Promise<void> {
   const cfg = resolveOrWarn(logger);
   if (!cfg) {
@@ -474,14 +529,20 @@ export async function syncInvoicePaid(
     return;
   }
 
-  const outcome = await withMirrorLock(
-    `ledger_sync:${invoiceId}`,
-    logger,
-    "busy" as "busy" | "done",
-    async () => {
-      await bookPaidInvoice(cfg, stripeClient, invoice, invoiceId, logger);
+  // The booking date must be the same on every retry, or the lookup would search another fiscal
+  // year: paid_at, else the event's own time (never the clock).
+  const paidAt =
+    invoice.status_transitions?.paid_at ?? eventCreated ?? Math.floor(Date.now() / 1000);
+
+  // Read from Stripe before taking the lock, so no database connection waits on Stripe. Safe to
+  // reuse under the lock: a paid invoice's payment and its fee never change.
+  const payment = await resolvePaymentDetails(stripeClient, invoiceId, logger);
+
+  const outcome = await underLedgerLimit(invoiceId, () =>
+    withMirrorLock(`ledger_sync:${invoiceId}`, logger, "busy" as "busy" | "done", async () => {
+      await bookPaidInvoice(cfg, invoice, invoiceId, paidAt, payment, logger);
       return "done";
-    }
+    })
   );
   if (outcome === "busy") {
     throw new LedgerSyncBusyError(invoiceId);
@@ -516,17 +577,19 @@ export async function syncInvoiceLifecycle(
     return;
   }
   try {
-    const outcome = await withMirrorLock(
-      `ledger_sync:${invoiceId}`,
-      logger,
-      "busy" as "busy" | "done",
-      async () => {
+    const outcome = await underLedgerLimit(invoiceId, () =>
+      withMirrorLock(`ledger_sync:${invoiceId}`, logger, "busy" as "busy" | "done", async () => {
         await upsertRegisterInvoice(cfg, invoice, "", logger);
         return "done";
-      }
+      })
     );
     if (outcome === "busy") {
-      logger.warn({ invoiceId }, "Ledger sync: invoice busy; skipped register status update.");
+      // Dropped on purpose: invoice.paid writes the final status. A dropped voided or
+      // uncollectible event can leave the register at "open".
+      logger.warn(
+        { invoiceId, status: invoice.status },
+        "Ledger sync: invoice busy; dropped a register status update."
+      );
     }
   } catch (err) {
     logger.warn(

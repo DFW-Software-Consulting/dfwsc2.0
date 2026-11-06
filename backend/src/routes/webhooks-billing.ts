@@ -63,7 +63,7 @@ async function syncLedger(event: Stripe.Event, logger: FastifyBaseLogger): Promi
   const invoice = event.data.object as Stripe.Invoice;
   switch (event.type) {
     case "invoice.paid":
-      await syncInvoicePaid(stripe, invoice, logger, event.account);
+      await syncInvoicePaid(stripe, invoice, logger, event.account, event.created);
       return;
     case "invoice.finalized":
     case "invoice.payment_failed":
