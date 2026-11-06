@@ -55,7 +55,7 @@ function DemoCard({ demo }) {
       </div>
       <div className="demo-card-body">
         <p className="studio-mini-label">{demo.industry}</p>
-        <h2>{demo.name}</h2>
+        <h2 className="demo-card-title">{demo.name}</h2>
         <p>{demo.description}</p>
         <a
           className="studio-text-link"

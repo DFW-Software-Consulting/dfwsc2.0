@@ -1,7 +1,6 @@
-import type { FastifyBaseLogger, FastifyInstance } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type Stripe from "stripe";
 import { markCustomerDirty } from "../lib/billing-snapshot";
-import { syncInvoiceLifecycle, syncInvoicePaid } from "../lib/ledger-sync";
 import { retryErrorFields, safeErrorFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import {
@@ -16,10 +15,7 @@ import {
 //
 // An event never carries data into the snapshot: the Customer is looked up in billing_customers
 // and its snapshot is only marked dirty; the refresh re-reads Stripe (lib/billing-snapshot.ts).
-// Read-only toward Stripe: this route makes no Stripe write. Its only Stripe reads are the
-// invoicePayments/paymentIntents lookups of the optional ledger sync (lib/ledger-sync.ts), which
-// books a paid invoice into Nextcloud and runs only when LEDGER_SYNC_ENABLED=true. That sync is
-// the one place the event's invoice payload is used, and only for invoices of the platform account.
+// Read-only toward Stripe: this route makes no Stripe API call (it only verifies signatures).
 
 export const BILLING_WEBHOOK_EVENTS = [
   "invoice.created",
@@ -54,26 +50,6 @@ function customerIdOf(event: Stripe.Event): string | null {
   const customer = (event.data.object as { customer?: string | { id?: string } | null }).customer;
   if (typeof customer === "string") return customer;
   return customer && typeof customer.id === "string" ? customer.id : null;
-}
-
-// Nextcloud ledger sync. `invoice.paid` books money, so its failure propagates: the claim is
-// released and Stripe retries (the booking is idempotent and serialized per invoice). The other
-// invoice events only mirror a status into the register and never fail the webhook.
-async function syncLedger(event: Stripe.Event, logger: FastifyBaseLogger): Promise<void> {
-  const invoice = event.data.object as Stripe.Invoice;
-  switch (event.type) {
-    case "invoice.paid":
-      await syncInvoicePaid(stripe, invoice, logger, event.account, event.created);
-      return;
-    case "invoice.finalized":
-    case "invoice.payment_failed":
-    case "invoice.voided":
-    case "invoice.marked_uncollectible":
-      await syncInvoiceLifecycle(invoice, logger, event.account);
-      return;
-    default:
-      return;
-  }
 }
 
 export default async function billingWebhookRoute(fastify: FastifyInstance) {
@@ -115,7 +91,6 @@ export default async function billingWebhookRoute(fastify: FastifyInstance) {
       try {
         const customerId = customerIdOf(event);
         const known = customerId ? await markCustomerDirty(customerId) : false;
-        await syncLedger(event, fastify.log);
         fastify.log.info(
           { eventId: event.id, eventType: event.type, known },
           "Billing webhook handled."
