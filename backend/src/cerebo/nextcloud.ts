@@ -1,13 +1,13 @@
 import {
+  cereboRequest,
   getNextcloudConfig,
   NextcloudCircuitOpenError,
   type NextcloudConfig,
   NextcloudHttpError,
-  nextcloudRequest,
 } from "../lib/nextcloud";
 
-// Read-only Nextcloud access for Cerebo through the shared service account and
-// breaker in lib/nextcloud.ts. Nextcloud is optional: without credentials Cerebo
+// Read-only Nextcloud access for Cerebo through the shared service account in
+// lib/nextcloud.ts, on a breaker of its own so a failing Deck cannot lock out admin login. Nextcloud is optional: without credentials Cerebo
 // still serves its own records and marks Nextcloud data "not_configured".
 
 export type Unavailable = { status: "not_configured" } | { status: "unavailable"; reason: string };
@@ -20,7 +20,7 @@ function configOrUnavailable(): { config: NextcloudConfig } | Unavailable {
 }
 
 async function getJson(config: NextcloudConfig, path: string, label: string): Promise<unknown> {
-  const res = await nextcloudRequest(config, { method: "GET", path, label });
+  const res = await cereboRequest(config, { method: "GET", path, label });
   return JSON.parse(res.body) as unknown;
 }
 

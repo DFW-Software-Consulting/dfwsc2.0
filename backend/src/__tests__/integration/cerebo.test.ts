@@ -18,7 +18,11 @@ import { summarizeDeckStacks } from "../../cerebo/nextcloud";
 import { auditEvents, milestones, projects, resourceLinks } from "../../cerebo/schema";
 import { db } from "../../db/client";
 import { clients } from "../../db/schema";
-import { resetNextcloudBreakerForTests } from "../../lib/nextcloud";
+import {
+  getNextcloudBreakerState,
+  openCereboBreakerForTests,
+  resetNextcloudBreakerForTests,
+} from "../../lib/nextcloud";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
 import { FakeLoginNextcloud, loginEnv } from "../helpers/fake-nextcloud-login";
@@ -345,6 +349,89 @@ describe("Cerebo API", () => {
       });
       return p;
     }
+
+    const login = (remoteAddress: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        payload: { username: "jane", password: "pw-for-jane-1234" },
+        headers: { "content-type": "application/json" },
+        remoteAddress,
+      });
+
+    function useFakeLoginNextcloud(deck: (url: string) => Promise<Response>) {
+      const fake = new FakeLoginNextcloud();
+      fake.addUser("jane", "pw-for-jane-1234", ["dfwsc-admins"]);
+      for (const [key, value] of Object.entries(loginEnv())) {
+        if (value !== undefined) process.env[key] = value;
+      }
+      const fetchMock = vi.fn(async (input: any, init?: any) =>
+        String(input).includes("/apps/deck/") ? deck(String(input)) : fake.fetch(input, init)
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    it("keeps admin login working while the Cerebo breaker is open", async () => {
+      useFakeLoginNextcloud(async () => Response.json([]));
+      const p = await projectWithBoard(`${Date.now()}4`);
+      openCereboBreakerForTests();
+
+      const res = await call("GET", `/projects/${p.id}`);
+      expect(res.json().deck[0].status).toBe("unavailable");
+
+      const signedIn = await login("198.51.100.78");
+      expect(signedIn.statusCode).toBe(200);
+      expect(getNextcloudBreakerState().open).toBe(false);
+    });
+
+    it("does not open the login breaker when many Deck boards fail", async () => {
+      useFakeLoginNextcloud(async () => new Response("down", { status: 503 }));
+      const p = await createProject(clientA);
+      for (let i = 0; i < 8; i++) {
+        await call("POST", `/clients/${clientA}/links`, {
+          projectId: p.id,
+          kind: "deck_board",
+          externalId: `${Date.now()}${i}`,
+        });
+      }
+      const res = await call("GET", `/projects/${p.id}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.json().deck).toHaveLength(8);
+      expect(getNextcloudBreakerState().open).toBe(false);
+
+      const signedIn = await login("198.51.100.79");
+      expect(signedIn.statusCode).toBe(200);
+    });
+
+    it("calls Deck for at most three boards at a time and still returns every board", async () => {
+      let inFlight = 0;
+      let maxInFlight = 0;
+      useFakeLoginNextcloud(async () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 15));
+        inFlight -= 1;
+        return Response.json([]);
+      });
+      const p = await createProject(clientA);
+      const linkIds: string[] = [];
+      for (let i = 0; i < 8; i++) {
+        const link = await call("POST", `/clients/${clientA}/links`, {
+          projectId: p.id,
+          kind: "deck_board",
+          externalId: `${Date.now()}${i}`,
+        });
+        linkIds.push(link.json().id);
+      }
+      const res = await call("GET", `/projects/${p.id}`);
+      const deck = res.json().deck as { linkId: string; status: string }[];
+      expect(deck).toHaveLength(8);
+      expect(deck.every((d) => d.status === "ok")).toBe(true);
+      expect(deck.map((d) => d.linkId).sort()).toEqual([...linkIds].sort());
+      expect(maxInFlight).toBeGreaterThan(1);
+      expect(maxInFlight).toBeLessThanOrEqual(3);
+    });
 
     it("reports not_configured without Nextcloud credentials", async () => {
       const p = await projectWithBoard(`${Date.now()}1`);

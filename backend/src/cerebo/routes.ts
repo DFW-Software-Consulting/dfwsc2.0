@@ -92,6 +92,27 @@ function parseQuery<T extends z.ZodTypeAny>(schema: T, query: unknown, res: Fast
   return parsed.data as z.infer<T>;
 }
 
+// A project can link many boards; cap how many Deck calls run at once.
+const DECK_CONCURRENCY = 3;
+
+// Like Promise.all(items.map(fn)) but with at most `limit` calls in flight; order is kept.
+async function mapWithLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 type ClientParams = { clientId: string };
 type IdParams = { id: string };
 
@@ -138,10 +159,10 @@ const cereboRoutes: FastifyPluginAsync = async (app) => {
   // show up per board in `deck`; they never fail the request.
   app.get<{ Params: IdParams }>("/projects/:id", async (req) => {
     const project = await getProjectDetail(req.params.id);
-    const deck = await Promise.all(
-      project.links
-        .filter((link) => link.kind === "deck_board")
-        .map(async (link) => ({ linkId: link.id, ...(await getDeckBoardSummary(link.externalId)) }))
+    const deck = await mapWithLimit(
+      project.links.filter((link) => link.kind === "deck_board"),
+      DECK_CONCURRENCY,
+      async (link) => ({ linkId: link.id, ...(await getDeckBoardSummary(link.externalId)) })
     );
     return { ...project, deck };
   });
