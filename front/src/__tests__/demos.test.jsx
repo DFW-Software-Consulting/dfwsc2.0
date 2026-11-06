@@ -22,6 +22,24 @@ describe("Demos", () => {
     }
   });
 
+  it("makes the whole card one link with an accessible name, and shows the preview image", () => {
+    const { container } = renderWithProviders(<Demos />, { initialEntries: ["/demos"] });
+    const first = demos[0];
+    const link = screen.getByRole("link", {
+      name: `View ${first.name} live demo (opens in a new tab)`,
+    });
+    expect(link).toContainElement(screen.getByRole("heading", { name: first.name }));
+    expect(link.querySelectorAll("a, button")).toHaveLength(0);
+    const img = link.querySelector("img");
+    expect(img).toHaveAttribute("src", first.image);
+    expect(img).toHaveAttribute("width");
+    expect(img).toHaveAttribute("height");
+    expect(img).toHaveAttribute("decoding", "async");
+    expect(container.querySelectorAll(".demo-card img").length).toBeGreaterThanOrEqual(
+      demos.length
+    );
+  });
+
   it("links back to the contact form", () => {
     renderWithProviders(<Demos />, { initialEntries: ["/demos"] });
     expect(screen.getByRole("link", { name: /start a project/i })).toHaveAttribute("href", "/");

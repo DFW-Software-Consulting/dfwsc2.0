@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useSpotlight } from "../components/motion/useTilt.js";
 import PageHero from "../components/PageHero.jsx";
 import { demos } from "../content/demos.js";
 import "../styles/studio.css";
@@ -43,30 +44,69 @@ function DemoIcon({ name }) {
   );
 }
 
-function DemoCard({ demo }) {
+// Faux address bar text: host plus path, without the scheme or trailing slash.
+function displayUrl(url) {
+  const { host, pathname } = new URL(url);
+  return `${host}${pathname}`.replace(/\/$/, "");
+}
+
+// The whole card is one link (no nested interactive elements). Its aria-label replaces the
+// content as the accessible name, so the preview images are decorative (alt="").
+function DemoCard({ demo, first }) {
+  const spotlight = useSpotlight();
+  const label = `View ${demo.name} live demo (opens in a new tab)`;
   return (
-    <li className="demo-card">
-      <div className="demo-card-media">
-        {demo.image ? (
-          <img src={demo.image} alt="" loading="lazy" />
-        ) : (
-          <DemoIcon name={demo.icon} />
-        )}
-      </div>
-      <div className="demo-card-body">
-        <p className="studio-mini-label">{demo.industry}</p>
-        <h2 className="demo-card-title">{demo.name}</h2>
-        <p>{demo.description}</p>
-        <a
-          className="studio-text-link"
-          href={demo.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`View live demo: ${demo.name} (opens in a new tab)`}
-        >
-          View live demo <span aria-hidden="true">↗</span>
-        </a>
-      </div>
+    <li>
+      <a
+        className="demo-card studio-spot studio-lift"
+        href={demo.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={label}
+        {...spotlight}
+      >
+        <div className="demo-card-frame" aria-hidden="true">
+          <div className="demo-card-bar">
+            <span className="demo-card-dots" />
+            <span className="demo-card-address">{displayUrl(demo.url)}</span>
+          </div>
+          <div className="demo-card-media">
+            {demo.image ? (
+              <>
+                <img
+                  src={demo.image}
+                  alt=""
+                  width="1200"
+                  height="750"
+                  loading={first ? "eager" : "lazy"}
+                  decoding="async"
+                />
+                {demo.scrollImage && (
+                  <img
+                    className="demo-card-scroll"
+                    src={demo.scrollImage}
+                    alt=""
+                    width="900"
+                    height="2250"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                )}
+              </>
+            ) : (
+              <DemoIcon name={demo.icon} />
+            )}
+          </div>
+        </div>
+        <div className="demo-card-body">
+          <p className="studio-mini-label">{demo.industry}</p>
+          <h2 className="demo-card-title">{demo.name}</h2>
+          <p>{demo.description}</p>
+          <span className="demo-card-cta">
+            View live demo <span aria-hidden="true">↗</span>
+          </span>
+        </div>
+      </a>
     </li>
   );
 }
@@ -80,8 +120,8 @@ export default function Demos() {
       </PageHero>
       <section className="studio-section demo-section page-wrap" aria-label="Demo sites">
         <ul className="demo-grid">
-          {demos.map((demo) => (
-            <DemoCard key={demo.url} demo={demo} />
+          {demos.map((demo, i) => (
+            <DemoCard key={demo.url} demo={demo} first={i === 0} />
           ))}
         </ul>
       </section>
