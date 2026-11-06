@@ -830,3 +830,47 @@ export const connectInvoiceSends = pgTable(
     ),
   })
 );
+
+// "Stripe ID write-back" (STRIPE_ID_WRITEBACK=true only, lib/stripe-id-writeback-sync.ts): the
+// billing Customer id written onto the client's own Nextcloud records. One row per target:
+// 'project_row' (Client Projects row, keyed by client code) or 'contact_card' (contact card,
+// keyed by contact UID). desired_hash is what the database wants now; written_hash is what was
+// last confirmed in Nextcloud. Only a difference (or the daily verify) touches Nextcloud.
+// last_error is a PII-free code, never a message.
+export const stripeIdWritebacks = pgTable(
+  "stripe_id_writebacks",
+  {
+    target: text("target", { enum: ["project_row", "contact_card"] }).notNull(),
+    targetKey: text("target_key").notNull(),
+    ncRowId: integer("nc_row_id"),
+    addressbook: text("addressbook"),
+    cardHref: text("card_href"),
+    desiredHash: text("desired_hash"),
+    writtenHash: text("written_hash"),
+    writtenAt: timestamp("written_at", { withTimezone: true }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    status: text("status", {
+      enum: ["ok", "not_found", "ambiguous", "read_only", "forbidden", "error"],
+    })
+      .notNull()
+      .default("ok"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.target, table.targetKey] }),
+    targetCheck: check(
+      "stripe_id_writebacks_target_check",
+      sql`${table.target} IN ('project_row', 'contact_card')`
+    ),
+    statusCheck: check(
+      "stripe_id_writebacks_status_check",
+      sql`${table.status} IN ('ok', 'not_found', 'ambiguous', 'read_only', 'forbidden', 'error')`
+    ),
+  })
+);

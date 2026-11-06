@@ -84,6 +84,10 @@ All resources can be deployed independently on Coolify while sharing the same mo
   BILLING_MIRROR=false
   # BILLING_MIRROR_SHARE_GROUPS=dfwsc-admins,managers   (default; both read-only)
   # BILLING_SWEEP_INTERVAL_MS=3600000
+  # Optional: write each billing client's Stripe Customer id onto its Client Projects row and contact card (docs/BACKEND.md section 15); off by default. Start with the dry run.
+  STRIPE_ID_WRITEBACK=false
+  # STRIPE_ID_WRITEBACK_DRY_RUN=false   (true/1/yes = log only; any unrecognised value also means dry run)
+  # STRIPE_ID_WRITEBACK_INTERVAL_MS=300000
   # Secret of the account-level Stripe webhook endpoint https://api.dfwsc.com/api/v1/webhooks/stripe-billing (docs/STRIPE.md); unset = endpoint answers 404
   # STRIPE_BILLING_WEBHOOK_SECRET=whsec_...
   # Optional: "New invoice" Nextcloud form that creates REAL Stripe invoices and plans (docs/BACKEND.md section 14); off by default.

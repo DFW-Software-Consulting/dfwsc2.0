@@ -243,6 +243,7 @@ export class FakeOnboardingNextcloud {
       ]),
     },
   ];
+  nextColumnId = 900;
   cards = new Map<string, Card>();
   /** Address books besides the configured one (own or shared with the account). */
   otherBooks = new Map<
@@ -637,6 +638,17 @@ export class FakeOnboardingNextcloud {
     if (method === "GET" && columns) {
       const cols = this.columns[Number(columns[1])];
       return cols ? this.json(cols) : this.json({ message: "not found" }, 404);
+    }
+    if (method === "POST" && columns) {
+      const tableId = Number(columns[1]);
+      const cols = this.columns[tableId];
+      if (!cols) return this.json({ message: "not found" }, 404);
+      const body = JSON.parse(req.body) as Record<string, unknown>;
+      const column = { ...body, id: this.nextColumnId++ } as Record<string, unknown> & {
+        id: number;
+      };
+      cols.push(column);
+      return this.json(column);
     }
     const tableRows = new RegExp(`^${TABLES}/tables/(\\d+)/rows$`).exec(path);
     if (tableRows) {
