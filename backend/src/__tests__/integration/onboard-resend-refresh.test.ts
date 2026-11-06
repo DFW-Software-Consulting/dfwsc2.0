@@ -407,7 +407,7 @@ describe("Onboard Resend + Connect Refresh", () => {
       it("reads a NULL status live, stores it and short-circuits when it is active", async () => {
         const id = await seedLive(null);
         (stripe.accounts.retrieve as any).mockResolvedValueOnce({
-          capabilities: { card_payments: "active" },
+          capabilities: { card_payments: "active", us_bank_account_ach_payments: "pending" },
         });
         const res = await resend(id);
         expect(res.statusCode).toBe(200);
@@ -415,6 +415,7 @@ describe("Onboard Resend + Connect Refresh", () => {
         expect(await tokenCount(id)).toBe(0);
         const [row] = await db.select().from(clients).where(eq(clients.id, id));
         expect(row.cardPaymentsStatus).toBe("active");
+        expect(row.achPaymentsStatus).toBe("pending");
       });
 
       it("reads a NULL status live and issues a fresh link when it is inactive", async () => {
@@ -434,6 +435,7 @@ describe("Onboard Resend + Connect Refresh", () => {
         await expectUnrequestedRefusal(id);
         const [row] = await db.select().from(clients).where(eq(clients.id, id));
         expect(row.cardPaymentsStatus).toBe("unrequested");
+        expect(row.achPaymentsStatus).toBe("unrequested");
       });
 
       it("fails with 502 when the live read of a non-active status fails", async () => {

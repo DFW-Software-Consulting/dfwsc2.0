@@ -59,7 +59,11 @@ describe("Connect Callback State Validation Integration", () => {
       details_submitted: true,
       charges_enabled: true,
       payouts_enabled: true,
-      capabilities: { card_payments: "active", transfers: "active" },
+      capabilities: {
+        card_payments: "active",
+        transfers: "active",
+        us_bank_account_ach_payments: "pending",
+      },
     });
     stripe.accountLinks.create.mockResolvedValue({ url: "https://connect.stripe.com/setup/mock" });
 
@@ -157,6 +161,7 @@ describe("Connect Callback State Validation Integration", () => {
     expect(updatedClient.stripeAccountId).toBe(testStripeAccount);
     expect(updatedClient.chargesEnabled).toBe(true);
     expect(updatedClient.cardPaymentsStatus).toBe("active");
+    expect(updatedClient.achPaymentsStatus).toBe("pending");
 
     // Verify status changed to 'completed'
     [tokenRecord] = await db

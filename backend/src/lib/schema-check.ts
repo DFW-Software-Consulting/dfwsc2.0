@@ -20,6 +20,7 @@ export const REQUIRED_TABLES: TableColumns[] = [
       "status",
       "charges_enabled",
       "card_payments_status",
+      "ach_payments_status",
       "payouts_enabled",
       "details_submitted",
       "workspace",
