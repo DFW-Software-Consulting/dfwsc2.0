@@ -2,6 +2,7 @@ import { act } from "@testing-library/react";
 import { hydrateRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Disclosure from "../components/Disclosure.jsx";
 import { MotionRoot, Reveal, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
 
 const tree = (
@@ -94,5 +95,33 @@ describe("reveals when hydrating prerendered HTML", () => {
     expect(seen.filter((opacity) => opacity === "0")).toEqual([]);
     expect(container.querySelector('[data-testid="below"]').style.opacity).toBe("0");
     expect(errors.mock.calls.filter(([m]) => !String(m).includes("useLayoutEffect"))).toEqual([]);
+  });
+});
+
+describe("a Disclosure under a below-the-fold RevealGroup", () => {
+  it("stays open when the group remounts after hydration", async () => {
+    const bio = (
+      <MotionRoot>
+        <RevealGroup data-pos="below" data-testid="group">
+          <Disclosure id="bio-test" summary="Read more">
+            <p>the bio</p>
+          </Disclosure>
+        </RevealGroup>
+      </MotionRoot>
+    );
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(bio);
+    document.body.appendChild(container);
+    const before = container.querySelector("details");
+    before.open = true; // opened in the prerendered HTML, as a visitor can before hydration
+
+    await act(async () => {
+      hydrateRoot(container, bio);
+    });
+    await act(async () => {});
+
+    const after = container.querySelector("details");
+    expect(after).not.toBe(before); // the remount really happened
+    expect(after.open).toBe(true);
   });
 });
