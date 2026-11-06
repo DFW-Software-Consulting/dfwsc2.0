@@ -97,11 +97,26 @@ describe("HeroBackdrop", () => {
   it("loads the scene from a custom loader instead of the Home nodes scene", async () => {
     mockEnvironment();
     const { container } = await renderBackdrop({
-      load: async () => ({ default: () => <canvas data-testid="terrain" /> }),
+      load: async () => () => <canvas data-testid="terrain" />,
     });
     await flush();
     expect(container.querySelector('[data-testid="terrain"]')).toBeInTheDocument();
     expect(sceneLoaded).not.toHaveBeenCalled();
+  });
+
+  it("does not reload or drop the scene when re-rendered with a new inline loader", async () => {
+    mockEnvironment();
+    const first = vi.fn(async () => () => <canvas data-testid="terrain" />);
+    const { container, rerender } = await renderBackdrop({ load: first });
+    await flush();
+    const canvas = container.querySelector('[data-testid="terrain"]');
+    expect(canvas).toBeInTheDocument();
+    const second = vi.fn(async () => () => <canvas data-testid="other" />);
+    await act(async () => rerender(<HeroBackdrop load={second} />));
+    await flush();
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="terrain"]')).toBe(canvas);
   });
 
   it("never calls a custom loader when gating fails", async () => {

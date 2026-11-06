@@ -108,7 +108,6 @@ function buildTerrain({ scene, camera }, progress) {
   };
 }
 
-// fallow-ignore-next-line unused-export
 export default function TeamScene({ onUnsupported, progress }) {
   const hostRef = useRef(null);
 

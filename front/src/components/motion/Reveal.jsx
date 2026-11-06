@@ -134,12 +134,15 @@ export function RevealItem({ as = "div", y = OFFSET, x = 0, wipe, ...props }) {
 
 /** One line of a heading that rises from behind a clip mask (inside a <RevealGroup>). */
 export function MaskLine({ children }) {
+  // The trailing space keeps adjacent lines from reading as one word ("software.Real").
   return (
-    <span className="studio-mask">
-      <RevealItem as="span" y="105%">
-        {children}
-      </RevealItem>
-    </span>
+    <>
+      <span className="studio-mask">
+        <RevealItem as="span" y="105%">
+          {children}
+        </RevealItem>
+      </span>{" "}
+    </>
   );
 }
 

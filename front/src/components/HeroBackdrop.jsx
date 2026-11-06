@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Decorative hero background. The static fallback (blue glow + faint blueprint grid)
 // always renders. The three.js scene is a separate lazy chunk that is only requested
@@ -34,15 +34,20 @@ function whenIdle(callback) {
 }
 
 // Scene loaders. Each is a dynamic import so every scene is its own lazy chunk.
-const loadNodes = () => import("./HeroScene.jsx");
-export const loadTerrain = () => import("./TeamScene.jsx");
+const loadNodes = () => import("./HeroScene.jsx").then((mod) => mod.default);
+export const loadTerrain = () => import("./TeamScene.jsx").then((mod) => mod.default);
 
 /**
  * `progress`: optional MotionValue (0..1) of the hero scrolling out; the scene drifts with it.
- * `load`: returns the scene module (default: Home's node field). Must be a stable reference.
+ * `load`: resolves to the scene component (default: Home's node field).
  */
 export default function HeroBackdrop({ progress, load = loadNodes }) {
   const [Scene, setScene] = useState(null);
+  // Held in a ref so an inline `load` neither re-runs the gating effect nor disposes the scene.
+  const loadRef = useRef(load);
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
   const dropScene = useCallback(() => setScene(null), []);
 
   useEffect(() => {
@@ -64,8 +69,8 @@ export default function HeroBackdrop({ progress, load = loadNodes }) {
         if (webgl === undefined) webgl = hasWebGL();
         if (!webgl) return;
         try {
-          const mod = await load();
-          if (!cancelled && matches(WIDE) && !matches(REDUCED)) setScene(() => mod.default);
+          const Component = await loadRef.current();
+          if (!cancelled && matches(WIDE) && !matches(REDUCED)) setScene(() => Component);
         } catch {
           // Chunk failed to load: keep the static fallback.
         }
@@ -81,7 +86,7 @@ export default function HeroBackdrop({ progress, load = loadNodes }) {
       wide.removeEventListener("change", evaluate);
       reduced.removeEventListener("change", evaluate);
     };
-  }, [load]);
+  }, []);
 
   return (
     <div className="studio-backdrop" aria-hidden="true" data-scene={Scene ? "3d" : "static"}>

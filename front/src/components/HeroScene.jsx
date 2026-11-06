@@ -170,7 +170,6 @@ function buildNodes({ scene }, progress) {
   };
 }
 
-// fallow-ignore-next-line unused-export
 export default function HeroScene({ onUnsupported, progress }) {
   const hostRef = useRef(null);
 

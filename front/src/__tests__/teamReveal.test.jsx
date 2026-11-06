@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import { MotionGlobalConfig } from "motion/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Team from "../pages/Team.jsx";
 import { renderWithProviders } from "../test/renderWithProviders.jsx";
@@ -10,8 +11,11 @@ import { renderWithProviders } from "../test/renderWithProviders.jsx";
 // elements never intersect) and the real stylesheets are applied so display is computed.
 
 let style;
+let pending; // observer callbacks held until the test releases them
 
 beforeEach(() => {
+  pending = [];
+  MotionGlobalConfig.skipAnimations = true; // jump to final values, no real animation time
   window.scrollTo = vi.fn();
   style = document.createElement("style");
   style.textContent = ["../styles/studio.css", "../pages/Team.css"]
@@ -26,7 +30,7 @@ beforeEach(() => {
       }
       observe(target) {
         const boxless = getComputedStyle(target).display === "contents";
-        queueMicrotask(() =>
+        pending.push(() =>
           this.callback([{ target, isIntersecting: !boxless, intersectionRatio: boxless ? 0 : 1 }])
         );
       }
@@ -60,20 +64,31 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  MotionGlobalConfig.skipAnimations = false;
   style.remove();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("Team member reveal", () => {
-  it("reveals the card photo and copy once the card intersects", async () => {
+  it("starts hidden, then reveals the card photo and copy once the card intersects", async () => {
     renderWithProviders(<Team />, { initialEntries: ["/team"] });
     const card = screen.getByRole("heading", { name: "Jeremy Ashley" }).closest("article");
     const photo = card.querySelector("a.studio-member-photo");
+    const copy = [...card.querySelectorAll(".studio-member-copy p, .studio-member-copy h3")];
     const hidden = () =>
-      [photo, ...card.querySelectorAll(".studio-member-copy *")].filter(
+      [photo, ...copy].filter(
         (el) => el.style.opacity === "0" || el.style.clipPath.includes("100%")
       );
-    await waitFor(() => expect(hidden()).toHaveLength(0), { timeout: 4000 });
+
+    // Nothing has intersected yet: the photo is wiped shut and every copy line is transparent.
+    expect(photo.style.clipPath).toContain("100%");
+    expect(copy.length).toBeGreaterThan(0);
+    for (const el of copy) expect(el.style.opacity).toBe("0");
+
+    await act(async () => {
+      for (const fire of pending) fire();
+    });
+    await waitFor(() => expect(hidden()).toHaveLength(0));
   });
 });
