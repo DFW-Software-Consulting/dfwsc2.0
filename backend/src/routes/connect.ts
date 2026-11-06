@@ -22,6 +22,7 @@ import {
   persistPreparedClientWithOnboardingToken,
   prepareClientWithOnboardingToken,
 } from "../lib/client-factory";
+import { kickJob } from "../lib/coalesced-runner";
 import { resolveFrontendOrigin, resolveServerBaseUrl } from "../lib/config";
 import {
   AUTH_RATE_LIMIT_MAX,
@@ -996,6 +997,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
           })
           .where(eq(onboardingTokens.id, onboardingRecord.id));
       });
+      kickJob("portalMirror");
 
       return reply.redirect(
         `${redirectBase}?status=${tokenStatus === "completed" ? "completed" : "pending"}`

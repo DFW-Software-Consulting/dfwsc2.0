@@ -2,9 +2,9 @@ import { m, useScroll, useTransform } from "motion/react";
 import { createContext, useContext, useRef } from "react";
 import { useMotionAllowed } from "./useMotionAllowed.js";
 
-// Scroll-linked motion for the marketing pages: transforms and opacity only, driven by
-// scroll position (motion's useScroll + useTransform). Every helper renders a plain
-// element under reduced motion, so nothing is offset or faded there. Entrances are
+// Scroll-linked motion for the marketing pages: transforms, opacity and the process-step
+// color variable, driven by scroll position (motion's useScroll + useTransform). Every
+// helper renders a plain element under reduced motion, so nothing is offset or faded there. Entrances are
 // authored to finish (identity, opacity 1) before the block is well inside the viewport.
 
 /** Progress 0 when the element's top enters at the viewport bottom, 1 when it reaches 60% down. */
@@ -23,13 +23,15 @@ export function useSectionProgress(ref, offset = ENTER) {
   return useScroll({ target: ref, offset }).scrollYProgress;
 }
 
-// fx channels: { y, x, scale, rotate, opacity }, each `[inputRange, outputRange]` over 0..1.
+// fx channels: { y, x, scale, rotate, opacity, lit }, each `[inputRange, outputRange]` over 0..1.
 function useFxStyle(progress, fx) {
   const y = useTransform(progress, fx.y?.[0] ?? IN, fx.y?.[1] ?? ZERO);
   const scale = useTransform(progress, fx.scale?.[0] ?? IN, fx.scale?.[1] ?? ONE);
   const rotate = useTransform(progress, fx.rotate?.[0] ?? IN, fx.rotate?.[1] ?? ZERO);
   const opacity = useTransform(progress, fx.opacity?.[0] ?? IN, fx.opacity?.[1] ?? ONE);
+  const lit = useTransform(progress, fx.lit?.[0] ?? IN, fx.lit?.[1] ?? IN);
   const style = {};
+  if (fx.lit) style["--step-lit"] = lit;
   if (fx.y) style.y = y;
   if (fx.scale) style.scale = scale;
   if (fx.rotate) style.rotate = rotate;
@@ -67,15 +69,18 @@ export function ScrollGroup({ as = "div", offset = ENTER, ...props }) {
 /**
  * Staggered child of a <ScrollGroup>: slides up `y` px and fades in over a window of the
  * group's progress that starts later for higher `index`. The default windows end by 1.0
- * (the last item settles exactly when the group is 60% up the viewport). `min` raises
- * the starting opacity, and `step`/`span` override the window (the process steps).
+ * (the last item settles exactly when the group is 60% up the viewport). `step`/`span`
+ * override the window. With `colorFade`, the item does not fade in opacity at all: it
+ * drives the `--step-lit` CSS variable from 0 to 1 over the same window, and the
+ * stylesheet mixes text color between a muted and a full token (see the process grid in
+ * studio.css), so every intermediate state keeps AA contrast.
  */
 export function ScrollItem({
   as = "div",
   index = 0,
   count = 1,
   y = 48,
-  min = 0,
+  colorFade = false,
   step = 0.3 / count,
   span = 0.7,
   ...props
@@ -92,7 +97,7 @@ export function ScrollItem({
       progress={progress}
       index={index}
       y={y}
-      min={min}
+      colorFade={colorFade}
       step={step}
       span={span}
       {...props}
@@ -100,7 +105,7 @@ export function ScrollItem({
   );
 }
 
-function TrackedScrollItem({ as, progress, index, y, min, step, span, ...props }) {
+function TrackedScrollItem({ as, progress, index, y, colorFade, step, span, ...props }) {
   const allowed = useMotionAllowed();
   const start = index * step;
   const end = start + span;
@@ -111,10 +116,13 @@ function TrackedScrollItem({ as, progress, index, y, min, step, span, ...props }
           [y, 0],
         ]
       : undefined,
-    opacity: [
-      [start, start + span * 0.6],
-      [min, 1],
-    ],
+    lit: colorFade ? [[start, start + span], IN] : undefined,
+    opacity: colorFade
+      ? undefined
+      : [
+          [start, start + span * 0.6],
+          [0, 1],
+        ],
   });
   const Tag = m[as];
   return <Tag {...props} {...(allowed ? { style } : {})} />;
@@ -155,13 +163,17 @@ export function ScrollProgressBar() {
 
 const PROCESS = ["start 0.85", "end 0.6"];
 
-/** Numbered steps (`[number, title, copy]`) under a line that fills as you scroll; steps light up in turn. */
+/**
+ * Numbered steps (`[number, title, copy]`) under a line that fills as you scroll. Steps
+ * light up in turn by color, not opacity: opacity would drop text under AA contrast. The
+ * dimmest color tokens (--step-dim-*) are chosen to pass 4.5:1 in both themes.
+ */
 export function ProcessGrid({ steps }) {
   return (
     <ScrollGroup className="studio-process-grid" offset={PROCESS}>
       <ScrollLine />
       {steps.map(([number, title, copy], index) => (
-        <ScrollItem as="article" key={number} index={index} step={0.3} span={0.25} y={0} min={0.4}>
+        <ScrollItem as="article" key={number} index={index} step={0.3} span={0.25} y={0} colorFade>
           <span>{number}</span>
           <h3>{title}</h3>
           <p>{copy}</p>

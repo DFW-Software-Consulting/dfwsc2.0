@@ -4,28 +4,31 @@
 import { access, readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileFor, PUBLIC_ROUTES } from "../src/seo/meta.js";
 
-const REQUIRED = [
-  "index.html",
-  "pricing.html",
-  "team.html",
-  "privacy.html",
-  "spa.html",
-  "404.html",
-  "sitemap.xml",
-];
+const EXTRA = ["spa.html", "404.html", "sitemap.xml"];
 
 export async function verifyBuild(dir) {
-  for (const file of REQUIRED) {
+  const pages = Object.keys(PUBLIC_ROUTES).map(fileFor);
+  for (const file of [...pages, ...EXTRA]) {
     try {
       await access(join(dir, file));
     } catch {
       throw new Error(`Build check failed: ${file} is missing from ${dir}`);
     }
   }
-  const pricing = await readFile(join(dir, "pricing.html"), "utf8");
-  if (!pricing.includes("<h1")) {
-    throw new Error("Build check failed: pricing.html has no <h1>, so it was not prerendered");
+  for (const file of pages) {
+    const html = await readFile(join(dir, file), "utf8");
+    if (!html.includes("<h1")) {
+      throw new Error(`Build check failed: ${file} has no <h1>, so it was not prerendered`);
+    }
+    if (!/<link[^>]+rel="canonical"/.test(html)) {
+      throw new Error(`Build check failed: ${file} has no canonical link`);
+    }
+    // The entry CSS plus the page's own lazy-chunk CSS; without the latter the first paint is unstyled.
+    if ((html.match(/<link[^>]+rel="stylesheet"/g) ?? []).length < 2) {
+      throw new Error(`Build check failed: ${file} does not link its page stylesheet`);
+    }
   }
 }
 

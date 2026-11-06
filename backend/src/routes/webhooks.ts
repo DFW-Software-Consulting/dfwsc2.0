@@ -4,6 +4,7 @@ import type Stripe from "stripe";
 import { db } from "../db/client";
 import { clients, paymentLedger } from "../db/schema";
 import { isCircuitOpenError, isStripeBusyError, withStripeCircuit } from "../lib/circuit-breakers";
+import { kickJob } from "../lib/coalesced-runner";
 import { syncConnectInvoice } from "../lib/connect-invoice-sync";
 import { isUniqueViolation } from "../lib/errors";
 import { dbErrorFields, retryErrorFields, safeErrorFields } from "../lib/safe-error-log";
@@ -123,6 +124,7 @@ async function updateLedgerStatus(
       .update(paymentLedger)
       .set({ stripePaymentIntentId: paymentIntentIdToAttach, updatedAt: new Date() })
       .where(eq(paymentLedger.id, existing.id));
+    kickJob("portalMirror");
   };
 
   // Ordering protection: ignore stale events (same-second events use precedence).
@@ -176,6 +178,7 @@ async function updateLedgerStatus(
   }
 
   await db.update(paymentLedger).set(updateData).where(eq(paymentLedger.id, existing.id));
+  kickJob("portalMirror");
 }
 
 // The PaymentIntent id carried by a Checkout Session event, when present as a
@@ -286,6 +289,7 @@ async function syncAccountFromStripe(accountId: string, logger: FastifyBaseLogge
       updatedAt: new Date(),
     })
     .where(eq(clients.stripeAccountId, account.id));
+  kickJob("portalMirror");
 }
 
 async function processEvent(event: Stripe.Event, logger: FastifyBaseLogger): Promise<void> {

@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../db/client";
 import { billingCustomers, clientOnboardingSubmissions, stripeIdWritebacks } from "../db/schema";
+import { createCoalescedRunner, kickJob, registerKickable } from "./coalesced-runner";
 import {
   AuthBackoff,
   intVar,
@@ -172,7 +173,6 @@ let lastVerifyAt = 0;
 let lastLoggedProblem: string | null = null;
 const loggedWarnings = new Set<string>();
 let columnCreateAttempted = false;
-let activeTrigger: (() => void) | null = null;
 const authBackoff = new AuthBackoff();
 
 export function resetStripeIdWritebackStateForTests() {
@@ -187,7 +187,7 @@ export function resetStripeIdWritebackStateForTests() {
 
 /** Asks the running reconciler for a cycle now; a no-op when the flag is off. */
 export function triggerStripeIdWriteback(): void {
-  activeTrigger?.();
+  kickJob("stripeIdWriteback");
 }
 
 function logProblemOnce(
@@ -836,31 +836,17 @@ export function startStripeIdWriteback(
     return null;
   }
 
-  let running: Promise<unknown> | null = null;
-  let again = false;
-  let stopped = false;
-  const run = () => {
-    again = false;
-    running = runStripeIdWritebackCycle({ logger, env })
-      .catch((error: unknown) => {
-        logger.error({ errorName: (error as Error)?.name }, "Stripe ID write-back cycle crashed.");
-      })
-      .finally(() => {
-        running = null;
-        if (again && !stopped) run();
-      });
-  };
-  const trigger = () => {
-    if (stopped) return;
-    if (running) {
-      again = true;
-      return;
-    }
-    run();
-  };
+  // No debounce: a billing_customers link is a single, rare event.
+  const runner = createCoalescedRunner({
+    name: "stripe-id-writeback",
+    logger,
+    cycle: () => runStripeIdWritebackCycle({ logger, env }),
+    isBusy: (r) => (r as StripeIdWritebackResult).status === "busy",
+  });
+  const { trigger } = runner;
+  const unregister = registerKickable("stripeIdWriteback", runner);
   const timer = setInterval(trigger, config.settings.intervalMs);
   timer.unref();
-  activeTrigger = trigger;
   trigger();
   logger.info(
     { intervalMs: config.settings.intervalMs, dryRun: config.settings.dryRun },
@@ -869,10 +855,9 @@ export function startStripeIdWriteback(
   return {
     trigger,
     async stop() {
-      stopped = true;
-      if (activeTrigger === trigger) activeTrigger = null;
+      unregister();
       clearInterval(timer);
-      while (running) await running;
+      await runner.stop();
     },
   };
 }

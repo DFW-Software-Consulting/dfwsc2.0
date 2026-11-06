@@ -35,6 +35,7 @@ const OPTIONAL_ENV_VARS = [
   "SALES_ADDRESSBOOK_PATH",
   "SALES_LEADS_FOLDER",
   "SALES_POLL_INTERVAL_MS",
+  "SALES_LEAD_WEBHOOK_SECRET",
   "CLIENT_ONBOARDING_ENABLED",
   "CLIENT_ONBOARDING_FORM_ID",
   "CLIENT_ONBOARDING_WEBHOOK_SECRET",
@@ -73,11 +74,6 @@ const OPTIONAL_ENV_VARS = [
   "BILLING_AUTO_SEND",
   "BILLING_DEFAULT_DAYS_UNTIL_DUE",
   "CONNECT_INVOICING",
-  // Ledger sync (lib/ledger-sync.ts) reuses the NEXTCLOUD_* service account and is off unless
-  // LEDGER_SYNC_ENABLED=true; the register ids have defaults.
-  "LEDGER_SYNC_ENABLED",
-  "OPENREGISTER_REGISTER_ID",
-  "OPENREGISTER_INVOICE_SCHEMA_ID",
 ];
 
 // Vars whose values must never appear in logs, even partially — presence only.

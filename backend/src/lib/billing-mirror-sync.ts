@@ -9,6 +9,8 @@ import {
 } from "./billing-mirror-render";
 import { runBillingRefresh } from "./billing-snapshot";
 import type { BillingValues } from "./billing-status";
+import { createCoalescedRunner, registerKickable } from "./coalesced-runner";
+import { KICK_DEBOUNCE_MS } from "./constants";
 import {
   AuthBackoff,
   intVar,
@@ -379,39 +381,28 @@ export function startBillingMirror(
     return null;
   }
 
-  let running: Promise<unknown> | null = null;
-  let again = false;
   let sweepPending = false;
-  let stopped = false;
-  const run = () => {
-    const all = sweepPending;
-    sweepPending = false;
-    again = false;
-    running = (async () => {
+  const runner = createCoalescedRunner({
+    name: "billing-mirror",
+    logger,
+    cycle: async () => {
+      const all = sweepPending;
+      sweepPending = false;
       try {
         await runBillingRefresh({ logger, all });
       } catch (error) {
         logger.error({ errorName: (error as Error)?.name }, "Billing refresh crashed.");
       }
-      await runBillingMirrorCycle({ logger, env });
-    })()
-      .catch((error: unknown) => {
-        logger.error({ errorName: (error as Error)?.name }, "Billing mirror cycle crashed.");
-      })
-      .finally(() => {
-        running = null;
-        if (again && !stopped) run();
-      });
-  };
+      return runBillingMirrorCycle({ logger, env });
+    },
+    isBusy: (r) => (r as BillingMirrorResult).status === "busy",
+    debounceMs: KICK_DEBOUNCE_MS,
+  });
   const trigger = (sweep: boolean) => {
-    if (stopped) return;
     sweepPending ||= sweep;
-    if (running) {
-      again = true;
-      return;
-    }
-    run();
+    runner.trigger();
   };
+  const unregister = registerKickable("billingMirror", runner);
   const timer = setInterval(() => trigger(false), config.settings.intervalMs);
   const sweepTimer = setInterval(() => trigger(true), config.settings.sweepIntervalMs);
   timer.unref();
@@ -427,10 +418,10 @@ export function startBillingMirror(
   );
   return {
     async stop() {
-      stopped = true;
+      unregister();
       clearInterval(timer);
       clearInterval(sweepTimer);
-      while (running) await running;
+      await runner.stop();
     },
   };
 }

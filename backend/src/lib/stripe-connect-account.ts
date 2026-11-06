@@ -4,6 +4,7 @@ import type Stripe from "stripe";
 import { db } from "../db/client";
 import { clients } from "../db/schema";
 import { withStripeCircuit } from "./circuit-breakers";
+import { kickJob } from "./coalesced-runner";
 import { errorLogFields } from "./safe-error-log";
 import { stripe } from "./stripe-billing";
 
@@ -133,7 +134,10 @@ export async function ensureExpressAccountForClient(
     throw err;
   }
 
-  if (claimed?.stripeAccountId) return claimed.stripeAccountId;
+  if (claimed?.stripeAccountId) {
+    kickJob("portalMirror");
+    return claimed.stripeAccountId;
+  }
 
   if (refreshed?.stripeAccountId) {
     if (refreshed.stripeAccountId !== created.stripeAccountId) {
@@ -173,6 +177,7 @@ export async function resolveCardPaymentsStatus(
     .update(clients)
     .set({ achPaymentsStatus, updatedAt: new Date() })
     .where(and(eq(clients.id, client.id), isNull(clients.achPaymentsStatus)));
+  kickJob("portalMirror");
   if (written.length > 0) return live;
   const [current] = await db
     .select({ status: clients.cardPaymentsStatus })
@@ -197,6 +202,7 @@ export async function refreshCardPaymentsStatus(
     .update(clients)
     .set({ cardPaymentsStatus: live, achPaymentsStatus, updatedAt: new Date() })
     .where(eq(clients.id, client.id));
+  kickJob("portalMirror");
   return live;
 }
 
@@ -222,4 +228,5 @@ export async function syncClientFromAccount(
       updatedAt: new Date(),
     })
     .where(eq(clients.id, clientId));
+  kickJob("portalMirror");
 }

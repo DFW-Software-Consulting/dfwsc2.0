@@ -57,6 +57,9 @@ export const SHELL_META = { ...privatePage("Portal"), title: SITE_NAME };
 /** Pathnames handled by nginx as the SPA shell (kept in sync with front/nginx.conf). */
 export const PRIVATE_PATHS = Object.keys(PRIVATE_ROUTES);
 
+/** Prerendered file for a public path: "/" -> index.html, "/pricing" -> pricing.html. */
+export const fileFor = (path) => (path === "/" ? "index.html" : `${path.slice(1)}.html`);
+
 /** Normalise a pathname to the key used above: lower case, no trailing slash. */
 export function normalizePath(pathname) {
   const path = pathname.toLowerCase().replace(/\/+$/, "");
