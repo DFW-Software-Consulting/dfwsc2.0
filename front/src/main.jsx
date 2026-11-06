@@ -1,11 +1,12 @@
-import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import React from "react";
-import { createRoot } from "react-dom/client";
+import { StrictMode } from "react";
+import { createRoot, hydrateRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
-import ErrorBoundary from "./components/ErrorBoundary.jsx";
-import { AuthProvider, authLogoutRef } from "./contexts/AuthContext.jsx";
-import { ThemeProvider } from "./contexts/ThemeContext.jsx";
+import { authLogoutRef } from "./contexts/AuthContext.jsx";
+import Root from "./Root.jsx";
+import { preloadRoute } from "./routes.js";
 import { handlePreloadError } from "./utils/preloadRecovery.js";
 import "@fontsource/inter/latin-400.css";
 import "@fontsource/inter/latin-500.css";
@@ -25,17 +26,29 @@ const queryClient = new QueryClient({
   }),
 });
 
-createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <AuthProvider>
-            <App />
-          </AuthProvider>
-        </ThemeProvider>
-        {import.meta.env.DEV && <ReactQueryDevtools />}
-      </QueryClientProvider>
-    </ErrorBoundary>
-  </React.StrictMode>
+const container = document.getElementById("root");
+const prerendered = container.hasChildNodes();
+
+const app = (
+  <StrictMode>
+    <Root
+      queryClient={queryClient}
+      hydrating={prerendered}
+      devtools={import.meta.env.DEV ? <ReactQueryDevtools /> : null}
+    >
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </Root>
+  </StrictMode>
 );
+
+if (prerendered) {
+  // Prerendered page: load the matched route's chunk first so its Suspense boundary
+  // hydrates in place instead of falling back over the server HTML.
+  preloadRoute(window.location.pathname)
+    .catch(() => {})
+    .then(() => hydrateRoot(container, app));
+} else {
+  createRoot(container).render(app);
+}

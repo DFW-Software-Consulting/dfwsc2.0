@@ -1,6 +1,7 @@
-import { domAnimation, LazyMotion, m, useReducedMotion } from "motion/react";
+import { domAnimation, LazyMotion, m } from "motion/react";
 import { ScrollProgressBar } from "./ScrollFx.jsx";
 import SmoothScroll from "./SmoothScroll.jsx";
+import { useMotionAllowed } from "./useMotionAllowed.js";
 
 // Shared motion helpers for the marketing pages only (Home, Pricing, Team).
 // Everything is opacity/transform so nothing shifts layout. Content is never left
@@ -17,8 +18,8 @@ const VIEWPORT = { once: true, amount: "some", margin: "0px 0px 15% 0px" };
 
 /** `[Tag, animated]`: with `animated` false, render Tag without any animation props. */
 function useMotionTag(as) {
-  const reduced = useReducedMotion();
-  return [m[as], !reduced && typeof IntersectionObserver !== "undefined"];
+  const allowed = useMotionAllowed();
+  return [m[as], allowed && typeof IntersectionObserver !== "undefined"];
 }
 
 export function MotionRoot({ children }) {

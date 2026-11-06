@@ -8,65 +8,11 @@ import {
   ScrollGroup,
   ScrollItem,
 } from "../components/motion/ScrollFx.jsx";
+import { faqItems, hostingPlans, retainer } from "../content/pricing.js";
 import "../styles/studio.css";
 import "./Pricing.css";
-import { usePageTitle } from "../hooks/usePageTitle.js";
-
-const hostingPlans = [
-  {
-    name: "Basic Hosting",
-    price: "$40",
-    includes: "Hosting + uptime monitoring, minor edits, payment setup",
-    idealFor: "Business websites and landing pages",
-    specs: [
-      ["Website & file storage", "5 GB"],
-      ["Monthly data transfer", "100 GB"],
-      ["Database storage", "Not included"],
-      ["Application backend", "Not included"],
-      ["Maintenance retainer", "Included"],
-      ["Support", "Standard"],
-    ],
-  },
-  {
-    name: "Pro Hosting",
-    price: "$100",
-    includes:
-      "Multi-page site hosting, domain management, maintenance, backups, backend API hosting, and database storage — we keep it running so you don't have to",
-    idealFor: "Custom applications and client portals",
-    specs: [
-      ["Website & file storage", "10 GB"],
-      ["Monthly data transfer", "500 GB"],
-      ["Database storage", "1 GB"],
-      ["Application backend", "Included"],
-      ["Maintenance retainer", "Included"],
-      ["Support", "Standard"],
-    ],
-  },
-  {
-    name: "Business Hosting",
-    price: "$200",
-    includes:
-      "Application hosting, maintenance, backups, monthly performance review, and priority support for businesses with more demanding storage and processing needs",
-    idealFor: "Businesses with larger applications and data needs",
-    specs: [
-      ["Website & file storage", "25 GB"],
-      ["Monthly data transfer", "1 TB"],
-      ["Database storage", "5 GB"],
-      ["Application backend", "Included"],
-      ["Maintenance retainer", "Included"],
-      ["Support", "Priority"],
-    ],
-  },
-];
-
-const retainer = {
-  name: "Dev Retainer",
-  price: "Custom",
-  includes: "Ongoing dev team, new features, priority support, and dedicated engineering hours",
-};
 
 export default function Pricing() {
-  usePageTitle("Pricing");
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, []);
@@ -251,56 +197,12 @@ export default function Pricing() {
             </div>
           </Reveal>
           <Reveal className="studio-faq">
-            <details>
-              <summary>What do storage and monthly data transfer mean?</summary>
-              <p>
-                Storage is the space used by your website and uploaded files. Database storage is
-                listed separately for application records. Monthly data transfer is the amount of
-                data delivered to visitors, including pages, images, and downloads. It resets each
-                billing month and is not a visitor limit.
-              </p>
-            </details>
-            <details>
-              <summary>What happens if my business needs more capacity?</summary>
-              <p>
-                Your hosting proposal will specify your included allowances and how additional usage
-                is billed. More storage, data transfer, or application processing may require
-                additional infrastructure charges or a different plan. Email, video delivery,
-                third-party services, and AI usage are scoped separately.
-              </p>
-            </details>
-            <details>
-              <summary>Does hosting include building my website?</summary>
-              <p>
-                A new website or application is quoted separately. The monthly hosting price
-                includes a maintenance retainer for repairs and fixes to existing functionality,
-                within the scope agreed in your proposal. New features and larger changes are
-                estimated separately.
-              </p>
-            </details>
-            <details>
-              <summary>How do we decide the project price?</summary>
-              <p>
-                We start with your goals, required features, and current tools. A discovery
-                conversation helps us define the scope, estimate the work, and explain the proposed
-                costs.
-              </p>
-            </details>
-            <details>
-              <summary>Can you work with a website or application we already have?</summary>
-              <p>
-                Tell us what you’re using and where you need help. We’ll review the setup with you
-                before recommending improvements or a migration path.
-              </p>
-            </details>
-            <details>
-              <summary>Can we keep working together after launch?</summary>
-              <p>
-                Yes. Every hosting plan includes a maintenance retainer for agreed repairs and
-                fixes. If you need ongoing new features or dedicated development hours, we can
-                discuss a separate development retainer.
-              </p>
-            </details>
+            {faqItems.map(({ question, answer }) => (
+              <details key={question}>
+                <summary>{question}</summary>
+                <p>{answer}</p>
+              </details>
+            ))}
           </Reveal>
         </section>
         <section className="studio-contact studio-inverse">
