@@ -772,7 +772,8 @@ export function startSalesLeadPoller(
     ? { secret: config.settings.webhookSecret, trigger: tick }
     : null;
   activeWebhook = webhook;
-  const timer = setInterval(tick, config.settings.pollIntervalMs);
+  // The timer skips a tick while a cycle runs; webhook and contact kicks still queue one.
+  const timer = setInterval(runner.triggerIfIdle, config.settings.pollIntervalMs);
   timer.unref();
   tick();
   logger.info(

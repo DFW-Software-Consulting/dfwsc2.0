@@ -241,6 +241,7 @@ describe("POST /api/v1/contact", () => {
         kick.mockReset();
         unregister = registerKickable("salesLead", {
           trigger: vi.fn(),
+          triggerIfIdle: vi.fn(),
           kick,
           stop: async () => {},
         });

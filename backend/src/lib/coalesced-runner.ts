@@ -27,11 +27,15 @@ export interface CoalescedRunnerOptions {
 export interface CoalescedRunner {
   /** Runs a cycle now, or queues one behind the running cycle. */
   trigger(): void;
+  /** Like `trigger()`, but does nothing while a cycle is running (for timer ticks). */
+  triggerIfIdle(): void;
   /** Debounced trigger for event sources. */
   kick(): void;
   /** Stops new cycles and waits for the running one. */
   stop(): Promise<void>;
 }
+
+const CRASHED = Symbol("crashed");
 
 export function createCoalescedRunner(options: CoalescedRunnerOptions): CoalescedRunner {
   const { name, logger, cycle, isBusy, busyRetryMs = KICK_BUSY_RETRY_MS } = options;
@@ -42,6 +46,15 @@ export function createCoalescedRunner(options: CoalescedRunnerOptions): Coalesce
   let debounceTimer: NodeJS.Timeout | null = null;
   let retryTimer: NodeJS.Timeout | null = null;
 
+  const busy = (result: unknown) => {
+    try {
+      return isBusy?.(result) ?? false;
+    } catch (error) {
+      logger.error({ errorName: (error as Error)?.name, job: name }, "isBusy threw.");
+      return false;
+    }
+  };
+
   const run = (isRetry: boolean) => {
     again = false;
     running = (async () => {
@@ -49,24 +62,30 @@ export function createCoalescedRunner(options: CoalescedRunnerOptions): Coalesce
         return await cycle();
       } catch (error) {
         logger.error({ errorName: (error as Error)?.name, job: name }, "Cycle crashed.");
-        return undefined;
+        return CRASHED;
       }
-    })().then((result) => {
-      running = null;
-      if (stopped) return;
-      if (again) {
-        run(false);
-      } else if (!isRetry && isBusy?.(result)) {
-        // The lock holder may be mid-cycle with stale data: look again shortly, once.
-        retryTimer = setTimeout(() => {
-          retryTimer = null;
-          if (stopped) return;
-          if (running) again = true;
-          else run(true);
-        }, busyRetryMs);
-        retryTimer.unref();
-      }
-    });
+    })()
+      .then((outcome) => {
+        running = null;
+        if (stopped) return;
+        if (again) {
+          run(false);
+        } else if (!isRetry && outcome !== CRASHED && busy(outcome)) {
+          // The lock holder may be mid-cycle with stale data: look again shortly, once.
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            if (stopped) return;
+            if (running) again = true;
+            else run(true);
+          }, busyRetryMs);
+          retryTimer.unref();
+        }
+      })
+      .catch((error) => {
+        // The stored promise must never reject: stop() awaits it and nothing else does.
+        running = null;
+        logger.error({ errorName: (error as Error)?.name, job: name }, "Runner step failed.");
+      });
   };
   const trigger = () => {
     if (stopped) return;
@@ -79,6 +98,9 @@ export function createCoalescedRunner(options: CoalescedRunnerOptions): Coalesce
       return;
     }
     run(false);
+  };
+  const triggerIfIdle = () => {
+    if (!running) trigger();
   };
   const kick = () => {
     if (stopped) return;
@@ -93,6 +115,7 @@ export function createCoalescedRunner(options: CoalescedRunnerOptions): Coalesce
 
   return {
     trigger,
+    triggerIfIdle,
     kick,
     async stop() {
       stopped = true;

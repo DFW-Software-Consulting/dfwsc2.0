@@ -127,13 +127,89 @@ describe("createCoalescedRunner", () => {
   });
 });
 
+describe("crash handling", () => {
+  const unhandled = vi.fn();
+  beforeEach(() => {
+    unhandled.mockClear();
+    process.on("unhandledRejection", unhandled);
+  });
+  afterEach(() => {
+    process.off("unhandledRejection", unhandled);
+  });
+
+  it("survives a throwing cycle with an isBusy that dereferences its argument", async () => {
+    const cycle = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValue({ status: "ok" });
+    const runner = createCoalescedRunner({
+      name: "t",
+      logger,
+      cycle,
+      isBusy: (r) => (r as { status: string }).status === "busy",
+    });
+    runner.trigger();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+
+    runner.trigger();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cycle).toHaveBeenCalledTimes(2);
+    await expect(runner.stop()).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+
+  it("treats an isBusy that throws as not busy and keeps running", async () => {
+    const cycle = vi.fn().mockResolvedValue({ status: "ok" });
+    const runner = createCoalescedRunner({
+      name: "t",
+      logger,
+      cycle,
+      isBusy: () => {
+        throw new Error("bad isBusy");
+      },
+      busyRetryMs: 100,
+    });
+    runner.trigger();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(cycle).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+
+    runner.trigger();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cycle).toHaveBeenCalledTimes(2);
+    await expect(runner.stop()).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+});
+
+describe("triggerIfIdle", () => {
+  it("runs when idle and does not queue a follow-up while a cycle runs", async () => {
+    const gate = deferred();
+    const cycle = vi.fn().mockImplementation(() => gate.promise);
+    const runner = createCoalescedRunner({ name: "t", logger, cycle });
+    runner.triggerIfIdle();
+    runner.triggerIfIdle();
+    runner.triggerIfIdle();
+    expect(cycle).toHaveBeenCalledTimes(1);
+    gate.resolve(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cycle).toHaveBeenCalledTimes(1);
+    runner.triggerIfIdle();
+    expect(cycle).toHaveBeenCalledTimes(2);
+    await runner.stop();
+  });
+});
+
 describe("kickJob", () => {
   it("is a no-op when the job is not started", () => {
     expect(() => kickJob("salesLead")).not.toThrow();
   });
 
   it("kicks the registered runner and stops once unregistered", () => {
-    const runner = { trigger: vi.fn(), kick: vi.fn(), stop: vi.fn() };
+    const runner = { trigger: vi.fn(), triggerIfIdle: vi.fn(), kick: vi.fn(), stop: vi.fn() };
     const unregister = registerKickable("portalMirror", runner);
     kickJob("portalMirror");
     expect(runner.kick).toHaveBeenCalledTimes(1);
@@ -145,6 +221,7 @@ describe("kickJob", () => {
   it("never throws into the caller", () => {
     const runner = {
       trigger: vi.fn(),
+      triggerIfIdle: vi.fn(),
       kick: vi.fn(() => {
         throw new Error("boom");
       }),
