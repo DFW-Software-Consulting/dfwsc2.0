@@ -58,6 +58,18 @@ describe("Frontend Dockerfile", () => {
       expect(nginxConfig).not.toContain("connect-src 'self' https:;");
     });
 
+    it("should never let an /assets/ or 404 response be cached after a failed fetch", () => {
+      const nginxConfig = readFileSync(join(ROOT_DIR, "front/nginx.conf"), "utf-8");
+
+      // Immutable only for statuses that actually served the file; everything else is no-store.
+      expect(nginxConfig).toContain(
+        '"~^(200|206|304):/assets/" "public, max-age=31536000, immutable"'
+      );
+      expect(nginxConfig).toContain('"~^\\d+:/assets/" "no-store"');
+      expect(nginxConfig).toContain('"~^404:" "no-store"');
+      expect(nginxConfig).toContain("try_files $uri @asset_missing;");
+    });
+
     it("should copy build output to nginx html directory", () => {
       expect(dockerfileContent).toContain("COPY --from=builder");
       expect(dockerfileContent).toContain("/usr/share/nginx/html");

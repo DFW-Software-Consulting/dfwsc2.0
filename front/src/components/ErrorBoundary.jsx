@@ -1,10 +1,11 @@
 import { Component } from "react";
 import logger from "../utils/logger";
+import { isChunkLoadError, startRecovery } from "../utils/preloadRecovery";
 
 export default class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false };
+    this.state = { hasError: false, recovering: false };
   }
 
   static getDerivedStateFromError() {
@@ -13,6 +14,8 @@ export default class ErrorBoundary extends Component {
 
   componentDidCatch(error, errorInfo) {
     logger.error("Uncaught error in component tree:", error, errorInfo);
+    // A stale or missing chunk after a deploy: refresh the asset and reload once.
+    if (isChunkLoadError(error) && startRecovery(error)) this.setState({ recovering: true });
   }
 
   handleReload = () => {
@@ -20,6 +23,7 @@ export default class ErrorBoundary extends Component {
   };
 
   render() {
+    if (this.state.recovering) return null;
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-[var(--bg-main)] text-[var(--text-main)] px-4">
