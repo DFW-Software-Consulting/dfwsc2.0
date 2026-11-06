@@ -2,9 +2,9 @@ import { m, useScroll, useTransform } from "motion/react";
 import { createContext, useContext, useRef } from "react";
 import { useMotionAllowed } from "./useMotionAllowed.js";
 
-// Scroll-linked motion for the marketing pages: transforms and opacity only, driven by
-// scroll position (motion's useScroll + useTransform). Every helper renders a plain
-// element under reduced motion, so nothing is offset or faded there. Entrances are
+// Scroll-linked motion for the marketing pages: transforms, opacity and the process-step
+// color variable, driven by scroll position (motion's useScroll + useTransform). Every
+// helper renders a plain element under reduced motion, so nothing is offset or faded there. Entrances are
 // authored to finish (identity, opacity 1) before the block is well inside the viewport.
 
 /** Progress 0 when the element's top enters at the viewport bottom, 1 when it reaches 60% down. */
