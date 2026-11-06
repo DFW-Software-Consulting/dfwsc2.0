@@ -152,6 +152,10 @@ const billingMirrorBreaker = new CircuitBreaker(send, {
   ...breakerOptions,
 });
 
+// Cerebo (cerebo/nextcloud.ts) has its own as well: a project view fans out one Deck call per
+// board, and a failing Deck must never open the breaker that admin login depends on.
+const cereboBreaker = new CircuitBreaker(send, { name: "nextcloud-cerebo", ...breakerOptions });
+
 export function nextcloudRequest(
   config: NextcloudConfig,
   request: NextcloudRequest
@@ -173,6 +177,14 @@ export function billingMirrorRequest(
   request: NextcloudRequest
 ): Promise<NextcloudResponse> {
   return fire(billingMirrorBreaker, config, request);
+}
+
+/** Same as nextcloudRequest, through Cerebo's own breaker. */
+export function cereboRequest(
+  config: NextcloudConfig,
+  request: NextcloudRequest
+): Promise<NextcloudResponse> {
+  return fire(cereboBreaker, config, request);
 }
 
 async function fire(
@@ -212,6 +224,7 @@ export function resetNextcloudBreakerForTests() {
   breaker.close();
   mirrorBreaker.close();
   billingMirrorBreaker.close();
+  cereboBreaker.close();
 }
 
 export function openPortalMirrorBreakerForTests() {
@@ -220,4 +233,8 @@ export function openPortalMirrorBreakerForTests() {
 
 export function openNextcloudBreakerForTests() {
   breaker.open();
+}
+
+export function openCereboBreakerForTests() {
+  cereboBreaker.open();
 }
