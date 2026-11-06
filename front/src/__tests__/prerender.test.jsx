@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { faqItems, hostingPlans } from "../content/pricing.js";
 import { render } from "../entry-server.jsx";
 
@@ -26,5 +26,18 @@ describe("prerender entry", () => {
 
   it("renders the not-found page for unknown paths", async () => {
     expect(text(await render("/404"))).toContain("Page Not Found");
+  });
+});
+
+describe("render timeout", () => {
+  it("rejects instead of hanging when a render does not finish in time", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      const pending = expect(render("/docs", 5000)).rejects.toThrow(/did not finish within 5000ms/);
+      vi.advanceTimersByTime(5000); // before the render's own async work can finish
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -40,6 +40,7 @@ describe("hydration of browser-dependent UI", () => {
     expect(serverHtml).not.toContain("opacity:0");
 
     localStorage.setItem("theme", "dark");
+    document.documentElement.classList.add("dark"); // what theme-init.js does
     const container = document.createElement("div");
     container.innerHTML = serverHtml;
     document.body.appendChild(container);
@@ -61,6 +62,8 @@ describe("hydration of browser-dependent UI", () => {
     expect(container.querySelector('[data-testid="theme"]').textContent).toBe("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);
     expect(container.textContent).toContain("Dallas, TX ·");
+    // theme-init.js sets the class before hydration; the placeholder "light" must not undo it.
+    expect(document.documentElement.classList.contains("light")).toBe(false);
     container.remove();
   });
 

@@ -10,10 +10,20 @@ import {
 
 const ThemeContext = createContext();
 
+// Same rule as public/theme-init.js, which applies it before first paint.
 function readTheme() {
-  const saved = localStorage.getItem("theme");
+  let saved = null;
+  try {
+    saved = localStorage.getItem("theme");
+  } catch {
+    // Storage blocked: use the OS preference.
+  }
   if (saved) return saved;
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  try {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch {
+    return "light";
+  }
 }
 
 /**
@@ -26,20 +36,29 @@ function readTheme() {
 export function ThemeProvider({ children, hydrating = false }) {
   const [settled, setSettled] = useState(!hydrating);
   const [chosen, setChosen] = useState(null);
-  const theme = chosen ?? (settled ? readTheme() : "light");
+  const initial = useMemo(() => (settled ? readTheme() : "light"), [settled]);
+  const theme = chosen ?? initial;
 
   useEffect(() => {
     if (!settled) startTransition(() => setSettled(true));
   }, [settled]);
 
   useEffect(() => {
+    // While hydrating, theme-init.js has already set the real class; "light" is only the
+    // placeholder that matches the prerendered markup, so it must not overwrite it.
+    if (!settled && !chosen) return;
     const root = window.document.documentElement;
     root.classList.remove("light", "dark");
     root.classList.add(theme);
-  }, [theme]);
+  }, [theme, settled, chosen]);
 
   useEffect(() => {
-    if (chosen) localStorage.setItem("theme", chosen);
+    if (!chosen) return;
+    try {
+      localStorage.setItem("theme", chosen);
+    } catch {
+      // Storage blocked: the choice lasts for this page view only.
+    }
   }, [chosen]);
 
   const toggleTheme = useCallback(() => {

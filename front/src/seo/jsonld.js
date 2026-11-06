@@ -36,7 +36,7 @@ const website = {
   publisher: { "@id": ORGANIZATION_ID },
 };
 
-function pricingNodes() {
+function pricingPage() {
   const planOffers = hostingPlans.map((plan) => ({
     "@type": "Offer",
     name: plan.name,
@@ -52,10 +52,8 @@ function pricingNodes() {
     },
     itemOffered: { "@type": "Service", name: plan.name, audience: plan.idealFor },
   }));
-  return [
-    {
-      "@type": "ProfessionalService",
-      "@id": ORGANIZATION_ID,
+  return {
+    organization: {
       hasOfferCatalog: {
         "@type": "OfferCatalog",
         name: "Hosting and maintenance plans",
@@ -70,35 +68,42 @@ function pricingNodes() {
         ],
       },
     },
-    {
-      "@type": "FAQPage",
-      mainEntity: faqItems.map(({ question, answer }) => ({
-        "@type": "Question",
-        name: question,
-        acceptedAnswer: { "@type": "Answer", text: answer },
-      })),
-    },
-  ];
+    nodes: [
+      {
+        "@type": "FAQPage",
+        mainEntity: faqItems.map(({ question, answer }) => ({
+          "@type": "Question",
+          name: question,
+          acceptedAnswer: { "@type": "Answer", text: answer },
+        })),
+      },
+    ],
+  };
 }
 
-function teamNodes() {
-  return teamMembers.map((member) => ({
-    "@type": "Person",
-    name: member.name,
-    jobTitle: member.role,
-    description: member.bio,
-    worksFor: { "@id": ORGANIZATION_ID },
-    ...(member.linkedin ? { sameAs: [member.linkedin] } : {}),
-  }));
+function teamPage() {
+  return {
+    nodes: teamMembers.map((member) => ({
+      "@type": "Person",
+      name: member.name,
+      jobTitle: member.role,
+      description: member.bio,
+      worksFor: { "@id": ORGANIZATION_ID },
+      ...(member.linkedin ? { sameAs: [member.linkedin] } : {}),
+    })),
+  };
 }
 
-const PAGE_NODES = { "/pricing": pricingNodes, "/team": teamNodes };
+const PAGES = { "/pricing": pricingPage, "/team": teamPage };
 
-/** The JSON-LD document for an indexable path: global nodes plus the page's own. */
+/**
+ * The JSON-LD document for an indexable path: the organisation (extended with the page's
+ * own properties, so it stays a single node) and website, plus the page's other nodes.
+ */
 export function buildJsonLd(pathname) {
-  const extra = PAGE_NODES[normalizePath(pathname)];
+  const page = PAGES[normalizePath(pathname)]?.();
   return {
     "@context": "https://schema.org",
-    "@graph": [organization, website, ...(extra ? extra() : [])],
+    "@graph": [{ ...organization, ...page?.organization }, website, ...(page?.nodes ?? [])],
   };
 }

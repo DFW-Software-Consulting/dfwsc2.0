@@ -12,8 +12,17 @@ export { renderHead } from "./seo/render.js";
  * Render the app at `url` to an HTML string. Waits for every lazy route module so the
  * output holds the real page, never a Suspense fallback.
  */
-export function render(url) {
+export function render(url, timeoutMs = 30_000) {
   return new Promise((resolve, reject) => {
+    // A lazy page whose import never settles would otherwise hang the build forever.
+    const timer = setTimeout(() => {
+      abort();
+      reject(new Error(`Prerender of ${url} did not finish within ${timeoutMs}ms`));
+    }, timeoutMs);
+    const finish = (settle) => (value) => {
+      clearTimeout(timer);
+      settle(value);
+    };
     const chunks = [];
     const sink = new Writable({
       write(chunk, _encoding, done) {
@@ -21,11 +30,11 @@ export function render(url) {
         done();
       },
       final(done) {
-        resolve(Buffer.concat(chunks).toString("utf8"));
+        finish(resolve)(Buffer.concat(chunks).toString("utf8"));
         done();
       },
     });
-    const { pipe } = renderToPipeableStream(
+    const { pipe, abort } = renderToPipeableStream(
       <Root queryClient={new QueryClient()} hydrating>
         <StaticRouter location={url}>
           <App />
@@ -33,8 +42,8 @@ export function render(url) {
       </Root>,
       {
         onAllReady: () => pipe(sink),
-        onShellError: reject,
-        onError: reject,
+        onShellError: finish(reject),
+        onError: finish(reject),
       }
     );
   });

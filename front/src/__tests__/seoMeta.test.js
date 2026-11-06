@@ -141,7 +141,8 @@ describe("JSON-LD", () => {
   });
 
   it("lists each hosting plan with its monthly price", () => {
-    const catalog = ofType("/pricing", "ProfessionalService").find((n) => n.hasOfferCatalog);
+    expect(ofType("/pricing", "ProfessionalService")).toHaveLength(1);
+    const catalog = ofType("/pricing", "ProfessionalService")[0];
     const offers = catalog.hasOfferCatalog.itemListElement;
     for (const plan of hostingPlans) {
       const offer = offers.find((o) => o.name === plan.name);

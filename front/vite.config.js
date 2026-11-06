@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { build, defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -8,21 +9,26 @@ import { prerender } from './scripts/prerender.mjs'
 // render the marketing routes to static HTML. Runs inside `vite build` so `npm run build`
 // and the Dockerfile stay a single step.
 function prerenderPlugin() {
-  let isSsrBuild = false
+  let config
+  let buildFailed = false
   return {
     name: 'prerender',
     apply: 'build',
-    configResolved(config) {
-      isSsrBuild = Boolean(config.build.ssr)
+    configResolved(resolved) {
+      config = resolved
+    },
+    buildEnd(error) {
+      if (error) buildFailed = true
     },
     async closeBundle() {
-      if (isSsrBuild) return
-      await build({ build: { ssr: 'src/entry-server.jsx', outDir: 'build-ssr' } })
-      await prerender()
+      // closeBundle also runs after a failed build, and for the nested SSR build.
+      if (buildFailed || config.build.ssr) return
+      const serverDir = resolve(config.root, 'build-ssr')
+      await build({ build: { ssr: 'src/entry-server.jsx', outDir: serverDir } })
+      await prerender({ clientDir: resolve(config.root, config.build.outDir), serverDir })
     },
   }
 }
-
 
 // https://vite.dev/config/
 export default defineConfig({

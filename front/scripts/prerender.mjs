@@ -2,14 +2,13 @@
 // 404 page, and generates sitemap.xml. Called by the prerender plugin in vite.config.js
 // after the client build and the `--ssr` build of src/entry-server.jsx.
 import { readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { verifyBuild } from "./verify-build.mjs";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-
-export async function prerender() {
-  const clientDir = join(root, "build-dist");
-  const serverEntry = pathToFileURL(join(root, "build-ssr", "entry-server.js")).href;
+/** `clientDir`: the client build output; `serverDir`: the `--ssr` build output. */
+export async function prerender({ clientDir, serverDir }) {
+  const serverEntry = pathToFileURL(join(serverDir, "entry-server.js")).href;
 
   const HEAD_MARKER = "<!--seo-head-->";
   const ROOT_MARKER = '<div id="root"></div>';
@@ -56,4 +55,6 @@ export async function prerender() {
   );
 
   process.stdout.write(`Prerendered ${Object.keys(PUBLIC_ROUTES).length} routes, spa.html, 404.html, sitemap.xml` + "\n");
+
+  await verifyBuild(clientDir);
 }
