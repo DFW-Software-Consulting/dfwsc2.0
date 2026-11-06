@@ -73,7 +73,7 @@ Conventions:
 - `animate-pulse-slow` (ambient background glows), `animate-float`.
 
 ### Reduced motion
-`index.css` applies a global `prefers-reduced-motion: reduce` rule: transitions and animations finish instantly (0.01ms, one iteration) across the app shell, admin and marketing pages, so hover, focus and menu state changes still appear without movement. `.animate-spin` loading spinners are exempt because they signal progress. CSS can't reach JS-requested scrolling, so `scrollToSection` checks the media query itself and jumps (`behavior: "auto"`) instead of smooth-scrolling. The `Docs` page's `scrollIntoView({ behavior: "smooth" })` does not check it yet.
+`index.css` applies a global `prefers-reduced-motion: reduce` rule: transitions and animations finish instantly (0.01ms, one iteration) across the app shell, admin and marketing pages, so hover, focus and menu state changes still appear without movement. `.animate-spin` loading spinners are exempt because they signal progress. CSS can't reach JS-requested scrolling, so `scrollToSection` checks the media query itself and jumps (`behavior: "auto"`) instead of smooth-scrolling.
 
 ### Motion (marketing pages only)
 `front/src/components/motion/Reveal.jsx` wraps Framer Motion (`motion` package, imported from `motion/react`) with `LazyMotion` (`domAnimation`, strict, so use `m.*` only) and `MotionConfig reducedMotion="user"`. Wrap a marketing page in `<MotionRoot>`; admin and portal routes never import it, so they don't ship the library.

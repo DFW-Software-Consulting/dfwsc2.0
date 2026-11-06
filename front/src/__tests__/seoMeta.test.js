@@ -128,7 +128,7 @@ describe("JSON-LD", () => {
     expect(org.email).toBe("mail@dfwsc.com");
     expect(org.areaServed.name).toBe("Dallas–Fort Worth");
     expect(org.priceRange).toBe("$40–$200 per month");
-    expect(ofType("/docs", "WebSite")).toHaveLength(1);
+    expect(ofType("/team", "WebSite")).toHaveLength(1);
     expect(org).not.toHaveProperty("address");
   });
 
@@ -197,6 +197,16 @@ describe("nginx.conf stays in step with the route config", () => {
       .filter((p) => p !== "/")
       .map((p) => p.slice(1));
     expect(alternation.split("|").sort()).toEqual(expected.sort());
+  });
+
+  it("redirects /docs, /docs/ and /docs.html to the Nextcloud guide with a 301", () => {
+    const [, pattern, target] = conf.match(
+      /location ~ (\^\/docs[^\s]*) \{\s*return 301 (https:\/\/\S+);/
+    );
+    const re = new RegExp(pattern.replace(/\\\./g, "\\."));
+    for (const path of ["/docs", "/docs/", "/docs.html"]) expect(path).toMatch(re);
+    expect(target).toBe("https://cloud.dfwsc.com/apps/collectives/Developer-Integration-Guide-4");
+    expect(Object.keys(PUBLIC_ROUTES)).not.toContain("/docs");
   });
 
   it("redirects the trailing-slash form of every prerendered page to its clean URL", () => {
