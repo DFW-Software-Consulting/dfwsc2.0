@@ -154,11 +154,13 @@ export function ScrollProgressBar() {
 }
 
 const PROCESS = ["start 0.85", "end 0.6"];
-// Steps not yet reached sit at this opacity. Any lower and their text (bronze numbers,
-// muted copy) falls under the WCAG AA 4.5:1 contrast ratio on the tinted band in light mode.
+// Opacity of steps not yet reached. At 0.94 that is effectively no fade, on purpose: any
+// lower and their text (bronze numbers, muted copy) falls under the WCAG AA 4.5:1 contrast
+// ratio on the tinted band in light mode. The scroll plumbing stays so a contrast-safe
+// cue (e.g. a color change instead of opacity) can reuse it.
 const STEP_MIN_OPACITY = 0.94;
 
-/** Numbered steps (`[number, title, copy]`) under a line that fills as you scroll; steps light up in turn. */
+/** Numbered steps (`[number, title, copy]`) under a line that fills as you scroll. Steps are staggered in turn, but see STEP_MIN_OPACITY: the fade is currently almost imperceptible. */
 export function ProcessGrid({ steps }) {
   return (
     <ScrollGroup className="studio-process-grid" offset={PROCESS}>

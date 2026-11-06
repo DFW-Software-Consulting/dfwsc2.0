@@ -25,6 +25,10 @@ export async function verifyBuild(dir) {
     if (!/<link[^>]+rel="canonical"/.test(html)) {
       throw new Error(`Build check failed: ${file} has no canonical link`);
     }
+    // The entry CSS plus the page's own lazy-chunk CSS; without the latter the first paint is unstyled.
+    if ((html.match(/<link[^>]+rel="stylesheet"/g) ?? []).length < 2) {
+      throw new Error(`Build check failed: ${file} does not link its page stylesheet`);
+    }
   }
 }
 

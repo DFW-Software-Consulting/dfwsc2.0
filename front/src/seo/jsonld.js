@@ -63,6 +63,7 @@ function pricingPage() {
         name: "Hosting and maintenance plans",
         itemListElement: [
           ...planOffers,
+          // Intentionally unpriced: the retainer is quoted, so it is a Service, not an Offer.
           {
             "@type": "Service",
             name: retainer.name,
