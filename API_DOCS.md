@@ -106,6 +106,8 @@ Rate limiting is per-IP (IPv6 visitors are limited per /64 prefix) or per Stripe
 | `POST /onboard-client/resend` | 5 req / min |
 | `GET /onboard-client` | 10 req / min |
 | `GET /connect/refresh` | 10 req / min |
+| `POST /connect/onboarding-link`, `POST /connect/dashboard-link` | 10 req / min per client |
+| `GET /connect/account` | 60 req / min per client |
 | `POST /payments/create` | Burst of 200, refilling at 120 / min (per Stripe account) |
 | `GET /payments/session/:sessionId` | 30 req / min per IP; 600 req / min per client when `X-Api-Key` is sent (and 30 distinct rejected keys / min per IP; the same bad key counts once) |
 | `POST /contact` | 10 req / min |
@@ -351,6 +353,63 @@ No auth. Regenerates a Stripe account link for an incomplete onboarding. Stripe 
 
 ---
 
+#### Client-facing Connect (set up payments from your own app)
+
+**Auth: `X-Api-Key`.** The connected account is always the one belonging to the key's client; no request field can select a different account. Redirect URLs must be on an origin an admin has stored in the client's `connectRedirectOrigins` (see `PATCH /clients/:id`). Link URLs from Stripe are single-use credentials: pass them straight to the user's browser and do not log or store them.
+
+##### `POST /api/v1/connect/onboarding-link`
+
+Starts or resumes Stripe-hosted onboarding (business details, bank account). Creates the Express account on first use. Rate limit: 10 req / min per client.
+
+**Request:** `{ "returnUrl": "https://app.example.com/settings/payments?done=1", "refreshUrl": "https://app.example.com/settings/payments?refresh=1" }`
+
+**Response `200`:** `{ "url": "https://connect.stripe.com/...", "expiresAt": "2026-11-04T20:00:00.000Z" }`. Redirect the user to `url`. When Stripe sends them to `refreshUrl` (the link expired or was already used), call this endpoint again and redirect to the new `url`. On `returnUrl`, call `GET /connect/account` for the real status; returning does not mean onboarding is finished.
+
+**Errors:** `400 REDIRECT_URL_NOT_ALLOWED` (not https, or origin not allowlisted), `409 REDIRECT_ORIGINS_NOT_CONFIGURED`, `401`, `429`, `502/503` (Stripe unavailable; retry), and the permanent errors below (do not retry).
+
+The URLs are sent to Stripe in their canonical parsed form (for example a backslash becomes a slash), so Stripe may redirect to a slightly normalized URL.
+
+##### `GET /api/v1/connect/account`
+
+Live account status, also stored on the client. Rate limit: 60 req / min per client.
+
+**Response `200`:**
+```json
+{
+  "hasAccount": true,
+  "detailsSubmitted": true,
+  "chargesEnabled": true,
+  "payoutsEnabled": true,
+  "requirements": { "currentlyDue": [], "pastDue": [], "disabledReason": null },
+  "capabilities": { "card_payments": "active", "transfers": "active" }
+}
+```
+`hasAccount: false` (all other flags false, empty lists) when the client has not started onboarding.
+
+##### `POST /api/v1/connect/dashboard-link`
+
+Returns a link to the Stripe Express Dashboard, where the user updates bank and payout details. Empty body. Rate limit: 10 req / min per client.
+
+**Response `200`:** `{ "url": "https://connect.stripe.com/express/..." }`
+
+**Errors:** `409 ONBOARDING_INCOMPLETE` when the account does not exist or onboarding is not finished; use the onboarding link instead. Also the permanent errors below, and `502/503` (retry).
+
+##### Stripe errors on the Connect routes
+
+All three Connect routes share this mapping. Retry only the retryable ones.
+
+| Status | `code` | Retry? |
+|---|---|---|
+| 400 | `INVALID_REQUEST` (Stripe rejected the request, e.g. a non-https redirect URL on a live key) | No. Fix the input |
+| 409 | `IDEMPOTENCY_KEY_REUSED` (the account was first requested with different details, e.g. the client email changed within 24h) | No. Contact DFWSC |
+| 409 | `ACCOUNT_NOT_CONNECTED` (the connected account is disconnected or lacks permission) | No. Contact DFWSC |
+| 409 | `IDEMPOTENCY_KEY_IN_USE` (the first request is still running) | Yes, shortly |
+| 429 | `RATE_LIMITED`, with `Retry-After` | Yes |
+| 502 | `STRIPE_FAILED` | Yes |
+| 503 | `STRIPE_BUSY` (with `Retry-After`) or `STRIPE_CIRCUIT_OPEN` | Yes |
+
+---
+
 ### Payments
 
 #### `POST /api/v1/payments/create`
@@ -508,6 +567,7 @@ Update a client's configuration. All fields are optional — only send what you 
 ```
 
 **Field rules:**
+- `connectRedirectOrigins` — array of up to 10 origins (`https://host[:port]`, no path; `http` only for localhost) the client app may use as onboarding return/refresh URLs. Replaces the stored list.
 - `status` — `"active"` or `"inactive"`
 - `groupId` — existing group ID, or `null` to remove from group
 - `paymentSuccessUrl` / `paymentCancelUrl` — must be HTTPS

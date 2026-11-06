@@ -199,3 +199,27 @@ export async function refreshCardPaymentsStatus(
     .where(eq(clients.id, client.id));
   return live;
 }
+
+/**
+ * Stores the readiness fields of an already-retrieved Stripe account on the client row that owns
+ * it. For callers that hold a live account object (client-facing status and dashboard routes);
+ * the account.updated webhook keeps its own retrieve-then-write path.
+ */
+export async function syncClientFromAccount(
+  clientId: string,
+  account: Pick<
+    Stripe.Account,
+    "charges_enabled" | "capabilities" | "payouts_enabled" | "details_submitted"
+  >
+): Promise<void> {
+  await db
+    .update(clients)
+    .set({
+      chargesEnabled: account.charges_enabled ?? false,
+      cardPaymentsStatus: account.capabilities?.card_payments ?? "unrequested",
+      payoutsEnabled: account.payouts_enabled ?? false,
+      detailsSubmitted: account.details_submitted ?? false,
+      updatedAt: new Date(),
+    })
+    .where(eq(clients.id, clientId));
+}

@@ -1,5 +1,5 @@
 {
-  "id": "8175a0fd-dfc1-4245-afd2-d5096fe9b485",
+  "id": "9ae16b5d-bbdd-45f0-85e5-ef1b655843ff",
   "prevId": "2ec353d8-e02f-46f5-909b-6a6d77472c11",
   "version": "7",
   "dialect": "postgresql",
@@ -1119,12 +1119,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "ach_payments_status": {
-          "name": "ach_payments_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "payouts_enabled": {
           "name": "payouts_enabled",
           "type": "boolean",
@@ -1156,6 +1150,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "connect_redirect_origins": {
+          "name": "connect_redirect_origins",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'"
         },
         "processing_fee_percent": {
           "name": "processing_fee_percent",
