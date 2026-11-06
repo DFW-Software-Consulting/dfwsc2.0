@@ -16,16 +16,18 @@ import {
 /** Title of the Client Projects column that holds the raw Customer id. */
 export const STRIPE_ID_COLUMN_TITLE = "Stripe Customer ID";
 /** Label of the URL entry on a contact card (Contacts' custom label, stored as X-ABLABEL). */
-export const STRIPE_CARD_LABEL = "Stripe customer";
+const STRIPE_CARD_LABEL = "Stripe customer";
 
 // A URL entry is ours when it points at a Stripe Dashboard Customer page, whatever its group,
 // label case or live/test mode.
 const OUR_URL = /dashboard\.stripe\.com\/(?:test\/)?customers\/(cus_[A-Za-z0-9]+)/i;
 
+const CUSTOMER_ID = /^cus_[A-Za-z0-9]+$/;
+
 const sha256 = (text: string) => crypto.createHash("sha256").update(text).digest("hex");
 
-export const projectRowHash = (customerId: string) => sha256(`project_row:${customerId}`);
-export const contactCardHash = (customerIds: string[]) =>
+const projectRowHash = (customerId: string) => sha256(`project_row:${customerId}`);
+const contactCardHash = (customerIds: string[]) =>
   sha256(`contact_card:${[...new Set(customerIds)].sort().join(",")}`);
 
 /** The Customer id of one of our URL entries, or null for any other line. */
@@ -146,7 +148,8 @@ const CARD_STATUSES = new Set(["created", "updated"]);
  */
 export function buildDesiredState(
   links: BillingLinkRow[],
-  submissions: SubmissionRef[]
+  submissions: SubmissionRef[],
+  onInvalidId?: (clientCode: string) => void
 ): DesiredState {
   const byCode = new Map<string, SubmissionRef[]>();
   for (const s of submissions) {
@@ -155,6 +158,11 @@ export function buildDesiredState(
   const rows = new Map<string, DesiredRow>();
   const cards = new Map<string, DesiredCard>();
   for (const link of [...links].sort((a, b) => a.clientCode.localeCompare(b.clientCode))) {
+    // The id ends up in a vCard line and a table cell: only a plain Customer id gets through.
+    if (!CUSTOMER_ID.test(link.stripeCustomerId)) {
+      onInvalidId?.(link.clientCode);
+      continue;
+    }
     const subs = byCode.get(link.clientCode) ?? [];
     rows.set(link.clientCode, {
       clientCode: link.clientCode,

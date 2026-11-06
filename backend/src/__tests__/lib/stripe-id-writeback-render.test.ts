@@ -198,4 +198,24 @@ describe("buildDesiredState", () => {
     expect(state.rows.get("CP-002")?.customerId).toBe("cus_S");
     expect(state.cards.get("uid-1")?.customerIds).toEqual(["cus_S", "cus_T"]);
   });
+
+  it("skips a link whose Stripe id is not a plain Customer id, reporting the client code only", () => {
+    const skipped: string[] = [];
+    const state = buildDesiredState(
+      [
+        { clientCode: "CP-001", stripeCustomerId: "cus_OK1", email: "a@x.example" },
+        {
+          clientCode: "CP-002",
+          stripeCustomerId: "cus_BAD\r\nURL:https://evil.example",
+          email: "b@x.example",
+        },
+        { clientCode: "CP-003", stripeCustomerId: "sub_123", email: "c@x.example" },
+      ],
+      [],
+      (code) => skipped.push(code)
+    );
+    expect([...state.rows.keys()]).toEqual(["CP-001"]);
+    expect([...state.cards.values()].flatMap((c) => c.customerIds)).toEqual(["cus_OK1"]);
+    expect(skipped).toEqual(["CP-002", "CP-003"]);
+  });
 });

@@ -66,11 +66,23 @@ interface WritebackSettings {
 type ConfigResult =
   | { status: "disabled" }
   | { status: "invalid"; problems: string[] }
-  | { status: "ready"; settings: WritebackSettings };
+  | { status: "ready"; settings: WritebackSettings; warnings: string[] };
+
+/** Fails safe: anything that is not clearly "live" is a dry run, and unknown values are flagged. */
+function parseDryRun(raw: string | undefined, warnings: string[]): boolean {
+  const value = raw?.trim().toLowerCase() ?? "";
+  if (["true", "1", "yes"].includes(value)) return true;
+  if (["", "false", "0", "no"].includes(value)) return false;
+  warnings.push(
+    "STRIPE_ID_WRITEBACK_DRY_RUN is not a recognised value (use true or false); running as a dry run"
+  );
+  return true;
+}
 
 export function loadStripeIdWritebackConfig(env: NodeJS.ProcessEnv): ConfigResult {
   if (env.STRIPE_ID_WRITEBACK?.trim() !== "true") return { status: "disabled" };
   const problems: string[] = [];
+  const warnings: string[] = [];
   const nc = getNextcloudConfig(env);
   if (!nc.ok) {
     problems.push(
@@ -96,7 +108,7 @@ export function loadStripeIdWritebackConfig(env: NodeJS.ProcessEnv): ConfigResul
     DEFAULT_INTERVAL_MS,
     problems
   );
-  const dryRun = env.STRIPE_ID_WRITEBACK_DRY_RUN?.trim() === "true";
+  const dryRun = parseDryRun(env.STRIPE_ID_WRITEBACK_DRY_RUN, warnings);
   if (!nc.ok || problems.length) return { status: "invalid", problems };
   return {
     status: "ready",
@@ -108,6 +120,7 @@ export function loadStripeIdWritebackConfig(env: NodeJS.ProcessEnv): ConfigResul
       dryRun,
       minGapMs: 200,
     },
+    warnings,
   };
 }
 
@@ -157,6 +170,7 @@ export function getStripeIdWritebackStats() {
 
 let lastVerifyAt = 0;
 let lastLoggedProblem: string | null = null;
+const loggedWarnings = new Set<string>();
 let columnCreateAttempted = false;
 let activeTrigger: (() => void) | null = null;
 const authBackoff = new AuthBackoff();
@@ -164,6 +178,7 @@ const authBackoff = new AuthBackoff();
 export function resetStripeIdWritebackStateForTests() {
   lastVerifyAt = 0;
   lastLoggedProblem = null;
+  loggedWarnings.clear();
   columnCreateAttempted = false;
   stats.lastCycleAt = null;
   stats.lastCycleStatus = null;
@@ -262,7 +277,7 @@ function isDue(state: StateRow | undefined, hash: string, verifyDue: boolean, no
 
 // ── Desired state ────────────────────────────────────────────────────────────
 
-async function loadDesired() {
+async function loadDesired(logger: MirrorLogger) {
   const links = await db
     .select({
       clientCode: billingCustomers.clientCode,
@@ -280,7 +295,12 @@ async function loadDesired() {
     })
     .from(s)
     .where(sql`${s.projectCode} IS NOT NULL`);
-  return buildDesiredState(links, submissions);
+  return buildDesiredState(links, submissions, (clientCode) => {
+    logger.warn(
+      { clientCode },
+      "Stripe ID write-back skipped a client with a malformed Stripe id."
+    );
+  });
 }
 
 // ── Client Projects rows ─────────────────────────────────────────────────────
@@ -518,10 +538,9 @@ async function syncContactCards(
   logger: MirrorLogger,
   out: Counters
 ): Promise<void> {
-  const anyDue = [...desired.values()].some((d) =>
-    isDue(states.get(stateKey("contact_card", d.key)), d.hash, verifyDue, now)
-  );
-  if (!anyDue) return;
+  const isEntryDue = (entry: DesiredCard) =>
+    isDue(states.get(stateKey("contact_card", entry.key)), entry.hash, verifyDue, now);
+  if (![...desired.values()].some(isEntryDue)) return;
 
   const directory = createContactDirectory(
     settings.nextcloud,
@@ -532,6 +551,8 @@ async function syncContactCards(
   );
   type Resolved = {
     entry: DesiredCard;
+    /** Not due entries are resolved only so a shared card gets the union of ids. */
+    due: boolean;
     card: StoredCard | null;
     status: Status | null;
     error: string;
@@ -539,25 +560,31 @@ async function syncContactCards(
   const resolved: Resolved[] = [];
   for (const entry of desired.values()) {
     const previous = states.get(stateKey("contact_card", entry.key));
-    // A card in backoff keeps its status, unless it is one of several sharing a card below.
+    const due = isEntryDue(entry);
     try {
       if (entry.uid) {
         const card = await directory.findByUid(entry.uid);
         resolved.push(
           card
-            ? { entry, card, status: null, error: "" }
-            : { entry, card: null, status: "not_found", error: "card_not_found" }
+            ? { entry, due, card, status: null, error: "" }
+            : { entry, due, card: null, status: "not_found", error: "card_not_found" }
         );
       } else if (entry.email) {
         const matches = await directory.findByEmail(entry.email);
         if (matches.length === 1)
-          resolved.push({ entry, card: matches[0], status: null, error: "" });
+          resolved.push({ entry, due, card: matches[0], status: null, error: "" });
         else if (matches.length === 0)
-          resolved.push({ entry, card: null, status: "not_found", error: "no_email_match" });
+          resolved.push({ entry, due, card: null, status: "not_found", error: "no_email_match" });
         else
-          resolved.push({ entry, card: null, status: "ambiguous", error: "email_matches_several" });
+          resolved.push({
+            entry,
+            due,
+            card: null,
+            status: "ambiguous",
+            error: "email_matches_several",
+          });
       } else {
-        resolved.push({ entry, card: null, status: "not_found", error: "no_lookup_key" });
+        resolved.push({ entry, due, card: null, status: "not_found", error: "no_lookup_key" });
       }
     } catch (error) {
       if (!(error instanceof AddressbookDiscoveryError)) throw error;
@@ -566,7 +593,7 @@ async function syncContactCards(
           { cardKey: entry.key },
           "Stripe ID write-back could not search the address books."
         );
-      resolved.push({ entry, card: null, status: "error", error: "addressbook_discovery" });
+      resolved.push({ entry, due, card: null, status: "error", error: "addressbook_discovery" });
     }
   }
 
@@ -589,7 +616,7 @@ async function syncContactCards(
   const byHref = new Map<string, { card: StoredCard; ids: Set<string>; members: Resolved[] }>();
   for (const r of resolved) {
     if (!r.card) {
-      await fail(r, r.status as Status, r.error);
+      if (r.due) await fail(r, r.status as Status, r.error);
       continue;
     }
     const group = byHref.get(r.card.href) ?? { card: r.card, ids: new Set<string>(), members: [] };
@@ -598,9 +625,11 @@ async function syncContactCards(
     byHref.set(r.card.href, group);
   }
 
-  for (const { card, ids, members } of byHref.values()) {
+  for (const { card, ids, members: all } of byHref.values()) {
+    const members = all.filter((m) => m.due);
+    if (members.length === 0) continue;
     const customerIds = [...ids].sort();
-    const codes = members.flatMap((m) => m.entry.codes);
+    const codes = all.flatMap((m) => m.entry.codes);
     const where = { addressbook: card.addressbook, cardHref: card.href };
     const mark = async (outcome: Outcome) => {
       for (const m of members) {
@@ -684,7 +713,7 @@ async function syncOnce(
   cycleStart: Date
 ): Promise<StripeIdWritebackResult> {
   const out = result("ok");
-  const desired = await loadDesired();
+  const desired = await loadDesired(logger);
   const states = new Map(
     (await db.select().from(stripeIdWritebacks)).map((r) => [stateKey(r.target, r.targetKey), r])
   );
@@ -755,6 +784,12 @@ export async function runStripeIdWritebackCycle(options: {
       "Stripe ID write-back is enabled but its config is invalid; skipped."
     );
     return finish(result("invalid_config"));
+  }
+  for (const warning of config.warnings) {
+    if (!loggedWarnings.has(warning)) {
+      loggedWarnings.add(warning);
+      logger.warn({ warning }, "Stripe ID write-back config warning.");
+    }
   }
   if (options.minGapMs !== undefined) config.settings.minGapMs = options.minGapMs;
   if (Date.now() < authBackoff.until) return result("backoff");

@@ -490,6 +490,89 @@ describe("shared Customers", () => {
   });
 });
 
+describe("dry run parsing", () => {
+  const dry = (value: string | undefined) =>
+    loadStripeIdWritebackConfig({ ...on, STRIPE_ID_WRITEBACK_DRY_RUN: value } as NodeJS.ProcessEnv);
+
+  it("reads true/1/yes in any case as a dry run, with no warning", () => {
+    for (const v of ["true", "TRUE", " Yes ", "1"]) {
+      expect(dry(v)).toMatchObject({ settings: { dryRun: true }, warnings: [] });
+    }
+  });
+
+  it("reads unset, empty, false/0/no as live, with no warning", () => {
+    for (const v of [undefined, "", "false", "False", "0", "no"]) {
+      expect(dry(v)).toMatchObject({ settings: { dryRun: false }, warnings: [] });
+    }
+  });
+
+  it("treats any other value as a dry run and warns, once per process", async () => {
+    expect(dry("ture")).toMatchObject({ settings: { dryRun: true } });
+    expect((dry("ture") as { warnings: string[] }).warnings).toHaveLength(1);
+    await addClient({ code: "CP-001", customerId: "cus_A1", submissionId: 5, tableRowId: 27 });
+    fake.addCard(`${uidOf(5)}.vcf`, vcard(uidOf(5)));
+    const env = { ...on, STRIPE_ID_WRITEBACK_DRY_RUN: "ture" } as NodeJS.ProcessEnv;
+    expect(await cycle(env)).toMatchObject({ planned: 2, written: 0 });
+    await cycle(env);
+    expect(fake.writes()).toHaveLength(0);
+    expect(lines.filter((l) => l.text.includes("config warning"))).toHaveLength(1);
+  });
+});
+
+describe("per-card due-ness", () => {
+  it("leaves a card in backoff alone while another card is written", async () => {
+    await addClient({ code: "CP-001", customerId: "cus_A", submissionId: 5, tableRowId: 27 });
+    await cycle(); // the card is missing: not_found, in backoff
+    const before = await stateOf("contact_card", uidOf(5));
+    expect(before).toMatchObject({ status: "not_found", attempts: 1 });
+    expect(before?.nextAttemptAt?.getTime()).toBeGreaterThan(Date.now());
+
+    fake.addCard(`${uidOf(5)}.vcf`, vcard(uidOf(5)));
+    await addClient({ code: "CP-002", customerId: "cus_B", submissionId: 6, tableRowId: 28 });
+    fake.addCard(`${uidOf(6)}.vcf`, vcard(uidOf(6)));
+    await cycle();
+    expect(cardWrites().map((w) => w.path)).toEqual([expect.stringContaining(uidOf(6))]);
+    expect(cardUrls(`${uidOf(5)}.vcf`)).toEqual([]);
+    const after = await stateOf("contact_card", uidOf(5));
+    expect(after?.attempts).toBe(1);
+    expect(after?.nextAttemptAt?.getTime()).toBe(before?.nextAttemptAt?.getTime());
+    expect(await stateOf("contact_card", uidOf(6))).toMatchObject({ status: "ok" });
+  });
+
+  it("does not rewrite a hand-edited card that is not due until the verify pass", async () => {
+    await addClient({ code: "CP-001", customerId: "cus_A", submissionId: 5, tableRowId: 27 });
+    fake.addCard(`${uidOf(5)}.vcf`, vcard(uidOf(5)));
+    await cycle();
+    fake.addCard(`${uidOf(5)}.vcf`, vcard(uidOf(5))); // URL entry hand-deleted
+    await addClient({ code: "CP-002", customerId: "cus_B", submissionId: 6, tableRowId: 28 });
+    fake.addCard(`${uidOf(6)}.vcf`, vcard(uidOf(6)));
+    const writesBefore = cardWrites().length;
+    await cycle();
+    expect(cardWrites()).toHaveLength(writesBefore + 1);
+    expect(cardUrls(`${uidOf(5)}.vcf`)).toEqual([]);
+    expect(cardUrls(`${uidOf(6)}.vcf`)).toEqual([dashboard("cus_B")]);
+
+    resetStripeIdWritebackStateForTests(); // the verify timer elapsed
+    await cycle();
+    expect(cardUrls(`${uidOf(5)}.vcf`)).toEqual([dashboard("cus_A")]);
+  });
+
+  it("still writes every id to a card shared by a due and a not due entry, without touching the latter's state", async () => {
+    await addClient({ code: "CP-001", customerId: "cus_A", submissionId: 5, tableRowId: 27 });
+    fake.addCard(`${uidOf(5)}.vcf`, vcard(uidOf(5), "EMAIL;TYPE=WORK:shared@zephyrine.example"));
+    await cycle();
+    const first = await stateOf("contact_card", uidOf(5));
+    // CP-002 has no submission and reaches the same card by its billing email.
+    await addClient({ code: "CP-002", customerId: "cus_B", email: "shared@zephyrine.example" });
+    await cycle();
+    expect(cardUrls(`${uidOf(5)}.vcf`)).toEqual([dashboard("cus_A"), dashboard("cus_B")]);
+    const same = await stateOf("contact_card", uidOf(5));
+    expect(same).toMatchObject({ status: "ok", attempts: 0 });
+    expect(same?.updatedAt.getTime()).toBe(first?.updatedAt.getTime());
+    expect(await stateOf("contact_card", "client:CP-002")).toMatchObject({ status: "ok" });
+  });
+});
+
 describe("dry run", () => {
   it("logs the planned writes and writes nothing to Nextcloud or the state table", async () => {
     await addClient({ code: "CP-001", customerId: "cus_A1", submissionId: 5, tableRowId: 27 });
