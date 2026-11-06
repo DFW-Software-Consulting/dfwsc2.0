@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import Stripe from "stripe";
 import { db } from "../db/client";
 import { billingCustomers } from "../db/schema";
+import { kickJob } from "./coalesced-runner";
 import { stripe } from "./stripe";
 
 // DFWSC's own billing Customers, on the platform Stripe account. Separate from Stripe
@@ -103,7 +104,13 @@ async function link(
     })
     .onConflictDoNothing({ target: billingCustomers.clientCode })
     .returning({ stripeCustomerId: billingCustomers.stripeCustomerId });
-  if (inserted[0]) return { status: "linked", stripeCustomerId, source };
+  if (inserted[0]) {
+    // A new link shows on the client's Nextcloud records and billing table within seconds
+    // (no-ops when those jobs are off; their own timers are the safety net).
+    kickJob("stripeIdWriteback");
+    kickJob("billingMirror");
+    return { status: "linked", stripeCustomerId, source };
+  }
   // Lost a race (or a retry after an unsaved result): the row already there wins.
   const [existing] = await db
     .select()

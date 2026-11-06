@@ -136,6 +136,15 @@ export const BILLING_REQUESTS_MAX_PER_CYCLE = 20;
 export const BILLING_REQUESTS_MAX_DISCOVERY_PAGES = 20;
 export const BILLING_REQUESTS_MIN_WEBHOOK_SECRET_LENGTH = 32;
 export const BILLING_REQUESTS_WEBHOOK_RATE_LIMIT_MAX = 60;
+
+/** Sales lead webhook: same contract and limits as the two Nextcloud form webhooks above. */
+export const SALES_LEAD_MIN_WEBHOOK_SECRET_LENGTH = 32;
+export const SALES_LEAD_WEBHOOK_RATE_LIMIT_MAX = 60;
+
+/** Event-driven triggers (lib/coalesced-runner.ts): a burst of writes becomes one cycle. */
+export const KICK_DEBOUNCE_MS = 1_500;
+/** A kicked cycle that found the job's advisory lock held is retried once after this. */
+export const KICK_BUSY_RETRY_MS = 5_000;
 // A submission older than this (by its Forms timestamp) is not billed unless an object of its own
 // already exists in Stripe; then it is resumed whatever its age.
 export const BILLING_REQUESTS_DEFAULT_MAX_AGE_HOURS = 72;

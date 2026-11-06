@@ -5,6 +5,7 @@ import validator from "validator";
 import { type DbOrTx, db } from "../db/client";
 import { clientGroups, clients, onboardingTokens } from "../db/schema";
 import { hashApiKey, sha256Lookup } from "./auth";
+import { kickJob } from "./coalesced-runner";
 import { dbErrorConstraint, errors, isUniqueViolation } from "./errors";
 import type { Workspace } from "./workspace";
 
@@ -127,6 +128,7 @@ export async function persistPreparedClientWithOnboardingToken(
       await tx.insert(clients).values(client);
       await tx.insert(onboardingTokens).values(onboardingToken);
     });
+    kickJob("portalMirror");
   } catch (err) {
     if (isUniqueViolation(err)) {
       const constraint = dbErrorConstraint(err);
