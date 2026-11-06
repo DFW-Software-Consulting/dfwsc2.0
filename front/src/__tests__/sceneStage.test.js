@@ -53,6 +53,16 @@ beforeEach(() => {
     }
   );
   vi.stubGlobal(
+    "MutationObserver",
+    class {
+      observe = vi.fn();
+      disconnect = vi.fn();
+      constructor() {
+        observers.theme = this;
+      }
+    }
+  );
+  vi.stubGlobal(
     "ResizeObserver",
     class {
       observe = vi.fn();
@@ -125,9 +135,15 @@ describe("mountStage", () => {
     const { instance } = renderer;
     expect(host.contains(instance.domElement)).toBe(true);
 
+    const canvasOff = vi.spyOn(instance.domElement, "removeEventListener");
+    const windowOff = vi.spyOn(window, "removeEventListener");
+
     unmount();
 
     expect(raf.active.size).toBe(0);
+    expect(observers.theme.disconnect).toHaveBeenCalled();
+    expect(windowOff).toHaveBeenCalledWith("pointermove", expect.any(Function));
+    expect(canvasOff).toHaveBeenCalledWith("webglcontextlost", expect.any(Function));
     expect(observers.io.disconnect).toHaveBeenCalled();
     expect(observers.ro.disconnect).toHaveBeenCalled();
     expect(part.dispose).toHaveBeenCalled();

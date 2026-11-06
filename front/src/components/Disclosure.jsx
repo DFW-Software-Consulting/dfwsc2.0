@@ -12,7 +12,7 @@ import { useLayoutEffect, useRef } from "react";
  * remount their subtree once after hydration (see useMotionTag), which would drop a
  * <details> the visitor already opened (even in the prerendered HTML, before any JS). On
  * unmount the open state is parked in a module map keyed by `id`; the next mount with that
- * id takes it back before paint. Nothing is read at render time, so SSR and the hydrating
+ * id takes it back before paint (unclaimed entries are dropped on the next tick). Nothing is read at render time, so SSR and the hydrating
  * render are unchanged.
  */
 const parked = new Map();
@@ -29,7 +29,11 @@ export default function Disclosure({ summary, children, className = "", open = f
     if (!id || !details) return undefined;
     if (parked.delete(id)) details.open = true;
     return () => {
-      if (details.open) parked.set(id, true);
+      if (!details.open) return;
+      parked.set(id, true);
+      // A remount restores it in the same commit; anything still parked after that was a
+      // real unmount (navigation), so drop it.
+      setTimeout(() => parked.delete(id), 0);
     };
   }, [id]);
   return (
