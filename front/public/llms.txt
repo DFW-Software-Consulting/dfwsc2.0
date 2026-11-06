@@ -16,7 +16,7 @@
 
 ## Developer documentation
 
-- The payment integration guide is not published on this site. It is available to connected clients on request.
+- The payment integration guide is not published on this site. It is available to connected clients on request. Contact mail@dfwsc.com to request access.
 
 ## Contact
 
