@@ -74,6 +74,9 @@ export const clients = pgTable(
     groupId: text("group_id").references(() => clientGroups.id, { onDelete: "set null" }),
     paymentSuccessUrl: text("payment_success_url"),
     paymentCancelUrl: text("payment_cancel_url"),
+    // Origins (scheme + host + port) the client app may send as Connect onboarding return/refresh
+    // URLs. Empty = the client cannot use the client-facing onboarding link endpoint.
+    connectRedirectOrigins: text("connect_redirect_origins").array().notNull().default([]),
     processingFeePercent: numeric("processing_fee_percent", { precision: 5, scale: 2 }),
     processingFeeCents: integer("processing_fee_cents"),
     phone: text("phone"),

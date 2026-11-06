@@ -142,3 +142,8 @@ export const BILLING_REQUESTS_DEFAULT_MAX_AGE_HOURS = 72;
 // Per invoice, or per payment of a recurring plan: $25,000.
 export const BILLING_DEFAULT_MAX_AMOUNT_CENTS = 2_500_000;
 export const BILLING_DEFAULT_DAYS_UNTIL_DUE = 7;
+
+// Client-facing Connect routes (onboarding link, account status, dashboard link), per client.
+// Links open Stripe sessions, so the link routes are far stricter than the status read.
+export const CONNECT_CLIENT_LINK_RATE_LIMIT_MAX = 10;
+export const CONNECT_CLIENT_STATUS_RATE_LIMIT_MAX = 60;

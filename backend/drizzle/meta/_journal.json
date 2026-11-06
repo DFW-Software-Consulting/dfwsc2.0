@@ -271,8 +271,15 @@
     {
       "idx": 38,
       "version": "7",
-      "when": 1793939732295,
-      "tag": "0038_cerebo_module",
+      "when": 1793825950057,
+      "tag": "0038_client_connect_redirect_origins",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793941368952,
+      "tag": "0039_cerebo_module",
       "breakpoints": true
     }
   ]
