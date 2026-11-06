@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useSpotlight } from "../components/motion/useTilt.js";
 import PageHero from "../components/PageHero.jsx";
@@ -50,11 +51,20 @@ function displayUrl(url) {
   return `${host}${pathname}`.replace(/\/$/, "");
 }
 
-// The whole card is one link (no nested interactive elements). Its aria-label replaces the
-// content as the accessible name, so the preview images are decorative (alt="").
-function DemoCard({ demo, first }) {
+const HOVER_PREVIEW = "(hover: hover) and (prefers-reduced-motion: no-preference)";
+
+// The whole card is one link (no nested interactive elements). Its visible text names it (so
+// voice control by "View live demo" works) and the preview images are decorative (alt="").
+// The tall scroll image is only mounted, on the first pointer-enter or focus, when the hover
+// effect can actually play; touch and reduced-motion visitors never download it, and the
+// prerendered HTML has none. It is absolutely positioned, so mounting it shifts nothing.
+function DemoCard({ demo }) {
   const spotlight = useSpotlight();
-  const label = `View ${demo.name} live demo (opens in a new tab)`;
+  const [armed, setArmed] = useState(false);
+  const [ready, setReady] = useState(false);
+  const arm = () => {
+    if (!armed && window.matchMedia?.(HOVER_PREVIEW).matches) setArmed(true);
+  };
   return (
     <li>
       <a
@@ -62,7 +72,8 @@ function DemoCard({ demo, first }) {
         href={demo.url}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label={label}
+        onPointerEnter={arm}
+        onFocus={arm}
         {...spotlight}
       >
         <div className="demo-card-frame" aria-hidden="true">
@@ -78,17 +89,17 @@ function DemoCard({ demo, first }) {
                   alt=""
                   width="1200"
                   height="750"
-                  loading={first ? "eager" : "lazy"}
+                  loading="eager"
                   decoding="async"
                 />
-                {demo.scrollImage && (
+                {armed && demo.scrollImage && (
                   <img
-                    className="demo-card-scroll"
+                    className={ready ? "demo-card-scroll is-ready" : "demo-card-scroll"}
+                    onLoad={() => setReady(true)}
                     src={demo.scrollImage}
                     alt=""
                     width="900"
                     height="2250"
-                    loading="lazy"
                     decoding="async"
                   />
                 )}
@@ -104,6 +115,7 @@ function DemoCard({ demo, first }) {
           <p>{demo.description}</p>
           <span className="demo-card-cta">
             View live demo <span aria-hidden="true">↗</span>
+            <span className="sr-only"> (opens in a new tab)</span>
           </span>
         </div>
       </a>
@@ -120,8 +132,8 @@ export default function Demos() {
       </PageHero>
       <section className="studio-section demo-section page-wrap" aria-label="Demo sites">
         <ul className="demo-grid">
-          {demos.map((demo, i) => (
-            <DemoCard key={demo.url} demo={demo} first={i === 0} />
+          {demos.map((demo) => (
+            <DemoCard key={demo.url} demo={demo} />
           ))}
         </ul>
       </section>
