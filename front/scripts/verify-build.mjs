@@ -9,6 +9,7 @@ const REQUIRED = [
   "index.html",
   "pricing.html",
   "team.html",
+  "privacy.html",
   "spa.html",
   "404.html",
   "sitemap.xml",

@@ -7,6 +7,7 @@ export const routes = [
   { path: "/", Page: lazyPage(() => import("./pages/Home.jsx")) },
   { path: "/pricing", Page: lazyPage(() => import("./pages/Pricing.jsx")) },
   { path: "/team", Page: lazyPage(() => import("./pages/Team.jsx")) },
+  { path: "/privacy", Page: lazyPage(() => import("./pages/Privacy.jsx")) },
   { path: "/onboard", Page: lazyPage(() => import("./pages/OnboardClient")) },
   { path: "/admin", Page: lazyPage(() => import("./pages/AdminPage")) },
   { path: "/payment-success", Page: lazyPage(() => import("./pages/PaymentSuccess")) },

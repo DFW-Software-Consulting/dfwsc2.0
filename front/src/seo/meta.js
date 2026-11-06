@@ -31,6 +31,10 @@ export const PUBLIC_ROUTES = {
     `Our Team: Software Developers in Dallas–Fort Worth | ${SITE_NAME}`,
     "Meet the small team behind DFW Software Consulting: full-stack, DevOps, and network engineers who build and run software for small businesses."
   ),
+  "/privacy": publicPage(
+    `Privacy Policy | ${SITE_NAME}`,
+    "How DFW Software Consulting handles your information: what the contact form collects, how visit context is used, and what we never do. No analytics or tracking cookies."
+  ),
 };
 
 /** Portal and utility routes: served as the SPA shell and kept out of search indexes. */

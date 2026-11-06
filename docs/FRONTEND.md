@@ -32,6 +32,7 @@ This document details the frontend implementation, state management, and UI patt
 | `/` | `Home` | Marketing landing page |
 | `/pricing` | `Pricing` | Pricing tiers |
 | `/team` | `Team` | Team members |
+| `/privacy` | `Privacy` | Privacy policy (prerendered, indexable) |
 | `/onboard` | `OnboardClient` | Token-based client onboarding |
 | `/admin` | `AdminPage` | Admin dashboard (login-gated) |
 | `/payment-success` | `PaymentSuccess` | Post-payment success screen |
@@ -45,6 +46,8 @@ This document details the frontend implementation, state management, and UI patt
 TanStack Query manages all server state. API logic lives in `src/api/`; hooks in `src/hooks/` compose queries/mutations on top. Components never call `fetch` directly.
 
 The `components/Contact.jsx` form (rendered in the Home contact band, split layout, styled by the `.studio-contact-*` / `.studio-field` classes) submits through `api/contact.js` and `useContactForm`. Name, email, company, and message limits mirror the public backend endpoint; name, company and message are required, company is limited to 100 characters.
+
+Visit context for that form lives in `front/src/utils/visitContext.js`, populated by `RouteTracker`. It is in-memory only and records just allowlisted public routes (`/`, `/pricing`, `/team`, `/privacy`) plus UTM values, the landing path and external referrer host; it writes no cookies or storage. It is sent as `context` on `POST /api/v1/contact`, and the `/privacy` page describes this to visitors.
 
 ## 5. Theme System
 The app supports light and dark modes via `ThemeContext`. It defaults to the system preference, persists the choice in `localStorage` once the visitor toggles it, and applies a `.light` or `.dark` class on `<html>`, which switches the CSS custom properties defined in `index.css`:
@@ -66,7 +69,7 @@ Hero and contact bands stay dark in both themes. Use the semantic tokens and uti
 ## 7. SEO, head tags and prerendering
 - **One source of truth:** `src/seo/meta.js` holds the title, description and `indexable` flag per route (plus the not-found and SPA-shell metadata). `src/seo/head.js` turns it into the managed head tags; `<Seo />` (mounted in `App`) applies them on every navigation, and the prerender writes the same tags into the HTML. Private routes and unknown paths get `robots: noindex,nofollow`; indexable routes get a canonical (`https://dfwsc.com`, no trailing slash) and og/twitter URLs. Add a new public page by adding it to `PUBLIC_ROUTES` and `routes.js`; a test checks the route table, `meta.js` and `nginx.conf` agree.
 - **Dynamic titles:** the two status pages whose title depends on state (`PaymentSuccess`, `OnboardingSuccess`) still call `usePageTitle(title)` after `<Seo />` has set the route default.
-- **Prerender:** `npm run build` (plain `vite build`) runs the client build, then a plugin in `vite.config.js` (skipped if the client build failed) bundles `src/entry-server.jsx` for Node (`build-ssr/`) and calls `scripts/prerender.mjs`, which writes `index.html`, `pricing.html`, `team.html`, `404.html`, an unrendered `spa.html` (portal routes) and `sitemap.xml` into `build-dist/`, then checks they exist (`scripts/verify-build.mjs`, also run by the Dockerfile). JSON-LD (`src/seo/jsonld.js`, build time only) is built from the same data the pages render (`src/content/`).
+- **Prerender:** `npm run build` (plain `vite build`) runs the client build, then a plugin in `vite.config.js` (skipped if the client build failed) bundles `src/entry-server.jsx` for Node (`build-ssr/`) and calls `scripts/prerender.mjs`, which writes `index.html`, `pricing.html`, `team.html`, `privacy.html`, `404.html`, an unrendered `spa.html` (portal routes) and `sitemap.xml` into `build-dist/`, then checks they exist (`scripts/verify-build.mjs`, also run by the Dockerfile). JSON-LD (`src/seo/jsonld.js`, build time only) is built from the same data the pages render (`src/content/`).
 - **Hydration:** `main.jsx` calls `hydrateRoot` when `#root` has children (after preloading the matched route chunk) and `createRoot` otherwise. Anything that depends on the browser (stored theme, clock, motion preferences) must render the server value first: see `useIsClient`, `useMotionAllowed` and `ThemeProvider`'s `hydrating` prop. Reveal animations switch on after hydration, but elements already in the viewport (and `mount` reveals) stay in their final state; only content below the fold animates on scroll.
 - **Developer docs:** there is no docs page in the site. The developer integration guide lives in Nextcloud (Collective "Developer Integration Guide", access via the `integrators` group); nginx 301-redirects `/docs`, `/docs/` and `/docs.html` to it.
 - **nginx:** serves the prerendered files at clean URLs (`/pricing/` redirects to `/pricing`), portal routes as `spa.html` with `X-Robots-Tag: noindex, nofollow`, and real 404s for everything else. Static `robots.txt`, `llms.txt`, icons live in `front/public/`.

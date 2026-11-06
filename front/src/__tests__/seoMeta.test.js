@@ -209,6 +209,20 @@ describe("nginx.conf stays in step with the route config", () => {
     expect(Object.keys(PUBLIC_ROUTES)).not.toContain("/docs");
   });
 
+  it("redirects the trailing-slash form of every prerendered page to its clean URL", () => {
+    const [, alternation] = conf.match(/location ~ \^\/\(([^)]*)\)\/\$ \{\s*return 301 \/\$1/);
+    const expected = Object.keys(PUBLIC_ROUTES)
+      .filter((p) => p !== "/")
+      .map((p) => p.slice(1));
+    expect(alternation.split("|").sort()).toEqual(expected.sort());
+  });
+
+  it("hides every prerendered file behind its clean URL (internal)", () => {
+    const [, alternation] = conf.match(/location ~ \^\/\(([^)]*)\)\\\.html\$ \{\s*internal;/);
+    const pages = Object.keys(PUBLIC_ROUTES).map((p) => (p === "/" ? "index" : p.slice(1)));
+    expect(alternation.split("|").sort()).toEqual([...pages, "spa", "404"].sort());
+  });
+
   it("never sets add_header inside a location (it would drop the security headers)", () => {
     const inLocations = conf.split("\n").filter((line) => /^\s{8,}add_header /.test(line));
     expect(inLocations).toEqual([]);
