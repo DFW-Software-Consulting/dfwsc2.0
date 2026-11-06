@@ -1,5 +1,6 @@
-import { m, useReducedMotion, useScroll, useTransform } from "motion/react";
+import { m, useScroll, useTransform } from "motion/react";
 import { createContext, useContext, useRef } from "react";
+import { useMotionAllowed } from "./useMotionAllowed.js";
 
 // Scroll-linked motion for the marketing pages: transforms and opacity only, driven by
 // scroll position (motion's useScroll + useTransform). Every helper renders a plain
@@ -41,12 +42,12 @@ function useFxStyle(progress, fx) {
  * MotionValue is passed (e.g. the hero text and card share one).
  */
 export function ScrollFx({ as = "div", progress, offset = ENTER, fx, ...props }) {
-  const reduced = useReducedMotion();
+  const allowed = useMotionAllowed();
   const ref = useRef(null);
   const own = useSectionProgress(ref, offset);
   const style = useFxStyle(progress ?? own, fx);
   const Tag = m[as];
-  return <Tag ref={ref} {...props} {...(reduced ? {} : { style })} />;
+  return <Tag ref={ref} {...props} {...(allowed ? { style } : {})} />;
 }
 
 const GroupContext = createContext(null);
@@ -100,7 +101,7 @@ export function ScrollItem({
 }
 
 function TrackedScrollItem({ as, progress, index, y, min, step, span, ...props }) {
-  const reduced = useReducedMotion();
+  const allowed = useMotionAllowed();
   const start = index * step;
   const end = start + span;
   const style = useFxStyle(progress, {
@@ -116,23 +117,23 @@ function TrackedScrollItem({ as, progress, index, y, min, step, span, ...props }
     ],
   });
   const Tag = m[as];
-  return <Tag {...props} {...(reduced ? {} : { style })} />;
+  return <Tag {...props} {...(allowed ? { style } : {})} />;
 }
 
 /** The fill line of a process list. Static and full under reduced motion. */
 function ScrollLine() {
-  const reduced = useReducedMotion();
+  const allowed = useMotionAllowed();
   const progress = useContext(GroupContext);
   const scaleX = useTransform(progress, IN, IN);
   return (
     <span className="studio-process-line" aria-hidden="true">
       <m.span
         className="studio-process-fill studio-process-fill-x"
-        style={reduced ? undefined : { scaleX }}
+        style={allowed ? { scaleX } : undefined}
       />
       <m.span
         className="studio-process-fill studio-process-fill-y"
-        style={reduced ? undefined : { scaleY: scaleX }}
+        style={allowed ? { scaleY: scaleX } : undefined}
       />
     </span>
   );
@@ -140,9 +141,9 @@ function ScrollLine() {
 
 /** Thin brand-blue page progress bar across the top of the navbar. */
 export function ScrollProgressBar() {
-  const reduced = useReducedMotion();
+  const allowed = useMotionAllowed();
   const { scrollYProgress } = useScroll();
-  if (reduced) return null;
+  if (!allowed) return null;
   return (
     <m.div
       className="studio-scroll-progress"
