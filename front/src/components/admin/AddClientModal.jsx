@@ -87,7 +87,7 @@ export default function AddClientModal({ onClose, showToast, workspace = "client
             value={groupId}
             onChange={(e) => setGroupId(e.target.value)}
             disabled={initiateOnboardingMutation.isPending}
-            className="w-full rounded-md border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-900/50 px-3 py-2 text-slate-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-blue-500 focus:border-brand-500 dark:focus:border-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full rounded-md border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-900/50 px-3 py-2 text-slate-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <option value="">No company</option>
             {groups.map((g) => (

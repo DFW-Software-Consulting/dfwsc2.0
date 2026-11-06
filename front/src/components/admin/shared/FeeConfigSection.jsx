@@ -30,9 +30,12 @@ export default function FeeConfigSection({
   return (
     <div className="mb-4">
       <p className="block text-sm font-medium text-fg mb-2">Processing Fee</p>
-      <div className="flex flex-wrap gap-4 mb-2">
+      <div className="flex flex-wrap gap-x-4 mb-2">
         {options.map(({ value, label }) => (
-          <label key={value} className="flex items-center gap-1.5 text-sm text-fg cursor-pointer">
+          <label
+            key={value}
+            className="flex min-h-11 items-center gap-2 text-sm text-fg cursor-pointer md:min-h-0 pointer-coarse:min-h-11"
+          >
             <input
               type="radio"
               name={radioName}
@@ -40,7 +43,7 @@ export default function FeeConfigSection({
               checked={feeType === value}
               onChange={() => onFeeTypeChange(value)}
               disabled={disabled}
-              className="accent-blue-500"
+              className="size-5 accent-brand-500"
             />
             {label}
           </label>
@@ -60,7 +63,7 @@ export default function FeeConfigSection({
       )}
       {showHint && (
         <p
-          className={`mt-1.5 text-xs ${hintColor === "blue" ? "text-blue-700 dark:text-blue-400" : "text-fg-muted"}`}
+          className={`mt-1.5 text-xs ${hintColor === "blue" ? "text-brand-700 dark:text-brand-300" : "text-fg-muted"}`}
         >
           {hint}
         </p>

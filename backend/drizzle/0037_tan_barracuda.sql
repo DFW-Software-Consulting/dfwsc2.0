@@ -1,0 +1,1 @@
+ALTER TABLE "clients" ADD COLUMN "card_payments_status" text;

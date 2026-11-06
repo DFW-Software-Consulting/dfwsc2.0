@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getPaymentSession } from "../api/payments";
+import { usePageTitle } from "../hooks/usePageTitle";
 
 // Mirrors the payment_ledger status enum in backend/src/db/schema.ts.
 const PAID_STATUSES = new Set(["paid"]);
@@ -129,14 +130,14 @@ function StatusCard({ title, children, variant = "neutral", live = "polite" }) {
 }
 
 const TITLE_MAP = {
-  loading: "Verifying Payment - DFW Software Consulting",
-  checking: "Verifying Payment - DFW Software Consulting",
-  pending: "Payment Pending - DFW Software Consulting",
-  paid: "Payment Successful - DFW Software Consulting",
-  refund: "Payment Refunded - DFW Software Consulting",
-  failed: "Payment Not Completed - DFW Software Consulting",
-  unavailable: "Payment Unavailable - DFW Software Consulting",
-  missing: "Payment Session Missing - DFW Software Consulting",
+  loading: "Verifying Payment",
+  checking: "Verifying Payment",
+  pending: "Payment Pending",
+  paid: "Payment Successful",
+  refund: "Payment Refunded",
+  failed: "Payment Not Completed",
+  unavailable: "Payment Unavailable",
+  missing: "Payment Session Missing",
 };
 
 export default function PaymentSuccess() {
@@ -145,6 +146,7 @@ export default function PaymentSuccess() {
     return params.get("session_id") || "";
   });
   const [state, setState] = useState(() => (sessionId ? { type: "loading" } : { type: "missing" }));
+  usePageTitle(TITLE_MAP[state.type] || TITLE_MAP.loading);
 
   const summary = useMemo(() => {
     if (state.type !== "paid" && state.type !== "refund" && state.type !== "failed") {
@@ -158,10 +160,6 @@ export default function PaymentSuccess() {
       date: formatDate(data.createdAt),
     };
   }, [state]);
-
-  useEffect(() => {
-    document.title = TITLE_MAP[state.type] || TITLE_MAP.loading;
-  }, [state.type]);
 
   useEffect(() => {
     if (!sessionId) return;

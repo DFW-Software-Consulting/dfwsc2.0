@@ -24,6 +24,7 @@ import {
   resolveDefaultPaymentSuccessUrl,
   resolveFrontendOrigin,
 } from "../lib/config";
+import { CARD_PAYMENTS_NOT_ACTIVE_ERROR, getChargeableAccountId } from "../lib/connected-account";
 import {
   PAYMENT_CREATE_BUCKET_CAPACITY,
   PAYMENT_CREATE_REFILL_PER_MINUTE,
@@ -41,9 +42,17 @@ import {
   sendRateLimited,
   tokenBucketRateLimit,
 } from "../lib/rate-limit";
+import { errorLogFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
+import { resolveCardPaymentsStatus } from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
+import {
+  CURRENCY_REGEX,
+  lineItemSchema,
+  MAX_SAFE_AMOUNT,
+  validateStripeMetadata,
+} from "../lib/stripe-input";
 import { parseBody, validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
 import { applyCheckoutSessionOutcome } from "./webhooks";
 
@@ -147,7 +156,10 @@ async function reconcileStaleCheckout(
       .limit(1);
     return updated ?? row;
   } catch (err) {
-    request.log.warn({ err, sessionId }, "Checkout status reconciliation with Stripe failed");
+    request.log.warn(
+      { ...errorLogFields(err), sessionId },
+      "Checkout status reconciliation with Stripe failed"
+    );
     return row;
   }
 }
@@ -310,67 +322,6 @@ const STRIPE_CIRCUIT_OPEN_ERROR = {
   code: "STRIPE_CIRCUIT_OPEN",
 };
 
-// ── Strict line-item schema ────────────────────────────────────────────────────
-// Only inline price_data is accepted. Stripe price IDs (platform-scoped) are
-// incompatible with connected-account Checkout sessions and are rejected.
-const CURRENCY_REGEX = /^[a-z]{3}$/;
-const MAX_SAFE_AMOUNT = 99_999_999; // Stripe max for most currencies is 99999999
-
-const lineItemSchema = z.object({
-  price_data: z.object({
-    currency: z
-      .string()
-      .transform((v) => v.toLowerCase())
-      .refine((v) => CURRENCY_REGEX.test(v), {
-        message: "currency must be a 3-letter ISO code (e.g. 'usd').",
-      }),
-    product_data: z.object({
-      name: z.string().min(1, "product name is required.").max(200),
-      description: z.string().max(1000).optional(),
-    }),
-    unit_amount: z
-      .number()
-      .int("unit_amount must be an integer.")
-      .positive("unit_amount must be positive.")
-      .max(MAX_SAFE_AMOUNT, `unit_amount must not exceed ${MAX_SAFE_AMOUNT}.`),
-  }),
-  quantity: z
-    .number()
-    .int("quantity must be an integer.")
-    .positive("quantity must be positive.")
-    .max(999_999)
-    .default(1),
-});
-
-// ── Metadata validation ────────────────────────────────────────────────────────
-// Stripe allows max 50 metadata keys, each key max 40 chars, each value max 500 chars.
-const STRIPE_METADATA_MAX_KEYS = 50;
-const STRIPE_METADATA_MAX_KEY_LENGTH = 40;
-const STRIPE_METADATA_MAX_VALUE_LENGTH = 500;
-
-function validateStripeMetadata(
-  metadata: Record<string, string> | undefined
-): Record<string, string> {
-  if (!metadata) return {};
-  const keys = Object.keys(metadata);
-  if (keys.length > STRIPE_METADATA_MAX_KEYS) {
-    throw errors.badRequest(`metadata must not exceed ${STRIPE_METADATA_MAX_KEYS} keys.`);
-  }
-  for (const key of keys) {
-    if (key.length > STRIPE_METADATA_MAX_KEY_LENGTH) {
-      throw errors.badRequest(
-        `metadata key '${key.slice(0, 20)}...' exceeds ${STRIPE_METADATA_MAX_KEY_LENGTH} characters.`
-      );
-    }
-    if (metadata[key].length > STRIPE_METADATA_MAX_VALUE_LENGTH) {
-      throw errors.badRequest(
-        `metadata value for '${key}' exceeds ${STRIPE_METADATA_MAX_VALUE_LENGTH} characters.`
-      );
-    }
-  }
-  return metadata;
-}
-
 const paymentCreateBodySchema = z.object({
   amount: z.number().optional(),
   currency: z
@@ -490,11 +441,38 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         throw errors.notFound("Client");
       }
 
-      if (!client.stripeAccountId || !client.chargesEnabled) {
+      const stripeAccountId = getChargeableAccountId(client);
+      if (!stripeAccountId) {
         return reply.code(409).send({
           error: "Client Stripe account is not connected or cannot accept charges.",
           code: "ACCOUNT_NOT_CONNECTED",
         });
+      }
+
+      // Checkout is a direct charge on the connected account, which needs card_payments active.
+      // Checked before any Checkout call; a failed live read fails closed.
+      let cardPayments: string;
+      try {
+        cardPayments = await resolveCardPaymentsStatus(client, stripeAccountId);
+      } catch (err) {
+        request.log.error(
+          { clientId: client.id, ...errorLogFields(err) },
+          "Could not read the card_payments capability from Stripe"
+        );
+        if (isStripeBusyError(err) || isCircuitOpenError(err)) {
+          await paymentCreateBucket.refund(request);
+        }
+        if (
+          mapStripeError(err, reply, {
+            circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+            rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
+          })
+        )
+          return;
+        throw errors.stripeFailed("Payment processing failed. Please try again.");
+      }
+      if (cardPayments !== "active") {
+        return reply.code(409).send(CARD_PAYMENTS_NOT_ACTIVE_ERROR);
       }
 
       const effectiveWaiveFee = isApiCall ? false : waiveFee;
@@ -504,7 +482,6 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
 
       const clientId = client.id;
-      const stripeAccountId = client.stripeAccountId;
 
       // Keys are scoped per client: namespace the key sent to Stripe so two
       // clients using the same key never collide on the platform. Stripe limits
@@ -649,7 +626,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           });
         });
       } catch (err) {
-        request.log.error({ err }, "Stripe Checkout session creation failed");
+        request.log.error(errorLogFields(err), "Stripe Checkout session creation failed");
         // A request refused before it reached Stripe (no slot in time, or the circuit already
         // open) is told to retry, so it gives its rate-limit token back and the retry is not
         // charged twice. A circuit-open error after the call started is a timeout of a call
@@ -692,7 +669,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         });
       } catch (err) {
         request.log.error(
-          { err, stripeSessionId: session.id },
+          { ...errorLogFields(err), stripeSessionId: session.id },
           "Ledger insert failed after Stripe Checkout session creation — returning 503"
         );
         return reply.code(503).send({
@@ -708,8 +685,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           "Idempotency-Key already used for a different payment session"
         );
         return reply.code(409).send({
-          error:
-            "This Idempotency-Key was already used for a different payment. Use a new unique key for each new payment.",
+          error: "This Idempotency-Key was already used with a different request body.",
           code: "IDEMPOTENCY_KEY_REUSED",
         });
       }
@@ -865,7 +841,11 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
                 return;
               failedAccounts.push(c.id);
               request.log.error(
-                { err: outcome.reason, clientId: c.id, stripeAccountId: c.stripeAccountId },
+                {
+                  ...errorLogFields(outcome.reason),
+                  clientId: c.id,
+                  stripeAccountId: c.stripeAccountId,
+                },
                 "Failed to list payments for connected account; excluding from group report"
               );
             }
@@ -903,7 +883,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           })
         );
       } catch (err) {
-        request.log.error({ err, clientId }, "Stripe PaymentIntent list failed");
+        request.log.error({ ...errorLogFields(err), clientId }, "Stripe PaymentIntent list failed");
         if (mapStripeError(err, reply, { circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR })) return;
         return reply.code(502).send({ error: "Failed to list payments." });
       }

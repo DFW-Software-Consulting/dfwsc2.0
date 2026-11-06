@@ -33,8 +33,8 @@ export default function ConfirmModal({
 
   const confirmButtonStyles = {
     danger: "bg-red-600 hover:bg-red-700 focus:ring-red-400",
-    success: "bg-green-600 hover:bg-green-700 focus:ring-green-400",
-    primary: "bg-blue-600 hover:bg-blue-700 focus:ring-blue-400",
+    success: "bg-green-700 hover:bg-green-800 focus:ring-green-400",
+    primary: "bg-brand-500 hover:bg-brand-600 focus:ring-brand-400",
   };
 
   // Portaled to <body> so it layers above the sticky header (see BaseModal).
@@ -64,7 +64,7 @@ export default function ConfirmModal({
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 rounded-md border border-line bg-surface hover:border-line-strong text-fg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-focus"
+            className="px-4 py-2 max-md:min-h-11 pointer-coarse:min-h-11 rounded-md border border-line bg-surface hover:border-line-strong text-fg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-focus"
           >
             {cancelText}
           </button>
@@ -72,7 +72,7 @@ export default function ConfirmModal({
             ref={confirmButtonRef}
             type="button"
             onClick={onConfirm}
-            className={`px-4 py-2 rounded-md text-white font-medium transition-colors focus:outline-none focus:ring-2 ${confirmButtonStyles[confirmVariant]}`}
+            className={`px-4 py-2 max-md:min-h-11 pointer-coarse:min-h-11 rounded-md text-white font-medium transition-colors focus:outline-none focus:ring-2 ${confirmButtonStyles[confirmVariant]}`}
           >
             {confirmText}
           </button>

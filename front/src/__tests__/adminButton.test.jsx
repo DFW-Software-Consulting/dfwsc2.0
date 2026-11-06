@@ -31,8 +31,8 @@ describe("Button", () => {
     );
 
     expect(screen.getByRole("button", { name: "Edit" })).toHaveClass(
-      "text-blue-700",
-      "dark:text-blue-400"
+      "text-brand-700",
+      "dark:text-brand-300"
     );
     expect(screen.getByRole("button", { name: "Unlink" })).toHaveClass(
       "text-yellow-800",
@@ -51,7 +51,7 @@ describe("Button", () => {
     );
 
     const button = screen.getByRole("button", { name: "Save" });
-    expect(button).toHaveClass("bg-blue-600", "text-white", "w-full", "shadow-lg");
+    expect(button).toHaveClass("bg-brand-500", "text-white", "w-full", "shadow-lg");
   });
 
   it("forwards title", () => {

@@ -35,6 +35,7 @@ import { db } from "../../db/client";
 import { apiKeyRegenerationTokens, clients } from "../../db/schema";
 import { sendMail } from "../../lib/mailer";
 import { ensureBaseEnv } from "../helpers/env";
+import { dump, expectNoPlanted, plantedMailError } from "../helpers/log-capture";
 
 const URL = "/api/v1/api-key/regenerate-request";
 const settle = (ms = 100) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -193,7 +194,7 @@ describe("POST /api-key/regenerate-request abuse resistance", () => {
   });
 
   it("logs a detached failure and does not raise an unhandled rejection", async () => {
-    const error = new Error("smtp down");
+    const error = plantedMailError();
     (sendMail as any).mockRejectedValueOnce(error);
     // request.log is a per-request child of app.log, so capture what the children log.
     const logged: unknown[][] = [];
@@ -212,10 +213,15 @@ describe("POST /api-key/regenerate-request abuse resistance", () => {
     await vi.waitFor(() =>
       expect(
         logged.some(
-          ([obj, msg]) => msg === "Failed to send regeneration email" && (obj as any).err === error
+          ([obj, msg]) =>
+            msg === "Failed to send regeneration email" &&
+            (obj as any).errCode === "EENVELOPE" &&
+            (obj as any).errResponseCode === 550 &&
+            (obj as any).errCommand === "RCPT TO"
         )
       ).toBe(true)
     );
+    expectNoPlanted(dump(logged));
     await settle(50);
 
     expect(unhandled).toEqual([]);

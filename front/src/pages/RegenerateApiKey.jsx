@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useRegenerateApiKey } from "../hooks/useApiKey";
+import { usePageTitle } from "../hooks/usePageTitle";
 import logger from "../utils/logger";
 
 export default function RegenerateApiKey() {
@@ -14,9 +15,9 @@ export default function RegenerateApiKey() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const { mutate, isPending } = useRegenerateApiKey();
+  usePageTitle("Regenerate API Key");
 
   useEffect(() => {
-    document.title = "Regenerate API Key";
     if (location.search || location.hash) {
       navigate(location.pathname, { replace: true });
     }

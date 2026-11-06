@@ -219,7 +219,7 @@ export default function EditClientModal({
 
   return (
     <BaseModal isOpen onClose={onClose} title="Edit Client" titleId="edit-client-title">
-      <p className="text-sm text-fg-muted mb-5">
+      <p className="text-sm text-fg-muted mb-5 [overflow-wrap:anywhere]">
         {client.name} &bull; {client.email}
       </p>
 

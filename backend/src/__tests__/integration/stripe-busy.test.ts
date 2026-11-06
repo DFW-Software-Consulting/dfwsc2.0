@@ -72,6 +72,7 @@ describe("Stripe concurrency limit at the routes (STRIPE_BUSY)", () => {
       status: "active",
       stripeAccountId: accountId,
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       processingFeeCents: 100,
     });
   });

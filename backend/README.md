@@ -26,11 +26,9 @@ Create a `.env` file based on `.env.example`.
 | `SMTP_USER` | ✅ | Username/login for the SMTP server. |
 | `SMTP_PASS` | ✅ | Password/API key for the SMTP server. |
 | `SMTP_FROM` | ❌ | Friendly from address used in onboarding emails. Defaults to `SMTP_USER` when omitted. |
-| `ADMIN_USERNAME` | ❌ | Username for the first admin, created at startup only when the `admins` table is empty. Remove it from the environment once the admin is confirmed. |
-| `ADMIN_PASSWORD` | ❌ | Plaintext password for the first admin (at least 12 characters in production). The server hashes it with bcrypt when it creates the admin, so do not supply a pre-computed hash: the hash string itself would become the password. Once any admin exists it is ignored, and the server logs a startup warning while it is still set. Remove it from the environment once the admin is confirmed. |
+| `ADMIN_NEXTCLOUD_GROUPS` | ❌ | Comma-separated Nextcloud group ids allowed to sign in to the admin panel. Defaults to `dfwsc-admins,managers`. The groups must exist with members before deploying. Login also needs `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD`; without them it answers 503. |
 | `JWT_SECRET` | ✅ | Secret key for signing JWT tokens. Must be minimum 32 characters. Generate with: `openssl rand -base64 32` |
 | `JWT_EXPIRY` | ❌ | JWT token expiration time. Defaults to `1h`. Supported formats: `1h`, `30m`, `7d`, `24h`. |
-| `ALLOW_ADMIN_SETUP` | ❌ | When `true`, an admin created from `ADMIN_USERNAME`/`ADMIN_PASSWORD` at startup is left unconfirmed: log in, then choose permanent credentials with `POST /api/v1/auth/confirm-bootstrap`. When not `true`, that admin is created already confirmed. It does not enable `POST /api/v1/auth/setup`, which always returns `410 Gone`. |
 
 ## Database Schema
 
@@ -48,9 +46,6 @@ The database only stores the connected account mapping and raw webhook payloads.
 | --- | --- | --- |
 | `GET /api/v1/health` | Health check. | Public |
 | `POST /api/v1/auth/login` | Admin login endpoint. Returns JWT token for authentication. Rate limited to 5 requests per 15 minutes. | Public |
-| `GET /api/v1/auth/setup/status` | Bootstrap status. Returns `{ adminConfigured, requiresSetup }`. | Public |
-| `POST /api/v1/auth/setup` | Deprecated. Always returns `410 Gone`. | Public |
-| `POST /api/v1/auth/confirm-bootstrap` | Replace the bootstrap admin's username and password with permanent credentials. | Admin (JWT) |
 | `GET /api/v1/clients` | List all clients with their status and Stripe account information. | Admin (JWT) |
 | `PATCH /api/v1/clients/:id` | Update client status (`active` or `inactive`). Soft-deletes clients without removing from database. | Admin (JWT) |
 | `POST /api/v1/accounts` | Create a client record and onboarding token. | Admin |
@@ -138,20 +133,13 @@ To replay Stripe events, use the Stripe CLI directly:
 stripe trigger payment_intent.succeeded
 ```
 
-## Admin Bootstrap
+## Admin login
 
-The first admin is created from environment variables at startup. There is no browser-based credential setup or recovery flow: `POST /api/v1/auth/setup` always returns `410 Gone`.
+Admin login is checked against Nextcloud; there are no local admin accounts. `POST /api/v1/auth/login` verifies the Nextcloud username and password and requires membership of a group in `ADMIN_NEXTCLOUD_GROUPS` (default `dfwsc-admins,managers`).
 
-### First-run steps
+- Create the groups and add members **before** deploying.
+- Accounts with two-factor login must use a Nextcloud app password.
+- There is no local fallback: if Nextcloud is down, login answers `503` (payments are unaffected).
+- Logins are limited per IP (5 / 15 min) and per username (10 / 15 min), because Nextcloud throttles failed logins by source IP.
+- Details: `docs/BACKEND.md`, "Admin login (Nextcloud)".
 
-1. Set `ADMIN_USERNAME` and `ADMIN_PASSWORD` (plaintext, at least 12 characters in production), and `ALLOW_ADMIN_SETUP=true`.
-2. Start the application. If the `admins` table is empty, one admin is created with the password hashed by bcrypt and left unconfirmed. If any admin already exists, nothing is created.
-3. Open `/admin` and log in with those credentials. The login response reports `bootstrapPending: true` until the admin is confirmed.
-4. Choose permanent credentials (the new password must also meet the password rules) with `POST /api/v1/auth/confirm-bootstrap`.
-5. **Remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` from the environment, set `ALLOW_ADMIN_SETUP=false`, and restart.**
-
-### Security considerations
-
-- `ADMIN_PASSWORD` is hashed as given. Never put a bcrypt hash in it; the hash string would become the password.
-- Remove `ADMIN_USERNAME` and `ADMIN_PASSWORD` once the admin is confirmed. Bootstrap only seeds an empty `admins` table, so a leftover `ADMIN_PASSWORD` does not create a second admin, even if you renamed the admin when you confirmed. It is ignored, but a plaintext admin password has no reason to stay in the environment: while it is set and a confirmed admin exists, startup logs a warning, and names any active admin whose password is still the bootstrap one.
-- `POST /api/v1/auth/confirm-bootstrap` requires an admin JWT and is rate limited to 3 requests per 15 minutes.

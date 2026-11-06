@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { db } from "../db/client";
+import { errorLogFields } from "../lib/safe-error-log";
 
 export default async function healthRoutes(fastify: FastifyInstance) {
   fastify.get("/health", async (request, reply) => {
@@ -12,7 +13,7 @@ export default async function healthRoutes(fastify: FastifyInstance) {
         timestamp: new Date().toISOString(),
       });
     } catch (error) {
-      request.log.error(error, "Health check failed - database connection error");
+      request.log.error(errorLogFields(error), "Health check failed - database connection error");
       reply.code(503).send({
         status: "error",
         database: "disconnected",

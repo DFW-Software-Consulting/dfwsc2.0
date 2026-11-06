@@ -157,6 +157,6 @@ run_step "Agent docs" check_agent_docs_sync
 if [ "${SKIP_TYPECHECK}" != "1" ]; then
   STAGED_BACKEND_TS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^backend/.*\.tsx?$' || true)
   if [ -n "$STAGED_BACKEND_TS" ]; then
-    run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json"
+    run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json && npx tsc --noEmit -p tsconfig.json"
   fi
 fi

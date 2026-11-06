@@ -17,6 +17,12 @@ async function getRateLimit() {
   return mod.rateLimit;
 }
 
+async function getAdminRateLimit() {
+  vi.resetModules();
+  const mod = await import("../../lib/rate-limit");
+  return mod.adminRateLimit;
+}
+
 function makeMocks(ip = "127.0.0.1") {
   const reply = {
     code: vi.fn().mockReturnThis(),
@@ -117,6 +123,22 @@ describe("rateLimit", () => {
 
     expect(keyGenerator).toHaveBeenCalledWith(request);
     expect(reply.code).toHaveBeenCalledWith(429);
+  });
+
+  it("keys admin limits by the JWT subject", async () => {
+    const adminRateLimit = await getAdminRateLimit();
+    const guard = adminRateLimit({ max: 1, windowMs: 60_000 });
+    const jane = makeMocks("10.0.0.1");
+    const manager = makeMocks("10.0.0.1");
+    (jane.request as any).admin = { role: "admin", sub: "jane" };
+    (manager.request as any).admin = { role: "admin", sub: "manager" };
+
+    await guard(jane.request as any, jane.reply as any);
+    await guard(manager.request as any, manager.reply as any);
+    expect(manager.reply.code).not.toHaveBeenCalled();
+
+    await guard(jane.request as any, jane.reply as any);
+    expect(jane.reply.code).toHaveBeenCalledWith(429);
   });
 
   it("uses a custom maxGenerator when provided", async () => {

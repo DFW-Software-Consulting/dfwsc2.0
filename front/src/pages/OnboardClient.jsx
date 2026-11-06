@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useInitiateOnboarding } from "../hooks/useOnboarding";
+import { usePageTitle } from "../hooks/usePageTitle";
 import logger from "../utils/logger";
 
 function readTokenFromSearch() {
@@ -17,9 +18,9 @@ export default function OnboardClient() {
   });
   const [message, setMessage] = useState("");
   const { mutate, isPending } = useInitiateOnboarding();
+  usePageTitle("Client Onboarding");
 
   useEffect(() => {
-    document.title = "Client Stripe Onboarding";
     if (location.search || location.hash) {
       navigate(location.pathname, { replace: true });
     }

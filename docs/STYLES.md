@@ -15,22 +15,24 @@ Prefer these over raw Tailwind grays. Each token has a matching utility (e.g. `b
 
 | Variable | Utility color | Light | Dark | Use |
 |----------|---------------|-------|------|-----|
-| `--bg-main` | `page` | `#f7f7f0` | `#0a1920` | Page background, navbar, footer |
-| `--bg-surface` | `surface` | `#eaf0e8` | `#0f242b` | Tinted bands, chips, icon wells |
-| `--bg-card` | `card` | `#fffefa` | `#12292f` | Cards and panels |
-| `--text-main` | `fg` | `#132f39` | `#edf2ec` | Headings and body text |
-| `--text-muted` | `fg-muted` | `#4d6266` | `#a9bdbd` | Secondary copy |
-| `--accent` | `accent` | `#1d7360` | `#7fd3b6` | Accent text, eyebrows, icons, link hover |
-| `--accent-soft` | `accent-soft` | `#dceee5` | `#173b38` | Selected/active backgrounds, callouts |
-| `--border-subtle` | `line` | `#dce1d7` | `white / 10%` | Default borders and dividers |
-| `--border-strong` | `line-strong` | `#b9cfc2` | `white / 20%` | Hover borders, section rules |
-| `--focus-ring` | `focus` | `#0b7285` | `#63bdcc` | `focus-visible` outlines |
+| `--bg-main` | `page` | `#f8f7f3` (paper) | `#0b1322` | Page background, navbar, footer, heroes |
+| `--bg-surface` | `surface` | `#efede6` | `#111c30` | Tinted bands, chips, icon wells |
+| `--bg-card` | `card` | `#ffffff` | `#17243b` | Cards and panels |
+| `--text-main` | `fg` | `#0f1e33` | `#eef2f8` | Headings and body text |
+| `--text-muted` | `fg-muted` | `#4b5a6e` | `#a6b3c7` | Secondary copy |
+| `--accent` | `accent` | `#735c20` (bronze) | `#d6c89a` (sand) | Serif-italic `em`, eyebrows, icons |
+| `--accent-soft` | `accent-soft` | `#ebe3c8` | `#1f2c44` | Chips, callouts, active backgrounds |
+| `--link` | `link` | `#245a91` | `#6ea8e6` | Links, status dots |
+| `--border-subtle` | `line` | `rgb(15 30 51 / 12%)` | `white / 12%` | Default borders and dividers |
+| `--border-strong` | `line-strong` | `rgb(15 30 51 / 22%)` | `white / 20%` | Hover borders, section rules |
+| `--focus-ring` | `focus` | `#245a91` | `#6ea8e6` | `focus-visible` outlines |
+| `--cta-bg` / `--cta-bg-hover` / `--cta-text` | n/a | `#2c6daf` / `#245a91` / `#fff` | `#2c6daf` / `#2f72b7` / `#fff` | The one primary button (`.studio-button`, navbar "Start a project") |
 
-Inverse bands (hero, contact, featured cards) are dark in both themes and use `--bg-inverse`, `--text-inverse`, `--text-inverse-muted` and `--accent-inverse`, plus `--bg-inverse-glow` (the radial glow on inverse heroes and the featured pricing card) and `--border-inverse` (dividers on inverse surfaces). The primary marketing button uses `--cta-bg`, `--cta-bg-hover` and `--cta-text`.
+Heroes (`.studio-hero`, `.studio-page-hero`) follow the theme: paper with a soft blue radial glow (`--hero-glow`, from `#2c6daf`) in light mode, navy in dark mode. Inverse bands (contact band, featured pricing card) stay navy in both themes and use `--bg-inverse` (`#0b1322` light, `#0e1a31` dark), `--bg-inverse-glow`, `--text-inverse` (`#eef2f8`), `--text-inverse-muted` (`#a6b3c7`), `--accent-inverse` (`#d6c89a`), `--link-inverse` (`#6ea8e6`, also the focus ring there) and `--border-inverse`.
 
-Light elements laid over dark bands or photos keep the same colors in both themes: `--sticker-bg` / `--sticker-text` (the Home floating note; `--sticker-text` also colors the Team photo labels) and `--photo-label-bg`.
+Light elements over dark bands or photos keep the same colors in both themes: `--sticker-bg` `#ebe3c8` / `--sticker-text` `#4a3c10` (Home floating note, Team photo labels) and `--photo-label-bg`.
 
-All text/background pairs above meet WCAG AA (4.5:1) in both themes.
+Contrast pairs were checked with a WCAG script; every text pair is at least 4.5:1 and every control/focus/button edge at least 3:1 in both themes.
 
 `--glass-bg` / `--glass-border` remain for the `.glass` utility.
 
@@ -39,14 +41,14 @@ Defined in the `@theme` block. All map to Tailwind's `brand-*` utilities. `brand
 
 | Token | Hex |
 |-------|-----|
-| `brand-50` | `#e6f5f7` |
-| `brand-100` | `#c9e9ef` |
-| `brand-200` | `#98d4df` |
-| `brand-300` | `#63bdcc` |
-| `brand-400` | `#2ca1b4` |
-| `brand-500` | `#0b7285` (primary) |
-| `brand-600` | `#095d6d` |
-| `brand-700` | `#074955` |
+| `brand-50` | `#eaf2fb` |
+| `brand-100` | `#d3e4f6` |
+| `brand-200` | `#a8c9ec` |
+| `brand-300` | `#6ea8e6` |
+| `brand-400` | `#4a8bd0` |
+| `brand-500` | `#2c6daf` (primary, logo blue; white text 5.4:1) |
+| `brand-600` | `#245a91` (hover, links on light) |
+| `brand-700` | `#1c4772` |
 
 ## 4. Layout
 - **`.page-wrap`** (in `index.css`): the shared content container, `min(1180px, 100% − 80px)`, narrowing to 48px and 36px gutters at ≤1000px and ≤480px. The navbar, footer and marketing sections all use it so their edges line up.
@@ -55,11 +57,11 @@ Defined in the `@theme` block. All map to Tailwind's `brand-*` utilities. `brand
 ## 5. Marketing pages (studio styles)
 `Home`, `Pricing` and `Team` use plain CSS classes prefixed `studio-`:
 
-- `front/src/styles/studio.css`: shared primitives: `.studio` root, `.studio-inverse` (dark band; remaps accent and focus ring), eyebrow and mini labels, headings, `.studio-button` / `.studio-text-link`, `.studio-section` / `.studio-band` rhythm, section headings, the process grid, interior page hero and contact band.
+- `front/src/styles/studio.css`: shared primitives: `.studio` root, `.studio-inverse` (navy band; remaps link and focus ring), eyebrow and mini labels, headings, `.studio-button` / `.studio-text-link`, `.studio-section` / `.studio-band` rhythm, section headings, the process grid, interior page hero and contact band.
 - `front/src/pages/{Home,Pricing,Team}.css`: page-only layout, imported only by that page so each lazy route ships only its own CSS.
 
 Conventions:
-- Colors come from the tokens above; don't add hex values to studio CSS. The exception is the illustrative app preview on Home, which deliberately stays light in both themes: `.studio-preview` defines its own local `--win-*` palette (plus the window and note shadows), and `.studio-window` pins `--focus-ring` to the light value.
+- Colors come from the tokens above; don't add hex values to studio CSS. The exception is the illustrative app preview on Home: `.studio-preview` defines its own local `--win-*` palette per mode (white card in light, navy card in dark; no green), plus the window and note shadows.
 - Minimum text size is 12px (uppercase tracked labels); body copy is 14–16px.
 - Interactive elements get a 3px `--focus-ring` outline on `:focus-visible`.
 - Text links (`.studio-text-link`) are underlined at rest so they don't rely on color alone.
@@ -73,6 +75,26 @@ Conventions:
 ### Reduced motion
 `index.css` applies a global `prefers-reduced-motion: reduce` rule: transitions and animations finish instantly (0.01ms, one iteration) across the app shell, admin and marketing pages, so hover, focus and menu state changes still appear without movement. `.animate-spin` loading spinners are exempt because they signal progress. CSS can't reach JS-requested scrolling, so `scrollToSection` checks the media query itself and jumps (`behavior: "auto"`) instead of smooth-scrolling. The `Docs` page's `scrollIntoView({ behavior: "smooth" })` does not check it yet.
 
+### Motion (marketing pages only)
+`front/src/components/motion/Reveal.jsx` wraps Framer Motion (`motion` package, imported from `motion/react`) with `LazyMotion` (`domAnimation`, strict, so use `m.*` only) and `MotionConfig reducedMotion="user"`. Wrap a marketing page in `<MotionRoot>`; admin and portal routes never import it, so they don't ship the library.
+
+- `<Reveal as="div" delay y mount>`: fade up 16px over 0.5s once when 25% in view (`mount` animates on load instead).
+- `<RevealGroup>` + `<RevealItem>`: a stagger for card grids and hero text. Items must be direct or nested children of a group.
+- `<Swap id animate>`: slide/fade tab content when `id` changes. Keep the `aria-live` element outside it and swap only its inner span.
+- Only opacity and transform animate, so there is no layout shift. Elements that already use a CSS `transform` should not be wrapped (animate their parent).
+- Never hidden: with `prefers-reduced-motion: reduce`, or no `IntersectionObserver`, the wrappers render plain elements with no hidden initial state.
+
+### Smooth scroll and scroll-linked motion (marketing pages only)
+- **Lenis** (`lenis`, CSS from `lenis/dist/lenis.css`) smooths mouse-wheel and trackpad scrolling. `MotionRoot` mounts `motion/SmoothScroll.jsx`, so it runs only on Home, Pricing and Team and is destroyed on unmount; admin and portal routes keep native scrolling. It is off under `prefers-reduced-motion: reduce` (and follows the setting live). Touch stays native (`syncTouch` off). It scrolls the real document, so keyboard, focus, find-in-page, `#anchors` (Lenis `anchors`, cleared by `section[id]` scroll-margin-top) and `window.scrollTo` still work.
+- `scrollToSection` (navbar, route-state `scrollTo`) uses the active Lenis instance (`utils/smoothScroll.js` registry, so the entry chunk never imports Lenis) with the sticky-navbar offset, and falls back to native smooth scrolling otherwise; reduced motion always jumps.
+- `motion/ScrollFx.jsx` holds the scroll-linked helpers (`useScroll` + `useTransform`, transforms and opacity only): `ScrollFx` (one element, own or shared progress), `ScrollGroup` + `ScrollItem` (staggered children, each settles by progress 1, i.e. group 60% up the viewport), `ProcessGrid` (progress line fills, steps light up in turn), `ScrollProgressBar` (thin `--link` bar above the navbar), plus `ENTER`/`LEAVE`/`PASS` offsets and the `PAGE_HERO`/`RISE` presets. Motion-value `style` props on `m.*` are the accepted pattern; no inline style strings.
+- Rules: an element gets either a one-time `Reveal` or a scroll-linked transform, never both. Entrances must finish at identity (opacity 1, no offset) before the block is comfortably in view. Parallax drifts (hero, mission headline) are centered so they are identity when the block is centered.
+- Home hero: text column trails the scroll and the workspace card drifts up, scales down and levels its tilt, both fading gently near the end; the same progress feeds `HeroScene` (`progress` prop, read per frame) to drift and turn the 3D field.
+- Reduced motion: every helper renders a plain element (identity, fully visible), the progress bar is not rendered, the process line is static, and Lenis stays off.
+
+### Hero 3D background (Home only)
+`HeroBackdrop` always renders a static fallback (blue glow from the hero plus a faint CSS blueprint grid). It requests the lazy `HeroScene` chunk (three.js) only when all hold: viewport at least 1024px, no `prefers-reduced-motion: reduce`, WebGL available, and the browser is idle (`requestIdleCallback`, `setTimeout` fallback). If the viewport shrinks or reduced motion turns on later, the scene unmounts and disposes. The scene reads its colors from CSS variables (`--link`/`--cta-bg`, `--accent`), follows the `<html>` class (lower intensity in light mode), caps pixel ratio at 1.5, pauses off-screen or when the tab is hidden, and is `aria-hidden` with `pointer-events: none`. A gradient mask keeps the text column calm.
+
 ### Styling Conventions
 - **Utility-first** for the app shell, admin and form pages: Tailwind utilities with the semantic colors (`bg-card`, `text-fg`, `border-line`, `outline-focus`).
 - **Component CSS** for the marketing pages (see §5).
@@ -80,5 +102,11 @@ Conventions:
 - Admin surfaces use the semantic utilities. Exceptions: `ErrorMessage`, the `FormInput` error line, the `AdminLogin` error (`text-red-400`) and `TruncationNotice` (`text-yellow-400`) still use a single dark-tuned shade, which has weak contrast in light mode. Status badges and status text keep their hue (green/yellow/red/blue/orange/purple) with a light pairing by default and the dark pairing under `dark:`. Solid buttons and toasts (white text on blue/red/green/amber) look the same in both themes. The shared `AdminTable`, `BaseModal` and `FormInput` still use explicit `slate-*` / `gray-*` light/dark pairs instead of the semantic utilities.
 - The admin `Button` variants own every color (`primary`, `danger`, `success`, `warning`, `secondary`, `ghost`, and `ghost-info` / `ghost-warning` / `ghost-danger` for tinted text buttons). `className` is for layout only. Two utilities for the same property resolve by stylesheet order, not class-string order, so a color passed through `className` can lose to the variant. Add a variant instead; `adminButton.test.jsx` fails if an admin component passes color utilities to `Button`.
 
+### Site footer
+`Footer` renders on every route (marketing, admin, portal), so its styles are the `.site-footer*` classes in `index.css`, not studio.css. Layout: brand + copy on the left, an `Explore` and `Contact` link list (one `<nav aria-label="Footer">`) on the right, then a bottom bar (copyright, live Dallas time, "Back to top" via `scrollToTop`). Links are underlined at rest with a 3px `--focus-ring`. The oversized "DFW" wordmark below is decorative (`aria-hidden`, a low-alpha `--link` tint, cropped by the footer edge) and rises in with a CSS-only scroll-driven animation (`animation-timeline: view()` inside `@supports`, off under `prefers-reduced-motion`). Do not import `motion` or Lenis into the footer: it would land in the entry chunk.
+
 ## 7. Component Organization
 App-shell components (`Navbar`, `Footer`, `ErrorBoundary`) live in `front/src/components/`. Admin components are under `front/src/components/admin/` and `front/src/components/admin/shared/`. Logic is co-located with components via TanStack Query hooks.
+
+## Logo
+`front/src/components/Logo.jsx` renders `/dfwsc-mark.svg` (the vector mark from the logo package, paths only) plus live "SOFTWARE CONSULTING" text in `text-fg`, so it follows both themes. The package's horizontal wordmark SVG sets that text as an unoutlined Satoshi `<text>`, which renders in a fallback font, so it is not used directly. The og/twitter image remains `/DFWSC-Logo-HorizWordmarkPNG.png`.

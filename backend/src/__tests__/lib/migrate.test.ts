@@ -12,6 +12,7 @@ vi.mock("../../db/client", () => ({
 
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { runMigrations } from "../../lib/migrate";
+import { dump, expectNoPlanted, plantedDbError } from "../helpers/log-capture";
 
 const mockMigrate = migrate as ReturnType<typeof vi.fn>;
 
@@ -56,9 +57,24 @@ describe("runMigrations", () => {
     expect(mockMigrate).toHaveBeenCalledTimes(1);
     expect(server.log.error).toHaveBeenCalledTimes(1);
     expect(server.log.error).toHaveBeenCalledWith(
-      { err: migrationError },
+      expect.objectContaining({
+        errMessage: "Migration failed: connection timeout",
+        errStack: expect.any(String),
+      }),
       "Failed to execute database migrations."
     );
     expect(server.log.info).not.toHaveBeenCalled();
+  });
+
+  it("logs only SQLSTATE and schema names when migrate fails with a database error", async () => {
+    mockMigrate.mockRejectedValue(plantedDbError());
+    const server = makeFakeServer();
+
+    await expect(runMigrations(server as any)).rejects.toThrow();
+
+    const [fields, msg] = server.log.error.mock.calls[0];
+    expect(msg).toBe("Failed to execute database migrations.");
+    expect(fields).toMatchObject({ errCode: "23505", errTable: "planted_table" });
+    expectNoPlanted(dump(server.log.error.mock.calls));
   });
 });

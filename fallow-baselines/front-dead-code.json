@@ -1,24 +1,6 @@
 {
-  "unused_files": [
-    "src/api/subscriptions.js",
-    "src/components/CaseStudies.jsx",
-    "src/components/Process.jsx",
-    "src/components/TechStrip.jsx",
-    "src/components/admin/ImportStripeCustomer.jsx",
-    "src/hooks/useSubscriptions.js"
-  ],
-  "unused_exports": [
-    "src/api/auth.js:setup",
-    "src/api/payments.js:createCheckoutSession",
-    "src/api/subscriptions.js:getSubscriptions",
-    "src/api/subscriptions.js:createSubscription",
-    "src/api/subscriptions.js:linkSubscription",
-    "src/api/subscriptions.js:patchSubscription",
-    "src/api/subscriptions.js:getSubscriptionDetail",
-    "src/components/admin/Toast.jsx:TOAST_TIMEOUT_MS",
-    "src/contexts/AuthContext.jsx:AuthContext",
-    "src/utils/logger.js:logger"
-  ],
+  "unused_files": [],
+  "unused_exports": [],
   "unused_types": [],
   "private_type_leaks": [],
   "unused_dependencies": [],
@@ -42,9 +24,7 @@
   "unlisted_dependencies": [],
   "duplicate_exports": [],
   "type_only_dependencies": [],
-  "test_only_dependencies": [
-    "package.json:@tailwindcss/vite"
-  ],
+  "test_only_dependencies": [],
   "boundary_violations": [],
   "boundary_coverage_violations": [],
   "boundary_call_violations": [],

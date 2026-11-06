@@ -3,14 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { validateEnv } from "../lib/env";
 
 describe("Environment Variable Loading Order", () => {
+  let originalEnv: NodeJS.ProcessEnv;
+
   beforeEach(() => {
     // Store original env
-    this.originalEnv = { ...process.env };
+    originalEnv = { ...process.env };
   });
 
   afterEach(() => {
     // Restore original env
-    process.env = this.originalEnv;
+    process.env = originalEnv;
     vi.resetModules(); // Reset module cache for each test
   });
 

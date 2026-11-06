@@ -85,7 +85,7 @@ describe("rateLimit - Redis per-command errors", () => {
     const first = makeMocks();
     await guard(first.request as any, first.reply as any);
     expect(first.request.log.error).toHaveBeenCalledTimes(1);
-    expect(first.request.log.error.mock.calls[0][0].err.message).toBe("Connection is closed.");
+    expect(first.request.log.error.mock.calls[0][0].errMessage).toBe("Connection is closed.");
 
     const second = makeMocks();
     await guard(second.request as any, second.reply as any);

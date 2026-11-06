@@ -1,4 +1,4 @@
-import fastify from "fastify";
+import fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_TRUSTED_PROXIES, resolveTrustProxy } from "../app";
 
@@ -51,7 +51,7 @@ describe("resolveTrustProxy", () => {
 
 describe("trustProxy behaviour with the default list", () => {
   let originalValue: string | undefined;
-  let app: ReturnType<typeof fastify>;
+  let app: FastifyInstance;
 
   beforeEach(async () => {
     originalValue = process.env.TRUST_PROXY;
