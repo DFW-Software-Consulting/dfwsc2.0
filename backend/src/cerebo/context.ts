@@ -12,19 +12,21 @@ export interface ActorContext {
   requestId?: string;
 }
 
-type CereboRequest = FastifyRequest & { admin?: { id?: unknown } };
+// requireAdminJwt sets request.admin to the verified token payload. The login signs
+// `sub` as the Nextcloud user id, so that is the actor identity.
+type CereboRequest = FastifyRequest & { admin?: { sub?: unknown } };
 
-// Runs after requireAdminJwt. Tokens without `sub` are trusted by the portal but
-// carry no identity, and every Cerebo write must be attributable.
+// Runs after requireAdminJwt. A token without `sub` carries no identity, and every
+// Cerebo write must be attributable.
 export async function requireAdminIdentity(request: FastifyRequest, reply: FastifyReply) {
-  const id = (request as CereboRequest).admin?.id;
+  const id = (request as CereboRequest).admin?.sub;
   if (typeof id !== "string" || id.length === 0) {
     return reply.code(403).send({ error: "Cerebo requires an admin session with an identity." });
   }
 }
 
 export function getActor(request: FastifyRequest): ActorContext {
-  const id = (request as CereboRequest).admin?.id;
+  const id = (request as CereboRequest).admin?.sub;
   // Only reachable if a route forgot the requireAdminIdentity preHandler.
   if (typeof id !== "string")
     throw new Error("Cerebo actor missing: requireAdminIdentity did not run");

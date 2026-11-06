@@ -1,95 +1,38 @@
-import CircuitBreaker from "opossum";
+import {
+  getNextcloudConfig,
+  NextcloudCircuitOpenError,
+  type NextcloudConfig,
+  NextcloudHttpError,
+  nextcloudRequest,
+} from "../lib/nextcloud";
 
-// Read-only Nextcloud access for Cerebo, as one service account. Nextcloud is
-// optional: without credentials Cerebo still serves its own records and marks
-// Nextcloud data "not_configured". Calls go through a breaker of their own, so a
-// Nextcloud outage degrades project views and never touches the Stripe or SMTP
-// breakers the payment routes depend on.
-
-const REQUEST_TIMEOUT_MS = 8_000;
-
-interface NextcloudConfig {
-  baseUrl: string;
-  username: string;
-  appPassword: string;
-}
+// Read-only Nextcloud access for Cerebo through the shared service account and
+// breaker in lib/nextcloud.ts. Nextcloud is optional: without credentials Cerebo
+// still serves its own records and marks Nextcloud data "not_configured".
 
 export type Unavailable = { status: "not_configured" } | { status: "unavailable"; reason: string };
 
-function getConfig(): NextcloudConfig | Unavailable | null {
-  const baseUrl = process.env.NEXTCLOUD_BASE_URL?.trim();
-  const username = process.env.NEXTCLOUD_USERNAME?.trim();
-  const appPassword = process.env.NEXTCLOUD_APP_PASSWORD;
-  if (!baseUrl || !username || !appPassword) return null;
-  try {
-    if (new URL(baseUrl).protocol !== "https:") {
-      return { status: "unavailable", reason: "Nextcloud requires a valid HTTPS base URL." };
-    }
-  } catch {
-    return { status: "unavailable", reason: "Nextcloud requires a valid HTTPS base URL." };
-  }
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), username, appPassword };
+function configOrUnavailable(): { config: NextcloudConfig } | Unavailable {
+  const result = getNextcloudConfig();
+  if (result.ok) return { config: result.config };
+  if (result.reason === "not_configured") return { status: "not_configured" };
+  return { status: "unavailable", reason: "Nextcloud requires a valid HTTPS base URL." };
 }
 
-class NextcloudHttpError extends Error {
-  constructor(
-    readonly status: number,
-    path: string
-  ) {
-    super(`Nextcloud answered ${status} for ${path}`);
-    this.name = "NextcloudHttpError";
-  }
-}
-
-// A 4xx other than 401 means Nextcloud answered and the request was the problem
-// (board deleted, not shared with the service account). That must not open the
-// breaker for every other project. 401 means the app password is wrong or
-// revoked, which affects every call, so it counts.
-function isCallerError(error: unknown): boolean {
-  return (
-    error instanceof NextcloudHttpError &&
-    error.status >= 400 &&
-    error.status < 500 &&
-    error.status !== 401
-  );
-}
-
-const breaker = new CircuitBreaker(
-  async (config: NextcloudConfig, path: string) => {
-    const res = await fetch(`${config.baseUrl}${path}`, {
-      headers: {
-        authorization: `Basic ${Buffer.from(`${config.username}:${config.appPassword}`).toString("base64")}`,
-        "OCS-APIRequest": "true",
-        accept: "application/json",
-      },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new NextcloudHttpError(res.status, path);
-    return (await res.json()) as unknown;
-  },
-  {
-    name: "nextcloud",
-    timeout: REQUEST_TIMEOUT_MS + 2_000,
-    resetTimeout: 30_000,
-    volumeThreshold: 5,
-    errorThresholdPercentage: 50,
-    errorFilter: isCallerError,
-  }
-);
-
-async function getJson(config: NextcloudConfig, path: string): Promise<unknown> {
-  return breaker.fire(config, path);
+async function getJson(config: NextcloudConfig, path: string, label: string): Promise<unknown> {
+  const res = await nextcloudRequest(config, { method: "GET", path, label });
+  return JSON.parse(res.body) as unknown;
 }
 
 function unavailable(error: unknown): Unavailable {
-  if (CircuitBreaker.isOurError(error as Error)) {
+  if (error instanceof NextcloudCircuitOpenError) {
     return { status: "unavailable", reason: "Nextcloud is not responding; retrying shortly." };
   }
   if (error instanceof NextcloudHttpError) {
     if (error.status === 404 || error.status === 403) {
       return {
         status: "unavailable",
-        reason: "Not found, or not shared with the Cerebo service account.",
+        reason: "Not found, or not shared with the Nextcloud service account.",
       };
     }
     return { status: "unavailable", reason: `Nextcloud answered ${error.status}.` };
@@ -155,14 +98,14 @@ export function summarizeDeckStacks(
 }
 
 export async function getDeckBoardSummary(boardId: string): Promise<DeckBoardSummary> {
-  const config = getConfig();
-  if (!config) return { status: "not_configured" };
-  if ("status" in config) return config;
+  const resolved = configOrUnavailable();
+  if (!("config" in resolved)) return resolved;
   if (!/^\d+$/.test(boardId)) return { status: "unavailable", reason: "Invalid Deck board id." };
   try {
     const stacks = (await getJson(
-      config,
-      `/index.php/apps/deck/api/v1.0/boards/${boardId}/stacks`
+      resolved.config,
+      `/index.php/apps/deck/api/v1.0/boards/${boardId}/stacks`,
+      "deck.stacks"
     )) as DeckStack[];
     return summarizeDeckStacks(boardId, Array.isArray(stacks) ? stacks : []);
   } catch (error) {
@@ -173,19 +116,16 @@ export async function getDeckBoardSummary(boardId: string): Promise<DeckBoardSum
 export type NextcloudStatus = { status: "ok"; version: string } | Unavailable;
 
 export async function getNextcloudStatus(): Promise<NextcloudStatus> {
-  const config = getConfig();
-  if (!config) return { status: "not_configured" };
-  if ("status" in config) return config;
+  const resolved = configOrUnavailable();
+  if (!("config" in resolved)) return resolved;
   try {
-    const body = (await getJson(config, "/ocs/v2.php/cloud/capabilities?format=json")) as {
-      ocs?: { data?: { version?: { string?: string } } };
-    };
+    const body = (await getJson(
+      resolved.config,
+      "/ocs/v2.php/cloud/capabilities?format=json",
+      "capabilities"
+    )) as { ocs?: { data?: { version?: { string?: string } } } };
     return { status: "ok", version: body.ocs?.data?.version?.string ?? "unknown" };
   } catch (error) {
     return unavailable(error);
   }
-}
-
-export function resetNextcloudBreakerForTests() {
-  breaker.close();
 }

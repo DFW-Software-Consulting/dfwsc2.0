@@ -14,12 +14,14 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
-import { resetNextcloudBreakerForTests, summarizeDeckStacks } from "../../cerebo/nextcloud";
+import { summarizeDeckStacks } from "../../cerebo/nextcloud";
 import { auditEvents, milestones, projects, resourceLinks } from "../../cerebo/schema";
 import { db } from "../../db/client";
-import { admins, clients } from "../../db/schema";
+import { clients } from "../../db/schema";
+import { resetNextcloudBreakerForTests } from "../../lib/nextcloud";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
+import { FakeLoginNextcloud, loginEnv } from "../helpers/fake-nextcloud-login";
 
 const run = randomUUID().slice(0, 8);
 const adminId = `cerebo-admin-${run}`;
@@ -57,9 +59,6 @@ describe("Cerebo API", () => {
     }
     process.env.CEREBO_ENABLED = "true";
     app = await buildServer();
-    await db
-      .insert(admins)
-      .values({ id: adminId, username: adminId, passwordHash: "unused", setupConfirmed: true });
     await db.insert(clients).values([
       { id: clientA, name: "Client A", email: `${clientA}@example.test` },
       { id: clientB, name: "Client B", email: `${clientB}@example.test` },
@@ -78,7 +77,6 @@ describe("Cerebo API", () => {
     await db.delete(resourceLinks).where(inArray(resourceLinks.clientId, ids));
     await db.delete(projects).where(inArray(projects.clientId, ids));
     await db.delete(clients).where(inArray(clients.id, ids));
-    await db.delete(admins).where(eq(admins.id, adminId));
     delete process.env.CEREBO_ENABLED;
     for (const key of NEXTCLOUD_ENV) {
       if (savedEnv[key] !== undefined) process.env[key] = savedEnv[key];
@@ -113,6 +111,42 @@ describe("Cerebo API", () => {
   it("rejects admin tokens without an identity", async () => {
     const res = await call("GET", `/clients/${clientA}/projects`, undefined, null);
     expect(res.statusCode).toBe(403);
+  });
+
+  it("accepts the token issued by the real admin login and attributes writes to its user", async () => {
+    const fake = new FakeLoginNextcloud();
+    fake.addUser("jane", "pw-for-jane-1234", ["dfwsc-admins"]);
+    const env = loginEnv();
+    for (const [key, value] of Object.entries(env))
+      if (value !== undefined) process.env[key] = value;
+    vi.stubGlobal("fetch", vi.fn(fake.fetch));
+
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { username: "jane", password: "pw-for-jane-1234" },
+      headers: { "content-type": "application/json" },
+      remoteAddress: "198.51.100.77",
+    });
+    expect(login.statusCode).toBe(200);
+    const headers = {
+      authorization: `Bearer ${login.json().token}`,
+      "content-type": "application/json",
+    };
+
+    const created = await app.inject({
+      method: "POST",
+      url: `/api/v1/cerebo/clients/${clientA}/projects`,
+      headers,
+      payload: { name: "Via real login" },
+    });
+    expect(created.statusCode).toBe(201);
+
+    const [event] = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, created.json().id));
+    expect(event).toMatchObject({ actorType: "admin", actorId: "jane" });
   });
 
   describe("projects", () => {
@@ -383,7 +417,7 @@ describe("Cerebo API", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().deck[0]).toMatchObject({
         status: "unavailable",
-        reason: "Not found, or not shared with the Cerebo service account.",
+        reason: "Not found, or not shared with the Nextcloud service account.",
       });
     });
 

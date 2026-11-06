@@ -1,8 +1,6 @@
 import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import { z } from "zod";
-import { requireAdminJwt } from "../lib/auth";
-import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "../lib/constants";
-import { adminRateLimit } from "../lib/rate-limit";
+import { adminCrudPreHandler } from "../lib/admin-crud";
 import { isValidHttpsUrl, parseBody } from "../lib/validation";
 import { getActor, requireAdminIdentity } from "./context";
 import { getDeckBoardSummary, getNextcloudStatus } from "./nextcloud";
@@ -11,8 +9,6 @@ import { listAuditEvents } from "./services/audit";
 import { createLink, deleteLink, listClientLinks } from "./services/links";
 import { createMilestone, updateMilestone } from "./services/milestones";
 import { createProject, getProjectDetail, listProjects, updateProject } from "./services/projects";
-
-const cereboRateLimit = adminRateLimit({ max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
 
 const requiredText = (field: string, max = 200) =>
   z
@@ -100,8 +96,7 @@ type ClientParams = { clientId: string };
 type IdParams = { id: string };
 
 const cereboRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook("preHandler", requireAdminJwt);
-  app.addHook("preHandler", cereboRateLimit);
+  for (const hook of adminCrudPreHandler) app.addHook("preHandler", hook);
   app.addHook("preHandler", requireAdminIdentity);
 
   app.get("/nextcloud/status", async () => getNextcloudStatus());
