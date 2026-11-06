@@ -60,6 +60,7 @@ All resources can be deployed independently on Coolify while sharing the same mo
   SALES_ADDRESSBOOK_PATH=dfwsc-sales_shared_by_messyginger0804
   SALES_LEADS_FOLDER=DFWSC Sales/Leads
   SALES_POLL_INTERVAL_MS=120000
+  # SALES_LEAD_WEBHOOK_SECRET=at_least_32_random_characters   (unset = poll only; docs/BACKEND.md "Sales lead webhook")
   # Optional: client onboarding (docs/BACKEND.md §10); off unless enabled
   CLIENT_ONBOARDING_ENABLED=false
   CLIENT_ONBOARDING_FORM_ID=2

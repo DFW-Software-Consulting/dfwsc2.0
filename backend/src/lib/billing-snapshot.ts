@@ -11,6 +11,7 @@ import {
   deriveBilling,
 } from "./billing-status";
 import { isCircuitOpenError, isStripeBusyError, withStripeCircuit } from "./circuit-breakers";
+import { kickJob } from "./coalesced-runner";
 import { type MirrorLogger, withMirrorLock } from "./mirror-table";
 import { contentHash } from "./portal-mirror-render";
 import { stripe } from "./stripe";
@@ -288,6 +289,8 @@ export async function markCustomerDirty(customerId: string): Promise<boolean> {
     .update(billingSnapshots)
     .set({ dirtyAt: sql`now()` })
     .where(eq(billingSnapshots.stripeCustomerId, customerId));
+  // Refresh and mirror now instead of at the next tick (no-op when the mirror is off).
+  kickJob("billingMirror");
   return true;
 }
 
