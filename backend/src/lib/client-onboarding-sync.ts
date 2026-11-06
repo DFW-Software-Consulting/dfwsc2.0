@@ -79,6 +79,7 @@ import {
   NextcloudBadResponseError,
   SUBMISSION_PAGE_SIZE,
 } from "./sales-lead-nextcloud";
+import { triggerStripeIdWriteback } from "./stripe-id-writeback-sync";
 
 // "DFWSC — Convert Won Lead to Client" onboarding. For each submission of one
 // Nextcloud Form, exactly once: a client folder with Meetings/ Decisions/
@@ -1159,6 +1160,9 @@ async function billingCustomerStep(row: SubmissionRow, intake: Intake, ctx: Proc
     billingCustomerId: result.stripeCustomerId,
   });
   ctx.logger.info({ ...ids, source: result.source }, "Billing Stripe Customer linked.");
+  // Show the new link on the client's Nextcloud records within seconds (no-op when the
+  // write-back is off; its own poller would pick it up anyway).
+  triggerStripeIdWriteback();
 }
 
 async function runSteps(row: SubmissionRow, ctx: ProcessingContext): Promise<void> {

@@ -6,14 +6,25 @@ import {
   clientOnboardingSubmissions,
   clients,
   salesLeadSubmissions,
+  stripeIdWritebacks,
   webhookEvents,
 } from "../db/schema";
 import { getCircuitBreakerStates } from "../lib/circuit-breakers";
 import { getClientOnboardingStats } from "../lib/client-onboarding-sync";
 import { getNextcloudBreakerState } from "../lib/nextcloud";
 import { getSalesLeadSyncStats } from "../lib/sales-lead-sync";
+import { getStripeIdWritebackStats } from "../lib/stripe-id-writeback-sync";
 
 const SALES_LEAD_STATUSES = ["pending", "completed", "failed"] as const;
+const WRITEBACK_TARGETS = ["project_row", "contact_card"] as const;
+const WRITEBACK_STATUSES = [
+  "ok",
+  "not_found",
+  "ambiguous",
+  "read_only",
+  "forbidden",
+  "error",
+] as const;
 
 function isAuthorizedForMetrics(authHeader: string | undefined, token: string): boolean {
   if (!authHeader?.startsWith("Bearer ")) {
@@ -70,6 +81,18 @@ export default async function metricsRoute(fastify: FastifyInstance) {
         )
       );
     const onboardingStats = getClientOnboardingStats();
+    const writebackRows = await db
+      .select({
+        target: stripeIdWritebacks.target,
+        status: stripeIdWritebacks.status,
+        count: count(),
+      })
+      .from(stripeIdWritebacks)
+      .groupBy(stripeIdWritebacks.target, stripeIdWritebacks.status);
+    const writebackCounts = new Map(
+      writebackRows.map((row) => [`${row.target}:${row.status}`, row.count])
+    );
+    const writebackStats = getStripeIdWritebackStats();
 
     const metrics = [
       `# HELP dfwsc_clients_total Total number of clients`,
@@ -127,6 +150,17 @@ export default async function metricsRoute(fastify: FastifyInstance) {
       `# HELP dfwsc_client_onboarding_last_cycle_timestamp_seconds When the last client onboarding cycle ran (0 if never)`,
       `# TYPE dfwsc_client_onboarding_last_cycle_timestamp_seconds gauge`,
       `dfwsc_client_onboarding_last_cycle_timestamp_seconds ${onboardingStats.lastCycleAt ? Math.floor(onboardingStats.lastCycleAt.getTime() / 1000) : 0}`,
+      `# HELP dfwsc_stripe_id_writeback Stripe ID write-back records by target and status`,
+      `# TYPE dfwsc_stripe_id_writeback gauge`,
+      ...WRITEBACK_TARGETS.flatMap((target) =>
+        WRITEBACK_STATUSES.map(
+          (status) =>
+            `dfwsc_stripe_id_writeback{target="${target}",status="${status}"} ${writebackCounts.get(`${target}:${status}`) ?? 0}`
+        )
+      ),
+      `# HELP dfwsc_stripe_id_writeback_last_cycle_ok 1 if the last Stripe ID write-back cycle succeeded, 0 if not`,
+      `# TYPE dfwsc_stripe_id_writeback_last_cycle_ok gauge`,
+      `dfwsc_stripe_id_writeback_last_cycle_ok ${writebackStats.lastCycleStatus === "ok" ? 1 : 0}`,
     ].join("\n");
 
     return reply.type("text/plain").send(metrics);

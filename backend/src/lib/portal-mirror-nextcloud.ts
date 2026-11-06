@@ -204,6 +204,19 @@ export class PortalMirrorNextcloud {
     throw new NextcloudBadResponseError(label);
   }
 
+  /** One row, or null when it does not exist (deleted in Nextcloud). */
+  async getRow(rowId: number): Promise<MirrorRow | null> {
+    const label = "mirror.get_row";
+    const res = await this.call({
+      method: "GET",
+      label,
+      path: `${TABLES_BASE}/rows/${rowId}`,
+      okStatuses: [404],
+    });
+    if (res.status === 404) return null;
+    return this.toRow(parseJson(res.body, label), label);
+  }
+
   async createRow(tableId: number, data: Record<string, unknown>): Promise<number> {
     const label = "mirror.create_row";
     const res = await this.call({
