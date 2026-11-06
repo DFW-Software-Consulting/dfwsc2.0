@@ -39,6 +39,26 @@ describe("Disclosure", () => {
   });
 });
 
+describe("Disclosure open animation", () => {
+  it("is not tagged on first render, even when open by default, only after a click", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <>
+        <Disclosure summary="Closed">a</Disclosure>
+        <Disclosure summary="Starts open" open>
+          b
+        </Disclosure>
+      </>
+    );
+    const [closed, open] = container.querySelectorAll("details");
+    expect(closed).not.toHaveAttribute("data-animate");
+    expect(open).not.toHaveAttribute("data-animate");
+    await user.click(screen.getByText("Starts open"));
+    expect(open).toHaveAttribute("data-animate");
+    expect(closed).not.toHaveAttribute("data-animate");
+  });
+});
+
 describe("pages keep collapsed copy in the document", () => {
   it("Pricing: allowances, includes and every FAQ answer", () => {
     renderWithProviders(<Pricing />, { initialEntries: ["/pricing"] });

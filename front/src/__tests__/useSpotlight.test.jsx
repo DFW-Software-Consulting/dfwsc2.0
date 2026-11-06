@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSpotlight, useTilt } from "../components/motion/useTilt.js";
 
@@ -60,7 +60,7 @@ describe("useSpotlight", () => {
 });
 
 describe("useTilt", () => {
-  it("tilts toward the cursor, shares one bounding-box read with the spotlight, and resets", () => {
+  it("tilts toward the cursor, shares one bounding-box read with the spotlight, and resets", async () => {
     stubPointer(true);
     const { result } = renderHook(() => useTilt(4));
     const el = target();
@@ -68,8 +68,18 @@ describe("useTilt", () => {
     expect(el.getBoundingClientRect).toHaveBeenCalledTimes(1);
     expect(el.style.getPropertyValue("--mx")).toBe("100%");
     expect(el.style.getPropertyValue("--my")).toBe("0%");
+    // Cursor at the top-right corner: rotateY leans right (+), rotateX leans toward the top (+).
+    const { rotateX, rotateY, transformPerspective } = result.current.style;
+    expect(transformPerspective).toBe(1200);
+    await waitFor(() => {
+      expect(rotateY.get()).toBeGreaterThan(0);
+      expect(rotateX.get()).toBeGreaterThan(0);
+    });
     result.current.onPointerLeave();
-    expect(result.current.style.transformPerspective).toBe(1200);
+    await waitFor(() => {
+      expect(Math.abs(rotateY.get())).toBeLessThan(0.1);
+      expect(Math.abs(rotateX.get())).toBeLessThan(0.1);
+    });
   });
 
   it("ignores non-mouse pointers", () => {

@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import CtaStrip from "../components/CtaStrip.jsx";
 import Disclosure from "../components/Disclosure.jsx";
 import HeroHeading from "../components/motion/HeroHeading.jsx";
-import { MotionRoot, Reveal, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
+import { MotionRoot, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
 import {
   LEAVE,
   PAGE_HERO,
