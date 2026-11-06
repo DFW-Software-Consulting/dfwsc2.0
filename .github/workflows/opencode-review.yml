@@ -180,6 +180,11 @@ jobs:
           VARIANT: ""
           OIDC_BASE_URL: ""
           WATCHDOG_SECONDS: "600"
+          # Isolate from any user-level OpenCode config/auth on self-hosted runners.
+          XDG_CONFIG_HOME: ${{ runner.temp }}/opencode-xdg/config
+          XDG_DATA_HOME: ${{ runner.temp }}/opencode-xdg/data
+          XDG_STATE_HOME: ${{ runner.temp }}/opencode-xdg/state
+          XDG_CACHE_HOME: ${{ runner.temp }}/opencode-xdg/cache
         run: |
           log="$RUNNER_TEMP/opencode.log"
           : > "$log"
