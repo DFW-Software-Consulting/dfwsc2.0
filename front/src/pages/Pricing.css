@@ -65,3 +65,26 @@
   .studio-plan-card { padding: 22px; }
   .studio-engagement-price small { display: block; margin: 8px 0 0; }
 }
+
+/* Hero art (components/PricingHeroArt.jsx): wide screens only, absolutely placed so it
+   reserves nothing and cannot shift layout. Only transform and opacity animate. */
+.studio-pricing-hero { position: relative; overflow: hidden; }
+.studio-hero-art { display: none; }
+@media (min-width: 1100px) {
+  .studio-hero-art { display: block; position: absolute; top: 50%; right: max(40px, calc((100% - 1180px) / 2)); width: 330px; translate: 0 -50%; pointer-events: none; }
+}
+.studio-hero-art svg { display: block; width: 100%; height: auto; overflow: visible; }
+.hero-art-gridline { fill: none; stroke: var(--link); stroke-opacity: .18; stroke-width: 1; }
+.hero-art-base { stroke: var(--border-strong); stroke-width: 1.5; }
+.hero-art-face { fill: var(--bg-card); stroke: var(--link); stroke-width: 1.5; }
+.hero-art-mark { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; }
+.hero-art-ghost { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 6; opacity: .7; }
+.hero-art-block { transform-box: fill-box; transform-origin: 50% 100%; }
+@media (prefers-reduced-motion: no-preference) {
+  .hero-art-drift { animation: hero-art-drift 14s linear infinite; }
+  .hero-art-block { animation: hero-art-rise 900ms cubic-bezier(.22, 1, .36, 1) calc(var(--i) * 160ms + 200ms) backwards; }
+  .hero-art-ghost { animation: hero-art-pulse 4.5s ease-in-out 1.4s infinite alternate; }
+}
+@keyframes hero-art-drift { to { transform: translate(30px, 30px); } }
+@keyframes hero-art-rise { from { transform: scaleY(.15); opacity: 0; } }
+@keyframes hero-art-pulse { from { opacity: .25; transform: translateY(0); } to { opacity: .8; transform: translateY(-8px); } }

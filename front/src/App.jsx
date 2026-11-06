@@ -1,13 +1,15 @@
 import { Suspense } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 import Analytics from "./components/Analytics.jsx";
 import Footer from "./components/Footer.jsx";
 import Navbar from "./components/Navbar.jsx";
 import RouteTracker from "./components/RouteTracker.jsx";
 import { routes } from "./routes.js";
 import Seo from "./seo/Seo.jsx";
+import { useTransitionedLocation } from "./utils/useTransitionedLocation.js";
 
 export default function App() {
+  const location = useTransitionedLocation(useLocation());
   return (
     <>
       <Seo />
@@ -29,7 +31,7 @@ export default function App() {
               </div>
             }
           >
-            <Routes>
+            <Routes location={location}>
               {routes.map((route) => (
                 <Route key={route.path} path={route.path} element={<route.Page />} />
               ))}
