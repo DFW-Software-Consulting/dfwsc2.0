@@ -41,4 +41,116 @@ describe("public/theme-init.js", () => {
     run();
     expect(document.documentElement.className).toBe("light");
   });
+
+  describe("stale asset rescue", () => {
+    const reload = vi.fn();
+    const fetchMock = vi.fn();
+    let listener;
+
+    const install = () => {
+      const add = vi.spyOn(window, "addEventListener");
+      run();
+      const call = add.mock.calls.find(([type]) => type === "error");
+      expect(call[2]).toBe(true); // capture phase: link/script error events do not bubble
+      listener = call[1];
+    };
+    const failing = (html) => {
+      const holder = document.createElement("div");
+      holder.innerHTML = html;
+      return { target: holder.firstChild };
+    };
+
+    afterEach(() => sessionStorage.clear());
+
+    const setup = () => {
+      sessionStorage.clear();
+      reload.mockClear();
+      fetchMock.mockReset().mockResolvedValue({});
+      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal("location", { origin: window.location.origin, reload });
+      install();
+    };
+
+    it("refetches a failed /assets/ script bypassing the cache, then reloads once", async () => {
+      setup();
+      const url = `${window.location.origin}/assets/index-abc.js`;
+      listener(failing(`<script type="module" src="${url}"></script>`));
+      expect(fetchMock).toHaveBeenCalledWith(url, { cache: "reload" });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("flags the recovery on window so the app's ErrorBoundary stays blank", () => {
+      setup();
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      expect(window.__dfwscRecovering).toBe(true);
+      delete window.__dfwscRecovering;
+    });
+
+    it("reloads exactly once even though both the fetch and the timer fire", async () => {
+      vi.useFakeTimers();
+      setup();
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(reload).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+      delete window.__dfwscRecovering;
+    });
+
+    it("reloads when the refetch is rejected", async () => {
+      setup();
+      fetchMock.mockRejectedValue(new TypeError("offline"));
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(reload).toHaveBeenCalledTimes(1);
+      delete window.__dfwscRecovering;
+    });
+
+    it("falls back to the timer when the refetch hangs", async () => {
+      vi.useFakeTimers();
+      setup();
+      fetchMock.mockReturnValue(new Promise(() => {}));
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(reload).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(reload).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+      delete window.__dfwscRecovering;
+    });
+
+    it("does nothing when sessionStorage throws", () => {
+      setup();
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("blocked");
+      });
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(reload).not.toHaveBeenCalled();
+    });
+
+    it("handles stylesheets too", () => {
+      setup();
+      const url = `${window.location.origin}/assets/index-abc.css`;
+      listener(failing(`<link rel="stylesheet" href="${url}">`));
+      expect(fetchMock).toHaveBeenCalledWith(url, { cache: "reload" });
+    });
+
+    it("ignores failures outside /assets/ and non-link/script targets", () => {
+      setup();
+      listener(failing(`<script src="${window.location.origin}/other.js"></script>`));
+      listener(failing(`<img src="${window.location.origin}/assets/a.png">`));
+      listener({ target: window });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("recovers at most once per 30s (shared guard key)", () => {
+      setup();
+      const url = `${window.location.origin}/assets/a.js`;
+      listener(failing(`<script src="${url}"></script>`));
+      listener(failing(`<script src="${url}"></script>`));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(sessionStorage.getItem("preload-reloaded-at")).not.toBeNull();
+    });
+  });
 });

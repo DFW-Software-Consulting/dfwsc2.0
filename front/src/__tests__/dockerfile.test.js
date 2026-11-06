@@ -58,6 +58,40 @@ describe("Frontend Dockerfile", () => {
       expect(nginxConfig).not.toContain("connect-src 'self' https:;");
     });
 
+    it("should never let an /assets/ or 404 response be cached after a failed fetch", () => {
+      const nginxConfig = readFileSync(join(ROOT_DIR, "front/nginx.conf"), "utf-8");
+      const rules = nginxConfig
+        .slice(nginxConfig.indexOf('map "$status:$uri" $static_cache_control'))
+        .split("}")[0];
+      const at = (needle) => {
+        const i = rules.indexOf(needle);
+        expect(i, needle).toBeGreaterThan(-1);
+        return i;
+      };
+
+      // Immutable only for statuses that actually served the file; everything else is no-store.
+      expect(rules).toContain('"~^(200|206|304):/assets/" "public, max-age=31536000, immutable"');
+      expect(rules).toContain('"~^\\d+:/assets/" "no-store"');
+      expect(rules).toContain('"~^404:" "no-store"');
+      expect(nginxConfig).toContain("try_files $uri @asset_missing;");
+
+      // First match wins: /api/ opts out, and 404 must beat the .html no-cache rule or
+      // "404:/404.html" would be cacheable-with-revalidation instead of no-store.
+      expect(at('"~^\\d+:/api/" ""')).toBeLessThan(at('"~^404:"'));
+      expect(at('"~^(200|206|304):/assets/"')).toBeLessThan(at('"~^\\d+:/assets/"'));
+      expect(at('"~^404:"')).toBeLessThan(at('"~\\.html$"'));
+    });
+
+    it("should not set add_header inside a location (it would drop the security headers)", () => {
+      const nginxConfig = readFileSync(join(ROOT_DIR, "front/nginx.conf"), "utf-8");
+      const server = nginxConfig.slice(nginxConfig.indexOf("server {"));
+      const locations = server.split(/^ {4}location /m).slice(1);
+      expect(locations.length).toBeGreaterThan(0);
+      for (const block of locations) {
+        expect(block.split(/^ {4}\}/m)[0]).not.toMatch(/\badd_header\b/);
+      }
+    });
+
     it("should copy build output to nginx html directory", () => {
       expect(dockerfileContent).toContain("COPY --from=builder");
       expect(dockerfileContent).toContain("/usr/share/nginx/html");

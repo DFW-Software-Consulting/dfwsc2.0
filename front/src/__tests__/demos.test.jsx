@@ -111,6 +111,17 @@ describe("Demos", () => {
     expect(cardLink(demos[1]).querySelector(".demo-card-scroll")).toBeNull();
   });
 
+  it("marks the tall image ready once it has loaded", () => {
+    mockHover(true);
+    renderWithProviders(<Demos />, { initialEntries: ["/demos"] });
+    const link = cardLink(demos[0]);
+    fireEvent.pointerEnter(link);
+    const tall = link.querySelector(".demo-card-scroll");
+    expect(tall).not.toHaveClass("is-ready");
+    fireEvent.load(tall);
+    expect(tall).toHaveClass("is-ready");
+  });
+
   it("mounts the tall image on keyboard focus too", () => {
     mockHover(true);
     renderWithProviders(<Demos />, { initialEntries: ["/demos"] });
