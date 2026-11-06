@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json
@@ -52,8 +52,11 @@ jobs:
       - name: Install backend deps
         run: npm ci
         working-directory: backend
-      - name: Backend type-check
+      - name: Backend type-check (build config)
         run: npx tsc --noEmit -p tsconfig.build.json
+        working-directory: backend
+      - name: Backend type-check (everything, including tests)
+        run: npx tsc --noEmit -p tsconfig.json
         working-directory: backend
       - name: Install frontend deps
         run: npm ci
@@ -94,7 +97,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json
@@ -128,6 +131,8 @@ jobs:
         run: docker build -t dfwsc-api:ci -f backend/Dockerfile backend
       - name: Build frontend Docker image
         run: docker build -t dfwsc-web:ci -f front/Dockerfile front
+      - name: Build backup Docker image
+        run: docker build -t dfwsc-backup:ci -f backup/Dockerfile backup
 
   # --- Checks mirrored from the local git hooks ---
 
@@ -149,7 +154,6 @@ jobs:
       JWT_EXPIRY: 1h
       FRONTEND_ORIGIN: http://localhost:5173
       API_BASE_URL: http://localhost:4242
-      ALLOW_ADMIN_SETUP: "false"
       USE_CHECKOUT: "true"
       DEFAULT_PROCESS_FEE_CENTS: "100"
       SMTP_HOST: localhost
@@ -170,7 +174,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - run: npm ci
       - name: Secret scan (secretlint)
         run: npx secretlint "**/*"
@@ -184,7 +188,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - run: npm ci
       - name: Lint PR commit messages (commitlint)
         run: npx commitlint --from "${{ github.event.pull_request.base.sha }}" --to "${{ github.event.pull_request.head.sha }}" --verbose
@@ -204,7 +208,7 @@ jobs:
           set -eu
           src=$(git diff --name-only --diff-filter=ACM "$BASE" "$HEAD" | grep -E '\.(ts|tsx|js|jsx)$' | grep -vE '\.(test|spec)\.' || true)
           if [ -n "$src" ]; then
-            hits=$(git diff "$BASE" "$HEAD" -- $src | grep -E '^\+[^+].*\b(console\.(log|warn|error|info|debug)|debugger)\b' || true)
+            hits=$(git diff "$BASE" "$HEAD" -- $src | grep -E '^\+([^+].*)?\b(console\.(log|warn|error|info|debug)|debugger)\b' || true)
             if [ -n "$hits" ]; then
               echo "::error::console.log/debugger added in source files:"
               echo "$hits"
@@ -213,7 +217,7 @@ jobs:
           fi
           tests=$(git diff --name-only --diff-filter=ACM "$BASE" "$HEAD" | grep -E '\.(test|spec)\.(ts|tsx|js|jsx)$' || true)
           if [ -n "$tests" ]; then
-            hits=$(git diff "$BASE" "$HEAD" -- $tests | grep -E '^\+[^+].*(it|test|describe)\.(only|skip)\(' || true)
+            hits=$(git diff "$BASE" "$HEAD" -- $tests | grep -E '^\+([^+].*)?(it|test|describe)\.(only|skip)\(' || true)
             if [ -n "$hits" ]; then
               echo "::error::.only/.skip added in test files:"
               echo "$hits"
@@ -254,7 +258,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Fallow dead-code gate (backend)
         working-directory: backend
         run: npx --yes fallow@2.104.0 dead-code --baseline ../fallow-baselines/backend-dead-code.json --fail-on-issues --quiet

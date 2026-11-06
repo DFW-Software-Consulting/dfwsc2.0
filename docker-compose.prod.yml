@@ -19,7 +19,6 @@ services:
       - backend
 
   api:
-    container_name: dfwsc-api
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -34,25 +33,69 @@ services:
       JWT_EXPIRY: ${JWT_EXPIRY}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN}
       API_BASE_URL: ${API_BASE_URL}
-      ALLOW_ADMIN_SETUP: ${ALLOW_ADMIN_SETUP}
-      # SETUP_FLAG_PATH is intentionally not wired here: it defaults to an
-      # ephemeral container path with no persistent volume, so it resets on
-      # every redeploy. The DB-level `setupConfirmed` guard is the
-      # authoritative protection against re-running admin setup; the file
-      # flag is only a secondary, non-persistent safeguard.
+      ADMIN_NEXTCLOUD_GROUPS: ${ADMIN_NEXTCLOUD_GROUPS:-dfwsc-admins,managers}
+      NEXTCLOUD_BASE_URL: ${NEXTCLOUD_BASE_URL}
+      NEXTCLOUD_USERNAME: ${NEXTCLOUD_USERNAME}
+      NEXTCLOUD_APP_PASSWORD: ${NEXTCLOUD_APP_PASSWORD}
+      SALES_AUTOMATION_ENABLED: ${SALES_AUTOMATION_ENABLED:-false}
+      SALES_LEAD_FORM_ID: ${SALES_LEAD_FORM_ID:-}
+      SALES_PIPELINE_TABLE_ID: ${SALES_PIPELINE_TABLE_ID:-}
+      SALES_ADDRESSBOOK_PATH: ${SALES_ADDRESSBOOK_PATH:-}
+      SALES_LEADS_FOLDER: ${SALES_LEADS_FOLDER:-}
+      SALES_POLL_INTERVAL_MS: ${SALES_POLL_INTERVAL_MS:-120000}
+      CLIENT_ONBOARDING_ENABLED: ${CLIENT_ONBOARDING_ENABLED:-false}
+      CLIENT_ONBOARDING_FORM_ID: ${CLIENT_ONBOARDING_FORM_ID:-}
+      CLIENT_ONBOARDING_PROJECTS_TABLE_ID: ${CLIENT_ONBOARDING_PROJECTS_TABLE_ID:-}
+      CLIENT_ONBOARDING_PIPELINE_TABLE_ID: ${CLIENT_ONBOARDING_PIPELINE_TABLE_ID:-}
+      CLIENT_ONBOARDING_ADDRESSBOOK_PATH: ${CLIENT_ONBOARDING_ADDRESSBOOK_PATH:-}
+      CLIENT_ONBOARDING_CLIENTS_FOLDER: ${CLIENT_ONBOARDING_CLIENTS_FOLDER:-}
+      CLIENT_ONBOARDING_COLLECTIVE_ID: ${CLIENT_ONBOARDING_COLLECTIVE_ID:-}
+      CLIENT_ONBOARDING_WEBHOOK_SECRET: ${CLIENT_ONBOARDING_WEBHOOK_SECRET:-}
+      CLIENT_ONBOARDING_POLL_INTERVAL_MS: ${CLIENT_ONBOARDING_POLL_INTERVAL_MS:-300000}
+      CLIENT_ONBOARDING_PROJECT_TEAMS: ${CLIENT_ONBOARDING_PROJECT_TEAMS:-false}
+      CLIENT_ONBOARDING_TEAM_ADMINS: ${CLIENT_ONBOARDING_TEAM_ADMINS:-}
+      CLIENT_ONBOARDING_BILLING_CUSTOMER: ${CLIENT_ONBOARDING_BILLING_CUSTOMER:-false}
+      CONTACT_STRIPE_SYNC: ${CONTACT_STRIPE_SYNC:-false}
+      CONTACT_STRIPE_SYNC_INTERVAL_MS: ${CONTACT_STRIPE_SYNC_INTERVAL_MS:-120000}
+      PORTAL_MIRROR: ${PORTAL_MIRROR:-false}
+      PORTAL_MIRROR_INTERVAL_MS: ${PORTAL_MIRROR_INTERVAL_MS:-60000}
+      PORTAL_MIRROR_BATCH: ${PORTAL_MIRROR_BATCH:-25}
+      PORTAL_MIRROR_SHARE_GROUPS: ${PORTAL_MIRROR_SHARE_GROUPS:-dfwsc-admins,managers}
+      PORTAL_MIRROR_INCLUDE_ARCHIVED: ${PORTAL_MIRROR_INCLUDE_ARCHIVED:-false}
+      PORTAL_ACCOUNTS_TABLE_ID: ${PORTAL_ACCOUNTS_TABLE_ID:-}
+      BILLING_MIRROR: ${BILLING_MIRROR:-false}
+      BILLING_MIRROR_SHARE_GROUPS: ${BILLING_MIRROR_SHARE_GROUPS:-dfwsc-admins,managers}
+      BILLING_SWEEP_INTERVAL_MS: ${BILLING_SWEEP_INTERVAL_MS:-3600000}
+      STRIPE_BILLING_WEBHOOK_SECRET: ${STRIPE_BILLING_WEBHOOK_SECRET:-}
+      BILLING_REQUESTS_ENABLED: ${BILLING_REQUESTS_ENABLED:-false}
+      BILLING_REQUESTS_FORM_ID: ${BILLING_REQUESTS_FORM_ID:-}
+      BILLING_REQUESTS_WEBHOOK_SECRET: ${BILLING_REQUESTS_WEBHOOK_SECRET:-}
+      BILLING_REQUESTS_POLL_INTERVAL_MS: ${BILLING_REQUESTS_POLL_INTERVAL_MS:-300000}
+      BILLING_REQUESTS_ALLOWED_GROUPS: ${BILLING_REQUESTS_ALLOWED_GROUPS:-dfwsc-admins,managers}
+      BILLING_REQUESTS_SHARE_GROUPS: ${BILLING_REQUESTS_SHARE_GROUPS:-dfwsc-admins,managers}
+      BILLING_REQUESTS_MAX_AGE_HOURS: ${BILLING_REQUESTS_MAX_AGE_HOURS:-72}
+      BILLING_MAX_AMOUNT_CENTS: ${BILLING_MAX_AMOUNT_CENTS:-2500000}
+      BILLING_AUTO_SEND: ${BILLING_AUTO_SEND:-true}
+      BILLING_DEFAULT_DAYS_UNTIL_DUE: ${BILLING_DEFAULT_DAYS_UNTIL_DUE:-7}
+      CONNECT_INVOICING: ${CONNECT_INVOICING:-false}
       DEFAULT_PROCESS_FEE_CENTS: ${DEFAULT_PROCESS_FEE_CENTS}
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT}
       SMTP_USER: ${SMTP_USER}
       SMTP_PASS: ${SMTP_PASS}
       SMTP_FROM: ${SMTP_FROM}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      # Deliberately not ${REDIS_URL}: this is the stack's own Redis, addressed by
+      # its unique service name. The plain name `redis` also resolves to
+      # Coolify's control-plane Redis on the shared `coolify` network (which
+      # needs a password), so a Coolify-level REDIS_URL must not override this.
+      REDIS_URL: redis://dfwsc-redis:6379
+      CONTACT_INBOX: ${CONTACT_INBOX}
     ports:
       - "127.0.0.1:4242:4242"
     depends_on:
       migrator:
         condition: service_completed_successfully
-      redis:
+      dfwsc-redis:
         condition: service_started
     deploy:
       resources:
@@ -71,33 +114,56 @@ services:
       retries: 5
       start_period: 10s
     networks:
-      - frontend
-      - backend
+      frontend:
+      backend:
+      # Join Coolify's shared proxy network under a stable, unique name so the
+      # separately deployed frontend (nginx) can proxy /api/ to dfwsc-api:4242.
+      # Coolify ignores container_name, so the alias is what makes this resolvable.
+      coolify:
+        aliases:
+          - dfwsc-api
 
-  redis:
+  # The service name must be unique on the host: Coolify's own control-plane
+  # Redis answers to `redis` on the shared `coolify` network, and Coolify
+  # ignores custom network aliases, so only the service name is reliable.
+  # Backend network only; do not add it to `coolify`.
+  dfwsc-redis:
     image: redis:7-alpine
     restart: unless-stopped
     networks:
       - backend
 
   backup:
-    image: alpine:3.20
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    container_name: dfwsc-backup
     environment:
       DATABASE_URL: ${DATABASE_URL}
-      AWS_S3_BACKUP_BUCKET: ${AWS_S3_BACKUP_BUCKET:-}
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 2 * * *}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-${AWS_S3_BACKUP_BUCKET:-}}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-backups/}
+      BACKUP_REQUIRE_REMOTE: ${BACKUP_REQUIRE_REMOTE:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      AWS_ENDPOINT_URL_S3: ${AWS_ENDPOINT_URL_S3:-${AWS_S3_ENDPOINT:-}}
+      BACKUP_HEARTBEAT_MAX_AGE: ${BACKUP_HEARTBEAT_MAX_AGE:-90000}
     volumes:
-      - ./scripts:/scripts:ro
       - postgres_backups:/backups
-    command: >
-      sh -c "apk add --no-cache bash postgresql-client gzip findutils aws-cli &&
-      echo '0 2 * * * /scripts/backup-db.sh >> /proc/1/fd/1 2>> /proc/1/fd/2' > /etc/crontabs/root &&
-      crond -f -l 8"
     deploy:
       resources:
         limits:
           cpus: "0.25"
           memory: 128M
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - backend
 
@@ -109,3 +175,7 @@ networks:
     driver: bridge
   backend:
     driver: bridge
+  # Pre-existing network managed by Coolify (its reverse proxy and the frontend
+  # app live on it). For a local run without Coolify: docker network create coolify
+  coolify:
+    external: true

@@ -36,6 +36,8 @@ function isColumn(column: any, name: string): boolean {
 
 function createWhereResult(rowsPromise: Promise<any[]>) {
   return {
+    // Ordering is not simulated; the in-memory rows keep insertion order.
+    orderBy: (..._columns: unknown[]) => createWhereResult(rowsPromise),
     limit: (n: number) => ({
       offset: async (offset: number) => (await rowsPromise).slice(offset, offset + n),
       then: (resolve: any, reject: any) =>
@@ -63,6 +65,14 @@ function filterByExpr(rows: any[], expr: any): any[] {
   if (expr.all?.length) {
     return rows.filter((r) => {
       return expr.all.every((cond: any) => {
+        if (!cond) return true;
+        // Handle nested or
+        if (cond.or?.length) {
+          return cond.or.some((sub: any) => {
+            const subRows = filterByExpr([r], sub);
+            return subRows.length > 0;
+          });
+        }
         if (cond.field && cond.value !== undefined) {
           const colName = resolveColumnName(cond.field);
           if (!colName) return true;
@@ -76,7 +86,29 @@ function filterByExpr(rows: any[], expr: any): any[] {
           const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
           return cond.values.includes(r[colName]) || cond.values.includes(r[camel]);
         }
+        // Handle isNull
+        if (cond.isNull && cond.field) {
+          const colName = resolveColumnName(cond.field);
+          if (!colName) return true;
+          const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+          return r[colName] == null && r[camel] == null;
+        }
+        // Handle lt
+        if (cond.lt && cond.field && cond.value !== undefined) {
+          const colName = resolveColumnName(cond.field);
+          if (!colName) return true;
+          const camel = colName.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+          return (r[colName] ?? r[camel]) < cond.value;
+        }
         return true;
+      });
+    });
+  }
+  if (expr.or?.length) {
+    return rows.filter((r) => {
+      return expr.or.some((sub: any) => {
+        const subRows = filterByExpr([r], sub);
+        return subRows.length > 0;
       });
     });
   }
@@ -108,7 +140,8 @@ export interface AppDataStore {
   onboardingTokens: Map<string, any>;
   webhookEvents: Map<string, any>;
   clientGroups: Map<string, any>;
-  admins: Map<string, any>;
+  paymentLedger: Map<string, any>;
+  apiKeyRegenerationTokens: Map<string, any>;
 }
 
 // ─── App DB mock (used by app.test.ts) ───────────────────────────────────────
@@ -149,7 +182,10 @@ export function createAppDbMock(dataStore: AppDataStore) {
               const rows = Array.from(dataStore.clientGroups.values());
               return selection?.total ? [{ total: rows.length }] : rows;
             }
-            if (isTable(table, "admins")) return Array.from(dataStore.admins.values());
+            if (isTable(table, "payment_ledger"))
+              return Array.from(dataStore.paymentLedger?.values() ?? []);
+            if (isTable(table, "api_key_regeneration_tokens"))
+              return Array.from(dataStore.apiKeyRegenerationTokens?.values() ?? []);
             return [];
           })();
           return {
@@ -210,16 +246,6 @@ export function createAppDbMock(dataStore: AppDataStore) {
               const row = dataStore.clientGroups.get(expr?.value);
               return row ? [row] : [];
             }
-            if (isTable(table, "admins")) {
-              if (isColumn(expr?.field, "username")) {
-                const row = Array.from(dataStore.admins.values()).find(
-                  (a) => a.username === expr?.value
-                );
-                return row ? [row] : [];
-              }
-              const row = dataStore.admins.get(expr?.value);
-              return row ? [row] : [];
-            }
             if (isTable(table, "onboarding_tokens")) {
               if (expr?.all?.length) {
                 const records = Array.from(dataStore.onboardingTokens.values());
@@ -249,6 +275,37 @@ export function createAppDbMock(dataStore: AppDataStore) {
             }
             if (isTable(table, "webhook_events")) {
               const row = dataStore.webhookEvents.get(expr?.value);
+              return row ? [row] : [];
+            }
+            if (isTable(table, "payment_ledger")) {
+              const rows = Array.from(dataStore.paymentLedger?.values() ?? []);
+              if (isColumn(expr?.field, "stripe_session_id")) {
+                return rows.filter((r) => r.stripeSessionId === expr?.value);
+              }
+              if (isColumn(expr?.field, "stripe_payment_intent_id")) {
+                return rows.filter((r) => r.stripePaymentIntentId === expr?.value);
+              }
+              if (isColumn(expr?.field, "idempotency_key")) {
+                return rows.filter((r) => r.idempotencyKey === expr?.value);
+              }
+              if (isColumn(expr?.field, "client_id")) {
+                return rows.filter((r) => r.clientId === expr?.value);
+              }
+              const row = dataStore.paymentLedger?.get(expr?.value);
+              return row ? [row] : [];
+            }
+            if (isTable(table, "api_key_regeneration_tokens")) {
+              const rows = Array.from(dataStore.apiKeyRegenerationTokens?.values() ?? []);
+              if (isColumn(expr?.field, "token")) {
+                return rows.filter((r) => r.token === expr?.value);
+              }
+              if (isColumn(expr?.field, "client_id")) {
+                return rows.filter((r) => r.clientId === expr?.value);
+              }
+              if (expr?.all?.length) {
+                return filterByExpr(rows, expr);
+              }
+              const row = dataStore.apiKeyRegenerationTokens?.get(expr?.value);
               return row ? [row] : [];
             }
             return [];
@@ -289,6 +346,7 @@ export function createAppDbMock(dataStore: AppDataStore) {
             nextAction: payload.nextAction ?? existing?.nextAction ?? null,
             followUpAt: payload.followUpAt ?? existing?.followUpAt ?? null,
             chargesEnabled: payload.chargesEnabled ?? existing?.chargesEnabled ?? false,
+            cardPaymentsStatus: payload.cardPaymentsStatus ?? existing?.cardPaymentsStatus ?? null,
             payoutsEnabled: payload.payoutsEnabled ?? existing?.payoutsEnabled ?? false,
             detailsSubmitted: payload.detailsSubmitted ?? existing?.detailsSubmitted ?? false,
             createdAt: existing?.createdAt ?? new Date(),
@@ -336,18 +394,44 @@ export function createAppDbMock(dataStore: AppDataStore) {
           };
           dataStore.clientGroups.set(payload.id, next);
         }
-        if (isTable(table, "admins")) {
+        if (isTable(table, "payment_ledger")) {
+          const existing = dataStore.paymentLedger?.get(payload.idempotencyKey);
+          if (existing) {
+            // onConflictDoNothing: return empty
+            return {
+              onConflictDoNothing: (_opts?: any) => ({
+                returning: async () => [],
+                then: (resolve: any) => resolve({}),
+                catch: () => {},
+              }),
+            };
+          }
           const next = {
             id: payload.id,
-            username: payload.username,
-            passwordHash: payload.passwordHash,
-            role: payload.role ?? "admin",
-            active: payload.active ?? true,
-            setupConfirmed: payload.setupConfirmed ?? false,
+            idempotencyKey: payload.idempotencyKey,
+            connectedAccountId: payload.connectedAccountId,
+            stripeSessionId: payload.stripeSessionId ?? null,
+            stripePaymentIntentId: payload.stripePaymentIntentId ?? null,
+            clientId: payload.clientId,
+            source: payload.source,
+            status: payload.status ?? "created",
+            baseAmountCents: payload.baseAmountCents,
+            totalAmountCents: payload.totalAmountCents,
+            feeAmountCents: payload.feeAmountCents,
+            currency: payload.currency,
+            metadata: payload.metadata ?? null,
+            lastStripeEventCreatedAt: payload.lastStripeEventCreatedAt ?? null,
             createdAt: payload.createdAt ?? new Date(),
-            updatedAt: payload.updatedAt ?? new Date(),
+            updatedAt: new Date(),
           };
-          dataStore.admins.set(payload.id, next);
+          dataStore.paymentLedger?.set(payload.idempotencyKey, next);
+          return {
+            onConflictDoNothing: (_opts?: any) => ({
+              returning: async () => [{ id: payload.id }],
+              then: (resolve: any) => resolve({}),
+              catch: () => {},
+            }),
+          };
         }
         return { onConflictDoNothing: async () => {} };
       },
@@ -384,8 +468,14 @@ export function createAppDbMock(dataStore: AppDataStore) {
               for (const row of targets) Object.assign(row, values);
               return targets;
             }
-            if (isTable(table, "admins")) {
-              const rows = Array.from(dataStore.admins.values());
+            if (isTable(table, "payment_ledger")) {
+              const rows = Array.from(dataStore.paymentLedger?.values() ?? []);
+              const targets = filterByExpr(rows, expr);
+              for (const row of targets) Object.assign(row, values);
+              return targets;
+            }
+            if (isTable(table, "api_key_regeneration_tokens")) {
+              const rows = Array.from(dataStore.apiKeyRegenerationTokens?.values() ?? []);
               const targets = filterByExpr(rows, expr);
               for (const row of targets) Object.assign(row, values);
               return targets;
@@ -407,6 +497,18 @@ export function createAppDbMock(dataStore: AppDataStore) {
       }),
     })),
     transaction: vi.fn(async (cb: (tx: any) => Promise<any>) => cb(mock)),
+    delete: vi.fn((table: any) => ({
+      where: (expr: any) => {
+        if (isTable(table, "webhook_events")) {
+          const rows = Array.from(dataStore.webhookEvents.values());
+          const targets = filterByExpr(rows, expr);
+          for (const row of targets) {
+            dataStore.webhookEvents.delete(row.stripeEventId);
+          }
+        }
+        return Promise.resolve();
+      },
+    })),
   };
   return mock;
 }
@@ -414,13 +516,17 @@ export function createAppDbMock(dataStore: AppDataStore) {
 // ─── Stripe mock (used by app.test.ts) ───────────────────────────────────────
 
 export function createStripeMock() {
-  const webhookHelper = new Stripe("sk_test_12345", { apiVersion: "2023-10-16" });
+  const webhookHelper = new Stripe("sk_test_12345", { apiVersion: "2025-09-30.clover" });
   return {
-    accounts: { create: vi.fn(), retrieve: vi.fn() },
+    accounts: { create: vi.fn(), retrieve: vi.fn(), del: vi.fn() },
     accountLinks: { create: vi.fn() },
     customers: { create: vi.fn() },
     paymentIntents: { create: vi.fn(), list: vi.fn() },
     checkout: { sessions: { create: vi.fn() } },
+    products: { create: vi.fn(), list: vi.fn(), update: vi.fn() },
+    prices: { create: vi.fn() },
+    taxRates: { list: vi.fn(), retrieve: vi.fn() },
+    charges: { retrieve: vi.fn() },
     webhooks: webhookHelper.webhooks,
   };
 }

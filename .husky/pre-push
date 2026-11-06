@@ -77,7 +77,7 @@ run_step "Lint" npm run lint
 run_step "Agent docs" check_agent_docs_sync
 
 # 5. Backend TypeScript type-check
-run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json"
+run_step "Backend type-check" sh -c "cd backend && npx tsc --noEmit -p tsconfig.build.json && npx tsc --noEmit -p tsconfig.json"
 
 # 6. Frontend build
 run_step "Frontend build" npm run build:frontend

@@ -11,6 +11,7 @@ import {
   RATE_LIMIT_WINDOW_MS,
 } from "../lib/constants";
 import { adminRateLimit } from "../lib/rate-limit";
+import { errorLogFields } from "../lib/safe-error-log";
 import { clearSettingsCache } from "../lib/stripe-billing";
 import { parseBody } from "../lib/validation";
 
@@ -119,7 +120,7 @@ const settingsRoutes: FastifyPluginAsync = async (app) => {
 
         return res.status(200).send({ message: "Setting updated successfully." });
       } catch (error) {
-        req.log.error(error, "Error updating setting");
+        req.log.error(errorLogFields(error), "Error updating setting");
         return res.status(500).send({ error: "Internal server error" });
       }
     }

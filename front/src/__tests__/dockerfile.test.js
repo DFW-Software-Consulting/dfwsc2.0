@@ -26,8 +26,8 @@ describe("Frontend Dockerfile", () => {
       expect(dockerfileContent).toMatch(/FROM.*AS production/);
     });
 
-    it("should use node:20-alpine base image", () => {
-      expect(dockerfileContent).toMatch(/FROM node:20-alpine/);
+    it("should use node:22-alpine base image", () => {
+      expect(dockerfileContent).toMatch(/FROM node:22-alpine/);
     });
 
     it("should build with Vite", () => {
@@ -37,6 +37,25 @@ describe("Frontend Dockerfile", () => {
     it("should set VITE_API_URL build argument", () => {
       expect(dockerfileContent).toContain("ARG VITE_API_URL");
       expect(dockerfileContent).toContain("ENV VITE_API_URL");
+    });
+
+    it("should set analytics build arguments and derive a restrictive CSP origin", () => {
+      expect(dockerfileContent).toContain("ARG VITE_ANALYTICS_SRC");
+      expect(dockerfileContent).toContain("ARG VITE_ANALYTICS_DOMAIN");
+      expect(dockerfileContent).toContain("ENV VITE_ANALYTICS_SRC");
+      expect(dockerfileContent).toContain("ENV VITE_ANALYTICS_DOMAIN");
+      expect(dockerfileContent).toContain("nginx.production.conf");
+    });
+
+    it("should restrict analytics CSP to the build-derived origin", () => {
+      const nginxConfig = readFileSync(join(ROOT_DIR, "front/nginx.conf"), "utf-8");
+
+      expect(nginxConfig).toContain("script-src 'self' __ANALYTICS_ORIGIN__");
+      expect(nginxConfig).toContain(
+        "connect-src 'self' https://api.dfwsc.com __ANALYTICS_ORIGIN__"
+      );
+      expect(nginxConfig).not.toContain("script-src 'self' https:;");
+      expect(nginxConfig).not.toContain("connect-src 'self' https:;");
     });
 
     it("should copy build output to nginx html directory", () => {

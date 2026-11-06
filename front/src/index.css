@@ -4,14 +4,15 @@
 
 @theme {
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --color-brand-50: #e6f5f7;
-  --color-brand-100: #c9e9ef;
-  --color-brand-200: #98d4df;
-  --color-brand-300: #63bdcc;
-  --color-brand-400: #2ca1b4;
-  --color-brand-500: #0b7285;
-  --color-brand-600: #095d6d;
-  --color-brand-700: #074955;
+  --font-serif: Georgia, 'Times New Roman', serif;
+  --color-brand-50: #eaf2fb;
+  --color-brand-100: #d3e4f6;
+  --color-brand-200: #a8c9ec;
+  --color-brand-300: #6ea8e6;
+  --color-brand-400: #4a8bd0;
+  --color-brand-500: #2c6daf;
+  --color-brand-600: #245a91;
+  --color-brand-700: #1c4772;
 
   --animate-pulse-slow: pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-float: float 3s ease-in-out infinite;
@@ -22,31 +23,257 @@
   }
 }
 
+/* Semantic color utilities (bg-page, text-fg-muted, border-line, ...).
+   `inline` keeps the var() reference so the values follow the active theme. */
+@theme inline {
+  --color-page: var(--bg-main);
+  --color-surface: var(--bg-surface);
+  --color-card: var(--bg-card);
+  --color-fg: var(--text-main);
+  --color-fg-muted: var(--text-muted);
+  --color-line: var(--border-subtle);
+  --color-line-strong: var(--border-strong);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-focus: var(--focus-ring);
+  --color-link: var(--link);
+}
+
 @layer base {
   :root {
     color-scheme: light;
-    --bg-main: #ffffff;
-    --bg-surface: #f1f5f9; /* slate-100 */
-    --text-main: #0f172a; /* slate-900 */
-    --text-muted: #334155; /* slate-700 */
-    --border-subtle: rgba(0, 0, 0, 0.1);
+    --bg-main: #f8f7f3; /* paper */
+    --bg-surface: #efede6; /* tinted bands, chips */
+    --bg-card: #ffffff; /* cards and panels */
+    --bg-inverse: #0b1322; /* contact bands and featured card, navy in both themes */
+    --bg-inverse-glow: #17304f; /* radial glow on inverse bands */
+    --hero-glow: color-mix(in srgb, var(--cta-bg) 20%, transparent); /* soft blue glow behind heroes */
+    --border-inverse: rgb(255 255 255 / 0.2); /* dividers on inverse bands */
+    --text-main: #0f1e33;
+    --text-muted: #4b5a6e;
+    --text-inverse: #eef2f8;
+    --text-inverse-muted: #a6b3c7;
+    --accent: #735c20; /* bronze: serif accents, eyebrows, icons on page/card */
+    --accent-soft: #ebe3c8; /* sand chip */
+    --accent-inverse: #d6c89a; /* sand accent text on inverse bands */
+    --link: #245a91;
+    --link-inverse: #6ea8e6; /* link, status and focus on inverse bands */
+    --border-subtle: rgb(15 30 51 / 0.12);
+    --border-strong: rgb(15 30 51 / 0.22);
+    --focus-ring: #245a91;
+    --cta-bg: #2c6daf;
+    --cta-bg-hover: #245a91;
+    --cta-text: #ffffff;
+    /* Light stickers and labels laid over dark bands or photos, same in both themes. */
+    --sticker-bg: #ebe3c8;
+    --sticker-text: #4a3c10;
+    --photo-label-bg: rgb(248 247 243 / 0.93);
+    --shadow-card: 0 14px 35px rgb(15 30 51 / 0.1);
     --glass-bg: rgba(255, 255, 255, 0.8);
     --glass-border: rgba(0, 0, 0, 0.05);
   }
 
   .dark {
     color-scheme: dark;
-    --bg-main: #020617;
-    --bg-surface: #0f172a; /* slate-900 */
-    --text-main: #f8fafc; /* slate-50 */
-    --text-muted: #cbd5e1; /* slate-300 */
-    --border-subtle: rgba(255, 255, 255, 0.05);
-    --glass-bg: rgba(15, 23, 42, 0.8);
-    --glass-border: rgba(255, 255, 255, 0.1);
+    --bg-main: #0b1322;
+    --bg-surface: #111c30;
+    --bg-card: #17243b;
+    --bg-inverse: #0e1a31;
+    --bg-inverse-glow: #1b3558;
+    --hero-glow: color-mix(in srgb, var(--cta-bg) 28%, transparent);
+    --text-main: #eef2f8;
+    --text-muted: #a6b3c7;
+    --accent: #d6c89a;
+    --accent-soft: #1f2c44;
+    --accent-inverse: #d6c89a;
+    --link: #6ea8e6;
+    --link-inverse: #6ea8e6;
+    --border-subtle: rgb(255 255 255 / 0.12);
+    --border-strong: rgb(255 255 255 / 0.2);
+    --focus-ring: #6ea8e6;
+    --cta-bg: #2c6daf;
+    --cta-bg-hover: #2f72b7;
+    --cta-text: #ffffff;
+    --shadow-card: 0 14px 35px rgb(0 0 0 / 0.4);
+    --glass-bg: rgba(17, 28, 48, 0.8);
+    --glass-border: rgba(255, 255, 255, 0.12);
+  }
+
+  /* Before ThemeContext adds a class, match its default (the system preference)
+     so dark-mode visitors don't get a light first paint. */
+  @media (prefers-color-scheme: dark) {
+    :root:not(.light) { color-scheme: dark; --bg-main: #0b1322; --text-main: #eef2f8; }
   }
 
   body {
-    @apply bg-[var(--bg-main)] text-[var(--text-main)] antialiased font-sans selection:bg-brand-500/30 transition-colors duration-300;
+    @apply bg-page text-fg antialiased font-sans selection:bg-brand-500/30 transition-colors duration-300;
+  }
+
+  /* Honor reduced motion everywhere: transitions and animations finish instantly, so
+     state changes (focus outlines, hover, menus) still show without movement.
+     Loading spinners keep turning as progress feedback. */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *:not(.animate-spin), *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Site footer (renders on every route, so it lives here rather than in studio.css).
+     The decorative DFW mark rises in with a CSS-only scroll-driven animation, so the
+     footer needs no motion/Lenis import. */
+  .site-footer {
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-main);
+    color: var(--text-main);
+    padding-top: 48px;
+  }
+  .site-footer::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--cta-bg), var(--accent-inverse) 55%, transparent);
+  }
+  .site-footer-top {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 48px 96px;
+    align-items: start;
+  }
+  .site-footer-nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(150px, auto));
+    gap: 32px 72px;
+  }
+  .site-footer-heading {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .site-footer-list {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    list-style: none;
+    padding: 0;
+  }
+  .site-footer-link {
+    font-size: 15px;
+    color: var(--text-main);
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 5px;
+    transition: color 0.2s, text-decoration-color 0.2s;
+  }
+  .site-footer-link:hover { color: var(--link); text-decoration-color: currentColor; }
+  /* Touch: footer links and "Back to top" get a 44px hit area. Each row is now 44px, so the
+     list gap drops to 0. Desktop keeps the compact list. */
+  @media (pointer: coarse) {
+    .site-footer-list { gap: 0; }
+    .site-footer-link { display: inline-flex; align-items: center; min-height: 44px; }
+  }
+  .site-footer-link:focus-visible,
+  .site-footer-brand:focus-visible {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  .site-footer-brand { display: inline-flex; padding: 4px 0; }
+  .site-footer-bar {
+    position: relative;
+    z-index: 1;
+    margin-top: 40px;
+    padding-block: 20px;
+    border-top: 1px solid var(--border-subtle);
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 12px 24px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .site-footer-time { text-align: center; font-variant-numeric: tabular-nums; }
+  .site-footer-top-btn {
+    justify-self: end;
+    background: none;
+    border: 0;
+    padding: 4px 0;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  /* Decorative DFW mark: absolutely placed behind the footer content (z-index 0) and
+     anchored to the bottom edge, so it adds no height. The footer's overflow: hidden
+     crops the lower third of the letters. */
+  .site-footer-mark {
+    position: absolute;
+    z-index: 0;
+    inset: auto 0 0 0;
+    container-type: inline-size;
+    pointer-events: none;
+    user-select: none;
+  }
+  .site-footer-mark span {
+    display: block;
+    position: relative;
+    top: 0.28em;
+    font-size: 38.5cqw;
+    font-weight: 800;
+    line-height: 0.74;
+    letter-spacing: -0.04em;
+    text-align: center;
+    white-space: nowrap;
+    color: color-mix(in srgb, var(--link) 8%, transparent);
+  }
+  @supports (animation-timeline: view()) {
+    .site-footer-mark span {
+      animation: site-footer-rise linear both;
+      animation-timeline: view();
+      /* Ends at 50%: the glyph offset (top: 0.28em) keeps the box past the page bottom,
+         so a full entry range would never finish while the footer is at rest. */
+      animation-range: entry 0% entry 50%;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .site-footer-mark span { animation: none; }
+    }
+  }
+  @keyframes site-footer-rise {
+    from { opacity: 0; transform: translateY(35%); }
+    to { opacity: 1; transform: none; }
+  }
+  @media (max-width: 760px) {
+    /* The mark is pinned to the footer's bottom edge, so the extra bottom padding lifts the
+       bottom bar above the letters instead of moving the watermark. */
+    .site-footer { padding-top: 40px; padding-bottom: 40px; }
+    .site-footer-top { grid-template-columns: 1fr; gap: 32px; }
+    .site-footer-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+    .site-footer-bar { grid-template-columns: 1fr; justify-items: start; margin-top: 32px; }
+    .site-footer-time { text-align: left; }
+    .site-footer-top-btn { justify-self: start; }
+  }
+
+  /* Shared page container: navbar, footer and studio sections align to the same edges. */
+  .page-wrap {
+    width: min(1180px, calc(100% - 80px));
+    margin-inline: auto;
+  }
+  @media (max-width: 1000px) {
+    .page-wrap { width: calc(100% - 48px); }
+  }
+  @media (max-width: 480px) {
+    .page-wrap { width: calc(100% - 36px); }
   }
 }
 
@@ -67,11 +294,24 @@
     @apply bg-gradient-to-r from-brand-400 via-brand-500 to-brand-700 bg-clip-text text-transparent;
   }
 
+  /* Edge shadows on a horizontal scroller placed on a card: the card-colored covers
+     scroll with the content and hide each shadow once that edge is reached, so the
+     cue only shows while there is more to scroll. Painted as background, so it sits
+     under the content and never covers it. */
+  .scroll-shade-x {
+    --shade: color-mix(in srgb, var(--text-main) 22%, transparent);
+    background:
+      linear-gradient(to right, var(--bg-card) 40%, transparent) left / 2.5rem 100% no-repeat local,
+      linear-gradient(to left, var(--bg-card) 40%, transparent) right / 2.5rem 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, var(--shade), transparent) left / 0.875rem 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, var(--shade), transparent) right / 0.875rem 100% no-repeat scroll;
+  }
+
   .shadow-glow {
-    @apply shadow-[0_0_20px_-5px_rgba(11,114,133,0.3)];
+    @apply shadow-[0_0_20px_-5px_rgba(44,109,175,0.3)];
   }
 
   .shadow-glow-strong {
-    @apply shadow-[0_0_40px_-10px_rgba(11,114,133,0.5)];
+    @apply shadow-[0_0_40px_-10px_rgba(44,109,175,0.5)];
   }
 }

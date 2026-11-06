@@ -27,8 +27,8 @@ describe("Payments API Key Authentication Integration", () => {
     process.env.SMTP_PASS = "test";
 
     // Ensure this suite uses real bcrypt/drizzle behavior even if other tests mock them.
-    vi.unmock("bcryptjs");
-    vi.unmock("drizzle-orm");
+    vi.doUnmock("bcryptjs");
+    vi.doUnmock("drizzle-orm");
     vi.resetModules();
 
     stripeMock = {
@@ -118,6 +118,7 @@ describe("Payments API Key Authentication Integration", () => {
       status: "active",
       stripeAccountId: "acct_waive_fee_test",
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       // Fixed, deterministic fee (independent of global settings defaults)
       // so the "fee is still charged" assertion below is not flaky.
       processingFeeCents: 150,

@@ -1,6 +1,6 @@
 services:
   api:
-    image: node:20-alpine
+    image: node:22-alpine
     user: "0:0"
     working_dir: /app
     command: sh -c "chown -R node:node /app /app/node_modules && exec su node -c 'npm install --include=dev && until nc -z db 5432; do sleep 2; done && (npx drizzle-kit migrate || echo \"Migration failed, continuing...\") && npm run dev'"
@@ -10,6 +10,12 @@ services:
       NODE_ENV: development
       ENV_EXAMPLE_PATH: /tmp/env-example
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@${POSTGRES_HOST:-db}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-stripe_portal}}
+      # ts-node type-check needs more heap than the base 512M limit allows; large localhost cookie headers otherwise cause HTTP 431.
+      NODE_OPTIONS: --max-old-space-size=1536 --max-http-header-size=131072
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     volumes:
       - ./backend:/app
       - ./.env.example:/tmp/env-example
@@ -49,12 +55,15 @@ services:
       - api
 
   web:
-    image: node:20-alpine
+    image: node:22-alpine
     user: "0:0"
     working_dir: /app
     command: sh -c "npm install --include=dev && npm run dev"
     env_file:
       - .env
+    environment:
+      # Large localhost cookie headers otherwise cause HTTP 431 from the Vite dev server.
+      NODE_OPTIONS: --max-http-header-size=131072
     volumes:
       - ./front:/app
       - frontend_node_modules:/app/node_modules

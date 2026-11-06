@@ -13,12 +13,16 @@ vi.mock("bcryptjs", () => ({
 }));
 
 vi.mock("drizzle-orm", () => ({
+  asc: (field: unknown) => ({ asc: true, field }),
+  desc: (field: unknown) => ({ desc: true, field }),
   count: () => ({ fn: "count" }),
   eq: (field: unknown, value: unknown) => ({ value, field }),
   ne: (field: unknown, value: unknown) => ({ not: true, value, field }),
   inArray: (field: unknown, values: unknown[]) => ({ inArray: true, field, values }),
   and: (...conditions: any[]) => ({ all: conditions }),
   isNull: (field: unknown) => ({ isNull: true, field }),
+  or: (...conditions: any[]) => ({ or: conditions }),
+  lt: (field: unknown, value: unknown) => ({ lt: true, field, value }),
 }));
 
 const dataStore = {
@@ -27,7 +31,8 @@ const dataStore = {
   onboardingTokens: new Map<string, any>(),
   webhookEvents: new Map<string, any>(),
   clientGroups: new Map<string, any>(),
-  admins: new Map<string, any>(),
+  paymentLedger: new Map<string, any>(),
+  apiKeyRegenerationTokens: new Map<string, any>(),
 };
 
 type MailhogMessage = {
@@ -165,14 +170,25 @@ beforeEach(async () => {
   dataStore.onboardingTokens.clear();
   dataStore.webhookEvents.clear();
   dataStore.clientGroups.clear();
+  dataStore.paymentLedger.clear();
+  dataStore.apiKeyRegenerationTokens.clear();
   mailhogMessages.length = 0;
 
   vi.clearAllMocks();
+  stripeMock.accounts.create.mockImplementation(async (params: any) => ({
+    id: `acct_${params.metadata.clientId.replace(/-/g, "").slice(0, 20)}`,
+    charges_enabled: false,
+    payouts_enabled: false,
+    details_submitted: false,
+  }));
+  stripeMock.accounts.del.mockResolvedValue({ deleted: true });
 });
 
 afterEach(() => {
   delete process.env.API_BASE_URL;
   delete process.env.FRONTEND_ORIGIN;
+  delete process.env.DEFAULT_PAYMENT_SUCCESS_URL;
+  delete process.env.DEFAULT_PAYMENT_CANCEL_URL;
   delete process.env.DEFAULT_PROCESS_FEE_CENTS;
 });
 
@@ -183,7 +199,7 @@ async function createServer({ skipEnvValidation = false }: { skipEnvValidation?:
       logMaskedEnvSummary: () => {},
     }));
   } else {
-    vi.unmock("../lib/env");
+    vi.doUnmock("../lib/env");
   }
 
   vi.resetModules();
@@ -233,7 +249,38 @@ describe("route guards and validation", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({
-      error: "Idempotency-Key header is required for API calls.",
+      error: "Idempotency-Key header is required.",
+    });
+    await server.close();
+  });
+
+  it("requires idempotency key for admin payment creation", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+    seedClient({
+      id: "client_admin_no_idem",
+      stripeAccountId: "acct_admin",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      payload: {
+        clientId: "client_admin_no_idem",
+        amount: 1000,
+        currency: "usd",
+        workspace: "client_portal",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: "Idempotency-Key header is required.",
     });
     await server.close();
   });
@@ -301,7 +348,13 @@ describe("payments", () => {
     const server = await createServer();
 
     const apiKey = "api-key-client_fee";
-    seedClient({ id: "client_fee", stripeAccountId: "acct_123", chargesEnabled: true, apiKey });
+    seedClient({
+      id: "client_fee",
+      stripeAccountId: "acct_123",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+      apiKey,
+    });
 
     const response = await server.inject({
       method: "POST",
@@ -343,6 +396,7 @@ describe("payments", () => {
       id: "client_checkout",
       stripeAccountId: "acct_checkout",
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       apiKey,
     });
 
@@ -381,6 +435,7 @@ describe("payments", () => {
       id: "client_checkout",
       stripeAccountId: "acct_123",
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       apiKey,
     });
 
@@ -417,6 +472,7 @@ describe("payments", () => {
       apiKey,
       stripeAccountId: "acct_custom",
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       paymentSuccessUrl: "https://myclient.com/thank-you",
       paymentCancelUrl: null,
     });
@@ -448,7 +504,169 @@ describe("payments", () => {
     ).toBe(201);
     expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        success_url: "https://myclient.com/thank-you",
+        success_url: "https://myclient.com/thank-you?session_id={CHECKOUT_SESSION_ID}",
+      }),
+      expect.anything()
+    );
+    await server.close();
+  });
+
+  it("uses default checkout redirect URLs and appends session_id to default success URL", async () => {
+    process.env.USE_CHECKOUT = "true";
+    process.env.DEFAULT_PAYMENT_SUCCESS_URL = "https://payments.example.test/thanks?source=portal";
+    process.env.DEFAULT_PAYMENT_CANCEL_URL = "https://payments.example.test/cancel";
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      url: "https://checkout.stripe.com/c/pay/mock",
+    });
+
+    const server = await createServer();
+
+    const apiKey = "api-key-client_default_url";
+    seedClient({
+      id: "client_default_url",
+      apiKey,
+      stripeAccountId: "acct_default_url",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": "default-url-key",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success_url:
+          "https://payments.example.test/thanks?source=portal&session_id={CHECKOUT_SESSION_ID}",
+        cancel_url: "https://payments.example.test/cancel",
+      }),
+      expect.anything()
+    );
+    await server.close();
+  });
+
+  it("falls back to frontend checkout redirects when default redirect URLs are invalid", async () => {
+    process.env.USE_CHECKOUT = "true";
+    process.env.FRONTEND_ORIGIN = "https://portal.example.test";
+    process.env.DEFAULT_PAYMENT_SUCCESS_URL = "ftp://payments.example.test/thanks";
+    process.env.DEFAULT_PAYMENT_CANCEL_URL = "not-a-url";
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      url: "https://checkout.stripe.com/c/pay/mock",
+    });
+
+    const server = await createServer();
+
+    const apiKey = "api-key-client_invalid_default_url";
+    seedClient({
+      id: "client_invalid_default_url",
+      apiKey,
+      stripeAccountId: "acct_invalid_default_url",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": "invalid-default-url-key",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success_url: "https://portal.example.test/payment-success?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url: "https://portal.example.test/payment-cancel",
+      }),
+      expect.anything()
+    );
+    await server.close();
+  });
+
+  it("keeps group checkout redirect URLs ahead of default redirect URLs", async () => {
+    process.env.USE_CHECKOUT = "true";
+    process.env.DEFAULT_PAYMENT_SUCCESS_URL = "https://payments.example.test/thanks";
+    process.env.DEFAULT_PAYMENT_CANCEL_URL = "https://payments.example.test/cancel";
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      url: "https://checkout.stripe.com/c/pay/mock",
+    });
+
+    const server = await createServer();
+
+    const apiKey = "api-key-client_group_url";
+    seedClientGroup(dataStore, {
+      id: "group_checkout_urls",
+      name: "Checkout URLs Group",
+      paymentSuccessUrl: "https://group.example.test/thanks",
+      paymentCancelUrl: "https://group.example.test/cancel",
+    });
+    seedClient({
+      id: "client_group_url",
+      apiKey,
+      groupId: "group_checkout_urls",
+      stripeAccountId: "acct_group_url",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": "group-url-key",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(stripeMock.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success_url: "https://group.example.test/thanks?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url: "https://group.example.test/cancel",
       }),
       expect.anything()
     );
@@ -465,6 +683,7 @@ describe("payments", () => {
       id: "client_checkout",
       stripeAccountId: "acct_123",
       chargesEnabled: true,
+      cardPaymentsStatus: "active",
       apiKey,
     });
 
@@ -571,7 +790,63 @@ describe("connect onboarding", () => {
     expect(json.onboardingToken).toBeUndefined();
     expect(json.onboardingUrlHint).toBeDefined();
     expect(json.workspace).toBe("client_portal");
+    const saved = dataStore.clients.get(json.clientId);
+    expect(saved?.stripeAccountId).toMatch(/^acct_/);
+    expect(saved?.chargesEnabled).toBe(false);
+    expect(saved?.payoutsEnabled).toBe(false);
+    expect(saved?.detailsSubmitted).toBe(false);
+    expect(stripeMock.accounts.create).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "express", metadata: { clientId: json.clientId } }),
+      { idempotencyKey: `acct-create-${json.clientId}` }
+    );
 
+    await server.close();
+  });
+
+  it("maps a Stripe busy error on /accounts to 503 and persists nothing", async () => {
+    const server = await createServer();
+    // Imported after the server so the class matches the instance the routes check against.
+    const { ConcurrencyLimitError } = await import("../lib/concurrency-limiter");
+    stripeMock.accounts.create.mockRejectedValueOnce(new ConcurrencyLimitError("wait_timeout"));
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/accounts",
+      headers: { authorization: `Bearer ${makeAdminToken()}` },
+      payload: { name: "Busy Client", email: "busy@example.com", workspace: "client_portal" },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({ code: "STRIPE_BUSY" });
+    expect(
+      Array.from(dataStore.clients.values()).find((client) => client.email === "busy@example.com")
+    ).toBeUndefined();
+    await server.close();
+  });
+
+  it("does not create an /accounts client when Stripe provisioning fails", async () => {
+    stripeMock.accounts.create.mockRejectedValueOnce(new Error("stripe timeout"));
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/accounts",
+      headers: { authorization: `Bearer ${makeAdminToken()}` },
+      payload: {
+        name: "Unpersisted Client",
+        email: "unpersisted@example.com",
+        workspace: "client_portal",
+      },
+    });
+
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({ code: "STRIPE_FAILED" });
+    expect(
+      Array.from(dataStore.clients.values()).find(
+        (client) => client.email === "unpersisted@example.com"
+      )
+    ).toBeUndefined();
+    expect(response.json().apiKey).toBeUndefined();
     await server.close();
   });
 
@@ -605,6 +880,10 @@ describe("connect onboarding", () => {
     );
     expect(savedClient?.apiKeyHash).toMatch(/^hashed:.+/);
     expect(savedClient?.id).toBe(body.clientId);
+    expect(savedClient?.stripeAccountId).toBeDefined();
+    expect(savedClient?.chargesEnabled).toBe(false);
+    expect(savedClient?.payoutsEnabled).toBe(false);
+    expect(savedClient?.detailsSubmitted).toBe(false);
     expect(mailhogMessages.length).toBe(1);
     expect(mailhogMessages[0].Content.Headers.Subject[0]).toBe(
       "DFW Software Consulting - Stripe Onboarding"
@@ -679,6 +958,41 @@ describe("connect onboarding", () => {
     expect(updatedClient?.stripeAccountId).toBe("acct_new");
     await server.close();
   });
+
+  it("uses an already persisted Stripe account without creating another one", async () => {
+    stripeMock.accountLinks.create.mockResolvedValue({
+      url: "https://connect.stripe.com/setup/existing",
+    });
+    const clientId = "client_existing_connect";
+    seedClient({
+      id: clientId,
+      stripeAccountId: "acct_existing_connect",
+      name: "Existing Connect Client",
+      email: "existing-connect@example.com",
+    });
+    seedOnboardingToken(dataStore, {
+      id: "token_existing_connect",
+      clientId,
+      token: "token_existing_connect_value",
+      status: "pending",
+      email: "existing-connect@example.com",
+    });
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/onboard-client",
+      payload: { token: "token_existing_connect_value" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(stripeMock.accounts.create).not.toHaveBeenCalled();
+    expect(stripeMock.accountLinks.create).toHaveBeenCalledWith(
+      expect.objectContaining({ account: "acct_existing_connect" }),
+      expect.any(Object)
+    );
+    await server.close();
+  });
 });
 
 describe("connect callback", () => {
@@ -704,7 +1018,7 @@ describe("connect callback", () => {
     await server.close();
   });
 
-  it("rejects callback with expired state", async () => {
+  it("redirects callback with expired state to the expired onboarding page", async () => {
     const clientId = "client_expired_state";
     const onboardingTokenId = "token_expired";
     seedOnboardingToken(dataStore, {
@@ -721,8 +1035,11 @@ describe("connect callback", () => {
       method: "GET",
       url: `/api/v1/connect/callback?client_id=${clientId}&account=acct_123&state=expired_state_val`,
     });
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ error: "Expired state parameter." });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toMatch(/\/onboarding-success\?status=expired$/);
+    const expiredToken = dataStore.onboardingTokens.get(onboardingTokenId);
+    expect(expiredToken?.status).toBe("in_progress");
+    expect(expiredToken?.state).toBe("expired_state_val");
     await server.close();
   });
 
@@ -1313,7 +1630,8 @@ describe("client groups", () => {
     // original side effect (which populates dataStore.clientGroups), then
     // read the inserted row back for `.returning()`.
     const originalInsertImpl = dbMock.insert.getMockImplementation();
-    dbMock.insert.mockImplementationOnce((table: any) => {
+    // The wrapper widens the mock's inferred return shape (adds .returning off .values()).
+    dbMock.insert.mockImplementationOnce(((table: any) => {
       const original = originalInsertImpl?.(table);
       return {
         values: (payload: any) => {
@@ -1324,7 +1642,7 @@ describe("client groups", () => {
           };
         },
       };
-    });
+    }) as never);
 
     const response = await server.inject({
       method: "POST",
@@ -1530,6 +1848,596 @@ describe("client groups", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: "Invalid groupId." });
+    await server.close();
+  });
+});
+
+describe("checkout fee integrity", () => {
+  it("derives base amount from line items and ignores caller amount for checkout", async () => {
+    process.env.USE_CHECKOUT = "true";
+    process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      id: "cs_test_mock123",
+      url: "https://checkout.stripe.com/c/pay/mock",
+    });
+
+    const server = await createServer();
+
+    const apiKey = "api-key-client_fee_integrity";
+    seedClient({
+      id: "client_fee_integrity",
+      stripeAccountId: "acct_fee_integrity",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+      apiKey,
+    });
+
+    // Send a caller amount that differs from line items — should be ignored.
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": "fee-integrity-key",
+      },
+      payload: {
+        amount: 500, // This should be ignored; line items say 1000
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const createCall = stripeMock.checkout.sessions.create.mock.calls[0];
+    const sessionParams = createCall[0];
+    // The fee should be based on the line item total (1000), not the caller amount (500).
+    // Fee is 100 cents (from DEFAULT_PROCESS_FEE_CENTS).
+    expect(sessionParams.payment_intent_data.metadata.baseAmount).toBe("1000");
+    expect(sessionParams.payment_intent_data.metadata.feeAmount).toBe("100");
+    await server.close();
+  });
+
+  it("rejects mixed currencies in checkout line items", async () => {
+    process.env.USE_CHECKOUT = "true";
+    const server = await createServer();
+
+    const apiKey = "api-key-client_mixed_curr";
+    seedClient({
+      id: "client_mixed_curr",
+      stripeAccountId: "acct_mixed_curr",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+      apiKey,
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": "mixed-currency-key",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service A" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+          {
+            price_data: {
+              currency: "eur",
+              product_data: { name: "Service B" },
+              unit_amount: 500,
+            },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: expect.stringContaining("same currency"),
+    });
+    await server.close();
+  });
+
+  it("rejects invalid currency format", async () => {
+    process.env.USE_CHECKOUT = "true";
+    const server = await createServer();
+
+    const apiKey = "api-key-client_bad_curr";
+    seedClient({
+      id: "client_bad_curr",
+      stripeAccountId: "acct_bad_curr",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+      apiKey,
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": "bad-currency-key",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "US",
+              product_data: { name: "Service" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("currency");
+    await server.close();
+  });
+});
+
+describe("metadata validation", () => {
+  it("rejects metadata with too many keys", async () => {
+    process.env.USE_CHECKOUT = "true";
+    const server = await createServer();
+
+    const apiKey = "api-key-client_meta_many";
+    seedClient({
+      id: "client_meta_many",
+      stripeAccountId: "acct_meta_many",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+      apiKey,
+    });
+
+    const metadata: Record<string, string> = {};
+    for (let i = 0; i < 51; i++) {
+      metadata[`key${i}`] = `value${i}`;
+    }
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": "meta-many-key",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
+        metadata,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("50 keys");
+    await server.close();
+  });
+
+  it("rejects metadata with value exceeding 500 characters", async () => {
+    process.env.USE_CHECKOUT = "true";
+    const server = await createServer();
+
+    const apiKey = "api-key-client_meta_long";
+    seedClient({
+      id: "client_meta_long",
+      stripeAccountId: "acct_meta_long",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+      apiKey,
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": "meta-long-key",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
+        metadata: { shortKey: "x".repeat(501) },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("500 characters");
+    await server.close();
+  });
+});
+
+describe("payment ledger", () => {
+  it("inserts a ledger row after checkout session creation", async () => {
+    process.env.USE_CHECKOUT = "true";
+    process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
+    stripeMock.checkout.sessions.create.mockResolvedValue({
+      id: "cs_test_ledger_insert",
+      url: "https://checkout.stripe.com/c/pay/mock",
+    });
+
+    const server = await createServer();
+
+    const apiKey = "api-key-client_ledger_ins";
+    seedClient({
+      id: "client_ledger_ins",
+      stripeAccountId: "acct_ledger_ins",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+      apiKey,
+    });
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/payments/create",
+      headers: {
+        "x-api-key": apiKey,
+        "idempotency-key": "ledger-insert-key",
+      },
+      payload: {
+        lineItems: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service" },
+              unit_amount: 1000,
+            },
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    // Verify ledger row was created.
+    const ledgerRow = dataStore.paymentLedger.get("ledger-insert-key");
+    expect(ledgerRow).toBeDefined();
+    expect(ledgerRow.clientId).toBe("client_ledger_ins");
+    expect(ledgerRow.connectedAccountId).toBe("acct_ledger_ins");
+    expect(ledgerRow.stripeSessionId).toBe("cs_test_ledger_insert");
+    expect(ledgerRow.source).toBe("checkout");
+    expect(ledgerRow.status).toBe("created");
+    expect(ledgerRow.baseAmountCents).toBe(1000);
+    expect(ledgerRow.feeAmountCents).toBe(100);
+    expect(ledgerRow.currency).toBe("usd");
+    await server.close();
+  });
+});
+
+describe("payment session endpoint", () => {
+  it("returns payer-safe fields from ledger for a valid session", async () => {
+    const server = await createServer();
+
+    // Seed a ledger row.
+    dataStore.paymentLedger.set("session-lookup-key", {
+      id: "ledger_1",
+      idempotencyKey: "session-lookup-key",
+      connectedAccountId: "acct_session",
+      stripeSessionId: "cs_test_session_123",
+      stripePaymentIntentId: null,
+      clientId: "client_session",
+      source: "checkout",
+      status: "paid",
+      baseAmountCents: 5000,
+      totalAmountCents: 5100,
+      feeAmountCents: 100,
+      currency: "usd",
+      metadata: null,
+      lastStripeEventCreatedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/payments/session/cs_test_session_123",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.status).toBe("paid");
+    expect(body.baseAmountCents).toBe(5000);
+    expect(body.totalAmountCents).toBe(5100);
+    expect(body.feeAmountCents).toBe(100);
+    expect(body.currency).toBe("usd");
+    // Must not leak internal fields.
+    expect(body.clientId).toBeUndefined();
+    expect(body.connectedAccountId).toBeUndefined();
+    expect(body.metadata).toBeUndefined();
+    await server.close();
+  });
+
+  it("returns 404 for unknown session ID", async () => {
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/payments/session/cs_test_unknown_123",
+    });
+
+    expect(response.statusCode).toBe(404);
+    await server.close();
+  });
+
+  it("rejects invalid session ID format", async () => {
+    const server = await createServer();
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/payments/session/invalid-format",
+    });
+
+    expect(response.statusCode).toBe(400);
+    await server.close();
+  });
+});
+
+describe("products with connected account context", () => {
+  it("requires clientId for product listing", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/products",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("clientId");
+    await server.close();
+  });
+
+  it("requires clientId for product creation", async () => {
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/products",
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: {
+        name: "Test Product",
+        amountCents: 1000,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("clientId");
+    await server.close();
+  });
+
+  it("lists products on connected account when clientId provided", async () => {
+    seedClient({
+      id: "client_prod_acct",
+      stripeAccountId: "acct_prod_connected",
+      chargesEnabled: true,
+      cardPaymentsStatus: "active",
+    });
+
+    stripeMock.products = {
+      ...stripeMock.products,
+      list: vi.fn().mockResolvedValue({ data: [] }),
+    };
+
+    const server = await createServer();
+    const adminToken = makeAdminToken();
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/api/v1/products?clientId=client_prod_acct",
+      headers: { authorization: `Bearer ${adminToken}` },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(stripeMock.products.list).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ stripeAccount: "acct_prod_connected" })
+    );
+    await server.close();
+  });
+});
+
+describe("webhook ledger updates", () => {
+  it("updates ledger status on checkout.session.completed", async () => {
+    // Seed a ledger row.
+    dataStore.paymentLedger.set("webhook-ledger-key", {
+      id: "ledger_wh1",
+      idempotencyKey: "webhook-ledger-key",
+      connectedAccountId: "acct_wh",
+      stripeSessionId: "cs_test_wh_complete",
+      stripePaymentIntentId: "pi_test_wh",
+      clientId: "client_wh",
+      source: "checkout",
+      status: "created",
+      baseAmountCents: 1000,
+      totalAmountCents: 1100,
+      feeAmountCents: 100,
+      currency: "usd",
+      metadata: null,
+      lastStripeEventCreatedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const payload = JSON.stringify({
+      id: "evt_checkout_complete",
+      type: "checkout.session.completed",
+      created: Math.floor(Date.now() / 1000),
+      data: {
+        object: {
+          id: "cs_test_wh_complete",
+          payment_status: "paid",
+          payment_intent: "pi_test_wh",
+        },
+      },
+    });
+    const signature = stripeMock.webhooks.generateTestHeaderString({
+      payload,
+      secret: TEST_WEBHOOK_SECRET,
+    });
+
+    const server = await createServer();
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/stripe",
+      payload,
+      headers: {
+        "stripe-signature": signature,
+        "content-type": "application/json",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const ledgerRow = dataStore.paymentLedger.get("webhook-ledger-key");
+    expect(ledgerRow.status).toBe("paid");
+    await server.close();
+  });
+
+  it("ignores out-of-order events for ledger updates", async () => {
+    // Seed a failed row with a newer event timestamp. Precedence allows failed -> paid,
+    // so only the timestamp guard can keep a late-delivered completion from flipping it.
+    dataStore.paymentLedger.set("ooo-ledger-key", {
+      id: "ledger_ooo",
+      idempotencyKey: "ooo-ledger-key",
+      connectedAccountId: "acct_ooo",
+      stripeSessionId: "cs_test_ooo",
+      stripePaymentIntentId: null,
+      clientId: "client_ooo",
+      source: "checkout",
+      status: "failed",
+      baseAmountCents: 1000,
+      totalAmountCents: 1100,
+      feeAmountCents: 100,
+      currency: "usd",
+      metadata: null,
+      lastStripeEventCreatedAt: 1700000000, // Newer event
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const payload = JSON.stringify({
+      id: "evt_ooo_completed",
+      type: "checkout.session.completed",
+      created: 1699999000, // Older event
+      data: {
+        object: {
+          id: "cs_test_ooo",
+          payment_status: "paid",
+        },
+      },
+    });
+    const signature = stripeMock.webhooks.generateTestHeaderString({
+      payload,
+      secret: TEST_WEBHOOK_SECRET,
+    });
+
+    const server = await createServer();
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/stripe",
+      payload,
+      headers: {
+        "stripe-signature": signature,
+        "content-type": "application/json",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    // Status should remain 'failed' — the older event was ignored.
+    const ledgerRow = dataStore.paymentLedger.get("ooo-ledger-key");
+    expect(ledgerRow.status).toBe("failed");
+    await server.close();
+  });
+});
+
+describe("account.updated ordering protection", () => {
+  it("retrieves current account state from Stripe instead of trusting event payload", async () => {
+    seedClient({
+      id: "client_acct_order",
+      stripeAccountId: "acct_order_test",
+      chargesEnabled: false,
+    });
+
+    stripeMock.accounts.retrieve.mockResolvedValue({
+      id: "acct_order_test",
+      type: "express",
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
+
+    const payload = JSON.stringify({
+      id: "evt_acct_updated_order",
+      type: "account.updated",
+      created: Math.floor(Date.now() / 1000),
+      data: {
+        object: {
+          id: "acct_order_test",
+          // Event says false, but Stripe retrieve says true.
+          details_submitted: false,
+          charges_enabled: false,
+          payouts_enabled: false,
+        },
+      },
+    });
+    const signature = stripeMock.webhooks.generateTestHeaderString({
+      payload,
+      secret: TEST_WEBHOOK_SECRET,
+    });
+
+    const server = await createServer();
+    const response = await server.inject({
+      method: "POST",
+      url: "/api/v1/webhooks/stripe",
+      payload,
+      headers: {
+        "stripe-signature": signature,
+        "content-type": "application/json",
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    // Should have retrieved from Stripe and used the current state.
+    expect(stripeMock.accounts.retrieve).toHaveBeenCalledWith("acct_order_test");
+    const client = dataStore.clients.get("client_acct_order");
+    expect(client.chargesEnabled).toBe(true);
+    expect(client.payoutsEnabled).toBe(true);
+    expect(client.detailsSubmitted).toBe(true);
     await server.close();
   });
 });

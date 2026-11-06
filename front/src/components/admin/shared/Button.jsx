@@ -1,14 +1,30 @@
+// Variants own every color class. `className` is for layout only (width, margin, shadow):
+// two utilities for the same property resolve by stylesheet order, not by their order in
+// the class string, so a color passed through `className` cannot reliably beat the variant.
+// Add a variant here instead of overriding colors at the call site.
 const VARIANT_CLASSES = {
-  primary: "bg-blue-600 hover:bg-blue-700 text-white",
+  primary: "bg-brand-500 hover:bg-brand-600 text-white",
   danger: "bg-red-600 hover:bg-red-700 text-white",
-  success: "bg-green-600 hover:bg-green-700 text-white",
-  secondary: "bg-gray-700 hover:bg-gray-600 text-white",
-  ghost: "bg-transparent hover:bg-gray-700 text-gray-300",
+  success: "bg-green-700 hover:bg-green-800 text-white",
+  warning: "bg-amber-700 hover:bg-amber-800 text-white",
+  secondary: "border border-line bg-surface hover:border-line-strong text-fg",
+  ghost: "bg-transparent hover:bg-accent-soft text-fg-muted",
+  "ghost-info":
+    "bg-transparent text-brand-700 hover:bg-brand-50 dark:text-brand-300 dark:hover:bg-brand-400/10",
+  "ghost-warning":
+    "bg-transparent text-yellow-800 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-400/10",
+  "ghost-danger":
+    "bg-transparent text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-400/10",
 };
 
+// Touch screens get 44px targets (phones via the md breakpoint, tablets via a coarse
+// pointer); mouse users on desktop keep the compact density.
+const TOUCH_TARGET =
+  "max-md:min-h-11 max-md:min-w-11 pointer-coarse:min-h-11 pointer-coarse:min-w-11";
+
 const SIZE_CLASSES = {
-  sm: "px-3 py-1 text-xs",
-  md: "px-4 py-2 text-sm",
+  sm: `px-3 py-1 text-xs ${TOUCH_TARGET}`,
+  md: `px-4 py-2 text-sm ${TOUCH_TARGET}`,
 };
 
 export default function Button({
@@ -19,14 +35,16 @@ export default function Button({
   onClick,
   type = "button",
   children,
+  title,
   className = "",
 }) {
   return (
     <button
       type={type}
+      title={title}
       onClick={onClick}
       disabled={disabled || isLoading}
-      className={`rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${VARIANT_CLASSES[variant] ?? VARIANT_CLASSES.primary} ${SIZE_CLASSES[size] ?? SIZE_CLASSES.md} ${className}`}
+      className={`inline-flex items-center justify-center rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${VARIANT_CLASSES[variant] ?? VARIANT_CLASSES.primary} ${SIZE_CLASSES[size] ?? SIZE_CLASSES.md} ${className}`}
     >
       {isLoading ? (
         <span className="inline-flex items-center gap-1.5">

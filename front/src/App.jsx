@@ -1,24 +1,27 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
+import Analytics from "./components/Analytics.jsx";
 import Footer from "./components/Footer.jsx";
 import Navbar from "./components/Navbar.jsx";
+import { lazyPage } from "./utils/lazyPage.js";
 
-const Home = lazy(() => import("./pages/Home.jsx"));
-const Pricing = lazy(() => import("./pages/Pricing.jsx"));
-const Team = lazy(() => import("./pages/Team.jsx"));
-const Docs = lazy(() => import("./pages/Docs.jsx"));
-const OnboardClient = lazy(() => import("./pages/OnboardClient"));
-const AdminPage = lazy(() => import("./pages/AdminPage"));
-const PaymentSuccess = lazy(() => import("./pages/PaymentSuccess"));
-const PaymentCancel = lazy(() => import("./pages/PaymentCancel"));
-const OnboardingSuccess = lazy(() => import("./pages/OnboardingSuccess"));
-const RegenerateApiKey = lazy(() => import("./pages/RegenerateApiKey"));
-const RequestApiKeyRegeneration = lazy(() => import("./pages/RequestApiKeyRegeneration"));
-const NotFound = lazy(() => import("./pages/NotFound"));
+const Home = lazyPage(() => import("./pages/Home.jsx"));
+const Pricing = lazyPage(() => import("./pages/Pricing.jsx"));
+const Team = lazyPage(() => import("./pages/Team.jsx"));
+const Docs = lazyPage(() => import("./pages/Docs.jsx"));
+const OnboardClient = lazyPage(() => import("./pages/OnboardClient"));
+const AdminPage = lazyPage(() => import("./pages/AdminPage"));
+const PaymentSuccess = lazyPage(() => import("./pages/PaymentSuccess"));
+const PaymentCancel = lazyPage(() => import("./pages/PaymentCancel"));
+const OnboardingSuccess = lazyPage(() => import("./pages/OnboardingSuccess"));
+const RegenerateApiKey = lazyPage(() => import("./pages/RegenerateApiKey"));
+const RequestApiKeyRegeneration = lazyPage(() => import("./pages/RequestApiKeyRegeneration"));
+const NotFound = lazyPage(() => import("./pages/NotFound"));
 
 export default function App() {
   return (
     <BrowserRouter>
+      <Analytics />
       <div className="min-h-screen relative isolate bg-[var(--bg-main)] text-[var(--text-main)] selection:bg-brand-500/30 transition-colors duration-300">
         {/* Background glow effects */}
         <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">

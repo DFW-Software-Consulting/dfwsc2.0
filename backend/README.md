@@ -26,11 +26,9 @@ Create a `.env` file based on `.env.example`.
 | `SMTP_USER` | ✅ | Username/login for the SMTP server. |
 | `SMTP_PASS` | ✅ | Password/API key for the SMTP server. |
 | `SMTP_FROM` | ❌ | Friendly from address used in onboarding emails. Defaults to `SMTP_USER` when omitted. |
-| `ADMIN_USERNAME` | ✅ | Username for admin login to access client management endpoints. |
-| `ADMIN_PASSWORD` | ✅ | Password for admin authentication. Supports plain text (dev) or bcrypt hash (production). |
+| `ADMIN_NEXTCLOUD_GROUPS` | ❌ | Comma-separated Nextcloud group ids allowed to sign in to the admin panel. Defaults to `dfwsc-admins,managers`. The groups must exist with members before deploying. Login also needs `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD`; without them it answers 503. |
 | `JWT_SECRET` | ✅ | Secret key for signing JWT tokens. Must be minimum 32 characters. Generate with: `openssl rand -base64 32` |
 | `JWT_EXPIRY` | ❌ | JWT token expiration time. Defaults to `1h`. Supported formats: `1h`, `30m`, `7d`, `24h`. |
-| `ALLOW_ADMIN_SETUP` | ❌ | Set to `true` to enable browser-based admin credential setup. Only works when `ADMIN_PASSWORD` is not set. |
 
 ## Database Schema
 
@@ -48,15 +46,14 @@ The database only stores the connected account mapping and raw webhook payloads.
 | --- | --- | --- |
 | `GET /api/v1/health` | Health check. | Public |
 | `POST /api/v1/auth/login` | Admin login endpoint. Returns JWT token for authentication. Rate limited to 5 requests per 15 minutes. | Public |
-| `GET /api/v1/auth/setup/status` | Check if admin setup is allowed. Returns `{ setupAllowed, adminConfigured }`. | Public |
-| `POST /api/v1/auth/setup` | One-time admin credential setup. Only works when `ALLOW_ADMIN_SETUP=true` and no admin is configured. | Public |
 | `GET /api/v1/clients` | List all clients with their status and Stripe account information. | Admin (JWT) |
 | `PATCH /api/v1/clients/:id` | Update client status (`active` or `inactive`). Soft-deletes clients without removing from database. | Admin (JWT) |
 | `POST /api/v1/accounts` | Create a client record and onboarding token. | Admin |
 | `POST /api/v1/onboard-client/initiate` | Email onboarding link to a client. | Admin |
 | `GET /api/v1/onboard-client` | Exchange onboarding token for a Stripe onboarding link. | Public |
 | `GET /api/v1/connect/callback` | Stripe onboarding return URL. Persists the `account` query parameter to the client record and redirects to the frontend success page. | Public |
-| `POST /api/v1/payments/create` | Create a PaymentIntent or Checkout Session for a client's connected account. Requires an `Idempotency-Key` header. | Admin or Client |
+| `POST /api/v1/payments/create` | Create a Checkout Session for a client's connected account. Requires an `Idempotency-Key` header and a `lineItems` array; returns `{ url, sessionId }`. | Admin or Client |
+| `GET /api/v1/payments/session/:sessionId` | Confirm a payment by Checkout session ID (status and amounts). Rate limited: 30 requests per minute per IP, or 600 per minute per client when `X-Api-Key` is sent; 30 distinct rejected keys per minute per IP (the same bad key counts once). | Public, or API key |
 | `POST /api/v1/webhooks/stripe` | Verify the Stripe signature, store the raw event payload, mark the event as processed, and log basic status updates. | Stripe |
 | `GET /api/v1/reports/payments` | List PaymentIntents for a client's connected account with Stripe pagination parameters. | Admin |
 
@@ -65,8 +62,8 @@ Non-listed endpoints from earlier versions have been removed (invoices, refunds,
 ## Payments and Fees
 
 - The caller supplies the desired `application_fee_amount` for each payment request.
-- The API always creates a Checkout Session from the required `lineItems`, applies platform fees via `payment_intent_data.application_fee_amount`, and returns the hosted session URL.
-- Idempotency is enforced via the standard `Idempotency-Key` request header on write routes.
+- The API always creates a Checkout Session from the required `lineItems`, applies platform fees via `payment_intent_data.application_fee_amount`, and returns the hosted session URL and session ID.
+- Idempotency is enforced via the standard `Idempotency-Key` request header on write routes. On `POST /api/v1/payments/create` keys are scoped per client and at most 218 characters, a key reused for a different payment returns `409 IDEMPOTENCY_KEY_REUSED`, and a key should not be reused more than 24 hours after its first use (Stripe stops honouring it). See `CLIENT_INTEGRATION.md` for the full error list.
 
 Refunds are **not** exposed through this API. Handle all refunds directly in the Stripe Dashboard so Stripe remains the source of truth.
 
@@ -136,36 +133,13 @@ To replay Stripe events, use the Stripe CLI directly:
 stripe trigger payment_intent.succeeded
 ```
 
-## Admin Credential Recovery
+## Admin login
 
-If you lose access to your admin credentials or need to set up admin access on a new deployment without CLI access, use the browser-based setup flow.
+Admin login is checked against Nextcloud; there are no local admin accounts. `POST /api/v1/auth/login` verifies the Nextcloud username and password and requires membership of a group in `ADMIN_NEXTCLOUD_GROUPS` (default `dfwsc-admins,managers`).
 
-### Recovery Steps
+- Create the groups and add members **before** deploying.
+- Accounts with two-factor login must use a Nextcloud app password.
+- There is no local fallback: if Nextcloud is down, login answers `503` (payments are unaffected).
+- Logins are limited per IP (5 / 15 min) and per username (10 / 15 min), because Nextcloud throttles failed logins by source IP.
+- Details: `docs/BACKEND.md`, "Admin login (Nextcloud)".
 
-1. **Enable setup mode** by setting the environment variable:
-   ```
-   ALLOW_ADMIN_SETUP=true
-   ```
-
-2. **Remove or unset the existing `ADMIN_PASSWORD`** variable (the setup endpoint only works when no admin password is configured).
-
-3. **Restart your application** to pick up the environment changes.
-
-4. **Navigate to the admin page** (`/admin`) in your browser. You'll see a setup form instead of the login form.
-
-5. **Create your admin credentials** by entering a username and password (minimum 8 characters).
-
-6. **Copy the generated credentials**. The setup form will display:
-   - `ADMIN_USERNAME=<your-username>`
-   - `ADMIN_PASSWORD=<bcrypt-hash>`
-
-7. **Update your environment** with the new credentials.
-
-8. **Remove or set `ALLOW_ADMIN_SETUP=false`** and restart your application.
-
-### Security Considerations
-
-- The setup endpoint is **rate limited** to 3 requests per 15 minutes.
-- Setup can only be used **once per server session**. After a successful setup, the endpoint returns 403 until the server restarts.
-- **Never leave `ALLOW_ADMIN_SETUP=true` in production** after completing setup.
-- The generated password hash is bcrypt, which is secure for production use.

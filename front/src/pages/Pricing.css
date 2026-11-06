@@ -1,0 +1,58 @@
+.studio-engagement-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.studio-engagement-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 12px; padding: 40px; display: flex; flex-direction: column; align-items: start; }
+.studio-engagement-card h3 { font-size: clamp(28px, 3vw, 39px); line-height: 1.15; font-weight: 600; letter-spacing: -.04em; margin: 20px 0; }
+.studio-engagement-card > p:not(.studio-mini-label) { font-size: 16px; line-height: 1.75; color: var(--text-muted); max-width: 420px; }
+.studio-engagement-price { font-size: 23px; font-weight: 600; letter-spacing: -.03em; margin: 28px 0; padding-block: 20px; border-block: 1px solid var(--border-subtle); width: 100%; }
+.studio-engagement-price small { font-size: 14px; font-weight: 400; letter-spacing: 0; margin-left: 10px; }
+.studio-engagement-card ul { list-style: none; padding: 0; font-size: 15px; line-height: 1.7; color: var(--text-muted); margin-bottom: 32px; }
+.studio-engagement-card li { margin-bottom: 8px; padding-left: 24px; position: relative; }
+.studio-engagement-card li::before { content: '✓'; position: absolute; left: 0; color: var(--accent); }
+.studio-engagement-card > a:last-child { margin-top: auto; }
+.studio-engagement-card .studio-engagement-detail { margin-bottom: 32px; }
+.studio-engagement-featured.studio-inverse { border-color: var(--border-inverse); background: radial-gradient(ellipse at 100% 0, var(--bg-inverse-glow) 0, transparent 60%), var(--bg-inverse); }
+/* In dark mode the inverse band sits close to the page color; an accent edge keeps it featured. */
+.dark .studio-engagement-featured.studio-inverse { border-color: var(--border-inverse); box-shadow: var(--shadow-card); }
+.studio-engagement-featured .studio-mini-label { color: var(--accent-inverse); }
+.studio-engagement-featured > p:not(.studio-mini-label) { color: var(--text-inverse-muted); }
+.studio-engagement-featured .studio-engagement-price { border-color: var(--border-inverse); }
+
+.studio-allowance-draft { font-size: 14px; line-height: 1.7; color: var(--text-muted); background: var(--accent-soft); border: 1px solid var(--border-strong); padding: 14px 18px; border-radius: 8px; margin-bottom: 24px; }
+.studio-plan-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.studio-plan-card, .studio-plan-help { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 30px; display: flex; flex-direction: column; align-items: start; }
+.studio-plan-card h3 { font-size: 18px; font-weight: 600; }
+.studio-plan-price { font-size: 42px; letter-spacing: -.05em; font-weight: 600; margin-top: 22px; }
+.studio-plan-price span { font-size: 14px; color: var(--text-muted); letter-spacing: 0; font-weight: 400; }
+.studio-plan-fit { font-size: 14px; color: var(--text-muted); margin: 8px 0 22px; min-height: 42px; }
+.studio-plan-specs { width: 100%; border-top: 1px solid var(--border-subtle); margin-bottom: 20px; }
+.studio-plan-specs > div { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding-block: 11px; border-bottom: 1px solid var(--border-subtle); font-size: 14px; }
+.studio-plan-specs dt { color: var(--text-muted); }
+.studio-plan-specs dd { text-align: right; font-weight: 600; white-space: nowrap; }
+.studio-plan-includes { font-size: 14px; line-height: 1.7; color: var(--text-muted); margin-bottom: 28px; }
+.studio-plan-card a { margin-top: auto; }
+.studio-plan-help { grid-column: 1 / -1; background: var(--accent-soft); border-color: var(--border-strong); justify-content: center; }
+.studio-plan-help > span { font-size: 33px; color: var(--accent); }
+.studio-plan-help h3 { font-size: 30px; line-height: 1.15; letter-spacing: -.04em; margin: 16px 0; font-weight: 600; }
+.studio-plan-help p { font-size: 15px; line-height: 1.75; margin-bottom: 24px; color: var(--text-muted); }
+.studio-pricing-note { font-size: 14px; line-height: 1.8; color: var(--text-muted); margin-top: 30px; border-left: 2px solid var(--accent); padding-left: 18px; max-width: 900px; }
+
+.studio-faq { max-width: 900px; }
+.studio-faq details { border-top: 1px solid var(--border-strong); padding: 24px 0; }
+.studio-faq details:last-child { border-bottom: 1px solid var(--border-strong); }
+.studio-faq summary { cursor: pointer; font-size: 18px; font-weight: 600; padding-right: 15px; }
+.studio-faq summary:hover { color: var(--accent); }
+.studio-faq details p { max-width: 740px; font-size: 16px; line-height: 1.8; color: var(--text-muted); margin-top: 16px; }
+
+@media (max-width: 900px) {
+  .studio-engagement-card { padding: 28px; }
+  .studio-plan-grid { grid-template-columns: repeat(2, 1fr); }
+  /* Two columns: the help card fills the slot beside the third plan instead of a full row. */
+  .studio-plan-help { grid-column: auto; }
+}
+@media (max-width: 650px) {
+  .studio-engagement-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .studio-plan-grid { grid-template-columns: 1fr; }
+  .studio-plan-card, .studio-plan-help { padding: 24px; }
+  .studio-engagement-price small { display: block; margin: 8px 0 0; }
+}

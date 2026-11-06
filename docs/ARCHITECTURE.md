@@ -7,9 +7,9 @@ The DFWSC Payment Portal is a platform for DFW Software Consulting to manage cli
 
 ## 2. Tech Stack
 - **Frontend:** React 18, Vite, React Router 6, TanStack Query v5, TailwindCSS v4.
-- **Backend:** Node.js 20, Fastify 5, TypeScript.
+- **Backend:** Node.js 22, Fastify 5, TypeScript.
 - **Database:** PostgreSQL 17, Drizzle ORM.
-- **Integrations:** Stripe Connect (Express), Nodemailer (SMTP).
+- **Integrations:** Stripe Connect (Express), Nodemailer (SMTP), Nextcloud (optional New Lead and client onboarding automations).
 - **Environment:** Docker (multi-stage builds), Nginx (reverse proxy for frontend).
 
 ## 3. Specialized Documentation
@@ -30,10 +30,11 @@ sequenceDiagram
 
     C->>A: POST /api/v1/payments/create (API Key or Admin JWT)
     A->>A: Resolve Platform Fee (6-level chain + env fallback)
-    A->>S: Create PaymentIntent or Checkout Session
-    S-->>A: clientSecret or session URL
-    A-->>C: clientSecret + stripeAccountId / url
+    A->>S: Create Checkout Session
+    S-->>A: Session URL + ID
+    A-->>C: url + sessionId
     C->>S: Complete Payment
+    C->>A: GET /api/v1/payments/session/:sessionId (confirm status)
 ```
 
 ### Onboarding Flow
@@ -46,10 +47,11 @@ sequenceDiagram
     participant C as Client
 
     Admin->>A: POST /api/v1/onboard-client/initiate
-    A->>DB: Create client + onboarding token (pending)
+    A->>S: Create Express Account (idempotency key acct-create-<clientId>)
+    A->>DB: Create client (stripeAccountId + readiness) + tokens in one transaction
     A->>C: Send email with /onboard#token=...
     C->>A: POST /api/v1/onboard-client { token }
-    A->>S: Create Express Account + Account Link
+    A->>S: Create Account Link for the stored account
     S-->>C: Redirect to Stripe Onboarding
     C->>S: Completes Onboarding
     S->>A: Redirect to /api/v1/connect/callback?client_id=...&state=...
@@ -57,19 +59,24 @@ sequenceDiagram
     A-->>C: Redirect to /onboarding-success
 ```
 
+### Connected-account invoicing (optional)
+Behind `CONNECT_INVOICING` and a per-client `invoicing_enabled` flag, an API-key client can invoice its own customers. The API makes direct Stripe calls on the client's connected account (customers, draft invoices, finalize, send, void, delete); Stripe emails the invoice and the customer pays on its hosted page. Postgres keeps ids, amounts and idempotency records (`connect_customers`, `connect_invoices`, `connect_invoice_sends`), and the Connect webhook plus a stale re-check on read keep statuses current. See [BACKEND.md](./BACKEND.md), [STRIPE.md](./STRIPE.md) and the integrator guide [CLIENT_INTEGRATION.md](../CLIENT_INTEGRATION.md).
+
 ## 5. Data Model (Drizzle/PostgreSQL)
 - **`clients`**: Primary entity. `workspace` is always `"client_portal"`. `status` is `active`, `inactive`, `pending`, or `failed`.
 - **`client_groups`**: Shared fee/URL configuration for multiple clients.
 - **`onboarding_tokens`**: Lifecycle management for Stripe Connect onboarding. Statuses: `pending`, `in_progress`, `completed`, `revoked`.
 - **`webhook_events`**: Idempotency log for Stripe webhooks.
-- **`admins`**: Admin accounts with hashed passwords.
+- **`admins`**: Legacy, no longer used (admin login is checked against Nextcloud); to be dropped.
 - **`settings`**: Key-value store for system-wide configuration (e.g., `company_name`).
+- **`sales_lead_submissions`** / **`sales_lead_sync_state`**: Progress and baseline of the Nextcloud New Lead automation (off unless `SALES_AUTOMATION_ENABLED=true`; see [BACKEND.md](./BACKEND.md) §9).
+- **`client_onboarding_submissions`** / **`client_onboarding_sync_state`**: Progress and baseline of the Nextcloud client onboarding (off unless `CLIENT_ONBOARDING_ENABLED=true`; see [BACKEND.md](./BACKEND.md) §10).
 
 ## 6. Security & Authentication
 - **Admin Access:** JWT Bearer token obtained from `POST /api/v1/auth/login`.
 - **Client Access:** `X-Api-Key` header — `apiKeyLookup` (SHA256) for fast DB lookup + `apiKeyHash` (bcrypt) for verification.
 - **CSRF Protection:** State-based validation for Connect callbacks (32-byte random token, 30-minute expiry).
-- **Rate Limiting:** Redis-backed sliding window per IP when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets (logs a one-time startup warning, since limits are then multiplied by replica count under horizontal scaling).
+- **Rate Limiting:** Redis-backed sliding window per IP (checkout creation uses a token bucket per Stripe account) when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets (logs a one-time startup warning, since limits are then multiplied by replica count under horizontal scaling).
 
 ## 7. Architectural Rules
 - **Layered Architecture:**

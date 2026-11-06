@@ -6,7 +6,8 @@
     "skipLibCheck": true,
     "moduleResolution": "Node",
     "module": "CommonJS",
-    "target": "ES2022"
+    "target": "ES2022",
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": [

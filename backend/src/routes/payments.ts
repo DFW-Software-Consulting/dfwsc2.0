@@ -1,20 +1,168 @@
-import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Stripe from "stripe";
+import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { db } from "../db/client";
-import { clientGroups, clients } from "../db/schema";
-import { requireAdminJwt, requireApiKey } from "../lib/auth";
-import { withStripeCircuit } from "../lib/circuit-breakers";
-import { resolveFrontendOrigin } from "../lib/config";
-import { REPORT_MAX_CONCURRENCY } from "../lib/constants";
+import { clientGroups, clients, paymentLedger } from "../db/schema";
+import {
+  isRecentlyVerifiedApiKey,
+  requireAdminJwt,
+  requireApiKey,
+  sha256Lookup,
+} from "../lib/auth";
+import {
+  getCircuitBreakerStates,
+  isCircuitOpenError,
+  isStripeBusyError,
+  withStripeCircuit,
+} from "../lib/circuit-breakers";
+import { getClientIp } from "../lib/client-ip";
+import {
+  appendCheckoutSessionId,
+  resolveDefaultPaymentCancelUrl,
+  resolveDefaultPaymentSuccessUrl,
+  resolveFrontendOrigin,
+} from "../lib/config";
+import { CARD_PAYMENTS_NOT_ACTIVE_ERROR, getChargeableAccountId } from "../lib/connected-account";
+import {
+  PAYMENT_CREATE_BUCKET_CAPACITY,
+  PAYMENT_CREATE_REFILL_PER_MINUTE,
+  REPORT_MAX_CONCURRENCY,
+  SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX,
+  SESSION_STATUS_API_KEY_RATE_LIMIT_MAX,
+  SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX,
+} from "../lib/constants";
 import { errors } from "../lib/errors";
-import { adminRateLimit, rateLimit } from "../lib/rate-limit";
+import {
+  adminRateLimit,
+  type FailureCharge,
+  failureRateLimit,
+  rateLimit,
+  sendRateLimited,
+  tokenBucketRateLimit,
+} from "../lib/rate-limit";
+import { errorLogFields } from "../lib/safe-error-log";
 import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
+import { resolveCardPaymentsStatus } from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
+import {
+  CURRENCY_REGEX,
+  lineItemSchema,
+  MAX_SAFE_AMOUNT,
+  validateStripeMetadata,
+} from "../lib/stripe-input";
 import { parseBody, validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
+import { applyCheckoutSessionOutcome } from "./webhooks";
+
+// ── Sanitize Stripe PaymentIntent for reports ──────────────────────────────────
+// Returns only the fields needed by the frontend/admin reports.
+// Never return raw Stripe objects — they contain sensitive data like full
+// card details, internal IDs, and API metadata.
+function sanitizePaymentIntent(
+  pi: Stripe.PaymentIntent,
+  extra?: { clientId?: string; clientName?: string }
+): Record<string, unknown> {
+  return {
+    id: pi.id,
+    amount: pi.amount,
+    amountReceived: pi.amount_received,
+    currency: pi.currency,
+    status: pi.status,
+    created: pi.created,
+    description: pi.description ?? null,
+    metadata: pi.metadata ?? {},
+    paymentMethod: pi.payment_method ?? null,
+    ...(extra?.clientId ? { clientId: extra.clientId } : {}),
+    ...(extra?.clientName ? { clientName: extra.clientName } : {}),
+  };
+}
+
+// ── Stale checkout reconciliation ──────────────────────────────────────────────
+// Ledger status is normally written by webhooks. If the row is still "created"
+// after RECONCILE_MIN_AGE_MS the completion event may have been lost, so the
+// status endpoint asks Stripe and applies the transition the webhook would.
+const RECONCILE_MIN_AGE_MS = 30_000;
+// At most one Stripe lookup per session per interval, so a polling client
+// cannot turn this public endpoint into a Stripe call per request. In-memory
+// and per process: with several API instances the worst case is one lookup per
+// instance per interval.
+const RECONCILE_INTERVAL_MS = 30_000;
+const RECONCILE_MAX_TRACKED = 1000;
+// This endpoint is public and polled, so the fallback lookup gets a much
+// shorter per-request budget than the shared Stripe client (10s, 1 retry).
+const RECONCILE_STRIPE_TIMEOUT_MS = 3000;
+const lastReconcileAttempt = new Map<string, number>();
+
+function shouldAttemptReconcile(sessionId: string, now: number): boolean {
+  const last = lastReconcileAttempt.get(sessionId);
+  if (last !== undefined && now - last < RECONCILE_INTERVAL_MS) return false;
+  if (lastReconcileAttempt.size >= RECONCILE_MAX_TRACKED) {
+    for (const [id, at] of lastReconcileAttempt) {
+      if (now - at >= RECONCILE_INTERVAL_MS) lastReconcileAttempt.delete(id);
+    }
+    // Still full of recent entries: drop the oldest (insertion order) to stay bounded.
+    if (lastReconcileAttempt.size >= RECONCILE_MAX_TRACKED) {
+      const oldest = lastReconcileAttempt.keys().next().value;
+      if (oldest !== undefined) lastReconcileAttempt.delete(oldest);
+    }
+  }
+  lastReconcileAttempt.set(sessionId, now);
+  return true;
+}
+
+// Returns the ledger row to report: the refreshed row if Stripe moved it, else
+// the stored row. Never throws; any Stripe or DB failure degrades to the stored row.
+async function reconcileStaleCheckout(
+  row: typeof paymentLedger.$inferSelect,
+  request: FastifyRequest
+): Promise<typeof paymentLedger.$inferSelect> {
+  const sessionId = row.stripeSessionId;
+  const now = Date.now();
+  if (!sessionId || now - row.createdAt.getTime() < RECONCILE_MIN_AGE_MS) return row;
+  // Best-effort read on a public, polled endpoint: honour an open Stripe breaker
+  // but run the lookup outside it. Routing it through withStripeCircuit would
+  // count its failures (timeouts, 4xx for an inaccessible account) towards the
+  // breaker that guards payment creation and could open it for every merchant.
+  if (getCircuitBreakerStates().stripe.open) return row;
+  if (!shouldAttemptReconcile(sessionId, now)) return row;
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(
+      sessionId,
+      {},
+      {
+        stripeAccount: row.connectedAccountId,
+        timeout: RECONCILE_STRIPE_TIMEOUT_MS,
+        maxNetworkRetries: 0,
+      }
+    );
+    // An open session has nothing to apply yet.
+    const outcome =
+      session.status === "complete" ? "completed" : session.status === "expired" ? "expired" : null;
+    if (!outcome) return row;
+
+    // Reconciliation is not a Stripe event, so it must not advance the ordering
+    // clock (a later, genuinely newer webhook would be discarded as stale) nor
+    // lose to it. Reuse the newest event time already recorded on the row.
+    const eventCreatedAt = Math.max(session.created, row.lastStripeEventCreatedAt ?? 0);
+    await applyCheckoutSessionOutcome(outcome, session, eventCreatedAt, request.log);
+
+    const [updated] = await db
+      .select()
+      .from(paymentLedger)
+      .where(eq(paymentLedger.id, row.id))
+      .limit(1);
+    return updated ?? row;
+  } catch (err) {
+    request.log.warn(
+      { ...errorLogFields(err), sessionId },
+      "Checkout status reconciliation with Stripe failed"
+    );
+    return row;
+  }
+}
 
 interface RequestWithClient extends FastifyRequest {
   client?: typeof clients.$inferSelect;
@@ -93,7 +241,80 @@ function resolvePaymentRateLimitKey(request: FastifyRequest): string {
   if (req.client?.stripeAccountId) {
     return `stripe:${req.client.stripeAccountId}`;
   }
-  return request.ip || "unknown";
+  return getClientIp(request);
+}
+
+// ── Session status auth + limits ───────────────────────────────────────────────
+// The endpoint stays anonymous (per-IP limit). Sending X-Api-Key opts into API-key auth and a
+// higher per-client limit; a bad key is a 401, never a silent fall back to anonymous, and failed
+// attempts are limited per IP.
+const anonymousStatusRateLimit = rateLimit({
+  max: SESSION_STATUS_ANONYMOUS_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+});
+const apiKeyStatusRateLimit = rateLimit({
+  max: SESSION_STATUS_API_KEY_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+  // Own bucket namespace: never shares hits with the anonymous per-IP limiter.
+  name: "GET:/payments/session/:sessionId:api-key",
+  keyGenerator: (request) => `client:${(request as RequestWithClient).client?.id}`,
+});
+
+// Failed key authentications are limited per caller IP by DISTINCT key (the key's SHA-256 lookup
+// is the member), so a flood of junk keys turns into 429s instead of unlimited database lookups
+// while one bad key polled in a loop still uses a single unit. The unit is charged before the
+// lookup, atomically, and given back when the key turns out to be valid or the lookup errors.
+const failedStatusAuthLimit = failureRateLimit({
+  max: SESSION_STATUS_FAILED_AUTH_RATE_LIMIT_MAX,
+  windowMs: 60_000,
+  name: "GET:/payments/session/:sessionId:failed-auth",
+});
+
+async function sessionStatusGuard(request: FastifyRequest, reply: FastifyReply) {
+  const header = request.headers["x-api-key"];
+  if (header === undefined) {
+    return anonymousStatusRateLimit(request, reply);
+  }
+
+  const apiKey = Array.isArray(header) ? header[0] : header;
+  if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
+    // A missing or blank key never reaches the database, so it is not counted.
+    await requireApiKey(request, reply);
+    return reply;
+  }
+
+  // Reserve one unit of the IP's failed-auth budget for this key before looking it up. A key
+  // already counted this window (a repeat) costs nothing more. Over budget, the request is
+  // refused with no lookup, except a key that passed verification within the last minute: that
+  // exception keeps one IP's junk keys from locking out its working ones, and such a key is
+  // only charged after the fact if it turns out to have been rejected. The cache only vouches
+  // for the key's recent past, so requireApiKey below still loads the client row and rejects a
+  // client that has since been deactivated.
+  const lookup = sha256Lookup(apiKey);
+  let charge: Extract<FailureCharge, { blocked: false }> | undefined;
+  if (!isRecentlyVerifiedApiKey(apiKey)) {
+    const result = await failedStatusAuthLimit.charge(request, lookup);
+    if (result.blocked) return sendRateLimited(reply, result.retryAfterMs);
+    charge = result;
+  }
+
+  // Only a rejected key (401) stays counted. A key that is accepted, or a 500 from our own
+  // database error, is not the caller's failure and gives the unit back.
+  let rejected = false;
+  try {
+    await requireApiKey(request, reply);
+    rejected = reply.sent && reply.statusCode === 401;
+  } finally {
+    if (!rejected) {
+      await charge?.release();
+    } else if (charge) {
+      charge.keep();
+    } else {
+      await failedStatusAuthLimit.record(request, lookup);
+    }
+  }
+  if (reply.sent) return reply;
+  return apiKeyStatusRateLimit(request, reply);
 }
 
 const STRIPE_CIRCUIT_OPEN_ERROR = {
@@ -103,52 +324,113 @@ const STRIPE_CIRCUIT_OPEN_ERROR = {
 
 const paymentCreateBodySchema = z.object({
   amount: z.number().optional(),
-  currency: z.string().optional(),
-  description: z.string().optional(),
+  currency: z
+    .string()
+    .optional()
+    .transform((v) => (v ? v.toLowerCase() : v)),
+  description: z.string().max(2000).optional(),
   metadata: z.record(z.string(), z.string()).optional(),
-  lineItems: z.array(z.any()).optional(),
+  lineItems: z.array(lineItemSchema).optional(),
   waiveFee: z.boolean().optional(),
   workspace: z.string().optional(),
   clientId: z.string().optional(),
 });
 
+// ── Ledger insert helper ───────────────────────────────────────────────────────
+// Inserts a payment ledger row after Stripe creation.
+// CRITICAL: This MUST succeed before returning the payment URL/secret to the caller.
+// If Stripe succeeds but DB insert fails, we return a 503 and the caller can retry
+// with the same idempotency key — Stripe will return the existing object and we
+// can then insert the ledger row.
+// Idempotency keys are scoped per client: (client_id, idempotency_key) and
+// stripe_session_id are both unique. A conflict on either is not an error by
+// itself, so the helper reports whether the session is recorded under this
+// client's key: "recorded" (inserted, or an identical retry) or "key_reused"
+// (the key already belongs to a different session). Any other state throws so
+// the caller never returns a session that has no ledger row.
+async function insertPaymentLedger(row: {
+  id: string;
+  idempotencyKey: string;
+  connectedAccountId: string;
+  stripeSessionId: string | null;
+  stripePaymentIntentId: string | null;
+  clientId: string;
+  source: "checkout" | "payment_intent";
+  status: "created" | "paid" | "expired" | "failed" | "refunded" | "disputed" | "canceled";
+  baseAmountCents: number;
+  totalAmountCents: number;
+  feeAmountCents: number;
+  refundedAmountCents: number;
+  currency: string;
+  metadata: string | null;
+}): Promise<"recorded" | "key_reused"> {
+  const inserted = await db
+    .insert(paymentLedger)
+    .values(row)
+    .onConflictDoNothing()
+    .returning({ id: paymentLedger.id });
+  if (inserted.length > 0) return "recorded";
+
+  const [existing] = await db
+    .select({ stripeSessionId: paymentLedger.stripeSessionId })
+    .from(paymentLedger)
+    .where(
+      and(
+        eq(paymentLedger.clientId, row.clientId),
+        eq(paymentLedger.idempotencyKey, row.idempotencyKey)
+      )
+    )
+    .limit(1);
+  if (!existing) {
+    // Conflicted on stripe_session_id under a different client/key: the session
+    // is not recorded for this request.
+    throw new Error("Ledger conflict without a matching row for this client and key");
+  }
+  return existing.stripeSessionId === row.stripeSessionId ? "recorded" : "key_reused";
+}
+
 export default async function paymentsRoutes(fastify: FastifyInstance) {
+  const paymentCreateBucket = tokenBucketRateLimit({
+    capacity: PAYMENT_CREATE_BUCKET_CAPACITY,
+    refillPerMinute: PAYMENT_CREATE_REFILL_PER_MINUTE,
+    keyGenerator: resolvePaymentRateLimitKey,
+  });
+
   fastify.post(
     "/payments/create",
     {
-      preHandler: [
-        requireClientOrAdmin,
-        rateLimit({ max: 20, windowMs: 60_000, keyGenerator: resolvePaymentRateLimitKey }),
-      ],
+      preHandler: [requireClientOrAdmin, paymentCreateBucket],
     },
     async (request, reply) => {
       const idempotencyKeyHeader = extractIdempotencyKey(request);
-      const isApiCall = !!request.headers["x-api-key"];
-      if (isApiCall && (!idempotencyKeyHeader || idempotencyKeyHeader.trim().length === 0)) {
-        throw errors.badRequest("Idempotency-Key header is required for API calls.");
+      // Require nonblank Idempotency-Key for ALL payment creation (API-key and admin).
+      if (!idempotencyKeyHeader || idempotencyKeyHeader.trim().length === 0) {
+        throw errors.badRequest("Idempotency-Key header is required.");
       }
-      const idempotencyKey = idempotencyKeyHeader ?? randomUUID();
+      const idempotencyKey = idempotencyKeyHeader.trim();
+      const isApiCall = !!request.headers["x-api-key"];
 
       const body = parseBody(paymentCreateBodySchema, request.body, reply);
       if (!body) return;
       const {
-        amount,
         currency,
         description,
-        metadata,
+        metadata: rawMetadata,
         lineItems,
         waiveFee = false,
         workspace,
       } = body as Omit<typeof body, "lineItems"> & {
-        lineItems?: Stripe.Checkout.SessionCreateParams.LineItem[];
+        lineItems?: z.infer<typeof lineItemSchema>[];
       };
+
+      const userMetadata = validateStripeMetadata(rawMetadata);
 
       let client = (request as RequestWithClient).client;
 
       if (!client) {
         const validWorkspace = validateWorkspace(workspace, reply);
         if (!validWorkspace) return;
-        const bodyClientId = body.clientId || metadata?.clientId;
+        const bodyClientId = body.clientId || userMetadata?.clientId;
         if (!bodyClientId) {
           throw errors.badRequest("clientId is required when using Admin authentication.");
         }
@@ -159,11 +441,38 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         throw errors.notFound("Client");
       }
 
-      if (!client.stripeAccountId || !client.chargesEnabled) {
+      const stripeAccountId = getChargeableAccountId(client);
+      if (!stripeAccountId) {
         return reply.code(409).send({
           error: "Client Stripe account is not connected or cannot accept charges.",
           code: "ACCOUNT_NOT_CONNECTED",
         });
+      }
+
+      // Checkout is a direct charge on the connected account, which needs card_payments active.
+      // Checked before any Checkout call; a failed live read fails closed.
+      let cardPayments: string;
+      try {
+        cardPayments = await resolveCardPaymentsStatus(client, stripeAccountId);
+      } catch (err) {
+        request.log.error(
+          { clientId: client.id, ...errorLogFields(err) },
+          "Could not read the card_payments capability from Stripe"
+        );
+        if (isStripeBusyError(err) || isCircuitOpenError(err)) {
+          await paymentCreateBucket.refund(request);
+        }
+        if (
+          mapStripeError(err, reply, {
+            circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+            rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
+          })
+        )
+          return;
+        throw errors.stripeFailed("Payment processing failed. Please try again.");
+      }
+      if (cardPayments !== "active") {
+        return reply.code(409).send(CARD_PAYMENTS_NOT_ACTIVE_ERROR);
       }
 
       const effectiveWaiveFee = isApiCall ? false : waiveFee;
@@ -173,7 +482,16 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
 
       const clientId = client.id;
-      const stripeAccountId = client.stripeAccountId;
+
+      // Keys are scoped per client: namespace the key sent to Stripe so two
+      // clients using the same key never collide on the platform. Stripe limits
+      // idempotency keys to 255 characters, so the namespaced key must fit.
+      const stripeIdempotencyKey = `${clientId}:${idempotencyKey}`;
+      if (stripeIdempotencyKey.length > 255) {
+        throw errors.badRequest(
+          `Idempotency-Key must not exceed ${255 - clientId.length - 1} characters.`
+        );
+      }
 
       const group = client.groupId
         ? ((
@@ -181,38 +499,47 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           )[0] ?? null)
         : null;
 
+      // ── Checkout flow ──────────────────────────────────────────────────────
       if (!Array.isArray(lineItems) || lineItems.length === 0) {
         throw errors.badRequest("lineItems are required.");
       }
 
-      const hasExplicitAmount = typeof amount === "number";
-      if (hasExplicitAmount && (!Number.isInteger(amount) || (amount as number) <= 0)) {
-        throw errors.badRequest(
-          "amount must be a positive integer (in the smallest currency unit)."
-        );
+      if (lineItems.length > 100) {
+        throw errors.badRequest("lineItems must not exceed 100 items.");
       }
 
-      let baseAmount = hasExplicitAmount ? (amount as number) : 0;
-      if (!hasExplicitAmount) {
-        for (const item of lineItems) {
-          const unitAmount = item.price_data?.unit_amount;
-          if (typeof unitAmount !== "number" || unitAmount <= 0) {
-            request.log.warn(
-              { item: { price_data: item.price_data, price: item.price } },
-              "Line item missing unit_amount - using price ID requires explicit amount"
-            );
-            throw errors.badRequest(
-              "An explicit integer amount is required when any line item references a Stripe price ID."
-            );
-          }
-          baseAmount += unitAmount * (item.quantity || 1);
+      // Derive baseAmount strictly from line items server-side.
+      // The caller-supplied `amount` is ignored for Checkout to prevent fee
+      // integrity attacks where a caller sends a lower amount than the line
+      // items imply.
+      let baseAmount = 0;
+      let lineItemCurrency: string | undefined;
+      for (const item of lineItems) {
+        const unitAmount = item.price_data.unit_amount;
+        const qty = item.quantity;
+        const lineTotal = unitAmount * qty;
+        if (!Number.isSafeInteger(lineTotal) || lineTotal > MAX_SAFE_AMOUNT * 999_999) {
+          throw errors.badRequest("Line item total exceeds safe integer bounds.");
+        }
+        baseAmount += lineTotal;
+        if (!lineItemCurrency) {
+          lineItemCurrency = item.price_data.currency;
+        } else if (lineItemCurrency !== item.price_data.currency) {
+          throw errors.badRequest("All line items must use the same currency.");
         }
       }
 
       if (baseAmount <= 0) {
-        throw errors.badRequest(
-          "amount must be provided when line items use price IDs, or line items must have unit_amount."
-        );
+        throw errors.badRequest("Computed base amount must be positive.");
+      }
+
+      if (!Number.isSafeInteger(baseAmount)) {
+        throw errors.badRequest("Computed base amount exceeds safe integer bounds.");
+      }
+
+      const resolvedCurrency = lineItemCurrency ?? currency;
+      if (!resolvedCurrency || !CURRENCY_REGEX.test(resolvedCurrency)) {
+        throw errors.badRequest("currency must be a 3-letter ISO code (e.g. 'usd').");
       }
 
       let feeAmount: number;
@@ -222,27 +549,30 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         throw errors.badRequest((e as Error).message);
       }
 
-      const frontendOrigin = resolveFrontendOrigin();
+      if (!Number.isSafeInteger(feeAmount) || feeAmount < 0) {
+        throw errors.badRequest("Computed fee is invalid.");
+      }
 
-      const checkoutLineItems = [...lineItems];
+      const checkoutLineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = lineItems.map(
+        (item) => ({
+          price_data: {
+            currency: item.price_data.currency,
+            product_data: {
+              name: item.price_data.product_data.name,
+              ...(item.price_data.product_data.description
+                ? { description: item.price_data.product_data.description }
+                : {}),
+            },
+            unit_amount: item.price_data.unit_amount,
+          },
+          quantity: item.quantity,
+        })
+      );
+
       if (feeAmount > 0 && !effectiveWaiveFee) {
-        const priceDataCurrencies = new Set(
-          lineItems.map((item) => item.price_data?.currency).filter((c): c is string => !!c)
-        );
-        let feeCurrency: string | undefined;
-        if (priceDataCurrencies.size === 1) {
-          feeCurrency = [...priceDataCurrencies][0];
-        } else if (priceDataCurrencies.size === 0 && currency) {
-          feeCurrency = currency;
-        }
-        if (!feeCurrency) {
-          throw errors.badRequest(
-            "Unable to determine a consistent currency for the processing fee line item."
-          );
-        }
         checkoutLineItems.push({
           price_data: {
-            currency: feeCurrency,
+            currency: resolvedCurrency,
             product_data: {
               name: "Processing Fee",
             },
@@ -252,19 +582,25 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         });
       }
 
+      const totalAmount = effectiveWaiveFee ? baseAmount : baseAmount + feeAmount;
+
+      const defaultSuccessUrl = resolveDefaultPaymentSuccessUrl();
+      const defaultCancelUrl = resolveDefaultPaymentCancelUrl();
+      const successUrl = client.paymentSuccessUrl ?? group?.paymentSuccessUrl ?? defaultSuccessUrl;
+      const cancelUrl = client.paymentCancelUrl ?? group?.paymentCancelUrl ?? defaultCancelUrl;
+      const frontendOrigin = successUrl && cancelUrl ? undefined : resolveFrontendOrigin();
+
       const sessionParams: Stripe.Checkout.SessionCreateParams = {
         mode: "payment",
         line_items: checkoutLineItems,
-        success_url:
-          client.paymentSuccessUrl ??
-          group?.paymentSuccessUrl ??
-          `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url:
-          client.paymentCancelUrl ?? group?.paymentCancelUrl ?? `${frontendOrigin}/payment-cancel`,
+        success_url: appendCheckoutSessionId(
+          successUrl ?? `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`
+        ),
+        cancel_url: cancelUrl ?? `${frontendOrigin}/payment-cancel`,
         payment_intent_data: {
           description,
           metadata: {
-            ...(metadata ?? {}),
+            ...userMetadata,
             clientId,
             baseAmount: baseAmount.toString(),
             feeAmount: effectiveWaiveFee ? "0" : feeAmount.toString(),
@@ -276,29 +612,135 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         },
       };
 
+      let session: Stripe.Checkout.Session;
+      let stripeCalled = false;
       try {
         if (sessionParams.payment_intent_data && !effectiveWaiveFee) {
           sessionParams.payment_intent_data.application_fee_amount = feeAmount;
         }
-        const session = await withStripeCircuit(() =>
-          stripe.checkout.sessions.create(sessionParams, {
+        session = await withStripeCircuit(() => {
+          stripeCalled = true;
+          return stripe.checkout.sessions.create(sessionParams, {
             stripeAccount: stripeAccountId,
-            idempotencyKey,
-          })
-        );
-        return reply.code(201).send({ url: session.url });
+            idempotencyKey: stripeIdempotencyKey,
+          });
+        });
       } catch (err) {
-        request.log.error({ err }, "Stripe Checkout session creation failed");
+        request.log.error(errorLogFields(err), "Stripe Checkout session creation failed");
+        // A request refused before it reached Stripe (no slot in time, or the circuit already
+        // open) is told to retry, so it gives its rate-limit token back and the retry is not
+        // charged twice. A circuit-open error after the call started is a timeout of a call
+        // that did go out, so it keeps its token like every other outcome that reached Stripe.
+        if (isStripeBusyError(err) || (isCircuitOpenError(err) && !stripeCalled)) {
+          await paymentCreateBucket.refund(request);
+        }
         if (
           mapStripeError(err, reply, {
             circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
             cardDeclinedCode: "CARD_DECLINED",
             rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
+            permanentErrors: true,
           })
         )
           return;
         throw errors.stripeFailed("Payment processing failed. Please try again.");
       }
+
+      // CRITICAL: Persist ledger synchronously BEFORE returning the checkout URL.
+      // If this fails, we return 503 — the caller can retry with the same
+      // idempotency key and Stripe will return the existing session.
+      let ledgerResult: "recorded" | "key_reused";
+      try {
+        ledgerResult = await insertPaymentLedger({
+          id: uuidv4(),
+          idempotencyKey,
+          connectedAccountId: stripeAccountId,
+          stripeSessionId: session.id,
+          stripePaymentIntentId: null,
+          clientId,
+          source: "checkout",
+          status: "created",
+          baseAmountCents: baseAmount,
+          totalAmountCents: totalAmount,
+          feeAmountCents: effectiveWaiveFee ? 0 : feeAmount,
+          refundedAmountCents: 0,
+          currency: resolvedCurrency,
+          metadata: Object.keys(userMetadata).length > 0 ? JSON.stringify(userMetadata) : null,
+        });
+      } catch (err) {
+        request.log.error(
+          { ...errorLogFields(err), stripeSessionId: session.id },
+          "Ledger insert failed after Stripe Checkout session creation — returning 503"
+        );
+        return reply.code(503).send({
+          error:
+            "Payment recorded but confirmation failed. Please retry with the same Idempotency-Key.",
+          code: "LEDGER_PERSISTENCE_FAILED",
+        });
+      }
+
+      if (ledgerResult === "key_reused") {
+        request.log.warn(
+          { clientId, stripeSessionId: session.id },
+          "Idempotency-Key already used for a different payment session"
+        );
+        return reply.code(409).send({
+          error: "This Idempotency-Key was already used with a different request body.",
+          code: "IDEMPOTENCY_KEY_REUSED",
+        });
+      }
+
+      return reply.code(201).send({ url: session.url, sessionId: session.id });
+    }
+  );
+
+  // ── GET /payments/session/:sessionId ─────────────────────────────────────────
+  // Rate-limited endpoint for retrieving checkout session result; anonymous by default, or with
+  // an X-Api-Key (see sessionStatusGuard). Uses the payment ledger as primary source. Returns
+  // only payer-safe fields.
+  fastify.get(
+    "/payments/session/:sessionId",
+    {
+      preHandler: [sessionStatusGuard],
+    },
+    async (request, reply) => {
+      const { sessionId } = request.params as { sessionId: string };
+      if (!sessionId || !/^cs_(test_|live_)[A-Za-z0-9_]+$/.test(sessionId)) {
+        throw errors.badRequest("Invalid session ID format.");
+      }
+
+      // Primary: look up in ledger.
+      const [ledgerRow] = await db
+        .select()
+        .from(paymentLedger)
+        .where(eq(paymentLedger.stripeSessionId, sessionId))
+        .limit(1);
+
+      // An authenticated caller only sees its own client's sessions; another client's session
+      // is indistinguishable from an unknown one.
+      const caller = (request as RequestWithClient).client;
+      if (ledgerRow && (!caller || ledgerRow.clientId === caller.id)) {
+        // A row still "created" after the webhook should have landed means the
+        // event may have been lost; ask Stripe and apply the same transition.
+        const current =
+          ledgerRow.status === "created"
+            ? await reconcileStaleCheckout(ledgerRow, request)
+            : ledgerRow;
+        return reply.send({
+          status: current.status,
+          baseAmountCents: current.baseAmountCents,
+          totalAmountCents: current.totalAmountCents,
+          feeAmountCents: current.feeAmountCents,
+          currency: current.currency,
+          createdAt: current.createdAt,
+        });
+      }
+
+      // Fallback: retrieve from Stripe using stored connected account context.
+      // We need to find which connected account this session belongs to.
+      // Without a ledger row, we cannot determine the connected account,
+      // so we return 404 rather than guessing.
+      throw errors.notFound("Payment session");
     }
   );
 
@@ -370,7 +812,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         if (parsedLimit !== undefined) perAccountParams.limit = parsedLimit;
 
         const maxConcurrency = REPORT_MAX_CONCURRENCY;
-        const results: Array<Awaited<ReturnType<typeof stripe.paymentIntents.list>>["data"]> = [];
+        const results: Array<Record<string, unknown>[]> = [];
         const failedAccounts: string[] = [];
         let hasMore = false;
         for (let i = 0; i < connected.length; i += maxConcurrency) {
@@ -390,14 +832,20 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
             if (outcome.status === "fulfilled") {
               const { pi, client: c } = outcome.value;
               if (pi.has_more) hasMore = true;
-              results.push(pi.data.map((p) => ({ ...p, clientId: c.id, clientName: c.name })));
+              results.push(
+                pi.data.map((p) => sanitizePaymentIntent(p, { clientId: c.id, clientName: c.name }))
+              );
             } else {
               const c = batch[j];
               if (mapStripeError(outcome.reason, reply, { circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR }))
                 return;
               failedAccounts.push(c.id);
               request.log.error(
-                { err: outcome.reason, clientId: c.id, stripeAccountId: c.stripeAccountId },
+                {
+                  ...errorLogFields(outcome.reason),
+                  clientId: c.id,
+                  stripeAccountId: c.stripeAccountId,
+                },
                 "Failed to list payments for connected account; excluding from group report"
               );
             }
@@ -435,14 +883,14 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
           })
         );
       } catch (err) {
-        request.log.error({ err, clientId }, "Stripe PaymentIntent list failed");
+        request.log.error({ ...errorLogFields(err), clientId }, "Stripe PaymentIntent list failed");
         if (mapStripeError(err, reply, { circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR })) return;
         return reply.code(502).send({ error: "Failed to list payments." });
       }
 
       return reply.send({
         clientId,
-        data: paymentIntents.data,
+        data: paymentIntents.data.map((p) => sanitizePaymentIntent(p)),
         hasMore: paymentIntents.has_more,
       });
     }

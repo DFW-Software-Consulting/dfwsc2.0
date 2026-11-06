@@ -1,14 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type Stripe from "stripe";
 import type { FastifyBaseLogger } from "fastify";
+import type Stripe from "stripe";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  LedgerSyncBusyError,
   resolveLedgerSyncConfig,
   syncInvoiceLifecycle,
   syncInvoicePaid,
 } from "../../lib/ledger-sync";
+import { resetNextcloudBreakerForTests } from "../../lib/nextcloud";
+import { FakeLedgerNextcloud } from "../helpers/fake-ledger-nextcloud";
 
 vi.mock("../../lib/circuit-breakers", () => ({
   withStripeCircuit: <T>(fn: () => Promise<T>) => fn(),
+}));
+
+// The advisory lock needs a real database; tests/integration/ledger-sync-lock.test.ts covers it.
+// Here the lock is a pass-through (or reports busy when a test asks for that).
+const lockState = vi.hoisted(() => ({ busy: false }));
+vi.mock("../../lib/mirror-table", () => ({
+  withMirrorLock: async <T>(_name: string, _log: unknown, busyValue: T, work: () => Promise<T>) =>
+    lockState.busy ? busyValue : work(),
 }));
 
 const logger = {
@@ -18,46 +29,13 @@ const logger = {
   error: vi.fn(),
 } as unknown as FastifyBaseLogger;
 
-// FY 2026 in the ledger: 2026-01-01T00:00:00-06:00 .. 2026-12-31T23:59:59-06:00
-const FY_2026 = { id: 1, name: "FY 2026", dateStart: 1767247200, dateEnd: 1798783199, isActive: true };
 const PAID_AT_2026 = 1767250000; // inside FY 2026
 
-interface RecordedCall {
-  method: string;
-  url: string;
-  body?: Record<string, unknown>;
-}
+let nc: FakeLedgerNextcloud;
 
-let calls: RecordedCall[];
-let responders: Array<{
-  match: (method: string, url: string) => boolean;
-  respond: (body?: Record<string, unknown>) => unknown;
-}>;
-
-function respondWith(method: string, urlPart: string, payload: unknown | ((body?: Record<string, unknown>) => unknown)) {
-  responders.push({
-    match: (m, u) => m === method && u.includes(urlPart),
-    respond: typeof payload === "function" ? (payload as (body?: Record<string, unknown>) => unknown) : () => payload,
-  });
-}
-
-function installFetchMock() {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string, init?: RequestInit) => {
-      const method = init?.method ?? "GET";
-      const body = init?.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : undefined;
-      calls.push({ method, url, body });
-      const responder = responders.find((r) => r.match(method, url));
-      if (!responder) {
-        return { ok: false, status: 404, json: async () => ({}) };
-      }
-      return { ok: true, status: 200, json: async () => responder.respond(body) };
-    })
-  );
-}
-
-function fakeStripe(overrides: Partial<Record<"invoicePayments" | "paymentIntents" | "charges", unknown>> = {}): Stripe {
+function fakeStripe(
+  overrides: Partial<Record<"invoicePayments" | "paymentIntents" | "charges", unknown>> = {}
+): Stripe {
   return {
     invoicePayments: {
       list: vi.fn(async () => ({
@@ -94,22 +72,31 @@ function invoice(overrides: Record<string, unknown> = {}): Stripe.Invoice {
     due_date: null,
     hosted_invoice_url: "https://invoice.stripe.com/i/test",
     status_transitions: { paid_at: PAID_AT_2026 },
-    lines: { data: [{ description: "1 × Development (at $200.00 / week)", quantity: 1, amount: 20000 }] },
+    lines: {
+      data: [{ description: "1 × Development (at $200.00 / week)", quantity: 1, amount: 20000 }],
+    },
     metadata: {},
     ...overrides,
   } as unknown as Stripe.Invoice;
 }
 
 function enableSync() {
-  vi.stubEnv("NEXTCLOUD_URL", "https://cloud.test");
-  vi.stubEnv("NEXTCLOUD_LEDGER_USER", "ledger-bot");
+  vi.stubEnv("LEDGER_SYNC_ENABLED", "true");
+  vi.stubEnv("NEXTCLOUD_BASE_URL", "https://cloud.test");
+  vi.stubEnv("NEXTCLOUD_USERNAME", "svc");
   vi.stubEnv("NEXTCLOUD_APP_PASSWORD", "secret");
 }
 
+function useNextcloud(options?: ConstructorParameters<typeof FakeLedgerNextcloud>[0]) {
+  nc = new FakeLedgerNextcloud(options);
+  nc.install();
+  return nc;
+}
+
 beforeEach(() => {
-  calls = [];
-  responders = [];
-  installFetchMock();
+  lockState.busy = false;
+  resetNextcloudBreakerForTests();
+  useNextcloud();
   vi.clearAllMocks();
 });
 
@@ -119,24 +106,31 @@ afterEach(() => {
 });
 
 describe("resolveLedgerSyncConfig", () => {
-  it("returns null when credentials are incomplete", () => {
-    expect(resolveLedgerSyncConfig({})).toBeNull();
-    expect(resolveLedgerSyncConfig({ NEXTCLOUD_URL: "https://x" })).toBeNull();
+  const nextcloud = {
+    NEXTCLOUD_BASE_URL: "https://cloud.test///",
+    NEXTCLOUD_USERNAME: "svc",
+    NEXTCLOUD_APP_PASSWORD: "p",
+  };
+
+  it("is off unless LEDGER_SYNC_ENABLED is true", () => {
+    expect(resolveLedgerSyncConfig({ ...nextcloud })).toBeNull();
+    expect(resolveLedgerSyncConfig({ ...nextcloud, LEDGER_SYNC_ENABLED: "yes" })).toBeNull();
+  });
+
+  it("is off when the shared Nextcloud service account is incomplete", () => {
+    expect(resolveLedgerSyncConfig({ LEDGER_SYNC_ENABLED: "true" })).toBeNull();
     expect(
-      resolveLedgerSyncConfig({ NEXTCLOUD_URL: "https://x", NEXTCLOUD_LEDGER_USER: "u" })
+      resolveLedgerSyncConfig({
+        LEDGER_SYNC_ENABLED: "true",
+        NEXTCLOUD_BASE_URL: "https://x",
+      })
     ).toBeNull();
   });
 
-  it("returns config with defaults and strips trailing slashes", () => {
-    const cfg = resolveLedgerSyncConfig({
-      NEXTCLOUD_URL: "https://cloud.test///",
-      NEXTCLOUD_LEDGER_USER: "u",
-      NEXTCLOUD_APP_PASSWORD: "p",
-    });
+  it("reuses the NEXTCLOUD_* credentials and defaults the register ids", () => {
+    const cfg = resolveLedgerSyncConfig({ ...nextcloud, LEDGER_SYNC_ENABLED: "true" });
     expect(cfg).toEqual({
-      baseUrl: "https://cloud.test",
-      user: "u",
-      appPassword: "p",
+      nextcloud: { baseUrl: "https://cloud.test", username: "svc", appPassword: "p" },
       registerId: "1",
       invoiceSchemaId: "9",
     });
@@ -144,9 +138,8 @@ describe("resolveLedgerSyncConfig", () => {
 
   it("honors register/schema overrides", () => {
     const cfg = resolveLedgerSyncConfig({
-      NEXTCLOUD_URL: "https://cloud.test",
-      NEXTCLOUD_LEDGER_USER: "u",
-      NEXTCLOUD_APP_PASSWORD: "p",
+      ...nextcloud,
+      LEDGER_SYNC_ENABLED: "true",
       OPENREGISTER_REGISTER_ID: "3",
       OPENREGISTER_INVOICE_SCHEMA_ID: "12",
     });
@@ -157,49 +150,39 @@ describe("resolveLedgerSyncConfig", () => {
 
 describe("syncInvoicePaid", () => {
   it("is a no-op when the integration is not configured", async () => {
-    await syncInvoicePaid(fakeStripe(), invoice(), logger);
-    expect(calls).toHaveLength(0);
+    const stripe = fakeStripe();
+    await syncInvoicePaid(stripe, invoice(), logger);
+    expect(nc.calls).toHaveLength(0);
+    expect(stripe.invoicePayments.list).not.toHaveBeenCalled();
   });
 
   it("skips connected-account invoices", async () => {
     enableSync();
     await syncInvoicePaid(fakeStripe(), invoice(), logger, "acct_123");
-    expect(calls).toHaveLength(0);
+    expect(nc.calls).toHaveLength(0);
   });
 
   it("books income, fee expense, and register object on first delivery", async () => {
     enableSync();
-    respondWith("GET", "/nextledger/api/fiscal-years/1/incomes", []);
-    respondWith("GET", "/nextledger/api/fiscal-years/1/expenses", []);
-    respondWith("GET", "/nextledger/api/fiscal-years", [FY_2026]);
-    respondWith("POST", "/nextledger/api/fiscal-years/1/incomes", { id: 100 });
-    respondWith("POST", "/nextledger/api/fiscal-years/1/expenses", { id: 200 });
-    respondWith("GET", "/openregister/api/objects/1/9", { results: [] });
-    respondWith("POST", "/openregister/api/objects/1/9", { id: "uuid-1" });
-
     await syncInvoicePaid(fakeStripe(), invoice(), logger);
 
-    const incomePost = calls.find(
-      (c) => c.method === "POST" && c.url.includes("/fiscal-years/1/incomes")
-    );
-    expect(incomePost?.body).toMatchObject({
+    const income = nc.posts("/fiscal-years/1/incomes");
+    expect(income).toHaveLength(1);
+    expect(income[0].body).toMatchObject({
       name: "TEST-0001 — Acme Corp",
       bookedAt: PAID_AT_2026,
       amountCents: 20000,
       status: "paid",
     });
-    expect(incomePost?.body?.description).toContain("in_test123");
-    expect(incomePost?.body?.description).toContain("paid via card");
+    expect(income[0].body?.description).toContain("in_test123");
+    expect(income[0].body?.description).toContain("paid via card");
 
-    const expensePost = calls.find(
-      (c) => c.method === "POST" && c.url.includes("/fiscal-years/1/expenses")
-    );
-    expect(expensePost?.body).toMatchObject({ name: "Stripe fee — TEST-0001", amountCents: 610 });
+    const expense = nc.posts("/fiscal-years/1/expenses");
+    expect(expense).toHaveLength(1);
+    expect(expense[0].body).toMatchObject({ name: "Stripe fee — TEST-0001", amountCents: 610 });
 
-    const registerPost = calls.find(
-      (c) => c.method === "POST" && c.url.includes("/openregister/api/objects/1/9")
-    );
-    expect(registerPost?.body).toMatchObject({
+    expect(nc.register).toHaveLength(1);
+    expect(nc.register[0]).toMatchObject({
       stripe_invoice_id: "in_test123",
       status: "paid",
       amount_paid_cents: 20000,
@@ -207,40 +190,104 @@ describe("syncInvoicePaid", () => {
     });
   });
 
-  it("skips already-booked entries and updates the existing register object", async () => {
+  it("is idempotent: a second delivery books nothing more and updates the register in place", async () => {
     enableSync();
-    respondWith("GET", "/nextledger/api/fiscal-years/1/incomes", [
-      { id: 5, name: "x", description: "Stripe invoice in_test123; ...", bookedAt: 1, amountCents: 1 },
-    ]);
-    respondWith("GET", "/nextledger/api/fiscal-years/1/expenses", [
-      { id: 6, name: "x", description: "Processing fee for Stripe invoice in_test123", bookedAt: 1, amountCents: 1 },
-    ]);
-    respondWith("GET", "/nextledger/api/fiscal-years", [FY_2026]);
-    respondWith("GET", "/openregister/api/objects/1/9", {
-      results: [{ id: "uuid-existing", stripe_invoice_id: "in_test123" }],
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+
+    expect(nc.incomes).toHaveLength(1);
+    expect(nc.expenses).toHaveLength(1);
+    expect(nc.register).toHaveLength(1);
+    expect(nc.calls.filter((c) => c.method === "PUT")).toHaveLength(1);
+  });
+
+  it("does not mistake an invoice whose id merely starts with this one for a booking", async () => {
+    enableSync();
+    nc.incomes.push({
+      id: 5,
+      description: "Stripe invoice in_test1234; something",
+      amountCents: 1,
     });
-    respondWith("PUT", "/openregister/api/objects/1/9/uuid-existing", { id: "uuid-existing" });
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    expect(nc.incomes).toHaveLength(2);
+  });
+
+  it("heals a partial failure: income written, fee fails, the retry books only the fee", async () => {
+    enableSync();
+    nc.failNext("POST", "/fiscal-years/1/expenses");
+
+    await expect(syncInvoicePaid(fakeStripe(), invoice(), logger)).rejects.toThrow(
+      /ledger\.expenses\.create/
+    );
+    expect(nc.incomes).toHaveLength(1);
+    expect(nc.expenses).toHaveLength(0);
 
     await syncInvoicePaid(fakeStripe(), invoice(), logger);
 
-    expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
-    const put = calls.find((c) => c.method === "PUT");
-    expect(put?.url).toContain("uuid-existing");
-    expect(put?.body).toMatchObject({ stripe_invoice_id: "in_test123", status: "paid" });
+    expect(nc.incomes).toHaveLength(1);
+    expect(nc.expenses).toHaveLength(1);
+    expect(nc.register).toHaveLength(1);
+    expect(nc.register[0].status).toBe("paid");
+  });
+
+  it("retries the register upsert when only that step failed", async () => {
+    enableSync();
+    nc.failNext("POST", "/openregister/api/objects");
+    await expect(syncInvoicePaid(fakeStripe(), invoice(), logger)).rejects.toThrow(
+      /ledger\.register\.create/
+    );
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    expect(nc.incomes).toHaveLength(1);
+    expect(nc.expenses).toHaveLength(1);
+    expect(nc.register).toHaveLength(1);
+  });
+
+  it("throws LedgerSyncBusyError, writing nothing, while another delivery holds the invoice", async () => {
+    enableSync();
+    lockState.busy = true;
+    await expect(syncInvoicePaid(fakeStripe(), invoice(), logger)).rejects.toBeInstanceOf(
+      LedgerSyncBusyError
+    );
+    expect(nc.calls).toHaveLength(0);
+  });
+
+  it("finds an earlier booking past the first page of entries", async () => {
+    enableSync();
+    for (let i = 0; i < 450; i++) {
+      nc.incomes.push({ id: 1000 + i, description: `Stripe invoice in_other${i}; x` });
+    }
+    nc.incomes.push({ id: 5000, description: "Stripe invoice in_test123; x; paid via card" });
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    expect(nc.posts("/fiscal-years/1/incomes")).toHaveLength(0);
+  });
+
+  it("still works against a server that ignores paging and returns everything", async () => {
+    useNextcloud({ ignorePaging: true });
+    enableSync();
+    for (let i = 0; i < 450; i++) {
+      nc.incomes.push({ id: 1000 + i, description: `Stripe invoice in_other${i}; x` });
+    }
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    expect(nc.incomes.filter((e) => String(e.description).includes("in_test123"))).toHaveLength(1);
+    expect(nc.register).toHaveLength(1);
+  });
+
+  it("finds the register object past the first page and filters server-side", async () => {
+    enableSync();
+    for (let i = 0; i < 450; i++) {
+      nc.register.push({ id: `old-${i}`, stripe_invoice_id: `in_old${i}`, status: "paid" });
+    }
+    nc.register.push({ id: "mine", stripe_invoice_id: "in_test123", status: "open" });
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    expect(nc.register).toHaveLength(451);
+    expect(nc.calls.some((c) => c.method === "PUT" && c.url.includes("/mine"))).toBe(true);
+    expect(nc.calls.some((c) => c.url.includes("stripe_invoice_id=in_test123"))).toBe(true);
   });
 
   it("creates the fiscal year when none covers the payment date", async () => {
+    useNextcloud({ fiscalYears: [] });
     enableSync();
-    const fy2027 = { id: 2, name: "FY 2027", dateStart: 1798783200, dateEnd: 1830319199, isActive: false };
-    respondWith("GET", "/nextledger/api/fiscal-years/2/incomes", []);
-    respondWith("GET", "/nextledger/api/fiscal-years/2/expenses", []);
-    respondWith("GET", "/nextledger/api/fiscal-years", []);
-    respondWith("POST", "/nextledger/api/fiscal-years", fy2027);
-    respondWith("POST", "/nextledger/api/fiscal-years/2/incomes", { id: 1 });
-    respondWith("POST", "/nextledger/api/fiscal-years/2/expenses", { id: 2 });
-    respondWith("GET", "/openregister/api/objects/1/9", { results: [] });
-    respondWith("POST", "/openregister/api/objects/1/9", { id: "uuid-2" });
-
     const paidAt2027 = 1798790000;
     await syncInvoicePaid(
       fakeStripe(),
@@ -248,64 +295,83 @@ describe("syncInvoicePaid", () => {
       logger
     );
 
-    const fyCreate = calls.find(
+    const create = nc.calls.find(
       (c) => c.method === "POST" && c.url.endsWith("/nextledger/api/fiscal-years")
     );
-    expect(fyCreate?.body?.name).toBe("FY 2027");
-    expect(fyCreate?.body?.isActive).toBe(false);
-    expect(
-      calls.some((c) => c.method === "POST" && c.url.includes("/fiscal-years/2/incomes"))
-    ).toBe(true);
+    expect(create?.body?.name).toBe("FY 2027");
+    expect(create?.body?.isActive).toBe(false);
+    expect(nc.incomes).toHaveLength(1);
   });
 
   it("books out-of-band payments without a fee expense", async () => {
     enableSync();
-    respondWith("GET", "/nextledger/api/fiscal-years/1/incomes", []);
-    respondWith("GET", "/nextledger/api/fiscal-years", [FY_2026]);
-    respondWith("POST", "/nextledger/api/fiscal-years/1/incomes", { id: 1 });
-    respondWith("GET", "/openregister/api/objects/1/9", { results: [] });
-    respondWith("POST", "/openregister/api/objects/1/9", { id: "uuid-3" });
-
     const stripeClient = fakeStripe({
       invoicePayments: { list: vi.fn(async () => ({ data: [] })) },
     });
     await syncInvoicePaid(stripeClient, invoice(), logger);
 
-    const incomePost = calls.find(
-      (c) => c.method === "POST" && c.url.includes("/fiscal-years/1/incomes")
-    );
-    expect(incomePost?.body?.description).toContain("out-of-band");
-    expect(calls.some((c) => c.url.includes("/expenses"))).toBe(false);
+    expect(String(nc.incomes[0].description)).toContain("out-of-band");
+    expect(nc.calls.some((c) => c.url.includes("/expenses"))).toBe(false);
   });
 
   it("throws when Nextcloud rejects a request so the webhook can retry", async () => {
     enableSync();
-    // No responders registered → fetch mock returns 404 for everything.
+    nc.failNext("GET", "/fiscal-years", 5);
     await expect(syncInvoicePaid(fakeStripe(), invoice(), logger)).rejects.toThrow(
-      /Nextcloud request failed/
+      /Nextcloud answered 500/
     );
+  });
+
+  it("sends requests with the shared client: service account auth, a timeout, no path in errors", async () => {
+    enableSync();
+    await syncInvoicePaid(fakeStripe(), invoice(), logger);
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).authorization).toBe(
+      `Basic ${Buffer.from("svc:secret").toString("base64")}`
+    );
+    expect((init.headers as Record<string, string>)["OCS-APIRequest"]).toBe("true");
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 });
 
 describe("syncInvoiceLifecycle", () => {
   it("is a no-op when the integration is not configured", async () => {
     await syncInvoiceLifecycle(invoice({ status: "open" }), logger);
-    expect(calls).toHaveLength(0);
+    expect(nc.calls).toHaveLength(0);
   });
 
   it("upserts the register object without touching NextLedger", async () => {
     enableSync();
-    respondWith("GET", "/openregister/api/objects/1/9", { results: [] });
-    respondWith("POST", "/openregister/api/objects/1/9", { id: "uuid-4" });
+    await syncInvoiceLifecycle(invoice({ status: "open", amount_paid: 0 }), logger);
+    expect(nc.register).toHaveLength(1);
+    expect(nc.register[0]).toMatchObject({ stripe_invoice_id: "in_test123", status: "open" });
+    expect(nc.register[0].payment_method).toBeUndefined();
+    expect(nc.calls.some((c) => c.url.includes("/nextledger/"))).toBe(false);
+  });
 
-    await syncInvoiceLifecycle(
-      invoice({ status: "open", amount_paid: 0, status_transitions: { paid_at: null } }),
-      logger
-    );
+  it("does not reopen an invoice the register already shows as paid", async () => {
+    enableSync();
+    nc.register.push({ id: "mine", stripe_invoice_id: "in_test123", status: "paid" });
+    await syncInvoiceLifecycle(invoice({ status: "open" }), logger);
+    expect(nc.calls.some((c) => c.method === "PUT")).toBe(false);
+    expect(nc.register[0].status).toBe("paid");
+  });
 
-    expect(calls.some((c) => c.url.includes("/nextledger/"))).toBe(false);
-    const post = calls.find((c) => c.method === "POST");
-    expect(post?.body).toMatchObject({ stripe_invoice_id: "in_test123", status: "open" });
-    expect(post?.body?.paid_at).toBeUndefined();
+  it("logs and swallows a Nextcloud failure: a status mirror never fails the webhook", async () => {
+    enableSync();
+    nc.failNext("GET", "/openregister/api/objects", 5);
+    await expect(
+      syncInvoiceLifecycle(invoice({ status: "open" }), logger)
+    ).resolves.toBeUndefined();
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it("logs and skips when the invoice is busy", async () => {
+    enableSync();
+    lockState.busy = true;
+    await expect(
+      syncInvoiceLifecycle(invoice({ status: "open" }), logger)
+    ).resolves.toBeUndefined();
+    expect(nc.calls).toHaveLength(0);
   });
 });

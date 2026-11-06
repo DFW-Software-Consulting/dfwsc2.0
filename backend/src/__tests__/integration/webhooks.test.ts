@@ -6,38 +6,18 @@ vi.mock("../../lib/stripe", () => ({
     webhooks: {
       constructEvent: vi.fn(),
     },
-    accounts: { create: vi.fn() },
+    accounts: { create: vi.fn(), retrieve: vi.fn() },
     accountLinks: { create: vi.fn() },
-    subscriptions: {
-      retrieve: vi.fn().mockResolvedValue({
-        id: "sub_test",
-        metadata: { paymentsMade: "0" },
-      }),
-      update: vi.fn().mockResolvedValue({ id: "sub_test" }),
-    },
-    invoices: {
-      // Idempotent invoice.paid derives the paid count from this listing.
-      list: vi.fn().mockResolvedValue({
-        data: [{ id: "in_test1", status: "paid" }],
-        has_more: false,
-      }),
-    },
-    subscriptionSchedules: {
-      retrieve: vi.fn().mockResolvedValue({
-        id: "sched_test",
-        metadata: { paymentsMade: "0" },
-      }),
-      update: vi.fn().mockResolvedValue({ id: "sched_test" }),
-    },
+    charges: { retrieve: vi.fn() },
   },
 }));
 
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildServer } from "../../app";
 import { db } from "../../db/client";
-import { clients, webhookEvents } from "../../db/schema";
+import { clients, paymentLedger, webhookEvents } from "../../db/schema";
 import { stripe } from "../../lib/stripe";
 
 const mockConstructEvent = stripe.webhooks.constructEvent as ReturnType<typeof vi.fn>;
@@ -251,6 +231,17 @@ describe("POST /api/v1/webhooks/stripe", () => {
     });
     mockConstructEvent.mockReturnValueOnce(event);
 
+    // account.updated now retrieves current state live from Stripe rather
+    // than trusting the webhook payload, to handle out-of-order delivery.
+    const accountsRetrieveMock = stripe.accounts.retrieve as ReturnType<typeof vi.fn>;
+    accountsRetrieveMock.mockResolvedValueOnce({
+      id: stripeAccountId,
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+      capabilities: { card_payments: "active", transfers: "active" },
+    });
+
     const response = await sendWebhook(app, event);
 
     expect(response.statusCode).toBe(200);
@@ -264,6 +255,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
     expect(updatedClient.name).toBe("Webhook Test Client");
     expect(updatedClient.email).toBe("webhooktest@example.com");
     expect(updatedClient.chargesEnabled).toBe(true);
+    expect(updatedClient.cardPaymentsStatus).toBe("active");
     expect(updatedClient.payoutsEnabled).toBe(true);
     expect(updatedClient.detailsSubmitted).toBe(true);
 
@@ -292,6 +284,16 @@ describe("POST /api/v1/webhooks/stripe", () => {
     });
     mockConstructEvent.mockReturnValueOnce(event);
 
+    // account.updated now retrieves current state live from Stripe rather
+    // than trusting the webhook payload, to handle out-of-order delivery.
+    const accountsRetrieveMock = stripe.accounts.retrieve as ReturnType<typeof vi.fn>;
+    accountsRetrieveMock.mockResolvedValueOnce({
+      id: stripeAccountId,
+      details_submitted: false,
+      charges_enabled: false,
+      payouts_enabled: false,
+    });
+
     const response = await sendWebhook(app, event);
 
     expect(response.statusCode).toBe(200);
@@ -302,6 +304,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     expect(updatedClient.detailsSubmitted).toBe(false);
     expect(updatedClient.chargesEnabled).toBe(false);
+    expect(updatedClient.cardPaymentsStatus).toBe("unrequested");
     expect(updatedClient.payoutsEnabled).toBe(false);
 
     // Clean up
@@ -318,6 +321,16 @@ describe("POST /api/v1/webhooks/stripe", () => {
       payouts_enabled: true,
     });
     mockConstructEvent.mockReturnValueOnce(event);
+
+    // account.updated now retrieves current state live from Stripe rather
+    // than trusting the webhook payload, to handle out-of-order delivery.
+    const accountsRetrieveMock = stripe.accounts.retrieve as ReturnType<typeof vi.fn>;
+    accountsRetrieveMock.mockResolvedValueOnce({
+      id: stripeAccountId,
+      details_submitted: true,
+      charges_enabled: true,
+      payouts_enabled: true,
+    });
 
     const response = await sendWebhook(app, event);
 
@@ -448,52 +461,39 @@ describe("POST /api/v1/webhooks/stripe", () => {
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
-  it("returns 200 for invoice.paid event with subscription and updates payment count", async () => {
-    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const event = makeStripeEvent("invoice.paid", {
-      id: "inv_paid123",
-      parent: { subscription_details: { subscription: subscriptionId } },
-      metadata: { clientId: "client_123" },
-    });
-    mockConstructEvent.mockReturnValueOnce(event);
+  it("never touches subscriptions or schedules on the Connect endpoint (invoice.paid, schedule.completed)", async () => {
+    const stripeMock = stripe as unknown as Record<string, unknown>;
+    // The Connect handler no longer has any subscription code: the mock exposes none.
+    expect(stripeMock.subscriptions).toBeUndefined();
+    expect(stripeMock.subscriptionSchedules).toBeUndefined();
 
-    const response = await sendWebhook(app, event);
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ received: true });
-
-    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
-  });
-
-  it("returns 500 for invoice.paid when subscription update fails (so Stripe retries)", async () => {
-    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const retrieveMock = stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>;
-    retrieveMock.mockRejectedValueOnce(new Error("stripe retrieve failed"));
-
-    const event = makeStripeEvent("invoice.paid", {
-      id: "inv_paid_failure_branch",
-      parent: { subscription_details: { subscription: subscriptionId } },
-      metadata: { clientId: "client_123" },
-    });
-    mockConstructEvent.mockReturnValueOnce(event);
-
-    const response = await sendWebhook(app, event);
-
-    // Error must propagate so processedAt is NOT set and Stripe will retry
-    expect(response.statusCode).toBe(500);
-
-    await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    for (const [type, object] of [
+      [
+        "invoice.paid",
+        {
+          id: "inv_paid123",
+          parent: { subscription_details: { subscription: "sub_x" } },
+          metadata: { clientId: "client_123" },
+        },
+      ],
+      ["subscription_schedule.completed", { id: "sched_x", metadata: {} }],
+    ] as const) {
+      const event = makeStripeEvent(type, object);
+      mockConstructEvent.mockReturnValueOnce(event);
+      const response = await sendWebhook(app, event);
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ received: true });
+      await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    }
   });
 
   it("does not reprocess duplicate webhook events", async () => {
-    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const retrieveMock = stripe.subscriptions.retrieve as ReturnType<typeof vi.fn>;
-    const updateMock = stripe.subscriptions.update as ReturnType<typeof vi.fn>;
+    const retrieveMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+    retrieveMock.mockReset();
 
-    const event = makeStripeEvent("invoice.paid", {
-      id: `evt_duplicate_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
-      parent: { subscription_details: { subscription: subscriptionId } },
-      metadata: { clientId: "client_123" },
+    const event = makeStripeEvent("charge.dispute.created", {
+      id: `dp_duplicate_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+      charge: "ch_duplicate_test",
     });
 
     // Gate the winner's first Stripe call so it parks mid-processing with its
@@ -506,7 +506,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
     });
     retrieveMock.mockImplementationOnce(async () => {
       await gate;
-      return { id: "sub_test", metadata: { paymentsMade: "0" } };
+      return { id: "ch_duplicate_test" };
     });
 
     mockConstructEvent.mockReturnValue(event);
@@ -528,7 +528,6 @@ describe("POST /api/v1/webhooks/stripe", () => {
     const first = await firstPromise;
     expect(first.statusCode).toBe(200);
     expect(retrieveMock).toHaveBeenCalledTimes(1);
-    expect(updateMock).toHaveBeenCalledTimes(1);
 
     // A genuine Stripe retry after A completed should be idempotent: the event
     // is already marked processed, so it short-circuits with 200 and no new
@@ -537,18 +536,17 @@ describe("POST /api/v1/webhooks/stripe", () => {
     const retry = await sendWebhook(app, event);
     expect(retry.statusCode).toBe(200);
     expect(retrieveMock).toHaveBeenCalledTimes(1);
-    expect(updateMock).toHaveBeenCalledTimes(1);
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
   it("reclaims a stale lease (crashed processor) and processes the event", async () => {
-    const updateMock = stripe.subscriptions.update as ReturnType<typeof vi.fn>;
-    const subscriptionId = `sub_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
-    const event = makeStripeEvent("invoice.paid", {
-      id: "inv_stale_lease",
-      parent: { subscription_details: { subscription: subscriptionId } },
-      metadata: { clientId: "client_123" },
+    const retrieveMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+    retrieveMock.mockReset();
+    retrieveMock.mockResolvedValue({ id: "ch_stale_lease" });
+    const event = makeStripeEvent("charge.dispute.created", {
+      id: "dp_stale_lease",
+      charge: "ch_stale_lease",
     });
 
     // Simulate a crashed processor: a claim row exists, unprocessed, with a
@@ -557,7 +555,6 @@ describe("POST /api/v1/webhooks/stripe", () => {
       id: randomUUID(),
       stripeEventId: event.id,
       type: event.type,
-      payload: JSON.parse(JSON.stringify(event)) as Record<string, unknown>,
       processedAt: null,
       claimedAt: new Date(Date.now() - 60 * 60 * 1000),
     });
@@ -567,7 +564,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
 
     // The stale lease must be reclaimed and the event processed to completion.
     expect(response.statusCode).toBe(200);
-    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(retrieveMock).toHaveBeenCalledTimes(1);
 
     const [row] = await db
       .select()
@@ -578,15 +575,107 @@ describe("POST /api/v1/webhooks/stripe", () => {
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
   });
 
+  describe("error logs never carry database or customer values", () => {
+    const URL_SECRET = "https://invoice.stripe.com/i/acct_1/live_secret";
+    const EMAIL = "jane@customer.example";
+
+    function loggedText(spy: ReturnType<typeof vi.spyOn>) {
+      return JSON.stringify(spy.mock.calls);
+    }
+
+    it("logs only SQLSTATE and constraint for a non-retryable unique violation", async () => {
+      const pg = Object.assign(new Error(`duplicate key (${EMAIL})`), {
+        code: "23505",
+        severity: "ERROR",
+        detail: `Key (email)=(${EMAIL}) already exists.`,
+        constraint: "uq_email",
+        table: "connect_invoices",
+      });
+      const drizzleErr = new Error(`Failed query: insert ... params: ${URL_SECRET},${EMAIL}`, {
+        cause: pg,
+      });
+      drizzleErr.name = "DrizzleQueryError";
+      const retrieveMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+      retrieveMock.mockReset();
+      retrieveMock.mockRejectedValueOnce(drizzleErr);
+      const errorSpy = vi.spyOn(app.log, "error");
+      const event = makeStripeEvent("charge.dispute.created", {
+        id: "dp_unique_log",
+        charge: "ch_unique_log",
+      });
+      mockConstructEvent.mockReturnValueOnce(event);
+
+      const res = await sendWebhook(app, event);
+      expect(res.statusCode).toBe(200);
+
+      const call = errorSpy.mock.calls.find((c) => String(c[1]).includes("non-retryable"));
+      expect(call).toBeDefined();
+      expect(call?.[0]).toMatchObject({ errCode: "23505", errConstraint: "uq_email" });
+      const text = loggedText(errorSpy);
+      expect(text).not.toContain(EMAIL);
+      expect(text).not.toContain(URL_SECRET);
+      expect(text).not.toContain("Failed query");
+      expect(text).not.toContain("already exists");
+      errorSpy.mockRestore();
+      await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    });
+
+    it("logs only identifiers when signature verification fails", async () => {
+      const errorSpy = vi.spyOn(app.log, "error");
+      mockConstructEvent.mockImplementationOnce(() => {
+        throw Object.assign(new Error(`bad signature for ${EMAIL}`), {
+          type: "StripeSignatureVerificationError",
+        });
+      });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/webhooks/stripe",
+        body: JSON.stringify({}),
+        headers: { "content-type": "application/json", "stripe-signature": "bad" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(errorSpy.mock.calls[0][0]).toMatchObject({
+        errType: "StripeSignatureVerificationError",
+      });
+      expect(loggedText(errorSpy)).not.toContain(EMAIL);
+      errorSpy.mockRestore();
+    });
+
+    it("logs only identifiers when the account state retrieve fails", async () => {
+      const warnSpy = vi.spyOn(app.log, "warn");
+      const accountsRetrieveMock = stripe.accounts.retrieve as ReturnType<typeof vi.fn>;
+      accountsRetrieveMock.mockRejectedValueOnce(
+        Object.assign(new Error(`No such account for ${EMAIL}`), {
+          type: "StripeInvalidRequestError",
+          code: "resource_missing",
+        })
+      );
+      const event = makeStripeEvent("account.updated", { id: "acct_log_retrieve" });
+      mockConstructEvent.mockReturnValueOnce(event);
+
+      const res = await sendWebhook(app, event);
+      expect(res.statusCode).toBe(200);
+      const call = warnSpy.mock.calls.find((c) => String(c[1]).includes("skipping sync"));
+      expect(call?.[0]).toMatchObject({
+        errCode: "resource_missing",
+        accountId: "acct_log_retrieve",
+      });
+      expect(loggedText(warnSpy)).not.toContain(EMAIL);
+      warnSpy.mockRestore();
+      await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+    });
+  });
+
   it("releases the claim on a retryable failure so Stripe's retry re-processes the event", async () => {
-    const scheduleUpdateMock = stripe.subscriptionSchedules.update as ReturnType<typeof vi.fn>;
-    const event = makeStripeEvent("subscription_schedule.completed", {
-      id: "sched_completed_error_branch",
-      metadata: { clientId: "client_123" },
+    const scheduleUpdateMock = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+    scheduleUpdateMock.mockReset();
+    const event = makeStripeEvent("charge.dispute.created", {
+      id: "dp_error_branch",
+      charge: "ch_error_branch",
     });
 
     // First delivery: processing fails with a retryable error → 500.
-    scheduleUpdateMock.mockRejectedValueOnce(new Error("schedule update failed"));
+    scheduleUpdateMock.mockRejectedValueOnce(new Error("charge retrieve failed"));
     mockConstructEvent.mockReturnValueOnce(event);
     const first = await sendWebhook(app, event);
     expect(first.statusCode).toBe(500);
@@ -601,7 +690,7 @@ describe("POST /api/v1/webhooks/stripe", () => {
     expect(afterFail).toHaveLength(0);
 
     // Stripe retry: processing now succeeds → 200, event re-processed and marked done.
-    scheduleUpdateMock.mockResolvedValueOnce({ id: "sched_test" });
+    scheduleUpdateMock.mockResolvedValueOnce({ id: "ch_error_branch" });
     mockConstructEvent.mockReturnValueOnce(event);
     const retry = await sendWebhook(app, event);
     expect(retry.statusCode).toBe(200);
@@ -615,5 +704,286 @@ describe("POST /api/v1/webhooks/stripe", () => {
     expect(afterRetry[0].processedAt).not.toBeNull();
 
     await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, event.id));
+  });
+
+  describe("payment ledger PaymentIntent linkage", () => {
+    let clientId: string;
+    const ledgerIds: string[] = [];
+    const eventIds: string[] = [];
+
+    beforeAll(async () => {
+      clientId = randomUUID();
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Ledger Linkage Client",
+        email: `ledger-${clientId}@example.com`,
+        status: "active",
+        stripeAccountId: `acct_${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      });
+    });
+
+    afterAll(async () => {
+      // Ledger rows cascade-delete with the client.
+      await db.delete(clients).where(eq(clients.id, clientId));
+    });
+
+    afterEach(async () => {
+      for (const id of ledgerIds.splice(0)) {
+        await db.delete(paymentLedger).where(eq(paymentLedger.id, id));
+      }
+      for (const id of eventIds.splice(0)) {
+        await db.delete(webhookEvents).where(eq(webhookEvents.stripeEventId, id));
+      }
+      vi.restoreAllMocks();
+    });
+
+    async function seedLedgerRow(
+      overrides: Partial<typeof paymentLedger.$inferInsert> = {}
+    ): Promise<{ id: string; sessionId: string; paymentIntentId: string }> {
+      const id = randomUUID();
+      const suffix = randomUUID().replace(/-/g, "");
+      const sessionId = `cs_test_${suffix}`;
+      await db.insert(paymentLedger).values({
+        id,
+        idempotencyKey: `idem_${suffix}`,
+        connectedAccountId: "acct_ledger_test",
+        stripeSessionId: sessionId,
+        stripePaymentIntentId: null,
+        clientId,
+        source: "checkout",
+        status: "created",
+        baseAmountCents: 5000,
+        totalAmountCents: 5150,
+        feeAmountCents: 150,
+        currency: "usd",
+        ...overrides,
+      });
+      ledgerIds.push(id);
+      return { id, sessionId, paymentIntentId: `pi_${suffix}` };
+    }
+
+    async function getRow(id: string) {
+      const [row] = await db.select().from(paymentLedger).where(eq(paymentLedger.id, id));
+      return row;
+    }
+
+    async function deliver(type: string, dataObject: Record<string, unknown>, created?: number) {
+      const event = makeStripeEvent(type, dataObject);
+      if (created !== undefined) event.created = created;
+      eventIds.push(event.id);
+      mockConstructEvent.mockReturnValueOnce(event);
+      const response = await sendWebhook(app, event);
+      expect(response.statusCode).toBe(200);
+      return event;
+    }
+
+    it("checkout.session.completed marks the row paid and records the PaymentIntent id", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.completed", {
+        id: row.sessionId,
+        payment_status: "paid",
+        payment_intent: row.paymentIntentId,
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("paid");
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("lets PaymentIntent-keyed charge.refunded reach the row after the id is recorded", async () => {
+      const row = await seedLedgerRow();
+      const created = Math.floor(Date.now() / 1000);
+
+      await deliver(
+        "checkout.session.completed",
+        { id: row.sessionId, payment_status: "paid", payment_intent: row.paymentIntentId },
+        created
+      );
+      await deliver(
+        "charge.refunded",
+        { id: "ch_linkage_refund", payment_intent: row.paymentIntentId, amount_refunded: 5150 },
+        created + 10
+      );
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("refunded");
+      expect(updated.refundedAmountCents).toBe(5150);
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("lets payment_intent.payment_failed and charge.dispute.created reach the row after the id is recorded", async () => {
+      const failedRow = await seedLedgerRow();
+      await deliver("checkout.session.completed", {
+        id: failedRow.sessionId,
+        payment_status: "paid",
+        payment_intent: failedRow.paymentIntentId,
+      });
+      // A PaymentIntent-keyed failure finds the row (it is already paid, so
+      // precedence keeps `paid`, but the lookup must succeed rather than skip).
+      const debugSpy = vi.spyOn(app.log, "debug");
+      await deliver("payment_intent.payment_failed", {
+        id: failedRow.paymentIntentId,
+        status: "requires_payment_method",
+      });
+      expect(
+        debugSpy.mock.calls.some(([, msg]) => String(msg).includes("No ledger row found"))
+      ).toBe(false);
+      expect(
+        debugSpy.mock.calls.some(([, msg]) => String(msg).includes("precedence prevents downgrade"))
+      ).toBe(true);
+
+      // charge.dispute.created retrieves the charge from Stripe; mock that call.
+      const disputeRow = await seedLedgerRow();
+      const created = Math.floor(Date.now() / 1000);
+      await deliver(
+        "checkout.session.completed",
+        { id: disputeRow.sessionId, payment_intent: disputeRow.paymentIntentId },
+        created
+      );
+      const chargesRetrieve = stripe.charges.retrieve as ReturnType<typeof vi.fn>;
+      chargesRetrieve.mockResolvedValueOnce({
+        id: "ch_linkage_dispute",
+        payment_intent: disputeRow.paymentIntentId,
+      });
+      await deliver(
+        "charge.dispute.created",
+        { id: "dp_linkage", charge: "ch_linkage_dispute" },
+        created + 10
+      );
+
+      expect(chargesRetrieve).toHaveBeenCalledTimes(1);
+      expect((await getRow(disputeRow.id)).status).toBe("disputed");
+    });
+
+    it("does not overwrite a different existing PaymentIntent id and logs a warning", async () => {
+      const row = await seedLedgerRow({ stripePaymentIntentId: "pi_original" });
+      const warnSpy = vi.spyOn(app.log, "warn");
+
+      await deliver("checkout.session.completed", {
+        id: row.sessionId,
+        payment_status: "paid",
+        payment_intent: "pi_different",
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.stripePaymentIntentId).toBe("pi_original");
+      expect(updated.status).toBe("paid");
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ledgerId: row.id,
+          existingPaymentIntentId: "pi_original",
+          incomingPaymentIntentId: "pi_different",
+        }),
+        expect.stringContaining("different PaymentIntent id")
+      );
+    });
+
+    it("does not warn when the incoming PaymentIntent id equals the recorded one", async () => {
+      const row = await seedLedgerRow({ stripePaymentIntentId: "pi_same" });
+      const warnSpy = vi.spyOn(app.log, "warn");
+
+      await deliver("checkout.session.completed", {
+        id: row.sessionId,
+        payment_status: "paid",
+        payment_intent: "pi_same",
+      });
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      const updated = await getRow(row.id);
+      expect(updated.stripePaymentIntentId).toBe("pi_same");
+      expect(updated.status).toBe("paid");
+    });
+
+    it("a stale checkout.session.completed still records the PaymentIntent id without changing status or ordering", async () => {
+      const lastEventAt = Math.floor(Date.now() / 1000);
+      const row = await seedLedgerRow({
+        status: "refunded",
+        lastStripeEventCreatedAt: lastEventAt,
+      });
+
+      await deliver(
+        "checkout.session.completed",
+        { id: row.sessionId, payment_intent: row.paymentIntentId },
+        lastEventAt - 60
+      );
+
+      const updated = await getRow(row.id);
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+      expect(updated.status).toBe("refunded");
+      expect(updated.lastStripeEventCreatedAt).toBe(lastEventAt);
+    });
+
+    it("records the PaymentIntent id even when status precedence blocks the update", async () => {
+      const lastEventAt = Math.floor(Date.now() / 1000);
+      const row = await seedLedgerRow({
+        status: "disputed",
+        lastStripeEventCreatedAt: lastEventAt,
+      });
+
+      await deliver(
+        "checkout.session.completed",
+        { id: row.sessionId, payment_intent: row.paymentIntentId },
+        lastEventAt + 5
+      );
+
+      const updated = await getRow(row.id);
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+      expect(updated.status).toBe("disputed");
+      expect(updated.lastStripeEventCreatedAt).toBe(lastEventAt);
+    });
+
+    it("checkout.session.async_payment_succeeded records the PaymentIntent id", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.async_payment_succeeded", {
+        id: row.sessionId,
+        payment_intent: row.paymentIntentId,
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("paid");
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("checkout.session.async_payment_failed records the PaymentIntent id", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.async_payment_failed", {
+        id: row.sessionId,
+        payment_intent: row.paymentIntentId,
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("failed");
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("checkout.session.expired records a PaymentIntent id when the session carries one", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.expired", {
+        id: row.sessionId,
+        payment_intent: row.paymentIntentId,
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("expired");
+      expect(updated.stripePaymentIntentId).toBe(row.paymentIntentId);
+    });
+
+    it("leaves the PaymentIntent id null when the session has none", async () => {
+      const row = await seedLedgerRow();
+
+      await deliver("checkout.session.completed", {
+        id: row.sessionId,
+        payment_status: "paid",
+        payment_intent: null,
+      });
+
+      const updated = await getRow(row.id);
+      expect(updated.status).toBe("paid");
+      expect(updated.stripePaymentIntentId).toBeNull();
+    });
   });
 });

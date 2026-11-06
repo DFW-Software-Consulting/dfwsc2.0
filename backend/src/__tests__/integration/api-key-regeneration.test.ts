@@ -19,6 +19,11 @@ vi.mock("../../lib/mailer", () => ({
 vi.mock("../../lib/rate-limit", () => ({
   adminRateLimit: () => async () => {},
   rateLimit: () => async () => {},
+  tokenBucketRateLimit: () => async () => {},
+  failureRateLimit: () => ({
+    charge: async () => ({ blocked: false, keep: () => {}, release: async () => {} }),
+    record: async () => {},
+  }),
   warnIfInMemoryRateLimit: vi.fn(),
 }));
 
@@ -98,11 +103,14 @@ describe("API Key Regeneration Routes", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().message).toMatch(/regeneration link/i);
-      expect(sendMail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          to: clientEmail,
-          subject: expect.stringContaining("Regenerate API Key"),
-        })
+      // The mail is sent after the response (detached), so wait for it.
+      await vi.waitFor(() =>
+        expect(sendMail).toHaveBeenCalledWith(
+          expect.objectContaining({
+            to: clientEmail,
+            subject: expect.stringContaining("Regenerate API Key"),
+          })
+        )
       );
     });
 
@@ -116,6 +124,8 @@ describe("API Key Regeneration Routes", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().message).toMatch(/regeneration link/i);
+      // Nothing is detached for an unknown address; give any stray work a moment.
+      await new Promise((resolve) => setTimeout(resolve, 50));
       expect(sendMail).not.toHaveBeenCalled();
     });
 
@@ -137,6 +147,9 @@ describe("API Key Regeneration Routes", () => {
         headers: { "content-type": "application/json" },
         payload: { email: clientEmail },
       });
+      // Token creation and mail run after the response; wait for the mail so the
+      // detached work has finished before the next test clears the table.
+      await vi.waitFor(() => expect(sendMail).toHaveBeenCalledTimes(1));
 
       const tokens = await db
         .select()
@@ -146,7 +159,7 @@ describe("API Key Regeneration Routes", () => {
       expect(tokens.length).toBeGreaterThanOrEqual(1);
       const pendingToken = tokens.find((t: any) => t.status === "pending");
       expect(pendingToken).toBeDefined();
-      expect(pendingToken.email).toBe(clientEmail);
+      expect(pendingToken?.email).toBe(clientEmail);
     });
   });
 

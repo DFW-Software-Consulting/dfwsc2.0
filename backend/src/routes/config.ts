@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { errorLogFields } from "../lib/safe-error-log";
 
 function resolveApiBaseUrl(): string {
   if (!process.env.API_BASE_URL) {
@@ -17,7 +18,7 @@ export default async function configRoutes(fastify: FastifyInstance) {
 
       reply.header("Content-Type", "application/javascript").send(script);
     } catch (error) {
-      request.log.error(error, "Failed to resolve API base URL");
+      request.log.error(errorLogFields(error), "Failed to resolve API base URL");
       reply.status(500).send({ error: "Internal Server Error: API_BASE_URL not configured" });
     }
   });

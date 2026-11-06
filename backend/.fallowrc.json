@@ -1,0 +1,3 @@
+{
+  "entry": ["src/scripts/backfill-billing-customers.ts"]
+}

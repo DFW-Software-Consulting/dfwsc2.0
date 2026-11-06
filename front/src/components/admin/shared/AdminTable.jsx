@@ -1,5 +1,25 @@
+import AdminCard from "./AdminCard";
+import Button from "./Button";
 import ErrorMessage from "./ErrorMessage";
 import LoadingSpinner from "./LoadingSpinner";
+import RowActions from "./RowActions";
+import { useIsDesktop } from "./useMinWidth";
+
+// Column definition: { header, key | render(row), tdClassName, actions(row) }.
+// `actions` returns RowActions specs; the table shows them as buttons and the mobile
+// cards show the primary one plus an overflow menu. The first column is the card title
+// unless a column sets `cardTitle`. Set `cardHidden` to leave a column out of the cards.
+function cellValue(col, row) {
+  return col.render ? col.render(row) : col.key ? row[col.key] : null;
+}
+
+// Names a card's overflow menu after its row so screen-reader users can tell cards apart.
+// Falls back to RowActions' generic label when the title is not plain text.
+function rowMenuLabel(title) {
+  return typeof title === "string" || typeof title === "number"
+    ? `More actions for ${title}`
+    : undefined;
+}
 
 export default function AdminTable({
   columns,
@@ -12,6 +32,7 @@ export default function AdminTable({
   keyField = "id",
   loadingMessage,
 }) {
+  const isDesktop = useIsDesktop();
   if (isLoading) return <LoadingSpinner message={loadingMessage} />;
 
   if (isError) {
@@ -19,13 +40,11 @@ export default function AdminTable({
       <div className="text-center py-4">
         <ErrorMessage message={error?.message} />
         {onRetry && (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="mt-3 text-sm bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded-md transition-colors"
-          >
-            Retry
-          </button>
+          <div className="mt-3">
+            <Button size="sm" onClick={onRetry}>
+              Retry
+            </Button>
+          </div>
         )}
       </div>
     );
@@ -34,38 +53,68 @@ export default function AdminTable({
   if (!rows || rows.length === 0) {
     return (
       <div className="text-center py-8">
-        <p className="text-gray-400 text-sm">{emptyMessage}</p>
+        <p className="text-fg-muted text-sm">{emptyMessage}</p>
       </div>
     );
   }
 
+  if (!isDesktop) {
+    const titleCol = columns.find((c) => c.cardTitle) ?? columns.find((c) => !c.actions);
+    const actionsCol = columns.find((c) => c.actions);
+    const fieldCols = columns.filter((c) => c !== titleCol && c !== actionsCol && !c.cardHidden);
+    return (
+      <ul className="grid gap-3" data-testid="admin-cards">
+        {rows.map((row) => {
+          const title = cellValue(titleCol, row);
+          return (
+            <AdminCard
+              key={row[keyField]}
+              title={title}
+              fields={fieldCols.map((c) => ({
+                label: c.header,
+                value: cellValue(c, row) ?? "—",
+                className: c.cardClassName ?? c.tdClassName,
+              }))}
+              actions={
+                actionsCol ? (
+                  <RowActions
+                    mode="card"
+                    actions={actionsCol.actions(row)}
+                    menuLabel={rowMenuLabel(title)}
+                  />
+                ) : null
+              }
+            />
+          );
+        })}
+      </ul>
+    );
+  }
+
   return (
-    <div className="overflow-x-auto transition-colors duration-300">
-      <table className="min-w-full divide-y divide-slate-200 dark:divide-gray-700 transition-colors">
+    <div className="scroll-shade-x overflow-x-auto transition-colors duration-300">
+      <table className="min-w-full divide-y divide-line transition-colors">
         <thead>
           <tr>
             {columns.map((col) => (
               <th
                 key={col.header}
-                className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-gray-300 uppercase tracking-wider transition-colors"
+                className="px-3 py-2 text-left text-xs font-medium text-fg-muted uppercase tracking-wider transition-colors"
               >
                 {col.header}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-gray-800 transition-colors">
+        <tbody className="divide-y divide-line text-fg transition-colors">
           {rows.map((row) => (
-            <tr
-              key={row[keyField]}
-              className="hover:bg-slate-50 dark:hover:bg-gray-700/50 transition-colors"
-            >
+            <tr key={row[keyField]} className="hover:bg-surface transition-colors">
               {columns.map((col) => (
                 <td
                   key={col.header}
-                  className={`px-3 py-2 whitespace-nowrap text-sm text-slate-700 dark:text-gray-200 transition-colors ${col.tdClassName ?? ""}`}
+                  className={`px-3 py-2 whitespace-nowrap text-sm transition-colors ${col.tdClassName ?? ""}`}
                 >
-                  {col.render ? col.render(row) : col.key ? row[col.key] : null}
+                  {col.actions ? <RowActions actions={col.actions(row)} /> : cellValue(col, row)}
                 </td>
               ))}
             </tr>

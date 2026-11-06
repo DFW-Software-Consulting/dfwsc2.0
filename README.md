@@ -38,7 +38,7 @@ dfwsc2.0/
 - **TailwindCSS v4** - Utility-first CSS
 
 ### Backend
-- **Node.js 20** - Runtime
+- **Node.js 22** - Runtime
 - **Fastify 5** - Web framework
 - **TypeScript** - Type safety
 - **PostgreSQL 17** - Database
@@ -49,7 +49,7 @@ dfwsc2.0/
 ## 🛠️ Development
 
 ### Prerequisites
-- Node.js 20+
+- Node.js 22+
 - PostgreSQL 17
 - npm or yarn
 
@@ -141,10 +141,7 @@ Most API routes are prefixed with `/api/v1` (the runtime config script `/app-con
 |--------|------|-------------|------|
 | GET | `/app-config.js` | Runtime API base URL script (served at root, no `/api/v1` prefix) | Public |
 | GET | `/api/v1/health` | Health check (verifies DB connectivity) | Public |
-| POST | `/api/v1/auth/login` | Admin login (returns JWT token) | Public |
-| GET | `/api/v1/auth/setup/status` | Bootstrap setup status | Public |
-| POST | `/api/v1/auth/setup` | Deprecated — always returns 410 Gone | Public |
-| POST | `/api/v1/auth/confirm-bootstrap` | Confirm bootstrap admin credentials | Admin (JWT) |
+| POST | `/api/v1/auth/login` | Admin login: Nextcloud credentials checked, returns JWT token | Public |
 | GET | `/api/v1/clients` | List clients (requires `workspace` query) | Admin (JWT) |
 | GET | `/api/v1/clients/:id` | Get a single client | Admin (JWT) |
 | PATCH | `/api/v1/clients/:id` | Update client config | Admin (JWT) |
@@ -154,7 +151,8 @@ Most API routes are prefixed with `/api/v1` (the runtime config script `/app-con
 | GET | `/api/v1/onboard-client` | Get Stripe onboarding link (JSON) by token | Public |
 | GET | `/api/v1/connect/refresh` | Refresh Stripe account link (redirect) | Public |
 | GET | `/api/v1/connect/callback` | Stripe Connect return callback | Public |
-| POST | `/api/v1/payments/create` | Create payment (PaymentIntent or Checkout) | Client (API key) or Admin (JWT) |
+| POST | `/api/v1/payments/create` | Create a Stripe Checkout payment; returns `{ url, sessionId }` | Client (API key) or Admin (JWT) |
+| GET | `/api/v1/payments/session/:sessionId` | Confirm a payment by Checkout session ID (status + amounts) | Public (30/min per IP), or API key (600/min per client) |
 | GET | `/api/v1/reports/payments` | List payments | Admin (JWT) |
 | GET | `/api/v1/groups` | List client groups | Admin (JWT) |
 | POST | `/api/v1/groups` | Create client group | Admin (JWT) |
@@ -205,17 +203,15 @@ SMTP_PASS=your-app-password
 JWT_SECRET=your_jwt_secret_minimum_32_characters_long
 JWT_EXPIRY=1h
 
-# First-run Admin Bootstrap (remove after setup)
-ALLOW_ADMIN_SETUP=true
-ADMIN_USERNAME=your-admin-username
-ADMIN_PASSWORD=a-strong-password-12-chars-min
+# Admin login is checked against Nextcloud (set NEXTCLOUD_BASE_URL, NEXTCLOUD_USERNAME, NEXTCLOUD_APP_PASSWORD)
+ADMIN_NEXTCLOUD_GROUPS=dfwsc-admins,managers
 
 # Payment Config
 DEFAULT_PROCESS_FEE_CENTS=100
 
 ```
 
-**Admin Authentication:** The backend uses database-backed admin accounts with JWT tokens. On first run, set `ADMIN_USERNAME`/`ADMIN_PASSWORD` (with `ALLOW_ADMIN_SETUP=true`) to bootstrap the first admin from env vars, log in, then confirm the credentials via `/auth/confirm-bootstrap`. After confirming, set `ALLOW_ADMIN_SETUP=false`. The `/auth/setup` endpoint is deprecated and always returns 410 Gone. See `.env.example` for detailed documentation.
+**Admin Authentication:** Admin login is checked against Nextcloud. `POST /api/v1/auth/login` takes a Nextcloud username and password, verifies them with the Nextcloud OCS API, and issues a JWT when the account belongs to one of the groups in `ADMIN_NEXTCLOUD_GROUPS` (default `dfwsc-admins,managers`). There are no local admin accounts. Before deploying: create those groups and add members, and set `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD` (the service account must be a Nextcloud admin). Accounts with two-factor login must sign in with a Nextcloud app password. There is no local fallback: if Nextcloud is down, admin login answers 503 (payments are unaffected). Logins are rate limited per IP and per username because Nextcloud throttles failures by source IP. See `docs/BACKEND.md` (Admin login) and `docs/COOLIFY_DEPLOYMENT.md`.
 
 ### Frontend (.env)
 

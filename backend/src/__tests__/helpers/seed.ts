@@ -5,6 +5,7 @@ export interface SeedableDataStore {
   clientsByApiKey?: Map<string, string>;
   onboardingTokens?: Map<string, any>;
   clientGroups?: Map<string, any>;
+  paymentLedger?: Map<string, any>;
 }
 
 export interface SeedClientOpts {
@@ -18,6 +19,9 @@ export interface SeedClientOpts {
   stripeAccountId?: string | null;
   groupId?: string | null;
   workspace?: string;
+  chargesEnabled?: boolean;
+  payoutsEnabled?: boolean;
+  detailsSubmitted?: boolean;
   [key: string]: any;
 }
 
@@ -95,13 +99,16 @@ export function seedClientGroup(
     name: string;
     status?: string;
     workspace?: string;
+    [key: string]: any;
   }
 ) {
+  const { id, name, status = "active", workspace = "client_portal", ...rest } = opts;
   dataStore.clientGroups?.set(opts.id, {
-    id: opts.id,
-    name: opts.name,
-    status: opts.status ?? "active",
-    workspace: opts.workspace ?? "client_portal",
+    id,
+    name,
+    status,
+    workspace,
+    ...rest,
     createdAt: new Date(),
     updatedAt: new Date(),
   });

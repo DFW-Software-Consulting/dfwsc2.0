@@ -1,73 +1,182 @@
-const contactMethods = [
-  { label: "Phone", value: "(214) 326-0128", href: "tel:+12143260128" },
-  { label: "Email", value: "mail@dfwsc.com", href: "mailto:mail@dfwsc.com" },
-  { label: "Website", value: "www.dfwsc.com", href: "https://www.dfwsc.com" },
-  {
-    label: "LinkedIn",
-    value: "DFW Software Consulting",
-    href: "https://www.linkedin.com/company/dfw-software-consulting",
-  },
-];
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useContactForm } from "../hooks/useContact";
+import { validateEmail, validateName } from "../utils/validation";
 
-export default function Contact() {
+const INITIAL_FORM = { name: "", email: "", company: "", message: "", _hp: "" };
+
+const validateCompany = (v) => {
+  if (!v?.trim()) return "Company or project is required";
+  return v.trim().length > 100 ? "Company or project must not exceed 100 characters" : null;
+};
+
+const HONEYPOT_STYLE = {
+  position: "absolute",
+  left: "-10000px",
+  width: "1px",
+  height: "1px",
+  overflow: "hidden",
+};
+
+function Field({ id, label, error, children }) {
   return (
-    <section
-      id="contact"
-      className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 transition-colors duration-300"
-    >
-      <div className="mx-auto max-w-5xl">
-        <div className="mx-auto max-w-3xl text-center mb-16">
-          <span className="mb-6 inline-flex items-center rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-brand-700 dark:text-brand-300">
-            Start a project
-          </span>
-          <h2 className="text-3xl font-bold tracking-tight sm:text-5xl text-gradient">
-            Tell us your goal, timeline, and must-haves
-          </h2>
-          <p className="mt-6 text-lg text-[var(--text-muted)] leading-relaxed transition-colors">
-            We&apos;ll respond within one business day with next steps and a lightweight plan you
-            can review.
-          </p>
-        </div>
+    <div className="studio-field">
+      <label htmlFor={id}>{label}</label>
+      {children}
+      {error && (
+        <p id={`${id}-error`} className="studio-field-error">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
 
-        <div className="grid gap-8 lg:grid-cols-1">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-12 rounded-[2.5rem] border border-slate-200 dark:border-white/5 bg-[var(--bg-surface)] dark:bg-white/[0.02] p-10 lg:p-16 transition-all duration-300 hover:bg-slate-100 dark:hover:bg-white/[0.03] shadow-sm">
-            <div className="max-w-md text-center md:text-left">
-              <h3 className="text-3xl font-bold text-[var(--text-main)] transition-colors">
-                Prefer a quick chat?
-              </h3>
-              <p className="mt-4 text-lg text-[var(--text-muted)] leading-relaxed transition-colors">
-                Share a Loom, forward requirements, or drop a quick note. We&apos;ll respond with
-                next steps and a suggested plan.
-              </p>
+/** Contact form for the Home contact band (POST /api/v1/contact). */
+export default function Contact() {
+  const [form, setForm] = useState(INITIAL_FORM);
+  const [errors, setErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const confirmRef = useRef(null);
+  const contactMutation = useContactForm();
 
-              <div className="mt-10 p-6 rounded-2xl border border-brand-500/10 bg-brand-500/5 text-sm text-brand-700 dark:text-brand-200/80 leading-relaxed transition-colors">
-                <strong className="text-brand-600 dark:text-brand-200 block mb-1 uppercase text-xs tracking-widest transition-colors">
-                  Pricing Note:
-                </strong>
-                Hosting retainers include uptime monitoring, SSL, and maintenance. Feature work is
-                billed hourly at $100–$150/hr with clear estimates.
-              </div>
-            </div>
+  useEffect(() => {
+    if (submitted) confirmRef.current?.focus();
+  }, [submitted]);
 
-            <div className="w-full max-w-sm space-y-6">
-              {contactMethods.map((method) => (
-                <a
-                  key={method.label}
-                  href={method.href}
-                  className="group flex flex-col p-6 rounded-2xl border border-slate-200 dark:border-white/5 bg-[var(--bg-main)] dark:bg-white/[0.02] transition-all duration-300 hover:bg-slate-50 dark:hover:bg-white/[0.08] hover:border-brand-500/30 shadow-sm"
-                >
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-[var(--text-muted)] group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors font-bold">
-                    {method.label}
-                  </span>
-                  <span className="mt-2 text-xl font-bold text-[var(--text-main)] group-hover:text-brand-500 dark:group-hover:text-brand-100 transition-colors">
-                    {method.value}
-                  </span>
-                </a>
-              ))}
-            </div>
-          </div>
-        </div>
+  const updateField = useCallback(
+    (field) => (e) => {
+      setForm((prev) => ({ ...prev, [field]: e.target.value }));
+    },
+    []
+  );
+
+  const handleSubmit = useCallback(
+    (e) => {
+      e.preventDefault();
+      const nextErrors = {
+        name: validateName(form.name, 1, 100, "Name"),
+        email: validateEmail(form.email),
+        company: validateCompany(form.company),
+        message: validateName(form.message, 1, 2000, "Message"),
+      };
+      setErrors(nextErrors);
+      const firstInvalid = ["name", "email", "company", "message"].find((k) => nextErrors[k]);
+      if (firstInvalid) {
+        document.getElementById(`contact-${firstInvalid}`)?.focus();
+        return;
+      }
+
+      contactMutation.mutate(
+        {
+          name: form.name.trim(),
+          email: form.email.trim(),
+          company: form.company.trim(),
+          message: form.message.trim(),
+          _hp: form._hp,
+        },
+        {
+          onSuccess: (data) => {
+            if (data?.ok) {
+              setForm(INITIAL_FORM);
+              setSubmitted(true);
+            }
+          },
+        }
+      );
+    },
+    [form, contactMutation]
+  );
+
+  const isPending = contactMutation.isPending;
+  const isError = contactMutation.isError;
+
+  if (submitted) {
+    return (
+      <div
+        ref={confirmRef}
+        tabIndex={-1}
+        role="status"
+        aria-live="polite"
+        className="studio-contact-form studio-contact-done"
+      >
+        Thanks — we&apos;ll be in touch.
       </div>
-    </section>
+    );
+  }
+
+  const fieldProps = (key) => ({
+    id: `contact-${key}`,
+    value: form[key],
+    onChange: updateField(key),
+    disabled: isPending,
+    "aria-invalid": errors[key] ? true : undefined,
+    "aria-describedby": errors[key] ? `contact-${key}-error` : undefined,
+  });
+
+  return (
+    <form onSubmit={handleSubmit} noValidate className="studio-contact-form">
+      <div aria-hidden="true" style={HONEYPOT_STYLE}>
+        <label htmlFor="contact-hp">Leave this field empty</label>
+        <input
+          id="contact-hp"
+          name="_hp"
+          type="text"
+          tabIndex={-1}
+          autoComplete="off"
+          value={form._hp}
+          onChange={updateField("_hp")}
+        />
+      </div>
+
+      <Field id="contact-name" label="Name" error={errors.name}>
+        <input
+          {...fieldProps("name")}
+          type="text"
+          placeholder="Your name"
+          maxLength={100}
+          required
+          autoComplete="name"
+        />
+      </Field>
+      <Field id="contact-email" label="Email" error={errors.email}>
+        <input
+          {...fieldProps("email")}
+          type="email"
+          placeholder="you@company.com"
+          required
+          autoComplete="email"
+        />
+      </Field>
+      <Field id="contact-company" label="Company or project" error={errors.company}>
+        <input
+          {...fieldProps("company")}
+          type="text"
+          placeholder="Your company or project name"
+          maxLength={100}
+          required
+          autoComplete="organization"
+        />
+      </Field>
+      <Field id="contact-message" label="Message" error={errors.message}>
+        <textarea
+          {...fieldProps("message")}
+          placeholder="Tell us your goal, timeline, and must-haves"
+          maxLength={2000}
+          required
+          rows={5}
+        />
+      </Field>
+
+      <button type="submit" className="studio-button" disabled={isPending}>
+        {isPending ? "Sending..." : "Send message"}
+      </button>
+
+      {isError && (
+        <p role="alert" className="studio-form-alert">
+          Something went wrong sending your message. Please email us directly at{" "}
+          <a href="mailto:mail@dfwsc.com">mail@dfwsc.com</a>.
+        </p>
+      )}
+    </form>
   );
 }

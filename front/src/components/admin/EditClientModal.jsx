@@ -34,8 +34,10 @@ export default function EditClientModal({
     return "";
   });
   const [groupId, setGroupId] = useState(() => client.groupId ?? "");
-  const [successUrl, setSuccessUrl] = useState(() => client.paymentSuccessUrl ?? "");
-  const [cancelUrl, setCancelUrl] = useState(() => client.paymentCancelUrl ?? "");
+  // The list row never carries the payment URLs, so they are seeded from the
+  // full client record once it loads.
+  const [successUrl, setSuccessUrl] = useState("");
+  const [cancelUrl, setCancelUrl] = useState("");
   const [error, setError] = useState("");
 
   // Profile fields (DFWSC mode only)
@@ -69,6 +71,8 @@ export default function EditClientModal({
     setPostalCode(fullClient.postalCode ?? "");
     setCountry(fullClient.country ?? "");
     setNotes(fullClient.notes ?? "");
+    setSuccessUrl(fullClient.paymentSuccessUrl ?? "");
+    setCancelUrl(fullClient.paymentCancelUrl ?? "");
     setDefaultPaymentTermsDays(
       fullClient.defaultPaymentTermsDays != null ? String(fullClient.defaultPaymentTermsDays) : ""
     );
@@ -135,11 +139,18 @@ export default function EditClientModal({
       return;
     }
 
-    const body = {
-      groupId: groupId || null,
-      paymentSuccessUrl: successUrl.trim() || null,
-      paymentCancelUrl: cancelUrl.trim() || null,
-    };
+    const body = { groupId: groupId || null };
+
+    // Send a URL only when it differs from the stored value, so saving a fee or
+    // group change never overwrites a URL the form did not touch.
+    const nextSuccessUrl = successUrl.trim();
+    if (nextSuccessUrl !== (fullClient?.paymentSuccessUrl ?? "")) {
+      body.paymentSuccessUrl = nextSuccessUrl || null;
+    }
+    const nextCancelUrl = cancelUrl.trim();
+    if (nextCancelUrl !== (fullClient?.paymentCancelUrl ?? "")) {
+      body.paymentCancelUrl = nextCancelUrl || null;
+    }
 
     if (feeType !== "none") {
       const feeErr = validateFeeValue(feeValue, feeType);
@@ -187,6 +198,7 @@ export default function EditClientModal({
     isDfwscMode,
     successUrl,
     cancelUrl,
+    fullClient,
     name,
     email,
     phone,
@@ -207,17 +219,17 @@ export default function EditClientModal({
 
   return (
     <BaseModal isOpen onClose={onClose} title="Edit Client" titleId="edit-client-title">
-      <p className="text-sm text-gray-400 mb-5">
+      <p className="text-sm text-fg-muted mb-5 [overflow-wrap:anywhere]">
         {client.name} &bull; {client.email}
       </p>
 
       {isDfwscMode && (
         <>
           {clientLoading ? (
-            <p className="text-sm text-gray-400 mb-4">Loading profile...</p>
+            <p className="text-sm text-fg-muted mb-4">Loading profile...</p>
           ) : (
             <>
-              <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">
+              <h3 className="text-sm font-semibold text-fg-muted uppercase tracking-wide mb-3">
                 Contact
               </h3>
 
@@ -256,7 +268,7 @@ export default function EditClientModal({
                 />
               </div>
 
-              <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">
+              <h3 className="text-sm font-semibold text-fg-muted uppercase tracking-wide mb-3">
                 Address
               </h3>
 
@@ -325,7 +337,7 @@ export default function EditClientModal({
               <div className="mb-4">
                 <label
                   htmlFor="edit-client-notes"
-                  className="block text-sm font-medium text-gray-300 mb-1"
+                  className="block text-sm font-medium text-fg mb-1"
                 >
                   Notes
                 </label>
@@ -335,8 +347,8 @@ export default function EditClientModal({
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Any additional notes..."
                   rows={3}
-                  className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                           focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted
+                           focus:outline-none focus:ring-2 focus:ring-focus"
                 />
               </div>
             </>
@@ -347,18 +359,15 @@ export default function EditClientModal({
       {!isDfwscMode && (
         <>
           <div className="mb-4">
-            <label
-              htmlFor="edit-client-group"
-              className="block text-sm font-medium text-gray-300 mb-1"
-            >
+            <label htmlFor="edit-client-group" className="block text-sm font-medium text-fg mb-1">
               Group
             </label>
             <select
               id="edit-client-group"
               value={groupId}
               onChange={(e) => setGroupId(e.target.value)}
-              className="w-full rounded-md border border-gray-600 bg-gray-900/50 px-3 py-2 text-gray-100
-                       focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-md border border-line bg-card px-3 py-2 text-fg placeholder:text-fg-muted
+                       focus:outline-none focus:ring-2 focus:ring-focus"
             >
               <option value="">— No group —</option>
               {groups
@@ -412,7 +421,7 @@ export default function EditClientModal({
         <Button
           variant="primary"
           isLoading={patchClientMutation.isPending}
-          disabled={isDfwscMode && clientLoading}
+          disabled={clientLoading}
           onClick={handleSave}
         >
           {patchClientMutation.isPending ? "Saving..." : "Save Changes"}

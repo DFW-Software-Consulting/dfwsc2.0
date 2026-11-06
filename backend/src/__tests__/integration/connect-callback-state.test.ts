@@ -1,4 +1,4 @@
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
 
 // Mock Stripe before importing other modules
 vi.mock("../../lib/stripe", async () => {
@@ -24,7 +24,18 @@ import { buildServer } from "../../app";
 import { db } from "../../db/client";
 import { clients, onboardingTokens } from "../../db/schema";
 import { hashOnboardingToken } from "../../lib/client-factory";
+import { OAUTH_STATE_EXPIRY_MS } from "../../lib/constants";
 import { hitBuckets } from "../../lib/rate-limit";
+import { captureAppLogs, expectNoPlanted, plantedStripeError } from "../helpers/log-capture";
+
+// The vi.mock above swaps lib/stripe for plain spies, so type the three used methods as Mocks
+// (the real SDK methods are overloaded and have no mock helpers).
+type StripeSpies = {
+  accounts: { create: Mock; retrieve: Mock };
+  accountLinks: { create: Mock };
+};
+const mockedStripe = async () =>
+  (await import("../../lib/stripe")).stripe as unknown as StripeSpies;
 
 // Constants for test values
 const TEST_STRIPE_ACCOUNT = "acct_test123456789";
@@ -41,13 +52,14 @@ describe("Connect Callback State Validation Integration", () => {
     process.env.API_BASE_URL = "http://localhost:4242";
 
     // Mock Stripe methods
-    const { stripe } = await import("../../lib/stripe");
+    const stripe = await mockedStripe();
     stripe.accounts.create.mockResolvedValue({ id: "acct_test123456789" });
     stripe.accounts.retrieve.mockResolvedValue({
       type: "express",
       details_submitted: true,
       charges_enabled: true,
       payouts_enabled: true,
+      capabilities: { card_payments: "active", transfers: "active" },
     });
     stripe.accountLinks.create.mockResolvedValue({ url: "https://connect.stripe.com/setup/mock" });
 
@@ -100,6 +112,7 @@ describe("Connect Callback State Validation Integration", () => {
     expect(tokenRecord.status).toBe("pending");
 
     // Call /onboard-client endpoint which should change status to 'in_progress'
+    const before = Date.now();
     const onboardResponse = await app.inject({
       method: "POST",
       url: "/api/v1/onboard-client",
@@ -122,7 +135,10 @@ describe("Connect Callback State Validation Integration", () => {
       .from(onboardingTokens)
       .where(eq(onboardingTokens.id, onboardingTokenId));
     const state = tokenRecord.state;
-    const _stateExpiresAt = tokenRecord.stateExpiresAt;
+    // The stored state lifetime should be OAUTH_STATE_EXPIRY_MS (24h) from now.
+    const stateExpiresAtMs = new Date(tokenRecord.stateExpiresAt as Date).getTime();
+    expect(stateExpiresAtMs).toBeGreaterThanOrEqual(before + OAUTH_STATE_EXPIRY_MS - 5_000);
+    expect(stateExpiresAtMs).toBeLessThanOrEqual(Date.now() + OAUTH_STATE_EXPIRY_MS + 5_000);
     const [linkedClient] = await db.select().from(clients).where(eq(clients.id, clientId));
     const testStripeAccount = linkedClient.stripeAccountId;
 
@@ -139,6 +155,8 @@ describe("Connect Callback State Validation Integration", () => {
     // Verify that the stripeAccountId was updated in the database
     const [updatedClient] = await db.select().from(clients).where(eq(clients.id, clientId));
     expect(updatedClient.stripeAccountId).toBe(testStripeAccount);
+    expect(updatedClient.chargesEnabled).toBe(true);
+    expect(updatedClient.cardPaymentsStatus).toBe("active");
 
     // Verify status changed to 'completed'
     [tokenRecord] = await db
@@ -172,8 +190,8 @@ describe("Connect Callback State Validation Integration", () => {
     const state = `test_state_${randomUUID().replace(/-/g, "")}`;
     const testStripeAccount = `acct_${randomUUID().replace(/-/g, "")}`;
 
-    // Set state to expire in 30 minutes from now
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    // Set state to expire in 24 hours (OAUTH_STATE_EXPIRY_MS) from now
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -285,8 +303,8 @@ describe("Connect Callback State Validation Integration", () => {
     const validState = `valid_state_${randomUUID().replace(/-/g, "")}`;
     const invalidState = `invalid_state_${randomUUID().replace(/-/g, "")}`;
 
-    // Set state to expire in 30 minutes from now
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    // Set state to expire in 24 hours (OAUTH_STATE_EXPIRY_MS) from now
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -314,7 +332,7 @@ describe("Connect Callback State Validation Integration", () => {
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenId));
   });
 
-  it("should reject request with expired state parameter", async () => {
+  it("should redirect to the expired onboarding page for an expired state parameter", async () => {
     const clientId = randomUUID();
     const testStripeAccount = "acct_test123456789";
 
@@ -349,10 +367,16 @@ describe("Connect Callback State Validation Integration", () => {
       url: `/api/v1/connect/callback?client_id=${clientId}&account=${testStripeAccount}&state=${expiredState}`,
     });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({
-      error: "Expired state parameter.",
-    });
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toMatch(/\/onboarding-success\?status=expired$/);
+
+    // The token must not be marked completed (nor have its state consumed)
+    const [tokenAfter] = await db
+      .select()
+      .from(onboardingTokens)
+      .where(eq(onboardingTokens.id, onboardingTokenId));
+    expect(tokenAfter.status).toBe("in_progress");
+    expect(tokenAfter.state).toBe(expiredState);
 
     // Clean up
     await db.delete(clients).where(eq(clients.id, clientId));
@@ -377,8 +401,8 @@ describe("Connect Callback State Validation Integration", () => {
     const onboardingTokenId = randomUUID();
     const state = `test_state_${randomUUID().replace(/-/g, "")}`;
 
-    // Set state to expire in 30 minutes from now
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    // Set state to expire in 24 hours (OAUTH_STATE_EXPIRY_MS) from now
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -437,8 +461,8 @@ describe("Connect Callback State Validation Integration", () => {
     const stateA = `state_a_${randomUUID().replace(/-/g, "")}`;
     const stateB = `state_b_${randomUUID().replace(/-/g, "")}`;
 
-    // Set states to expire in 30 minutes from now
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    // Set states to expire in 24 hours (OAUTH_STATE_EXPIRY_MS) from now
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenAId,
@@ -504,7 +528,7 @@ describe("Connect Callback State Validation Integration", () => {
 
     const onboardingTokenId = randomUUID();
     const state = `test_state_${randomUUID().replace(/-/g, "")}`;
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -546,7 +570,7 @@ describe("Connect Callback State Validation Integration", () => {
   });
 
   it("should invalidate the state nonce even when the callback leaves the token in_progress", async () => {
-    const { stripe } = await import("../../lib/stripe");
+    const stripe = await mockedStripe();
     // Override the shared "completed" mock for just this call: details not
     // yet submitted, so the callback resolves to in_progress rather than
     // completed. Using mockResolvedValueOnce (not mockResolvedValue) so this
@@ -573,7 +597,7 @@ describe("Connect Callback State Validation Integration", () => {
 
     const onboardingTokenId = randomUUID();
     const state = `test_state_${randomUUID().replace(/-/g, "")}`;
-    const stateExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    const stateExpiresAt = new Date(Date.now() + OAUTH_STATE_EXPIRY_MS);
 
     await db.insert(onboardingTokens).values({
       id: onboardingTokenId,
@@ -616,5 +640,86 @@ describe("Connect Callback State Validation Integration", () => {
     // Clean up
     await db.delete(clients).where(eq(clients.id, clientId));
     await db.delete(onboardingTokens).where(eq(onboardingTokens.id, onboardingTokenId));
+  });
+
+  it("logs only identifiers when account link creation fails with customer data in the message", async () => {
+    const stripe = await mockedStripe();
+    const clientId = randomUUID();
+    const email = `test-${randomUUID()}@example.com`;
+    const testToken = `test_token_${randomUUID().replace(/-/g, "")}`;
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Log Client",
+      email,
+      status: "active",
+      workspace: "client_portal",
+    });
+    const tokenId = randomUUID();
+    await db.insert(onboardingTokens).values({
+      id: tokenId,
+      clientId,
+      token: hashOnboardingToken(testToken),
+      status: "pending",
+      email,
+    });
+    stripe.accountLinks.create.mockRejectedValueOnce(plantedStripeError());
+    const logs = captureAppLogs(app);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/onboard-client",
+      payload: { token: testToken },
+    });
+    logs.restore();
+
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+    expect(logs.find("Stripe accountLinks.create failed")?.fields).toMatchObject({
+      errType: "StripeInvalidRequestError",
+      errCode: "resource_missing",
+      errRequestId: "req_planted",
+    });
+    expectNoPlanted(logs.text());
+    await db.delete(clients).where(eq(clients.id, clientId));
+    await db.delete(onboardingTokens).where(eq(onboardingTokens.id, tokenId));
+  });
+
+  it("logs only identifiers when the callback cannot verify the account with Stripe", async () => {
+    const stripe = await mockedStripe();
+    const clientId = randomUUID();
+    const email = `test-${randomUUID()}@example.com`;
+    const account = `acct_${randomUUID().replace(/-/g, "")}`;
+    const state = `test_state_${randomUUID().replace(/-/g, "")}`;
+    await db.insert(clients).values({
+      id: clientId,
+      name: "Log Client",
+      email,
+      status: "active",
+      workspace: "client_portal",
+    });
+    const tokenId = randomUUID();
+    await db.insert(onboardingTokens).values({
+      id: tokenId,
+      clientId,
+      token: `test_token_${randomUUID().replace(/-/g, "")}`,
+      status: "in_progress",
+      email,
+      state,
+      stateExpiresAt: new Date(Date.now() + OAUTH_STATE_EXPIRY_MS),
+    });
+    stripe.accounts.retrieve.mockRejectedValueOnce(plantedStripeError());
+    const logs = captureAppLogs(app);
+
+    await app.inject({
+      method: "GET",
+      url: `/api/v1/connect/callback?client_id=${clientId}&account=${account}&state=${state}`,
+    });
+    logs.restore();
+
+    expect(
+      logs.find("Failed to verify account with Stripe; leaving token in_progress")?.fields
+    ).toMatchObject({ errType: "StripeInvalidRequestError", errRequestId: "req_planted" });
+    expectNoPlanted(logs.text());
+    await db.delete(clients).where(eq(clients.id, clientId));
+    await db.delete(onboardingTokens).where(eq(onboardingTokens.id, tokenId));
   });
 });

@@ -1,69 +1,79 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useInitiateOnboarding } from "../hooks/useOnboarding";
+import { usePageTitle } from "../hooks/usePageTitle";
 import logger from "../utils/logger";
+
+function readTokenFromSearch() {
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get("token") || "";
+}
 
 export default function OnboardClient() {
   const location = useLocation();
   const navigate = useNavigate();
   const [token, setToken] = useState(() => {
     const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
-    return hashParams.get("token") || "";
+    return hashParams.get("token") || readTokenFromSearch();
   });
   const [message, setMessage] = useState("");
   const { mutate, isPending } = useInitiateOnboarding();
+  usePageTitle("Client Onboarding");
 
   useEffect(() => {
-    document.title = "Client Stripe Onboarding";
     if (location.search || location.hash) {
       navigate(location.pathname, { replace: true });
     }
   }, [location.hash, location.pathname, location.search, navigate]);
 
-  const handleSubmit = useCallback(() => {
-    if (!token) {
-      setMessage("Please enter your onboarding token.");
-      return;
-    }
-    setMessage("Verifying token and redirecting...");
-    mutate(token, {
-      onSuccess: (data) => {
-        if (!data?.url) {
-          setMessage("Error: API did not return a 'url' field.");
-          return;
-        }
-        let u;
-        try {
-          u = new URL(data.url);
-        } catch {
-          setMessage("Error: Received an invalid redirect URL.");
-          return;
-        }
-        if (u.protocol !== "https:") {
-          setMessage("Error: Received an invalid redirect URL.");
-          return;
-        }
-        setMessage("Redirecting to Stripe...");
-        window.location.href = data.url;
-      },
-      onError: (err) => {
-        logger.error("Onboarding error:", err);
-        setMessage(`Error: ${err.message}`);
-      },
-    });
-  }, [token, mutate]);
+  const handleSubmit = useCallback(
+    (e) => {
+      e.preventDefault();
+      if (!token) {
+        setMessage("Please enter your onboarding token.");
+        return;
+      }
+      setMessage("Verifying token and redirecting...");
+      mutate(token, {
+        onSuccess: (data) => {
+          if (!data?.url) {
+            setMessage("Error: API did not return a 'url' field.");
+            return;
+          }
+          let u;
+          try {
+            u = new URL(data.url);
+          } catch {
+            setMessage("Error: Received an invalid redirect URL.");
+            return;
+          }
+          if (u.protocol !== "https:") {
+            setMessage("Error: Received an invalid redirect URL.");
+            return;
+          }
+          setMessage("Redirecting to Stripe...");
+          window.location.href = data.url;
+        },
+        onError: (err) => {
+          logger.error("Onboarding error:", err);
+          setMessage(`Error: ${err.message}`);
+        },
+      });
+    },
+    [token, mutate]
+  );
 
   const isError = message.startsWith("Error");
 
   return (
     <section className="min-h-[90vh] flex items-center justify-center p-4 transition-colors duration-300">
       <div className="w-full max-w-xl mx-auto">
-        <div className="bg-[var(--bg-main)] dark:bg-white/[0.02] backdrop-blur-md p-8 rounded-2xl shadow-xl border border-slate-200 dark:border-white/10 transition-colors">
-          <h1 className="text-3xl font-bold text-center mb-4 text-slate-900 dark:text-white transition-colors">
+        <div className="bg-card p-8 rounded-2xl shadow-xl border border-line transition-colors">
+          <h1 className="text-3xl font-bold text-center mb-4 text-fg transition-colors">
             Stripe Account Setup
           </h1>
 
-          <p className="text-center text-slate-600 dark:text-gray-300 mb-8 transition-colors">
+          <p className="text-center text-fg-muted mb-8 transition-colors">
             Please enter the onboarding token provided by{" "}
             <span className="text-brand-600 dark:text-brand-400 font-semibold transition-colors">
               DFW Software Consulting
@@ -71,36 +81,37 @@ export default function OnboardClient() {
             to set up your Stripe account.
           </p>
 
-          <div className="mb-6">
-            <label
-              htmlFor="onboardingToken"
-              className="block text-sm font-semibold text-slate-700 dark:text-gray-200 mb-2 transition-colors"
-            >
-              Onboarding Token
-            </label>
-            <input
-              id="onboardingToken"
-              type="text"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Enter your token"
-              className="block w-full rounded-md border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-900/50
-                         px-3 py-2 text-slate-900 dark:text-gray-100 placeholder-slate-400 dark:placeholder-gray-500 shadow-sm
-                         focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-blue-500 transition-all"
-            />
-          </div>
+          <form onSubmit={handleSubmit}>
+            <div className="mb-6">
+              <label
+                htmlFor="onboardingToken"
+                className="block text-sm font-semibold text-fg mb-2 transition-colors"
+              >
+                Onboarding Token
+              </label>
+              <input
+                id="onboardingToken"
+                type="text"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Enter your token"
+                className="block w-full rounded-md border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-900/50
+                           px-3 py-2 text-slate-900 dark:text-gray-100 placeholder-slate-400 dark:placeholder-gray-500 shadow-sm
+                           focus:outline-none focus:ring-2 focus:ring-brand-500 dark:focus:ring-blue-500 transition-all"
+              />
+            </div>
 
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isPending}
-            className="mt-6 w-full rounded-full bg-brand-500 hover:bg-brand-600
-                       text-white font-semibold py-2.5 px-4 shadow-glow
-                       transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-400
-                       disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isPending ? "Processing..." : "Continue to Stripe Setup"}
-          </button>
+            <button
+              type="submit"
+              disabled={isPending}
+              className="mt-6 w-full rounded-full bg-brand-500 hover:bg-brand-600
+                         text-white font-semibold py-2.5 px-4 shadow-glow
+                         transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-400
+                         disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isPending ? "Processing..." : "Continue to Stripe Setup"}
+            </button>
+          </form>
 
           {message && (
             <p

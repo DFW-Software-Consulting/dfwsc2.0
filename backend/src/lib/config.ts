@@ -1,4 +1,5 @@
 import type { FastifyRequest } from "fastify";
+import validator from "validator";
 import { AppError } from "./errors";
 
 export function resolveFrontendOrigin(): string {
@@ -7,6 +8,74 @@ export function resolveFrontendOrigin(): string {
     throw new AppError("FRONTEND_ORIGIN is not configured.", 500, "CONFIGURATION_ERROR");
   }
   return origin;
+}
+
+function resolveOptionalHttpUrl(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return undefined;
+    }
+    return trimmed;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Makes sure a Checkout success URL carries `session_id={CHECKOUT_SESSION_ID}`
+ * so the customer's return trip (and the integrator) can identify the session.
+ * Plain string handling on purpose: URL/URLSearchParams would percent-encode the
+ * braces and Stripe would stop substituting the placeholder. A URL that already
+ * contains the placeholder is returned unchanged.
+ */
+export function appendCheckoutSessionId(url: string): string {
+  if (url.includes("{CHECKOUT_SESSION_ID}")) {
+    return url;
+  }
+
+  const hashIndex = url.indexOf("#");
+  const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
+  const separator = base.includes("?")
+    ? base.endsWith("?") || base.endsWith("&")
+      ? ""
+      : "&"
+    : "?";
+
+  return `${base}${separator}session_id={CHECKOUT_SESSION_ID}${hash}`;
+}
+
+export function resolveDefaultPaymentSuccessUrl(): string | undefined {
+  const url = resolveOptionalHttpUrl(process.env.DEFAULT_PAYMENT_SUCCESS_URL);
+  return url ? appendCheckoutSessionId(url) : undefined;
+}
+
+export function resolveDefaultPaymentCancelUrl(): string | undefined {
+  return resolveOptionalHttpUrl(process.env.DEFAULT_PAYMENT_CANCEL_URL);
+}
+
+/**
+ * Resolves the recipient address for public contact-form submissions.
+ * `CONTACT_INBOX` is preferred; falls back to `SMTP_FROM` (the only other
+ * configured mailbox address in this system) so the contact route doesn't
+ * require a dedicated env var in every environment. Throws if neither is
+ * configured, mirroring `resolveFrontendOrigin`'s fail-fast pattern.
+ */
+export function resolveContactInboxEmail(): string {
+  const contactInbox = process.env.CONTACT_INBOX?.trim();
+  const source = contactInbox ? "CONTACT_INBOX" : "SMTP_FROM";
+  const inbox = contactInbox || process.env.SMTP_FROM?.trim();
+  if (!inbox) {
+    throw new AppError("CONTACT_INBOX is not configured.", 500, "CONFIGURATION_ERROR");
+  }
+  if (!validator.isEmail(inbox)) {
+    throw new AppError(`${source} must be a valid email address.`, 500, "CONFIGURATION_ERROR");
+  }
+  return inbox;
 }
 
 /**

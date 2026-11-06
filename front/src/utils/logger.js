@@ -15,7 +15,7 @@ const emitAlways =
   (...args) =>
     console[method](...args);
 
-export const logger = {
+const logger = {
   error: emitAlways("error"),
   warn: emitAlways("warn"),
   info: emit("info"),

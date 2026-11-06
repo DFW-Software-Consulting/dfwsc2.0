@@ -2,11 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createGroup, deleteGroup, getGroups, patchGroup } from "../api/groups";
 import { useAuth } from "../contexts/AuthContext";
 
+// The API's maximum page size. There is no pager yet, so request as much as
+// the server will return in one go.
+const LIST_LIMIT = 100;
+
 export function useGroups(workspace = "client_portal") {
   const { token } = useAuth();
   return useQuery({
     queryKey: ["groups", workspace],
-    queryFn: () => getGroups(token, workspace),
+    queryFn: () => getGroups(token, workspace, LIST_LIMIT),
     enabled: !!token,
     select: (response) => {
       const data = Array.isArray(response) ? response : response.data;
@@ -42,8 +46,9 @@ export function usePatchGroup() {
       const isGroupsQuery = (query) => query.queryKey[0] === "groups";
       await queryClient.cancelQueries({ predicate: isGroupsQuery });
       const prev = queryClient.getQueriesData({ predicate: isGroupsQuery });
-      queryClient.setQueriesData({ predicate: isGroupsQuery }, (old) =>
-        old?.map((g) => (g.id === id ? { ...g, ...body } : g))
+      queryClient.setQueriesData(
+        { predicate: isGroupsQuery },
+        (old) => old && { ...old, data: old.data.map((g) => (g.id === id ? { ...g, ...body } : g)) }
       );
       return { prev };
     },
