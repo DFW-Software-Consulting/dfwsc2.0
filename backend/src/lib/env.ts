@@ -73,6 +73,11 @@ const OPTIONAL_ENV_VARS = [
   "BILLING_AUTO_SEND",
   "BILLING_DEFAULT_DAYS_UNTIL_DUE",
   "CONNECT_INVOICING",
+  // Ledger sync (lib/ledger-sync.ts) reuses the NEXTCLOUD_* service account and is off unless
+  // LEDGER_SYNC_ENABLED=true; the register ids have defaults.
+  "LEDGER_SYNC_ENABLED",
+  "OPENREGISTER_REGISTER_ID",
+  "OPENREGISTER_INVOICE_SCHEMA_ID",
 ];
 
 // Vars whose values must never appear in logs, even partially — presence only.
