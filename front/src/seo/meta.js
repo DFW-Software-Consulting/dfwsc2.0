@@ -31,10 +31,6 @@ export const PUBLIC_ROUTES = {
     `Our Team: Software Developers in Dallas–Fort Worth | ${SITE_NAME}`,
     "Meet the small team behind DFW Software Consulting: full-stack, DevOps, and network engineers who build and run software for small businesses."
   ),
-  "/docs": publicPage(
-    `Payment API Documentation | ${SITE_NAME}`,
-    "Developer reference for the DFWSC payment platform: create a payment, redirect to Stripe Checkout, and confirm the result from your backend."
-  ),
 };
 
 /** Portal and utility routes: served as the SPA shell and kept out of search indexes. */

@@ -1,13 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import ConfirmModal from "../components/admin/ConfirmModal";
 import BaseModal from "../components/admin/shared/BaseModal";
 import ErrorMessage from "../components/admin/shared/ErrorMessage";
 import FormInput from "../components/admin/shared/FormInput";
 import TruncationNotice from "../components/admin/shared/TruncationNotice";
 import Toast from "../components/admin/Toast";
-import Docs from "../pages/Docs.jsx";
 
 // <main> is its own stacking context below the sticky header, so overlays must render
 // outside it (portaled to <body>) to layer above the header.
@@ -129,24 +127,5 @@ describe("status text contrast", () => {
     const notice = screen.getByRole("status");
     expect(notice.className).toContain("text-yellow-800");
     expect(notice.className).toContain("dark:text-yellow-400");
-  });
-});
-
-describe("Docs section navigation", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it.each([
-    [true, "auto"],
-    [false, "smooth"],
-  ])("respects prefers-reduced-motion=%s", (reduce, behavior) => {
-    window.matchMedia = vi.fn((query) => ({
-      matches: query === "(prefers-reduced-motion: reduce)" && reduce,
-    }));
-    window.scrollTo = vi.fn();
-    render(<Docs />, { wrapper: MemoryRouter });
-    fireEvent.click(screen.getAllByRole("button", { name: "Quick Start" })[0]);
-    expect(window.scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior }));
   });
 });

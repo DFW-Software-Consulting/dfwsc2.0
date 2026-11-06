@@ -9,7 +9,6 @@ const REQUIRED = [
   "index.html",
   "pricing.html",
   "team.html",
-  "docs.html",
   "spa.html",
   "404.html",
   "sitemap.xml",
