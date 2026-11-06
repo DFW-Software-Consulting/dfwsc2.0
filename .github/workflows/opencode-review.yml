@@ -123,10 +123,12 @@ jobs:
           path: ${{ runner.temp }}/opencode-1.19.5
           key: opencode-1.19.5-${{ runner.os }}-${{ runner.arch }}
 
+      # Needs only curl, tar and sha256sum (no gh/jq: self-hosted runners may lack them).
+      # A failed install is not fatal; the run step then reports reason=error.
       - name: Install OpenCode (pinned release)
+        id: install
         if: steps.key.outputs.configured == 'true' && steps.cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
         run: |
           set -eu
           [ "$(uname -s)" = "Linux" ] && [ "$(uname -m)" = "x86_64" ] || { echo "::error::Unsupported runner platform $(uname -s)/$(uname -m)"; exit 1; }
@@ -141,13 +143,14 @@ jobs:
           dir="$RUNNER_TEMP/opencode-$OPENCODE_VERSION"
           dl="$RUNNER_TEMP/opencode-download"
           rm -rf "$dir" "$dl"; mkdir -p "$dir" "$dl"
-          gh release download "v$OPENCODE_VERSION" -R anomalyco/opencode -p "$asset" -D "$dl"
+          curl -fsSL --retry 3 -o "$dl/$asset" "https://github.com/anomalyco/opencode/releases/download/v$OPENCODE_VERSION/$asset"
           echo "$sha  $dl/$asset" | sha256sum -c -
           tar -xzf "$dl/$asset" -C "$dir"
           rm -rf "$dl"
 
       - name: Add OpenCode to PATH
         if: steps.key.outputs.configured == 'true'
+        continue-on-error: true
         run: |
           set -eu
           echo "$RUNNER_TEMP/opencode-$OPENCODE_VERSION" >> "$GITHUB_PATH"
@@ -155,11 +158,21 @@ jobs:
 
       - name: Snapshot bot comments
         if: steps.key.outputs.configured == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | .id' > "$RUNNER_TEMP/bot-comments.txt" || : > "$RUNNER_TEMP/bot-comments.txt"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let ids = null;
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: Number(process.env.PR_NUMBER), per_page: 100,
+              });
+              ids = comments.filter((c) => c.user && c.user.login === 'github-actions[bot]').map((c) => c.id);
+            } catch (e) {
+              core.warning(`Could not snapshot comments: ${e.message}`);
+            }
+            fs.writeFileSync(`${process.env.RUNNER_TEMP}/bot-comments.json`, JSON.stringify(ids));
 
       # Replicates the composite action's "Run opencode" step (github/action.yml @ v1.19.5) with a
       # watchdog. The step always exits 0; the outcome is in outputs.reason (ok|quota|error|timeout).
@@ -187,6 +200,11 @@ jobs:
           XDG_STATE_HOME: ${{ runner.temp }}/opencode-xdg/state
           XDG_CACHE_HOME: ${{ runner.temp }}/opencode-xdg/cache
         run: |
+          if ! command -v opencode >/dev/null 2>&1; then
+            echo "::warning::opencode binary not available (install failed)"
+            echo "reason=error" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           mkdir -p "$HOME"
           log="$RUNNER_TEMP/opencode.log"
           : > "$log"
@@ -239,36 +257,55 @@ jobs:
       - name: Remove raw error comments
         if: steps.key.outputs.configured == 'true' && steps.run.outputs.reason != 'ok'
         continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Only github-actions[bot] issue comments new since the snapshot AND linking to this run.
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-            --jq '.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("/actions/runs/" + env.GITHUB_RUN_ID)) | .id' > "$RUNNER_TEMP/bot-now.txt" || exit 0
-          grep -vxFf "$RUNNER_TEMP/bot-comments.txt" "$RUNNER_TEMP/bot-now.txt" | while read -r id; do
-            case "$id" in ''|*[!0-9]*) continue ;; esac
-            gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" || true
-          done || true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Only github-actions[bot] issue comments new since the snapshot AND linking to this run.
+            const fs = require('fs');
+            const before = JSON.parse(fs.readFileSync(`${process.env.RUNNER_TEMP}/bot-comments.json`, 'utf8'));
+            if (!Array.isArray(before)) return;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: Number(process.env.PR_NUMBER), per_page: 100,
+            });
+            const runPath = `/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            for (const c of comments) {
+              if (!c.user || c.user.login !== 'github-actions[bot]') continue;
+              if (before.includes(c.id) || !(c.body || '').includes(runPath)) continue;
+              try {
+                await github.rest.issues.deleteComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: c.id });
+              } catch (e) {
+                core.warning(`Could not delete comment ${c.id}: ${e.message}`);
+              }
+            }
 
       - name: Report skipped review
         if: steps.key.outputs.configured == 'true' && steps.run.outputs.reason != 'ok'
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           REASON: ${{ steps.run.outputs.reason }}
           LIMIT: ${{ steps.run.outputs.limit }}
           RESET: ${{ steps.run.outputs.reset }}
-        run: |
-          case "$REASON" in
-            quota)
-              if [ -n "$LIMIT" ]; then what="OpenCode Go $LIMIT usage limit reached"; else what="OpenCode Go usage limit reached"; fi
-              [ -n "$RESET" ] && what="$what (resets ~$RESET)"
-              ;;
-            error) what="OpenCode errored" ;;
-            *) what="OpenCode timed out" ;;
-          esac
-          echo "::warning::OpenCode review skipped: $what"
-          echo "OpenCode review skipped: $what. [Run logs]($RUN_URL)" >> "$GITHUB_STEP_SUMMARY"
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "⚠️ OpenCode review skipped — $what. CI is unaffected. [Run logs]($RUN_URL)" \
-            || echo "::warning::Could not post skip comment"
+        with:
+          script: |
+            const { REASON, LIMIT, RESET, RUN_URL } = process.env;
+            let what;
+            if (REASON === 'quota') {
+              what = `OpenCode Go ${LIMIT ? LIMIT + ' ' : ''}usage limit reached${RESET ? ` (resets ~${RESET})` : ''}`;
+            } else if (REASON === 'error') {
+              what = 'OpenCode errored';
+            } else {
+              what = 'OpenCode timed out';
+            }
+            core.warning(`OpenCode review skipped: ${what}`);
+            await core.summary.addRaw(`OpenCode review skipped: ${what}. [Run logs](${RUN_URL})`, true).write();
+            try {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: Number(process.env.PR_NUMBER),
+                body: `⚠️ OpenCode review skipped — ${what}. CI is unaffected. [Run logs](${RUN_URL})`,
+              });
+            } catch (e) {
+              core.warning(`Could not post skip comment: ${e.message}`);
+            }
