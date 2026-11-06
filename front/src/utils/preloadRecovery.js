@@ -45,12 +45,14 @@ let recovering = false;
 // React.lazy throw a TypeError that is not a chunk error, and a second failure (CSS plus
 // JS) is blocked by the guard below.
 export function isRecovering() {
-  return recovering;
+  // public/theme-init.js can start a recovery first and flags it on window.
+  return recovering || (typeof window !== "undefined" && window.__dfwscRecovering === true);
 }
 
 // Test hook: module state outlives a test, a real page never needs this.
 export function resetRecovering() {
   recovering = false;
+  if (typeof window !== "undefined") delete window.__dfwscRecovering;
 }
 
 // Starts one recovery per interval (tracked in sessionStorage so it survives the reload).

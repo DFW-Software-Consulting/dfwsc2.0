@@ -125,6 +125,18 @@ describe("ErrorBoundary", () => {
       await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     });
 
+    it("stays blank when theme-init.js already started the recovery", () => {
+      // theme-init sees the modulepreload link error first, so the app's own guard blocks.
+      window.__dfwscRecovering = true;
+      sessionStorage.setItem("preload-reloaded-at", String(Date.now()));
+      const { container } = render(
+        <ErrorBoundary>
+          <Bomb />
+        </ErrorBoundary>
+      );
+      expect(container).toBeEmptyDOMElement();
+    });
+
     it("does not recover from non-chunk errors", () => {
       render(
         <ErrorBoundary>

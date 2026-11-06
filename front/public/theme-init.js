@@ -38,7 +38,13 @@ window.addEventListener(
     } catch (e) {
       return;
     }
+    // Tell the app (isRecovering() in src/utils/preloadRecovery.js) so its ErrorBoundary
+    // stays blank: this error reaches us before a lazy import() rejects.
+    window.__dfwscRecovering = true;
+    var reloaded = false;
     var reload = function () {
+      if (reloaded) return;
+      reloaded = true;
       location.reload();
     };
     fetch(url, { cache: "reload" }).then(reload, reload);

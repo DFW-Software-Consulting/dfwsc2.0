@@ -80,6 +80,55 @@ describe("public/theme-init.js", () => {
       expect(reload).toHaveBeenCalledTimes(1);
     });
 
+    it("flags the recovery on window so the app's ErrorBoundary stays blank", () => {
+      setup();
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      expect(window.__dfwscRecovering).toBe(true);
+      delete window.__dfwscRecovering;
+    });
+
+    it("reloads exactly once even though both the fetch and the timer fire", async () => {
+      vi.useFakeTimers();
+      setup();
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(reload).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+      delete window.__dfwscRecovering;
+    });
+
+    it("reloads when the refetch is rejected", async () => {
+      setup();
+      fetchMock.mockRejectedValue(new TypeError("offline"));
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(reload).toHaveBeenCalledTimes(1);
+      delete window.__dfwscRecovering;
+    });
+
+    it("falls back to the timer when the refetch hangs", async () => {
+      vi.useFakeTimers();
+      setup();
+      fetchMock.mockReturnValue(new Promise(() => {}));
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(reload).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(reload).toHaveBeenCalledTimes(1);
+      vi.useRealTimers();
+      delete window.__dfwscRecovering;
+    });
+
+    it("does nothing when sessionStorage throws", () => {
+      setup();
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("blocked");
+      });
+      listener(failing(`<script src="${window.location.origin}/assets/a.js"></script>`));
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(reload).not.toHaveBeenCalled();
+    });
+
     it("handles stylesheets too", () => {
       setup();
       const url = `${window.location.origin}/assets/index-abc.css`;
