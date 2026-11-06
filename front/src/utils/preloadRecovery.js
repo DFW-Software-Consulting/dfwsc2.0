@@ -24,14 +24,33 @@ export function extractAssetUrl(error) {
 // cache (older nginx configs let Cloudflare add a 4h max-age to it). Re-fetch the asset
 // with cache: "reload" to overwrite any poisoned entry, then reload the page once.
 async function refetchAndReload(url) {
+  // AbortSignal.timeout is missing in older Safari, so use a controller.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    if (url) {
-      await fetch(url, { cache: "reload", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    }
+    if (url) await fetch(url, { cache: "reload", signal: controller.signal });
   } catch {
     // Offline or timed out: reload anyway, the guard prevents a loop.
+  } finally {
+    clearTimeout(timer);
+    window.location.reload();
   }
-  window.location.reload();
+}
+
+let recovering = false;
+
+// True from the moment a recovery starts until the page reloads. The reload always follows
+// (the refetch is time-limited and failures are swallowed), so this cannot stick. While it
+// is set, error UI is suppressed whatever the error: a prevented vite:preloadError makes
+// React.lazy throw a TypeError that is not a chunk error, and a second failure (CSS plus
+// JS) is blocked by the guard below.
+export function isRecovering() {
+  return recovering;
+}
+
+// Test hook: module state outlives a test, a real page never needs this.
+export function resetRecovering() {
+  recovering = false;
 }
 
 // Starts one recovery per interval (tracked in sessionStorage so it survives the reload).
@@ -50,6 +69,7 @@ export function startRecovery(error) {
   } catch {
     return false;
   }
+  recovering = true;
   refetchAndReload(extractAssetUrl(error));
   return true;
 }

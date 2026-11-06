@@ -1,6 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { lazy, Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ErrorBoundary from "../components/ErrorBoundary";
+import {
+  handlePreloadError,
+  isRecovering,
+  resetRecovering,
+  startRecovery,
+} from "../utils/preloadRecovery";
 
 function Bomb() {
   throw new Error("boom");
@@ -35,6 +42,8 @@ describe("ErrorBoundary", () => {
   describe("chunk-load errors", () => {
     const reload = vi.fn();
     const fetchMock = vi.fn();
+    const chunkErr = () =>
+      new TypeError("Failed to fetch dynamically imported module: /assets/D.js");
     const ChunkBomb = () => {
       throw new TypeError(
         "Failed to fetch dynamically imported module: https://dfwsc.com/assets/Demos-abc.js"
@@ -43,6 +52,7 @@ describe("ErrorBoundary", () => {
 
     beforeEach(() => {
       sessionStorage.clear();
+      resetRecovering();
       reload.mockClear();
       fetchMock.mockReset().mockResolvedValue({ ok: true });
       vi.stubGlobal("fetch", fetchMock);
@@ -79,6 +89,40 @@ describe("ErrorBoundary", () => {
       expect(screen.getByText("Something went wrong")).toBeInTheDocument();
       expect(reload).not.toHaveBeenCalled();
       expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("stays blank for the TypeError React.lazy throws after a prevented preload error", async () => {
+      const Lazy = lazy(() => Promise.resolve(undefined));
+      // A prevented vite:preloadError starts recovery, then the import resolves to undefined.
+      const event = new Event("vite:preloadError", { cancelable: true });
+      event.payload = new Error("Unable to preload CSS for /assets/a.css");
+      handlePreloadError(event);
+      expect(isRecovering()).toBe(true);
+      const { container } = render(
+        <ErrorBoundary>
+          <Suspense fallback={null}>
+            <Lazy />
+          </Suspense>
+        </ErrorBoundary>
+      );
+      await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+      expect(container).toBeEmptyDOMElement();
+      expect(screen.queryByText("Something went wrong")).not.toBeInTheDocument();
+    });
+
+    it("stays blank when a second chunk error hits the guard mid-recovery (CSS plus JS)", async () => {
+      const first = new Event("vite:preloadError", { cancelable: true });
+      first.payload = new Error("Unable to preload CSS for /assets/a.css");
+      handlePreloadError(first);
+      // The JS chunk then fails too; the 30s guard blocks a second recovery.
+      expect(startRecovery(chunkErr())).toBe(false);
+      const { container } = render(
+        <ErrorBoundary>
+          <ChunkBomb />
+        </ErrorBoundary>
+      );
+      expect(container).toBeEmptyDOMElement();
+      await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
     });
 
     it("does not recover from non-chunk errors", () => {

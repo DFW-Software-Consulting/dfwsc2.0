@@ -1,6 +1,6 @@
 import { Component } from "react";
 import logger from "../utils/logger";
-import { isChunkLoadError, startRecovery } from "../utils/preloadRecovery";
+import { isChunkLoadError, isRecovering, startRecovery } from "../utils/preloadRecovery";
 
 export default class ErrorBoundary extends Component {
   constructor(props) {
@@ -23,7 +23,7 @@ export default class ErrorBoundary extends Component {
   };
 
   render() {
-    if (this.state.recovering) return null;
+    if (this.state.recovering || isRecovering()) return null;
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-[var(--bg-main)] text-[var(--text-main)] px-4">
