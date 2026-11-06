@@ -50,8 +50,9 @@ Clients are businesses that use the platform to accept payments through their ow
 ## Base URL & Environment Setup
 
 - **Dev:** `http://localhost:4242`
-- **All routes** are prefixed with `/api/v1` (except `/docs` and `/api/v1/health`)
+- **All routes** are prefixed with `/api/v1` (except the dev-only Swagger `/docs` and `/api/v1/health`)
 - **Swagger UI** (dev only): `http://localhost:4242/docs`
+- **Integration guide:** The developer integration guide lives in Nextcloud (Collective "Developer Integration Guide", access via the `integrators` group). The public website no longer has a docs page; `dfwsc.com/docs` redirects there.
 
 ### Starting the dev stack
 

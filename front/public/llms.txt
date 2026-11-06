@@ -16,7 +16,7 @@
 
 ## Developer documentation
 
-- [Payment API documentation](https://dfwsc.com/docs): Reference for the DFWSC payment platform: create a payment, redirect to Stripe Checkout, and confirm the payment from your backend.
+- The payment integration guide is not published on this site. It is available to connected clients on request. Contact mail@dfwsc.com to request access.
 
 ## Contact
 
