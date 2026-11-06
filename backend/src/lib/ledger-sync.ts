@@ -58,6 +58,7 @@ const OPENREGISTER_API = "/index.php/apps/openregister/api";
 // Fiscal-year boundaries use the business's home timezone offset
 // (America/Chicago standard time), matching the years created manually.
 const FISCAL_TZ_OFFSET = "-06:00";
+const FISCAL_TZ_OFFSET_HOURS = -6;
 
 const PAGE_SIZE = 200;
 const MAX_PAGES = 50;
@@ -200,7 +201,9 @@ async function ensureFiscalYear(
   if (match) {
     return match;
   }
-  const year = new Date(paidAtSec * 1000).getUTCFullYear();
+  // The year is read in the same fixed offset the range is built with, so a payment late on
+  // Dec 31 local time (already Jan 1 UTC) lands in the year that actually contains it.
+  const year = new Date((paidAtSec + FISCAL_TZ_OFFSET_HOURS * 3600) * 1000).getUTCFullYear();
   // The per-invoice lock does not stop two different invoices from creating the same year, so
   // creation is serialized per year, and the list is read again once the lock is held.
   const outcome = await withMirrorLock<FiscalYear | "busy">(

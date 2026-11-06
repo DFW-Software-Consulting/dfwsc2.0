@@ -382,6 +382,38 @@ describe("syncInvoicePaid", () => {
     expect(nc.incomes).toHaveLength(1);
   });
 
+  it.each([
+    ["Dec 31 23:30 Chicago (-06:00)", "2026-12-31T23:30:00-06:00", "FY 2026"],
+    ["Jan 1 00:30 Chicago (-06:00)", "2027-01-01T00:30:00-06:00", "FY 2027"],
+  ])("creates the fiscal year in Chicago time for %s", async (_label, iso, name) => {
+    useNextcloud({ fiscalYears: [] });
+    enableSync();
+    const paidAt = Math.floor(Date.parse(iso) / 1000);
+    await syncInvoicePaid(
+      fakeStripe(),
+      invoice({ status_transitions: { paid_at: paidAt } }),
+      logger
+    );
+
+    const creates = nc.calls.filter(
+      (c) => c.method === "POST" && c.url.endsWith("/nextledger/api/fiscal-years")
+    );
+    expect(creates).toHaveLength(1);
+    expect(creates[0].body?.name).toBe(name);
+    expect(creates[0].body?.dateStart as number).toBeLessThanOrEqual(paidAt);
+    expect(creates[0].body?.dateEnd as number).toBeGreaterThanOrEqual(paidAt);
+
+    // A retry finds the year just created instead of making a second one.
+    await syncInvoicePaid(
+      fakeStripe(),
+      invoice({ status_transitions: { paid_at: paidAt } }),
+      logger
+    );
+    expect(
+      nc.calls.filter((c) => c.method === "POST" && c.url.endsWith("/nextledger/api/fiscal-years"))
+    ).toHaveLength(1);
+  });
+
   it("books out-of-band payments without a fee expense", async () => {
     enableSync();
     const stripeClient = fakeStripe({
