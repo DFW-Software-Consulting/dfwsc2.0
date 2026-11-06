@@ -87,6 +87,17 @@ describe("visitContextSchema", () => {
     expect(visitContextSchema.parse(ctx)).toEqual(ctx);
   });
 
+  it("accepts plain campaign text up to 64 characters", () => {
+    const utm = {
+      source: "newsletter",
+      medium: "e-mail",
+      campaign: "Spring Sale_2026 (A|B)",
+      term: "web+design.dallas",
+      content: "a".repeat(64),
+    };
+    expect(visitContextSchema.parse({ utm }).utm).toEqual(utm);
+  });
+
   it.each([
     ["referrer with a slash", { referrer: "a.com/x" }],
     ["uppercase referrer", { referrer: "A.com" }],
@@ -96,7 +107,13 @@ describe("visitContextSchema", () => {
     ["newline in utm", { utm: { source: "a\nb" } }],
     ["control char in utm", { utm: { medium: "a\u0000b" } }],
     ["empty utm value", { utm: { campaign: "" } }],
-    ["101-char utm value", { utm: { term: "a".repeat(101) } }],
+    ["65-char utm value", { utm: { term: "a".repeat(65) } }],
+    ["URL in utm", { utm: { source: "https://evil.example/login" } }],
+    ["scheme-less link in utm", { utm: { campaign: "see: evil.example/x" } }],
+    ["email address in utm", { utm: { content: "pay@evil.example" } }],
+    ["angle brackets in utm", { utm: { medium: "<b>hi</b>" } }],
+    ["emoji in utm", { utm: { source: "sale \u{1F600}" } }],
+    ["quote in utm", { utm: { term: 'say "hi"' } }],
     ["unknown utm key", { utm: { other: "x" } }],
     ["unknown key", { nope: 1 }],
     ["negative seconds", { secondsOnSite: -1 }],

@@ -8,7 +8,9 @@ const PUBLIC_PATHS = new Set(["/", "/pricing", "/team", "/privacy"]);
 const MAX_PAGES = 20;
 const MAX_PATH = 200;
 const MAX_HOST = 253;
-const MAX_UTM = 100;
+const MAX_UTM = 64;
+// Keep in step with the backend schema (backend/src/lib/visit-context.ts).
+const UTM_VALUE = /^[A-Za-z0-9 _.+|()-]+$/;
 const MAX_SECONDS = 86400;
 const UTM_KEYS = ["source", "medium", "campaign", "term", "content"];
 const OWN_HOSTS = ["dfwsc.com", "localhost"];
@@ -74,7 +76,8 @@ export function initVisitContext() {
   const found = {};
   for (const key of UTM_KEYS) {
     const value = cleanText(params.get(`utm_${key}`) ?? "");
-    if (value) found[key] = value;
+    // A value outside the allowed characters is dropped, not repaired.
+    if (value && UTM_VALUE.test(value)) found[key] = value;
   }
   if (Object.keys(found).length > 0) utm = found;
 }

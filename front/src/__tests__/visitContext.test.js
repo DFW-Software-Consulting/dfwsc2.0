@@ -32,7 +32,7 @@ describe("visitContext", () => {
     expect(ctx.utm).toEqual({
       source: "news",
       medium: "email",
-      campaign: "x".repeat(100),
+      campaign: "x".repeat(64),
       content: "ab",
     });
     expect(ctx.landingPath).toBe("/pricing");
@@ -45,16 +45,19 @@ describe("visitContext", () => {
     expect(m.getVisitContext().utm).toEqual({ campaign: "Spring Sale" });
   });
 
-  it("truncates utm values to 100 UTF-16 units without splitting emoji", async () => {
-    const raw = encodeURIComponent("\u{1F600}".repeat(101));
-    const m = await load({ url: `/?utm_content=${raw}` });
+  it("truncates utm values to 64 characters", async () => {
+    const m = await load({ url: `/?utm_content=${"y".repeat(80)}` });
     m.initVisitContext();
-    const { content } = m.getVisitContext().utm;
-    expect(content.length).toBeLessThanOrEqual(100);
-    expect(content).toBe("\u{1F600}".repeat(50));
-    expect(content).not.toMatch(
-      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
-    );
+    expect(m.getVisitContext().utm).toEqual({ content: "y".repeat(64) });
+  });
+
+  it("drops utm values with characters outside plain words, keeping the valid ones", async () => {
+    const q = (v) => encodeURIComponent(v);
+    const m = await load({
+      url: `/?utm_source=${q("https://evil.example/x")}&utm_medium=${q("a@b.example")}&utm_campaign=${q("sale \u{1F600}")}&utm_term=${q("<b>x</b>")}&utm_content=${q("Spring Sale (A|B)")}`,
+    });
+    m.initVisitContext();
+    expect(m.getVisitContext().utm).toEqual({ content: "Spring Sale (A|B)" });
   });
 
   it("omits utm when none are present", async () => {

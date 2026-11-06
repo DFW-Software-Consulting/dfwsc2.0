@@ -4,13 +4,16 @@ import { z } from "zod";
 // informational and entirely optional: the contact route drops an invalid context
 // instead of rejecting the request, so a bad value can never cost a lead.
 
-// No control characters (newlines would let a visitor forge lines in the email).
-const NO_CONTROL_CHARS = /^[^\p{Cc}\p{Zl}\p{Zp}]*$/u;
 const PATH = /^\/[A-Za-z0-9\-._~/]{0,199}$/;
 const HOSTNAME = /^[a-z0-9.-]{1,253}$/;
 
 const pathSchema = z.string().regex(PATH);
-const utmValueSchema = z.string().min(1).max(100).regex(NO_CONTROL_CHARS);
+// Campaign tags come straight from a link anyone can craft and are read by staff in the
+// inbox, so keep them to plain words: letters, digits, space and - _ . + | ( ). That rules
+// out ":", "/", "@" and the like, so a link cannot plant a URL or an address in a lead.
+const UTM_VALUE = /^[A-Za-z0-9 _.+|()-]+$/;
+const MAX_UTM_LENGTH = 64;
+const utmValueSchema = z.string().min(1).max(MAX_UTM_LENGTH).regex(UTM_VALUE);
 
 export const visitContextSchema = z.strictObject({
   referrer: z.string().regex(HOSTNAME).optional(),
