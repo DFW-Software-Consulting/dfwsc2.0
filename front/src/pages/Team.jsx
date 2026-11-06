@@ -5,40 +5,15 @@ import HectorOropesaImage from "../assets/hector-oropesa.webp";
 import JeremyAshleyImage from "../assets/jeremy-ashley.jpg";
 import { MotionRoot, Reveal, RevealGroup, RevealItem } from "../components/motion/Reveal.jsx";
 import { LEAVE, PAGE_HERO, ProcessGrid, RISE, ScrollFx } from "../components/motion/ScrollFx.jsx";
+import { teamMembers } from "../content/team.js";
 import "../styles/studio.css";
 import "./Team.css";
-import { usePageTitle } from "../hooks/usePageTitle.js";
 
-// Add a member's personal profile as `linkedin` (https://www.linkedin.com/in/...) to link their photo.
-const teamMembers = [
-  {
-    name: "Jeremy Ashley",
-    linkedin: "https://www.linkedin.com/in/dev-jc/",
-    role: "Founder & CTO",
-    intro: "Your partner in figuring out what to build—and why.",
-    bio: "Drives technical strategy and architecture across the organization. Oversees full-stack product delivery, DevOps automation, and scalable cloud infrastructure design.",
-    focus: "Discovery · Technical direction · Full-stack delivery",
-    image: JeremyAshleyImage,
-  },
-  {
-    name: "Diego Espino",
-    linkedin: "https://www.linkedin.com/in/developerdiego/",
-    role: "Full Stack & DevOps Engineer",
-    intro: "Turning the plan into software your team can use.",
-    bio: "Bridges front-end experience with backend reliability. Focused on TypeScript & Python ecosystems, CI/CD pipelines, and performance-driven web applications that scale.",
-    focus: "Application development · Deployment · Performance",
-    image: DiegoEspinoImage,
-  },
-  {
-    name: "Hector Oropesa",
-    linkedin: "https://www.linkedin.com/in/hectororopesa/",
-    role: "Full Stack Developer • DevOps & Network Engineer",
-    intro: "Bringing your software, systems, and infrastructure together.",
-    bio: "Combines full-stack development with deep IT and network engineering experience. Bridges software, systems, and networking by managing cloud environments, hardening systems, and supporting scalable, reliable deployments across DevOps workflows.",
-    focus: "Application development · Cloud systems · Networking",
-    image: HectorOropesaImage,
-  },
-];
+const memberImages = {
+  "Jeremy Ashley": JeremyAshleyImage,
+  "Diego Espino": DiegoEspinoImage,
+  "Hector Oropesa": HectorOropesaImage,
+};
 
 const processSteps = [
   [
@@ -104,7 +79,6 @@ export function MemberPhoto({ name, image, linkedin }) {
 }
 
 export default function Team() {
-  usePageTitle("Our Team");
   useEffect(() => {
     window.scrollTo({ top: 0 });
   }, []);
@@ -158,7 +132,11 @@ export default function Team() {
           <div className="studio-member-list">
             {teamMembers.map((member) => (
               <ScrollFx as="article" className="studio-member" key={member.name} fx={RISE}>
-                <MemberPhoto name={member.name} image={member.image} linkedin={member.linkedin} />
+                <MemberPhoto
+                  name={member.name}
+                  image={memberImages[member.name]}
+                  linkedin={member.linkedin}
+                />
                 <div className="studio-member-copy">
                   <p className="studio-mini-label">{member.role}</p>
                   <h3>{member.name}</h3>

@@ -15,6 +15,9 @@ ENV VITE_ANALYTICS_DOMAIN=$VITE_ANALYTICS_DOMAIN
 
 RUN npm run build
 
+# Fail the image build if the prerendered pages nginx routes to are missing.
+RUN node scripts/verify-build.mjs build-dist
+
 # The analytics script and its Plausible-compatible event endpoint share an
 # origin. Derive that exact origin at build time so CSP permits only the
 # configured service (and remains restrictive when analytics is disabled).

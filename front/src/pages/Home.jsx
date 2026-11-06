@@ -15,7 +15,6 @@ import {
 import { scrollToSection } from "../utils/scrollToSection.js";
 import "../styles/studio.css";
 import "./Home.css";
-import { usePageTitle } from "../hooks/usePageTitle.js";
 
 const workflows = [
   {
@@ -138,7 +137,6 @@ const processSteps = [
 const twoDigits = (n) => String(n).padStart(2, "0");
 
 export default function Home() {
-  usePageTitle("Home");
   const [active, setActive] = useState(0);
   const [switched, setSwitched] = useState(false);
   const workflow = workflows[active];
