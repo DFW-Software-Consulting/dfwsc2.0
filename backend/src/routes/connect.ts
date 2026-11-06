@@ -35,6 +35,7 @@ import { rateLimit } from "../lib/rate-limit";
 import { errorLogFields, transportErrorFields } from "../lib/safe-error-log";
 import { getSettings, stripe } from "../lib/stripe-billing";
 import {
+  capabilityStatuses,
   createExpressAccountForClient,
   deleteUnpersistedExpressAccount,
   type ExpressAccountState,
@@ -226,6 +227,7 @@ async function provisionExpressAccount(
     stripeAccountId: account.stripeAccountId,
     chargesEnabled: account.chargesEnabled,
     cardPaymentsStatus: account.cardPaymentsStatus,
+    achPaymentsStatus: account.achPaymentsStatus,
     payoutsEnabled: account.payoutsEnabled,
     detailsSubmitted: account.detailsSubmitted,
   });
@@ -949,7 +951,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       }
 
       const chargesEnabled = verifiedAccount.charges_enabled ?? false;
-      const cardPaymentsStatus = verifiedAccount.capabilities?.card_payments ?? "unrequested";
+      const { cardPaymentsStatus, achPaymentsStatus } = capabilityStatuses(verifiedAccount);
       const payoutsEnabled = verifiedAccount.payouts_enabled ?? false;
       const detailsSubmitted = verifiedAccount.details_submitted ?? false;
       const tokenStatus = detailsSubmitted ? "completed" : "in_progress";
@@ -974,6 +976,7 @@ export default async function connectRoutes(fastify: FastifyInstance) {
             stripeAccountId: effectiveAccountId,
             chargesEnabled,
             cardPaymentsStatus,
+            achPaymentsStatus,
             payoutsEnabled,
             detailsSubmitted,
             updatedAt: new Date(),

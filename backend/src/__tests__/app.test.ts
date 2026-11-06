@@ -937,6 +937,7 @@ describe("connect onboarding", () => {
         capabilities: {
           card_payments: { requested: true },
           transfers: { requested: true },
+          us_bank_account_ach_payments: { requested: true },
         },
       }),
       expect.objectContaining({ idempotencyKey: `acct-create-${clientId}` })
