@@ -1,0 +1,11 @@
+.demo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; list-style: none; padding: 0; margin: 0; }
+.demo-card { display: flex; flex-direction: column; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--bg-card); overflow: hidden; }
+.demo-card-media { display: flex; align-items: center; justify-content: center; aspect-ratio: 16 / 9; background: radial-gradient(ellipse at 100% 100%, var(--hero-glow) 0, transparent 70%), var(--bg-surface); color: var(--accent); border-bottom: 1px solid var(--border-subtle); }
+.demo-card-media img { width: 100%; height: 100%; object-fit: cover; }
+.demo-card-media svg { width: 56px; height: 56px; }
+.demo-card-body { display: flex; flex-direction: column; gap: 10px; padding: 24px; flex: 1; }
+.demo-card h2 { font-size: 24px; line-height: 1.2; letter-spacing: -.03em; font-weight: 600; }
+.demo-card p { font-size: 15px; line-height: 1.7; color: var(--text-muted); }
+.demo-card .studio-text-link { margin-top: auto; padding-top: 8px; }
+@media (max-width: 960px) { .demo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .demo-grid { grid-template-columns: 1fr; } }
