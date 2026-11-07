@@ -1,3 +1,7 @@
+> **Historical / superseded (2026-11-06).** This document reflects the codebase as of 2026-06-19. It is not maintained and some instructions would reintroduce removed or insecure behavior. Current docs: [docs/](../docs/)
+>
+> Status: superseded. Steps 5 to 9 describe tooling that does not exist in the repo: there is no Sentry integration, no Prometheus or Grafana stack, and no deploy workflow (`.github/workflows/` holds `ci.yml` and `opencode-review.yml` only). Deployment is on Coolify and logs go to Loki through Promtail (`observability/promtail-config.yml`); see [COOLIFY_DEPLOYMENT.md](../docs/COOLIFY_DEPLOYMENT.md). The backend does expose a `/metrics` route (`backend/src/routes/metrics.ts`); see [BACKEND.md](../docs/BACKEND.md).
+
 # Plan: DevOps, Monitoring & Infrastructure
 
 ## Goal

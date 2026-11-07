@@ -1,3 +1,7 @@
+> **Historical / superseded (2026-11-06).** This document reflects the codebase as of 2026-04-12. It is not maintained and some instructions would reintroduce removed or insecure behavior. Current docs: [docs/](../docs/)
+>
+> Many findings refer to routes, flows and tables that no longer exist (for example the local admin `/auth/setup` flow and PaymentIntent payments). Do not treat them as current.
+
 > **STALE** — 2026-04 snapshot referencing the removed `dfwsc_services` workspace and phantom `/dfwsc-clients`, `/stripe-customers`, `invoices.ts`/`subscriptions.ts` routes that no longer exist. See `README.md` and `backend/src/routes/` for current truth.
 
 # Deep Review Report: dfwsc-billing-first-flow Branch

@@ -1,137 +1,74 @@
-# Stripe Payment Portal (MVP)
+# DFWSC Backend
 
-Minimal Stripe Connect API for onboarding Express accounts, creating payments with platform fees, and recording webhook activity. This branch removes all custom invoice/refund handling, local ledgers, and non-essential routes so the service focuses on the Stripe source of truth.
+Fastify + TypeScript API for the DFW Software Consulting payment portal: Stripe Connect onboarding and Checkout payments, client API keys, admin login through Nextcloud, and optional Nextcloud/Stripe background jobs. Entry points are `src/index.ts` (process start, migrations in non-production, background jobs) and `src/app.ts` (server and route registration).
 
 ## Requirements
 
-- Node.js v18+
+- Node.js >=22.12
 - PostgreSQL 17
-- Stripe account with Connect enabled
+- A Stripe account with Connect enabled
+- Redis (optional): when `REDIS_URL` is set, rate limits are shared across replicas; otherwise they are per-process
 
-## Environment Variables
+## Where things are documented
 
-Create a `.env` file based on `.env.example`.
+| Topic | Document |
+|-------|----------|
+| Environment variables and feature flags | [docs/ENVIRONMENT.md](../docs/ENVIRONMENT.md) |
+| Routes, auth, rate limits, background jobs | [docs/BACKEND.md](../docs/BACKEND.md) (route map in section 7) |
+| Schema, migrations, boot-time schema check | [docs/DATABASE.md](../docs/DATABASE.md) |
+| Stripe Connect flows, fees, webhook behavior | [docs/STRIPE.md](../docs/STRIPE.md) |
+| Integrator guide for payments and invoicing | [CLIENT_INTEGRATION.md](../CLIENT_INTEGRATION.md) |
+| Production deployment | [docs/COOLIFY_DEPLOYMENT.md](../docs/COOLIFY_DEPLOYMENT.md) |
+| Hooks, CI, tests | [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md) |
 
-| Variable | Required | Description |
-| --- | --- | --- |
-| `STRIPE_SECRET_KEY` | ✅ | Stripe API key used for all server-side requests. |
-| `STRIPE_WEBHOOK_SECRET` | ✅ | Signing secret for `/webhooks/stripe`. |
-| `FRONTEND_ORIGIN` | ✅ | Origin allowed by CORS and used for Checkout redirects. |
-| `DEFAULT_PROCESS_FEE_CENTS` | ❌ | Platform fee applied when the request omits `applicationFeeAmount`. Must be a non-negative integer. |
-| `DATABASE_URL` | ✅ | PostgreSQL connection string used by Drizzle. |
-| `PORT` | ❌ | Server port (defaults to `4242`). |
-| `API_BASE_URL` | ❌ | Public URL for the API. When unset, the service infers it from the request host. |
-| `SMTP_HOST` | ✅ | SMTP server used to email onboarding tokens. |
-| `SMTP_PORT` | ✅ | Port for the SMTP server (`587` for STARTTLS, `465` for SMTPS). |
-| `SMTP_USER` | ✅ | Username/login for the SMTP server. |
-| `SMTP_PASS` | ✅ | Password/API key for the SMTP server. |
-| `SMTP_FROM` | ❌ | Friendly from address used in onboarding emails. Defaults to `SMTP_USER` when omitted. |
-| `ADMIN_NEXTCLOUD_GROUPS` | ❌ | Comma-separated Nextcloud group ids allowed to sign in to the admin panel. Defaults to `dfwsc-admins,managers`. The groups must exist with members before deploying. Login also needs `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD`; without them it answers 503. |
-| `JWT_SECRET` | ✅ | Secret key for signing JWT tokens. Must be minimum 32 characters. Generate with: `openssl rand -base64 32` |
-| `JWT_EXPIRY` | ❌ | JWT token expiration time. Defaults to `1h`. Supported formats: `1h`, `30m`, `7d`, `24h`. |
+`API_BASE_URL` is required in production: without it, `/app-config.js` and the Connect callback and refresh links answer 500.
 
-## Database Schema
+## Source layout
 
-| Table | Columns |
-| --- | --- |
-| `clients` | `id`, `name`, `email`, `stripe_account_id`, `created_at`, `updated_at` |
-| `webhook_events` | `id`, `stripe_event_id`, `type`, `payload`, `processed_at`, `created_at` |
-| `onboarding_tokens` | `id`, `client_id`, `token`, `status`, `email`, `created_at`, `updated_at` |
+| Path | Contents |
+|------|----------|
+| `src/routes/` | HTTP routes, registered under `/api/v1` in `src/app.ts` |
+| `src/lib/` | Stripe, mailer, auth, rate limiting, circuit breakers, Nextcloud and sync jobs |
+| `src/db/` | Drizzle schema and client |
+| `src/cerebo/` | Optional workspace API, served only when `CEREBO_ENABLED=true` |
+| `src/scripts/` | One-off scripts (for example `backfill-billing-customers.ts`) |
+| `scripts/` | `reset-test-data.ts` (also `npm run reset:test-data`) |
+| `drizzle/` | Generated SQL migrations; commit them with schema changes |
 
-The database only stores the connected account mapping and raw webhook payloads. All payment state lives in Stripe.
+## Running locally
 
-## Routes
-
-| Method & Path | Purpose | Role |
-| --- | --- | --- |
-| `GET /api/v1/health` | Health check. | Public |
-| `POST /api/v1/auth/login` | Admin login endpoint. Returns JWT token for authentication. Rate limited to 5 requests per 15 minutes. | Public |
-| `GET /api/v1/clients` | List all clients with their status and Stripe account information. | Admin (JWT) |
-| `PATCH /api/v1/clients/:id` | Update client status (`active` or `inactive`). Soft-deletes clients without removing from database. | Admin (JWT) |
-| `POST /api/v1/accounts` | Create a client record and onboarding token. | Admin |
-| `POST /api/v1/onboard-client/initiate` | Email onboarding link to a client. | Admin |
-| `GET /api/v1/onboard-client` | Exchange onboarding token for a Stripe onboarding link. | Public |
-| `GET /api/v1/connect/callback` | Stripe onboarding return URL. Persists the `account` query parameter to the client record and redirects to the frontend success page. | Public |
-| `POST /api/v1/payments/create` | Create a Checkout Session for a client's connected account. Requires an `Idempotency-Key` header and a `lineItems` array; returns `{ url, sessionId }`. | Admin or Client |
-| `GET /api/v1/payments/session/:sessionId` | Confirm a payment by Checkout session ID (status and amounts). Rate limited: 30 requests per minute per IP, or 600 per minute per client when `X-Api-Key` is sent; 30 distinct rejected keys per minute per IP (the same bad key counts once). | Public, or API key |
-| `POST /api/v1/webhooks/stripe` | Verify the Stripe signature, store the raw event payload, mark the event as processed, and log basic status updates. | Stripe |
-| `GET /api/v1/reports/payments` | List PaymentIntents for a client's connected account with Stripe pagination parameters. | Admin |
-
-Non-listed endpoints from earlier versions have been removed (invoices, refunds, ledgers, customer CRUD, etc.).
-
-## Payments and Fees
-
-- The caller supplies the desired `application_fee_amount` for each payment request.
-- The API always creates a Checkout Session from the required `lineItems`, applies platform fees via `payment_intent_data.application_fee_amount`, and returns the hosted session URL and session ID.
-- Idempotency is enforced via the standard `Idempotency-Key` request header on write routes. On `POST /api/v1/payments/create` keys are scoped per client and at most 218 characters, a key reused for a different payment returns `409 IDEMPOTENCY_KEY_REUSED`, and a key should not be reused more than 24 hours after its first use (Stripe stops honouring it). See `CLIENT_INTEGRATION.md` for the full error list.
-
-Refunds are **not** exposed through this API. Handle all refunds directly in the Stripe Dashboard so Stripe remains the source of truth.
-
-## Webhooks
-
-`POST /webhooks/stripe` handles the following event types:
-
-- `payment_intent.succeeded`
-- `payment_intent.payment_failed`
-- `charge.refunded`
-- `payout.paid`
-- `payout.failed`
-
-Each event is saved in `webhook_events` (raw JSON) and marked processed after minimal logging.
-
-## Running Locally
+The recommended path is the Docker dev stack from the repository root (`make up-build`; see the root [README.md](../README.md)). To run the API directly:
 
 ```bash
+cp ../.env.example ../.env      # the API reads the repo-root .env outside production
 npm install
-npm run dev
+npm run dev                     # http://localhost:4242
 ```
 
-The development server listens on `http://localhost:4242` by default.
+`.env.example` sets `DATABASE_URL` to the Compose host `db`; point it at your own PostgreSQL when running outside Compose. Outside production the API applies pending migrations at start. In production the `migrator` service in `docker-compose.prod.yml` runs `npm run db:migrate` before `api` starts.
 
-### Database Migrations
-
-Use Drizzle Kit to generate and apply migrations.
-
-**Local development:**
-```bash
-# Generate a new migration from schema changes
-npm run db:generate
-
-# Apply migrations to your local database
-npm run db:migrate
-```
-
-**CI/CD Deployment:**
-```bash
-# In your deployment pipeline, run migrations before starting the server
-npm run db:migrate
-```
-
-**Database management:**
-```bash
-# Open Drizzle Studio to view and manage data
-npm run db:studio
-
-# Push schema directly without migrations (dev only)
-npm run db:push
-```
-
-Migration files are stored in the `./drizzle` directory and should be committed to version control.
-
-### Tests
+### Database commands
 
 ```bash
-npm test
+npm run db:generate   # generate a migration from schema changes
+npm run db:migrate    # apply migrations
+npm run db:studio     # Drizzle Studio
+npm run db:push       # push schema without migrations (dev only)
 ```
 
-Vitest runs the unit suite, including route guards, validation, and webhook signature verification. The suite now mocks
-MailHog’s HTTP API and Nodemailer transports, so it can run without Docker or external services.
+`drizzle.config.ts` does not read `.env`: export `DATABASE_URL` in your shell before running these. It covers both `src/db/schema.ts` and `src/cerebo/schema.ts`.
 
-To replay Stripe events, use the Stripe CLI directly:
+### Tests and lint
 
 ```bash
-stripe trigger payment_intent.succeeded
+npm test                  # Vitest; requires DATABASE_URL
+npm run test:coverage     # enforces coverage thresholds
+npm run lint              # Biome
 ```
+
+Backend tests need a reachable PostgreSQL. From the repository root, `make test-back` runs them in the dev container and `make coverage` runs them with coverage.
+
+To replay Stripe events locally, use the Stripe CLI (`npm run stripe:listen`, or `stripe trigger payment_intent.succeeded`).
 
 ## Admin login
 
@@ -141,5 +78,4 @@ Admin login is checked against Nextcloud; there are no local admin accounts. `PO
 - Accounts with two-factor login must use a Nextcloud app password.
 - There is no local fallback: if Nextcloud is down, login answers `503` (payments are unaffected).
 - Logins are limited per IP (5 / 15 min) and per username (10 / 15 min), because Nextcloud throttles failed logins by source IP.
-- Details: `docs/BACKEND.md`, "Admin login (Nextcloud)".
-
+- Details: [docs/BACKEND.md](../docs/BACKEND.md), "Admin login (Nextcloud)".

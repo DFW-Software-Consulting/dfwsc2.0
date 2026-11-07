@@ -3,7 +3,22 @@
 This document describes the data model, Drizzle ORM usage, and migration strategy for the DFWSC Payment Portal.
 
 ## 1. Overview
-The project uses **PostgreSQL 17** with **Drizzle ORM**. All schema definitions live in `backend/src/db/schema.ts`.
+The project uses **PostgreSQL 17** with **Drizzle ORM**. Two schema files feed one migration history (`backend/drizzle.config.ts` lists both):
+
+| File | Postgres schema | Contents |
+|------|-----------------|----------|
+| `backend/src/db/schema.ts` | `public` | Every table in section 2 except the Cerebo tables |
+| `backend/src/cerebo/schema.ts` | `cerebo` | The Cerebo tables (section 2, "Cerebo schema") |
+
+Both are applied by the same migrations in `backend/drizzle/` (the `cerebo` schema is created by `0040_cerebo_module`). The Cerebo HTTP routes are registered only when `CEREBO_ENABLED=true` (see [BACKEND.md](./BACKEND.md) and [ENVIRONMENT.md](./ENVIRONMENT.md)), but the tables are created by every migration run whether or not the flag is on.
+
+Table groups:
+
+- **Payments and Connect (authoritative):** `clients`, `client_groups`, `onboarding_tokens`, `api_key_regeneration_tokens`, `payment_ledger`, `settings`, `connect_customers`, `connect_invoices`, `connect_invoice_sends`.
+- **Webhook dedupe:** `webhook_events`.
+- **DFWSC billing (platform Stripe account) and Nextcloud automations:** `billing_*`, `sales_lead_*`, `client_onboarding_*`, `contact_stripe_sync_*`, `portal_mirror_*`, `stripe_id_writebacks`.
+- **Legacy:** `admins`.
+- **Cerebo:** `cerebo.*`.
 
 ## 2. Core Tables
 
@@ -11,47 +26,68 @@ The project uses **PostgreSQL 17** with **Drizzle ORM**. All schema definitions 
 The primary entity for each consulting client.
 
 - **Keys**: `id` (text, UUID), `name`, `email`.
-- **Workspace**: `workspace` — always `"client_portal"`.
-- **Credentials**: `apiKeyHash` (bcrypt), `apiKeyLookup` (SHA256 — fast lookup index).
-- **Stripe**: `stripeAccountId` (linked Express account), `stripeCustomerId`.
-- **Status**: `"active"`, `"inactive"`, `"pending"`, `"failed"`.
+- **Workspace**: `workspace` — always `"client_portal"` (CHECK `clients_workspace_check`).
+- **Credentials**: `apiKeyHash` (bcrypt) and `apiKeyLookup` (SHA256, used to find the row before the bcrypt comparison). Both are unique columns and nullable.
+- **Stripe**: `stripeAccountId` (linked Express account; unique), `stripeCustomerId` (unique where not null).
+- **Status**: `"active"`, `"inactive"`, `"pending"`, `"failed"`, `"archived"` (CHECK `clients_status_check`, widened to include `archived` by migration `0020`).
 - **Group**: `groupId` (optional FK → `client_groups.id`).
 - **Pricing**: `processingFeePercent`, `processingFeeCents` (set one, not both).
 - **URLs**: `paymentSuccessUrl`, `paymentCancelUrl`.
+- **Connect redirect origins**: `connectRedirectOrigins` (`text[]`, NOT NULL, default empty; migration `0038_client_connect_redirect_origins`). The origins (`https://host[:port]`; plain `http` only for localhost) that a client app may use as `returnUrl` and `refreshUrl` for `POST /connect/onboarding-link`. An empty list means the client cannot use that endpoint. Set by admin `PATCH /clients/:id` (at most 10 entries, each a bare origin). See [STRIPE.md](./STRIPE.md), "Client-facing Connect endpoints".
 - **Contact**: `phone`, `billingContactName`.
 - **Address**: `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`.
 - **Billing**: `defaultPaymentTermsDays`.
-- **Stripe readiness**: `chargesEnabled`, `payoutsEnabled`, `detailsSubmitted` and `cardPaymentsStatus` (nullable text: Stripe's `capabilities.card_payments` value, `active`, `inactive`, `pending` or `unrequested` (stored when Stripe's account has no such capability); NULL = never synced, migration `0037`). Written together from the Stripe account by the `account.updated` webhook, the onboarding callback and lazy account creation. `achPaymentsStatus` is the same for `capabilities.us_bank_account_ach_payments` (same values, NULL = never synced, migration `0038`); it is written wherever the card status is written, the lazy NULL fill also fills it (only where NULL) and the onboarding resend refresh overwrites both. Nothing is gated on it yet. Invoice create, finalize and send require `cardPaymentsStatus = 'active'`; a NULL is read live once and stored, only if still NULL.
-- **Invoicing**: `invoicingEnabled` (boolean, NOT NULL, default false; per-client opt-in for connected-account invoicing, set only by admin `PATCH /clients/:id`, never by `X-Api-Key` routes). Unused until the invoicing routes land (migration `0035_connect_invoicing_schema`).
+- **Stripe readiness**: `chargesEnabled`, `payoutsEnabled`, `detailsSubmitted` and `cardPaymentsStatus` (nullable text: Stripe's `capabilities.card_payments` value, `active`, `inactive`, `pending` or `unrequested` (stored when Stripe's account has no such capability); NULL = never synced, migration `0037`). Both statuses are written from the Stripe account by the `account.updated` webhook, the onboarding callback, lazy account creation and the onboarding resend refresh. The client-facing `GET /connect/account` and `POST /connect/dashboard-link` sync (`syncClientFromAccount`) writes `cardPaymentsStatus` but leaves `achPaymentsStatus` unchanged. `achPaymentsStatus` is the same for `capabilities.us_bank_account_ach_payments` (same values, NULL = never synced, migration `0039`); the lazy NULL fill also fills it (only where NULL) and the onboarding resend refresh overwrites both. Nothing is gated on it yet. Invoice create, finalize and send require `cardPaymentsStatus = 'active'`; a NULL is read live once and stored, only if still NULL.
+- **Invoicing**: `invoicingEnabled` (boolean, NOT NULL, default false; per-client opt-in for connected-account invoicing, set only by admin `PATCH /clients/:id`, never by `X-Api-Key` routes). Enforced by the invoicing routes (403 `INVOICING_NOT_ENABLED` when false; migration `0035_connect_invoicing_schema`). The routes themselves exist only when `CONNECT_INVOICING=true`.
 - **Notes**: `notes` (free-form admin text).
 - **Timestamps**: `createdAt`, `updatedAt`.
 
-**Indexes:**
-- `clients_api_key_hash_idx` — API key verification
-- `clients_api_key_lookup_idx` — SHA256 fast lookup
-- `clients_email_workspace_unique` — unique email per workspace
+**Indexes and constraints:**
+- `clients_email_workspace_unique` — unique (`email`, `workspace`)
+- `clients_stripe_account_id_unique` — unique (`stripe_account_id`)
+- `clients_stripe_customer_id_unique_idx` — partial unique (`stripe_customer_id`) WHERE NOT NULL
+- `clients_api_key_hash_unique`, `clients_api_key_lookup_unique` — the unique constraints on the two credential columns (these are the lookup indexes; the separate non-unique `clients_api_key_hash_idx` and `clients_api_key_lookup_idx` were dropped by migration `0019_brave_ravenous`)
+- `clients_group_id_idx`, `clients_workspace_idx` — plain indexes
+- `clients_workspace_check`, `clients_status_check` — CHECK constraints on the enums above
+- `group_id` references `client_groups.id` with `ON DELETE SET NULL`
 
 ### `client_groups`
 Groups multiple clients to share fee and redirect URL configuration.
 
+- **Keys**: `id` (text), `name` (NOT NULL).
 - **Workspace**: always `"client_portal"`.
 - **Status**: `"active"` or `"inactive"`.
 - **Shared config**: `processingFeePercent`, `processingFeeCents`, `paymentSuccessUrl`, `paymentCancelUrl`.
+- **Timestamps**: `createdAt`, `updatedAt`.
+
+**Indexes and constraints:** `client_groups_workspace_idx`; CHECKs `client_groups_workspace_check` and `client_groups_status_check`.
 
 ### `onboarding_tokens`
 Manages the lifecycle of a client's Stripe Connect onboarding session.
 
-- **Statuses**: `pending` → `in_progress` → `completed` (or `revoked` on resend).
-- **CSRF**: `state` field (32-byte hex) + `stateExpiresAt` (30-minute window) validated in `/connect/callback`.
+- **Statuses**: `pending` → `in_progress` → `completed` (or `revoked` on resend). CHECK `onboarding_tokens_status_check`.
+- **Token**: `token` is unique and holds the SHA-256 hex of the random token that was emailed, never the token itself (migration `0019_hash_onboarding_tokens` hashed the rows that predate this). The emailed link is valid for 24 hours from `createdAt` (`ONBOARDING_TOKEN_TTL_MS` in `routes/connect.ts`).
+- **CSRF**: `state` (32-byte hex) + `stateExpiresAt` (24 hours, `OAUTH_STATE_EXPIRY_MS` in `lib/constants.ts`), minted each time an Account Link is created and validated in `GET /connect/callback`. The callback sets `state` to NULL, so a state is single-use. See [STRIPE.md](./STRIPE.md), "Onboarding flow".
+- **Index**: `onboarding_tokens_client_state_idx` on (`client_id`, `state`).
 - **FK**: `clientId` → `clients.id` (cascade delete).
 
-### `webhook_events`
-Idempotency table to de-duplicate Stripe webhook notifications.
+### `api_key_regeneration_tokens`
+One row per emailed API-key regeneration link (migration `0022_tiresome_rage`).
 
-- **Fields**: `id`, `stripeEventId` (unique), `type`, `payload` (JSONB), `processedAt`, `createdAt`.
+- **Fields**: `id`, `clientId` (FK → `clients.id`, cascade delete), `token` (unique; SHA-256 hex of the emailed token), `status` (`pending`, `completed`, `revoked`; CHECK `api_key_regeneration_tokens_status_check`), `email`, `createdAt`, `updatedAt`.
+- **Lifetime**: 15 minutes from creation, with a 5-minute cooldown between requests (`lib/api-key-regeneration.ts`).
+- **Index**: `api_key_regeneration_tokens_client_id_idx` on `client_id`.
+
+### `webhook_events`
+Idempotency table to de-duplicate Stripe webhook notifications. It stores no event payload.
+
+- **Fields**: `id`, `stripeEventId` (unique), `type`, `processedAt` (NULL until the event is fully handled), `claimedAt` (the lease timestamp), `createdAt`.
+- **Lease**: a delivery inserts the row with `claimedAt = now()` and may process the event only if it won that insert. A delivery that finds an unprocessed row with a lease older than 15 minutes reclaims it; a live lease answers 409 so Stripe retries. After a retryable failure the row is deleted. See `lib/webhook-lease.ts`.
+- **Index**: `webhook_events_unprocessed_idx`, partial on `processed_at` WHERE `processed_at IS NULL`.
+- **Retention**: processed rows older than 30 days are deleted at boot and then every 24 hours (`lib/webhook-retention.ts`, `WEBHOOK_EVENT_RETENTION_MS` and `WEBHOOK_PRUNE_INTERVAL_MS`). Unprocessed rows are never pruned. Both Stripe webhook endpoints (Connect and billing) share this table.
 
 ### `admins`
-**Legacy: no longer read or written.** Admin login is checked against Nextcloud, and a later migration drops this table. It used to hold the dashboard's own admin accounts.
+**Legacy: no longer read or written.** Admin login is checked against Nextcloud. The table still exists: no migration drops it, it is still defined in `schema.ts`, and it is still listed in `REQUIRED_TABLES`, so the boot guard fails if it is missing. It used to hold the dashboard's own admin accounts.
 
 - **Fields**: `id`, `username` (unique), `passwordHash`, `role` (default `"admin"`), `active`, `setupConfirmed`, `lastLoginAt`, `createdAt`, `updatedAt`.
 
@@ -60,6 +96,30 @@ Key-value store for system-wide configuration.
 
 - **Fields**: `key` (PK), `value`, `updatedAt`.
 - Example key: `company_name` (used in onboarding emails).
+
+### `payment_ledger`
+One row per Stripe Checkout Session created through `POST /payments/create` (migrations `0024_payment_ledger` and `0025_payment_ledger_per_client_idempotency`). It is inserted synchronously after the Session is created and before the checkout URL is returned; if the insert fails the API answers `503 LEDGER_PERSISTENCE_FAILED` and the caller retries with the same `Idempotency-Key`. Flow and fee behavior are in [STRIPE.md](./STRIPE.md), "Payment Strategy (Stripe Checkout)" and "Fees: the Processing Fee".
+
+- **Keys**: `id` (text, UUID), `clientId` (FK → `clients.id`, cascade delete), `connectedAccountId` (the `acct_` the charge was made on).
+- **Stripe ids**: `stripeSessionId` (set at insert), `stripePaymentIntentId` (NULL at insert; learned from the first Checkout Session webhook or the status endpoint's Stripe fallback, and never overwritten with a different id).
+- **Idempotency**: `idempotencyKey` is the caller's key, unique per client. The key sent to Stripe is `<clientId>:<key>`.
+- **Source**: `source` is `checkout` or `payment_intent` (CHECK). Current code writes only `checkout`; `payment_intent` remains allowed for rows from the removed PaymentIntent mode.
+- **Amounts** (integer cents): `baseAmountCents` (sum of the caller's line items), `feeAmountCents` (the Processing Fee, 0 when waived), `totalAmountCents` (base + fee), `refundedAmountCents` (default 0; the maximum refunded amount seen, so 0 is no refund, below total is partial, equal to total is full), `currency` (lowercase ISO code).
+- **Metadata**: `metadata` is a text column holding the caller's metadata as a JSON string (NULL when none).
+- **Ordering**: `lastStripeEventCreatedAt` (integer, Stripe event `created` in Unix seconds). A webhook older than the stored value is ignored for status.
+- **Timestamps**: `createdAt`, `updatedAt`.
+
+**Status.** `created`, `paid`, `expired`, `failed`, `canceled`, `refunded`, `disputed` (CHECK `payment_ledger_status_check`). The webhook handler applies a new status only if it does not lower the precedence of the stored one: `created` (0) < `expired`, `failed`, `canceled` (1) < `paid` (2) < `refunded` (3) < `disputed` (4). So `refunded` and `disputed` can never go back to `paid`, while `failed` is not final and can still move to `paid` (for example when a delayed payment later succeeds). `refunded` covers partial refunds; use `refundedAmountCents` to tell them apart.
+
+**Indexes and constraints:**
+- `payment_ledger_client_idempotency_key_uniq` — unique (`client_id`, `idempotency_key`)
+- `payment_ledger_session_id_uniq` — partial unique (`stripe_session_id`) WHERE NOT NULL
+- `payment_ledger_pi_id_idx` — partial (`stripe_payment_intent_id`) WHERE NOT NULL
+- `payment_ledger_client_id_idx`, `payment_ledger_connected_account_idx`
+- `payment_ledger_client_updated_idx` — (`client_id`, `updated_at`), used by the portal mirror (migration `0032`)
+- `payment_ledger_source_check`, `payment_ledger_status_check`
+
+Every ledger write calls `kickJob("portalMirror")`, so the Nextcloud Portal Accounts mirror (docs/BACKEND.md section 12) picks up payment changes. The ledger is the only record of Checkout payments in Postgres; the invoicing tables below are separate.
 
 ### `sales_lead_submissions`
 Progress of the Nextcloud New Lead automation, one row per Forms submission (see [BACKEND.md](./BACKEND.md), "Sales Lead Automation").
@@ -149,14 +209,64 @@ One row per accepted `POST /invoices/:id/send` Idempotency-Key (migration `0036_
 - `connect_invoice_sends_client_idx` — (`client_id`), backs the `clients` cascade (`client_id` is an FK but is not used in any query)
 - `connect_invoice_sends_state_check` — CHECK `state IN ('pending', 'sent', 'failed')`
 
+### Cerebo schema (`cerebo`)
+Client and project tracking, defined in `backend/src/cerebo/schema.ts` and created by migration `0040_cerebo_module`. Every table has `client_id` (FK → `public.clients.id`, `NO ACTION`: clients are archived rather than deleted, so a client that still has Cerebo rows cannot be deleted). References between Cerebo rows are composite (`client_id`, `id`) foreign keys so the database rejects a link that crosses clients. The HTTP routes (`/api/v1/cerebo/*`) exist only when `CEREBO_ENABLED=true`.
+
+| Table | Purpose | Notable columns and constraints |
+|-------|---------|---------------------------------|
+| `cerebo.projects` | A client's projects | `name`, `description`, `status` (`planned`, `active`, `paused`, `completed`, `canceled`), `starts_on`, `ends_on`. Unique (`client_id`, `id`) so others can reference it; CHECKs `projects_status_check` and `projects_dates_check` (end not before start); index (`client_id`, `status`) |
+| `cerebo.milestones` | Milestones of a project | `project_id`, `title`, `status` (`planned`, `in_progress`, `done`, `canceled`), `due_on`, `completed_at`, `client_visible` (default false), `stripe_invoice_id` (text, no FK), `sort_order`. FK `milestones_project_fk` (`client_id`, `project_id`) → `projects`, cascade; index (`client_id`, `project_id`, `sort_order`) |
+| `cerebo.resource_links` | Where work lives outside the portal | `project_id` (NULL for client-level), `kind` (`deck_board`, `files_folder`, `talk_room`, `collective`, `contact`, `calendar`), `external_id`, `url`, `label`. Unique (`client_id`, `kind`, `external_id`); FK `resource_links_project_fk` → `projects`, cascade; index (`client_id`, `project_id`) |
+| `cerebo.audit_events` | Append-only record of Cerebo writes, written in the same transaction as the change | `actor_type` (`admin`, `system`), `actor_id`, `action` (`create`, `update`, `delete`), `entity_type`, `entity_id`, `changes` (jsonb, default `{}`), `request_id`, `created_at`. Indexes (`entity_type`, `entity_id`, `created_at`) and (`client_id`, `created_at`) |
+
+`projects`, `milestones` and `resource_links` also have `created_at` and `updated_at`. The boot schema guard does not check the `cerebo` schema (section 3).
+
 ## 3. Tooling & Migrations
-- **Schema Changes**: Edit `backend/src/db/schema.ts`.
-- **Generate**: `npm run db:generate` — creates SQL migration files in `backend/drizzle/`.
-- **Apply**: `npm run db:migrate` — runs the `drizzle-kit migrate` CLI to apply pending migrations. (Separately, `runMigrations` in `src/lib/migrate.ts` applies the same migrations automatically at app startup in non-production environments.)
-- **Boot Schema Guard**: When a migration adds a new table, update `REQUIRED_TABLES` in `backend/src/lib/schema-check.ts` in the same PR, or a deployment that skips the migration will pass the boot check and fail later at runtime.
+
+### Generating a migration
+- **Schema changes**: edit `backend/src/db/schema.ts` (or `backend/src/cerebo/schema.ts`).
+- **Generate**: from `backend/`, run `npm run db:generate` (`drizzle-kit generate`). It reads both schema files, needs `DATABASE_URL` set (`drizzle.config.ts` throws without it), and writes the SQL file, `meta/_journal.json` entry and snapshot into `backend/drizzle/`. Use `npx drizzle-kit generate --custom` for hand-written or data-only SQL.
+- **Other scripts**: `db:migrate` (`drizzle-kit migrate`), `db:push` and `db:studio`. `db:push` bypasses the migration history and is not used for deployments.
+
+### Applying migrations
+
+| Environment | How migrations run |
+|-------------|--------------------|
+| Local dev stack (`docker-compose.base.yml` + `docker-compose.dev.yml`) | The `api` container runs `npx drizzle-kit migrate` before starting. The dev compose override tolerates a failure (`|| echo "Migration failed, continuing..."`), so check the logs. Outside production the API also calls `runMigrations` (`lib/migrate.ts`, the drizzle migrator) at startup, which is a no-op when everything is applied. |
+| CI | The test job runs `npm run db:migrate` against a fresh database. |
+| Production (`docker-compose.prod.yml`) | A one-shot `migrator` service (built from the backend `builder` target, `restart: "no"`) runs `npm run db:migrate`. The `api` service has `depends_on: migrator: condition: service_completed_successfully`, so if a migration fails the API does not start. In production the API never runs migrations itself (`NODE_ENV=production` skips `runMigrations`). |
+
+At every start the API then calls `verifyDatabaseSchema()` (`lib/schema-check.ts`) and exits if it fails.
+
+### Boot schema guard
+`verifyDatabaseSchema` reads `information_schema.columns` for the `public` schema and checks that each table in `REQUIRED_TABLES` has the listed columns. It is a safety net against a deployment that skipped a migration, not a full schema comparison:
+
+- It checks only the columns listed per table, not every column (for example `clients.connect_redirect_origins` and `webhook_events.claimed_at` are not listed) and not constraints or indexes.
+- Not every table is listed. Unchecked tables include `billing_customers`, `billing_snapshots`, `portal_mirror_rows`, `portal_mirror_state`, `stripe_id_writebacks` and every table in the `cerebo` schema.
+- When a migration adds a table or a column the code needs at boot, update `REQUIRED_TABLES` in the same PR.
+
+### Production migration runbook
+There are no down migrations. Rolling back means restoring a backup or writing a new forward migration.
+
+1. Merge the change. Deploying does not take a backup for you.
+2. Before deploying a migration that rewrites data or drops or narrows columns, take a dump: `make backup-now` on a host with the production compose file, or run `backup.sh` in the running backup container (see [BACKUP.md](./BACKUP.md)). Confirm the new file exists and passes the completeness check (the script does this and keeps no file otherwise).
+3. Deploy. The migrator runs first. Read its output: `drizzle-kit migrate` applies pending files in journal order.
+4. If the migrator fails, the API does not start. Fix forward with a new migration, or restore the dump into a scratch database to inspect it first ([BACKUP.md](./BACKUP.md), "Restore drill"). Restoring over the production database is a last resort.
+5. Confirm the API boots: a passing `verifyDatabaseSchema` appears as a normal start; a failure logs `Database schema incomplete for table ...` and exits.
+
+How the platform sequences the `migrator` and `api` services on deploy is covered in [COOLIFY_DEPLOYMENT.md](./COOLIFY_DEPLOYMENT.md).
 
 ### Migration authoring policy
-Always create migrations with `npx drizzle-kit generate` (or `npx drizzle-kit generate --custom` for hand-written/data-only SQL) so file numbering, `meta/_journal.json`, and `meta/*_snapshot.json` stay tool-managed. Never hand-number a migration file and never hand-edit `_journal.json` — review every generated diff line-by-line before committing. `backend/drizzle/` is applied-in-production history: existing files, tags, and journal entries must never be renamed or renumbered after the fact. The tree carries a few grandfathered anomalies predating this policy (duplicate `0019_*` prefixes, a skipped `0021` prefix, and some historical migrations missing a `meta/*_snapshot.json`); these are enumerated and guarded against further drift by `backend/src/__tests__/lib/migration-journal.test.ts`.
+Always create migrations with `npx drizzle-kit generate` (or `npx drizzle-kit generate --custom` for hand-written/data-only SQL) so file numbering, `meta/_journal.json`, and `meta/*_snapshot.json` stay tool-managed. Never hand-number a migration file and never hand-edit `_journal.json`; review every generated diff line by line before committing. `backend/drizzle/` is applied-in-production history: existing files, tags, and journal entries must never be renamed or renumbered after the fact.
 
-## 4. Idempotency Strategy
-Stripe webhook handling is guarded by the `webhook_events` table. Payment creation uses `Idempotency-Key` headers (required for API key calls).
+Journal rules and quirks:
+
+- **`when` must increase.** Drizzle applies a migration only when its journal `when` is greater than the newest `created_at` already recorded in the database. A migration merged with an older `when` than one already deployed is silently skipped in production while a fresh CI database still applies it. Keep each new migration's `when` strictly greater than the previous entry's, which `drizzle-kit generate` does when run on top of current `main`.
+- **Grandfathered anomalies**, listed exactly in `backend/src/__tests__/lib/migration-journal.test.ts`: two files share the prefix `0019` (`0019_brave_ravenous` and `0019_hash_onboarding_tokens`), there is no `0021`, journal entry idx 3 has the same `when` as idx 2, and some historical migrations have no `meta/*_snapshot.json`. The test fails on any new drift.
+- Migration numbers (`0035`, `0039`, ...) are file prefixes; the journal `idx` is the position in the list and differs from the prefix after `0019`.
+
+## 4. Idempotency, retention and table roles
+- **Stripe webhooks**: the `webhook_events` table (section 2) dedupes events with a reclaimable lease; processed rows are pruned after 30 days.
+- **Payment creation**: `Idempotency-Key` is required for every call; the ledger enforces it per client (`payment_ledger_client_idempotency_key_uniq`) and the key sent to Stripe is namespaced by client id.
+- **Invoicing**: `connect_customers` and `connect_invoices` store a SHA-256 of the caller's key, unique per client.
+- **Authoritative vs derived.** Authoritative data (back it up; it cannot be rebuilt): `clients`, `client_groups`, `onboarding_tokens`, `api_key_regeneration_tokens`, `payment_ledger`, `settings`, `connect_customers`, `connect_invoices`, `connect_invoice_sends`, `billing_customers`, the `*_submissions` progress tables and the `*_sync_state` baselines (they record which Stripe and Nextcloud objects a form submission already created, so a retry does not duplicate them), `cerebo.*`. Derived or rebuildable from Stripe and Nextcloud: `portal_mirror_rows`, `portal_mirror_state`, `billing_snapshots`, `stripe_id_writebacks`, `contact_stripe_sync_books`, `contact_stripe_sync_cards`. Losing a derived table costs a re-sync (for the Nextcloud mirrors, a re-create or re-compare cycle), not data. `webhook_events` is a dedupe log and is pruned by design.

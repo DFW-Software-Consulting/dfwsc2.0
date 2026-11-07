@@ -1,3 +1,9 @@
+> **Historical / superseded (2026-11-06).** This document reflects the codebase as of 2026-06-19. It is not maintained and some instructions would reintroduce removed or insecure behavior. Current docs: [docs/](../docs/)
+>
+> Status: superseded. Do not re-add an `invoices` table (Step 1): the old `invoices` table was dropped in migration `0017_aromatic_shaman.sql`; current invoicing uses the `connect_invoices` tables (see [DATABASE.md](../docs/DATABASE.md)).
+> - Done: the redundant `clients_api_key_hash_idx` and `clients_api_key_lookup_idx` indexes were dropped in `0019_brave_ravenous.sql` (Step 3); the group, workspace and onboarding-token indexes from Step 2 exist in `backend/src/db/schema.ts`; `clients.group_id` uses `onDelete: "set null"` (Step 6); the pool size is set by `DB_POOL_MAX` (Step 7); API key lookup uses `api_key_lookup` only (Step 8).
+> - Still open: CHECK constraints on the fee fields (`processing_fee_percent`, `processing_fee_cents`) of `clients` and `client_groups` (Step 5) are not in the schema.
+
 # Plan: Database Schema & Performance
 
 ## Goal

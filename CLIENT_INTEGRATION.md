@@ -15,7 +15,7 @@ This guide is for developers integrating the DFWSC payment API into their own ap
 After onboarding you should have been given:
 
 - **API Key** — a long string of letters and numbers. This authenticates every request. Keep it secret — treat it like a password and never expose it in frontend code.
-- **API Base URL** — the address of the payment server (e.g., `https://api.yourdfwscportal.com`)
+- **API Base URL** — `https://api.dfwsc.com/api/v1` in production. Every path in this guide is relative to it (`/payments/create` means `https://api.dfwsc.com/api/v1/payments/create`). If your administrator gave you a different base URL, use that one.
 
 ---
 
@@ -34,7 +34,7 @@ The customer is briefly redirected off your site to Stripe Checkout — Stripe h
 ## Quick Start — Test Your API Key
 
 ```bash
-curl -X POST https://<your-api-base-url>/api/v1/payments/create \
+curl -X POST https://api.dfwsc.com/api/v1/payments/create \
   -H "X-Api-Key: <your-api-key>" \
   -H "Idempotency-Key: $(uuidgen)" \
   -H "Content-Type: application/json" \
@@ -95,11 +95,27 @@ A key identifies one payment attempt, not one order:
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `lineItems` | Yes | Non-empty array of items to charge, in Stripe Checkout `price_data` form. A bare `{ "amount", "currency" }` body returns `400 "lineItems are required."` |
-| `description` | No | Shows up in your Stripe dashboard |
-| `metadata` | No | Any key/value pairs you want attached to the payment |
+| `lineItems` | Yes | 1 to 100 items to charge, in Stripe Checkout `price_data` form (limits below). A bare `{ "amount", "currency" }` body returns `400 "lineItems are required."` |
+| `description` | No | Up to 2000 characters. Shows up in your Stripe dashboard |
+| `metadata` | No | String keys and string values you want attached to the payment (rules below) |
 
-Amounts inside line items (`unit_amount`) are in **cents** (`5000` = $50.00).
+Unknown fields are ignored (`amount` and `currency` at the top level are not used: the amount is always computed from `lineItems`). Amounts inside line items (`unit_amount`) are in **cents** (`5000` = $50.00).
+
+**Line item limits.** Each item is `{ "price_data": { "currency", "product_data": { "name", "description"? }, "unit_amount" }, "quantity"? }`.
+
+| Field | Rule |
+|-------|------|
+| `price_data.currency` | 3-letter ISO code. Every item in one request must use the same currency |
+| `price_data.product_data.name` | Required, 1 to 200 characters |
+| `price_data.product_data.description` | Optional, up to 1000 characters |
+| `price_data.unit_amount` | Required whole number of cents, from 1 to 99,999,999 |
+| `quantity` | Whole number from 1 to 999,999 (default 1) |
+
+Only inline `price_data` is accepted: Stripe price ids are not. The total of all items must be positive. A violation is a `400` with an `error` message.
+
+**Metadata rules.** `metadata` must be a flat object whose values are all strings (a number or object value is a `400`). At most 50 keys; a key is at most 40 characters and a value at most 500. Metadata is attached to the Stripe PaymentIntent behind the Checkout Session, where you can see it in your Stripe dashboard. The API adds four keys of its own, `clientId`, `baseAmount`, `feeAmount` and `waivedFeeAmount`; if you send a key with one of those names, your value is replaced. Because they count toward Stripe's limit of 50, a request that uses almost all 50 keys can be rejected by Stripe (`400`, `code: INVALID_REQUEST`).
+
+**DFWSC processing fee.** DFWSC's processing fee is set on your account by your administrator; you cannot change or waive it through the API. When it is above zero it is added to the checkout as a separate line named **Processing Fee**, so your customer pays **the sum of your line items plus the fee**. The hosted Stripe page shows that line, and DFWSC receives the fee as the application fee. If no fee is configured there is no extra line. In the status response (Step 3), `baseAmountCents` is the sum of your lines, `feeAmountCents` is the fee, and `totalAmountCents` is base plus fee, what the customer paid. The fee is worked out when the session is created and does not change afterwards.
 
 ### Response
 
@@ -147,7 +163,7 @@ Send your `X-Api-Key` header with this call. It is optional, but it changes the 
 - **With `X-Api-Key`:** up to 600 requests per minute for your account, shared by every session you check. You only see your own account's sessions: a session that belongs to another account returns `404`, the same as an unknown session. A wrong or deactivated key returns `401`; it is not treated as an anonymous call. Rejected keys are counted per calling IP address, once for each different key: sending the same wrong key again and again uses one of the 30 allowed in a minute, so one stale key does not stop your other keys from working. After 30 different rejected keys in a minute, further calls from that address that send a key not checked successfully within the last minute get a `429` with a `Retry-After` header until the minute has passed, without the key being checked. Successful calls are never counted, and a key that was checked successfully within the last minute is still served. A key that has been rejected keeps getting `401` for up to a minute without being checked again; if its account is then reactivated, the key works again within that minute (at once when DFWSC reactivates it).
 - **Without it:** the call is anonymous and limited to 30 requests per minute for each calling IP address, shared by everything calling from that address. This is the limit a customer's browser has when it loads the payment success page.
 
-Other errors from this call: `400` for a `sessionId` that is not a Checkout session ID, and `404` for an unknown session. A `429` carries `code` `RATE_LIMITED` and a `Retry-After` header, as above.
+Other errors from this call: `400` for a `sessionId` that is not a Checkout session ID (`cs_test_...` or `cs_live_...`), and `404` for an unknown session. A session that is still `created` after 30 seconds is also checked against Stripe by the API, at most once per session per 30 seconds, so a missed notification does not leave it stuck; if that check fails you get the stored status, not an error. A `429` carries `code` `RATE_LIMITED` and a `Retry-After` header, as above.
 
 ```
 GET /api/v1/payments/session/{sessionId}
@@ -169,10 +185,12 @@ GET /api/v1/payments/session/{sessionId}
 | `paid` | The customer paid. This is the only status to fulfil an order on. |
 | `created` | Not finished yet. Check again later, using the schedule below. |
 | `expired` | Not paid. The checkout session ran out of time. |
-| `failed` | Not paid. The payment did not go through. |
+| `failed` | Not paid so far: a payment attempt failed (for example the card was declined, or a bank debit failed). This is **not final**: the customer can try again on the same session, and a later successful attempt moves it to `paid`. Keep checking until the session is `paid` or `expired`. |
 | `canceled` | Not paid. The payment was canceled. |
-| `refunded` | The customer paid, but the payment was later refunded. |
+| `refunded` | The customer paid, but the payment was later refunded. This includes **partial** refunds, and the refunded amount is not part of the response. If you need it, look at the payment in your Stripe dashboard. |
 | `disputed` | The customer paid, but the payment was later disputed. |
+
+`created` also covers delayed payment methods such as bank debits: the customer has finished checkout, but the money has not settled yet, so the status stays `created` until it does (then `paid`, or `failed`).
 
 - **Fulfil only on `paid`.** Compare `baseAmountCents` and `currency` to your order first. If they do not match, do not fulfil it.
 - **Customers do not always come back.** If someone pays and closes the tab, your success page never loads. Re-check any order that is still pending using its stored `sessionId`.
@@ -195,7 +213,7 @@ GET /api/v1/payments/session/{sessionId}
 // for each request) and call this again with the same idempotencyKey while the customer sees
 // a waiting screen. Do not ask them to click again.
 async function createPayment(amountCents, description, idempotencyKey) {
-  const response = await fetch('https://<your-api-base-url>/api/v1/payments/create', {
+  const response = await fetch('https://api.dfwsc.com/api/v1/payments/create', {
     method: 'POST',
     headers: {
       'X-Api-Key': process.env.DFWSC_API_KEY,
@@ -230,7 +248,7 @@ async function createPayment(amountCents, description, idempotencyKey) {
 // (and for any order still pending later).
 async function verifyPayment(sessionId, expectedAmountCents, expectedCurrency) {
   const response = await fetch(
-    `https://<your-api-base-url>/api/v1/payments/session/${encodeURIComponent(sessionId)}`,
+    `https://api.dfwsc.com/api/v1/payments/session/${encodeURIComponent(sessionId)}`,
     { headers: { 'X-Api-Key': process.env.DFWSC_API_KEY } }
   );
 
@@ -265,7 +283,7 @@ DFWSC_API_KEY = 'your-api-key'
 # a waiting screen. Do not ask them to click again.
 def create_payment(amount_cents: int, description: str, idempotency_key: str) -> dict:
     response = requests.post(
-        'https://<your-api-base-url>/api/v1/payments/create',
+        'https://api.dfwsc.com/api/v1/payments/create',
         headers={
             'X-Api-Key': DFWSC_API_KEY,
             'Idempotency-Key': idempotency_key,
@@ -293,7 +311,7 @@ def create_payment(amount_cents: int, description: str, idempotency_key: str) ->
 # (and for any order still pending later).
 def verify_payment(session_id: str, expected_amount_cents: int, expected_currency: str) -> bool:
     response = requests.get(
-        f'https://<your-api-base-url>/api/v1/payments/session/{session_id}',
+        f'https://api.dfwsc.com/api/v1/payments/session/{session_id}',
         headers={'X-Api-Key': DFWSC_API_KEY},
     )
     response.raise_for_status()  # a 429 is retryable: wait its Retry-After seconds plus a small random delay
@@ -317,7 +335,7 @@ def verify_payment(session_id: str, expected_amount_cents: int, expected_currenc
 // for each request) and call this again with the same $idempotencyKey while the customer sees
 // a waiting screen. Do not ask them to click again.
 function createPayment(int $amountCents, string $description, string $idempotencyKey): array {
-    $ch = curl_init('https://<your-api-base-url>/api/v1/payments/create');
+    $ch = curl_init('https://api.dfwsc.com/api/v1/payments/create');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST           => true,
@@ -347,7 +365,7 @@ function createPayment(int $amountCents, string $description, string $idempotenc
 // (and for any order still pending later).
 function verifyPayment(string $sessionId, int $expectedAmountCents, string $expectedCurrency): bool {
     $ch = curl_init(
-        'https://<your-api-base-url>/api/v1/payments/session/' . rawurlencode($sessionId)
+        'https://api.dfwsc.com/api/v1/payments/session/' . rawurlencode($sessionId)
     );
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['X-Api-Key: ' . DFWSC_API_KEY]);
@@ -418,15 +436,15 @@ A `502` or `503` returned while the API restarts during a deploy comes from the 
 
 Your admins can connect their bank account to Stripe without leaving your settings page. All three calls are made from your backend with your `x-api-key`, and always act on your own account.
 
-**One-time setup:** ask your DFWSC administrator to register the origin(s) of your app (for example `https://app.example.com`). Return and refresh URLs on any other origin are rejected.
+**One-time setup:** ask your DFWSC administrator to register the origin(s) of your app (for example `https://app.example.com`: scheme and host, no path; `http` is accepted only for `localhost`). Both `returnUrl` and `refreshUrl` must be absolute `https` URLs (up to 2048 characters) on a registered origin. Until an origin is registered the call fails with `409` `REDIRECT_ORIGINS_NOT_CONFIGURED`; a URL on any other origin fails with `400` `REDIRECT_URL_NOT_ALLOWED`.
 
 1. **Start.** `POST /api/v1/connect/onboarding-link` with `{ "returnUrl": "...", "refreshUrl": "..." }` returns `{ "url", "expiresAt" }`. Redirect the admin's browser to `url`; Stripe collects business details and bank account.
 2. **Come back.** Stripe sends the admin to `returnUrl`. That only means they left Stripe, so call `GET /api/v1/connect/account` to show real status: `hasAccount`, `detailsSubmitted`, `chargesEnabled`, `payoutsEnabled`, `requirements` (`currentlyDue`, `pastDue`, `disabledReason`) and `capabilities`. If `currentlyDue` is not empty, offer "Continue setup" (step 1 again). If Stripe sends them to `refreshUrl`, the link expired: call step 1 again and redirect to the new `url`.
 3. **Manage later.** `POST /api/v1/connect/dashboard-link` returns `{ "url" }` to the Stripe Express Dashboard, where they update bank and payout details. Before onboarding is finished it returns `409` with `code: "ONBOARDING_INCOMPLETE"`: use step 1 instead.
 
-Errors on these three endpoints: retry `429` (after `Retry-After`), `502`, `503` and `409` `IDEMPOTENCY_KEY_IN_USE` automatically. Do not retry `400` `INVALID_REQUEST`, `409` `IDEMPOTENCY_KEY_REUSED` or `409` `ACCOUNT_NOT_CONNECTED`: they will fail the same way until something changes, so show the admin an error and contact DFWSC. The redirect URLs are sent to Stripe in canonical form (for example a backslash becomes a slash).
+These three calls take no `Idempotency-Key`. Errors: retry `429` (after `Retry-After`), `502 STRIPE_FAILED` and `503` (`STRIPE_BUSY`, `STRIPE_CIRCUIT_OPEN`) automatically. Do not retry `400` `INVALID_REQUEST`, `400` `REDIRECT_URL_NOT_ALLOWED`, `409` `REDIRECT_ORIGINS_NOT_CONFIGURED`, `409` `ONBOARDING_INCOMPLETE` (dashboard link before onboarding is finished) or `409` `ACCOUNT_NOT_CONNECTED`: they will fail the same way until something changes, so show the admin an error and contact DFWSC. The redirect URLs are sent to Stripe in canonical form (for example a backslash becomes a slash).
 
-Links are single use and short lived: create one when the admin clicks, never store or log them. Limits: 10 requests per minute per client for the two link calls, 60 per minute for the status call. See `API_DOCS.md` for errors.
+Links are single use and short lived: create one when the admin clicks, never store or log them. Limits: 10 requests per minute per client for the two link calls, 60 per minute for the status call. Error bodies are described in [API_DOCS.md](./API_DOCS.md#errors).
 
 ---
 
@@ -438,13 +456,13 @@ This is an optional feature that DFWSC turns on per client. Use the same `X-Api-
 
 ### Before you start
 
-- **Enablement.** Ask your DFWSC administrator to turn on invoicing for your account. Until then every invoicing call returns `403` with `code: INVOICING_NOT_ENABLED`.
+- **Enablement.** Invoicing has two switches, both set by DFWSC. It must be enabled on the API itself (the `CONNECT_INVOICING` setting); until it is, every invoicing path answers `404` (`{ "error": "Not Found" }`, no `code`), as if the route did not exist. It must also be enabled for your account; until it is, every invoicing call returns `403` with `code: INVOICING_NOT_ENABLED`. Ask your DFWSC administrator for either.
 - **Charges must be enabled.** Calls that create or change things (create a customer, create, finalize or send an invoice, and so on) need a Stripe account that can take charges. If onboarding is not finished, or Stripe has switched charges off, they return `409` with `code: ACCOUNT_NOT_CONNECTED`. Reading, voiding and deleting a draft still work when charges are off, so you can read and cancel what you already created.
 - **Card payments must be active.** Creating, finalizing and sending an invoice also need the `card_payments` capability to be active on your Stripe account. If it is not, those calls return `409` with `code: CARD_PAYMENTS_NOT_ACTIVE`; contact your DFWSC administrator. Retrying will not help until DFWSC has enabled it.
 - Set these once in your shell for the examples below:
 
 ```sh
-API=https://api.yourdfwscportal.com/api/v1
+API=https://api.dfwsc.com/api/v1
 KEY=your-api-key
 ```
 
@@ -664,7 +682,7 @@ Statuses: `draft`, `open`, `paid`, `void`, `uncollectible`, `deleted`. An invoic
 
 `paid`, `void` and `deleted` are final. A late or repeated update never moves an invoice backwards (for example back from `paid` to `open`). A failed card attempt does not change the status; the invoice stays `open` and the customer can try again.
 
-Status stays current in two ways. Stripe notifies DFWSC when an invoice is finalized, sent, paid, voided and so on, and DFWSC updates its record within seconds. In addition, `GET /invoices/:id` re-checks a `draft`, `open` or `uncollectible` invoice against Stripe when its record is older than 30 seconds, so a read is up to date even if a notification was missed. If that re-check fails, you get the stored record, not an error. The list (`GET /invoices`) reads DFWSC's records only. To find out whether an invoice was paid, read `GET /invoices/:id` and check `status` is `paid` (and `amountPaidCents`, `paidAt`). DFWSC does not send webhooks to you, so poll the invoices you are waiting on.
+Status stays current in two ways. When DFWSC's Stripe Connect webhook endpoint is subscribed to the invoice events (`invoice.finalized`, `invoice.sent`, `invoice.paid`, `invoice.payment_succeeded`, `invoice.payment_failed`, `invoice.voided`, `invoice.marked_uncollectible`, `invoice.updated`, `invoice.deleted`), DFWSC updates its record when Stripe sends one; DFWSC administrators set that up, and you cannot check it from the API. In addition, `GET /invoices/:id` re-checks a `draft`, `open` or `uncollectible` invoice against Stripe when its record is older than 30 seconds, so a read is up to date even if a notification was missed. If that re-check fails, you get the stored record, not an error. The list (`GET /invoices`) reads DFWSC's records only. To find out whether an invoice was paid, read `GET /invoices/:id` and check `status` is `paid` (and `amountPaidCents`, `paidAt`). DFWSC does not send webhooks to you, so poll the invoices you are waiting on.
 
 ### Rate limits
 
