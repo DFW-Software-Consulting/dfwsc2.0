@@ -54,6 +54,8 @@ describe("Frontend Dockerfile", () => {
       expect(nginxConfig).toContain(
         "connect-src 'self' https://api.dfwsc.com __ANALYTICS_ORIGIN__"
       );
+      expect(nginxConfig).toContain("img-src 'self' data:;");
+      expect(nginxConfig).not.toMatch(/img-src[^;]*https:/);
       expect(nginxConfig).not.toContain("script-src 'self' https:;");
       expect(nginxConfig).not.toContain("connect-src 'self' https:;");
     });

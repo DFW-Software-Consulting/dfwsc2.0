@@ -80,7 +80,7 @@ Runs these in order; the first failure stops the commit.
 9. No `.only` / `.skip` added to staged test files.
 10. Warning only: a new `process.env.NAME` in staged code that has no `NAME=` line in `.env.example`.
 11. `lint-staged`: Biome `check --write` on staged backend and frontend source (ESLint `--fix` also for frontend) and on staged Markdown.
-12. Agent-doc mirrors in sync, compared against **`CLAUDE.md`** (section 4).
+12. Agent-doc mirrors (`AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md`) in sync, compared against **`CLAUDE.md`** (section 4).
 13. Backend type-check (`tsc --noEmit` for `tsconfig.build.json` and `tsconfig.json`) when backend TypeScript is staged. Skip: `SKIP_TYPECHECK=1`.
 
 ### commit-msg
@@ -90,9 +90,9 @@ Runs these in order; the first failure stops the commit.
 ### pre-push
 
 1. Any push whose remote ref matches `refs/heads/main` is refused (the message says "force-pushing", but the check does not distinguish).
-2. Backend coverage run inside the running dev `api` container (`docker compose ... exec -T api npm run test:coverage`). If the stack is not running the push fails with "Docker stack is not running". Skip: `SKIP_DOCKER_TESTS=1`. The step label says "90/80 coverage"; the real gate is the thresholds in `vitest.config.ts` (section 2).
+2. Backend coverage run inside the running dev `api` container (`docker compose ... exec -T api npm run test:coverage`). If the stack is not running the push fails with "Docker stack is not running". Skip: `SKIP_DOCKER_TESTS=1`. The step label quotes the real thresholds from `backend/vitest.config.ts` (87/79/82/87: statements/branches/functions/lines); update the label if they change.
 3. `npm run lint` (Biome check).
-4. Agent-doc mirrors in sync, compared against **`.claude/CLAUDE.md`** (section 4).
+4. Agent-doc mirrors in sync, compared against **`CLAUDE.md`** (section 4), including `.claude/CLAUDE.md`.
 5. Backend type-check.
 6. Frontend build (`npm run build:frontend`).
 7. Frontend tests.
@@ -102,13 +102,13 @@ Runs these in order; the first failure stops the commit.
 
 Five files must stay byte-identical: `CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.md`, `Qwen.md`, `Gemini.md`. They are tracked in git even though `.gitignore` lists `AGENTS.md`, `Qwen.md` and `Gemini.md`.
 
-The checks use different bases, so a change to one file that is not copied to the others fails somewhere:
+All three checks use `CLAUDE.md` as the base, so editing any mirror without `CLAUDE.md` fails:
 
 | Check | Base | Compared with |
 |-------|------|---------------|
-| pre-commit step 12 | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md` |
-| pre-push step 4 | `.claude/CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md` |
-| CI `docs-sync` | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md` |
+| pre-commit step 12 | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` |
+| pre-push step 4 | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` |
+| CI `docs-sync` | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` |
 
 After editing any of them, edit `CLAUDE.md` and then run:
 
@@ -130,7 +130,7 @@ Runs on pull requests and on pushes to `main`; a newer run on the same ref cance
 | `secrets` | `secretlint` over the whole repository. |
 | `commitlint` | Pull requests only: lints every commit message in the PR range. |
 | `source-guards` | Pull requests only: no added `console.*` / `debugger` in source and no added `.only` / `.skip` in tests. |
-| `docs-sync` | `AGENTS.md`, `Qwen.md`, `Gemini.md` equal `CLAUDE.md`. |
+| `docs-sync` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` equal `CLAUDE.md`. |
 | `fallow` | `fallow@2.104.0 dead-code` for `backend` and `front` against `fallow-baselines/*.json`; fails on new dead code, circular dependencies or unresolved imports beyond the baseline. To refresh a baseline after cleanup, run the command in the comment above the job with `--save-baseline`. |
 
 `.github/workflows/opencode-review.yml` posts an automated review comment on non-draft same-repo pull requests. It is advisory: every step is `continue-on-error`, so it never fails a pull request. Dependabot (`.github/dependabot.yml`) opens monthly npm, Docker and compose update pull requests.

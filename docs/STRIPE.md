@@ -215,7 +215,7 @@ The full variable and feature-flag reference is [ENVIRONMENT.md](./ENVIRONMENT.m
 | `DEFAULT_PAYMENT_SUCCESS_URL` | (optional) Default Checkout success redirect URL used after client/group config |
 | `DEFAULT_PAYMENT_CANCEL_URL` | (optional) Default Checkout cancel redirect URL used after client/group config |
 
-Current compose behavior: `docker-compose.prod.yml` forwards `STRIPE_*`, `API_BASE_URL`, `FRONTEND_ORIGIN`, `CONNECT_INVOICING`, `DEFAULT_PROCESS_FEE_CENTS`, `BILLING_AUTO_SEND` and `BILLING_SWEEP_INTERVAL_MS` to the API container but does not forward `DEFAULT_PAYMENT_SUCCESS_URL` or `DEFAULT_PAYMENT_CANCEL_URL`, so setting those on the platform has no effect for that stack.
+Current compose behavior: `docker-compose.prod.yml` forwards `STRIPE_*`, `API_BASE_URL`, `FRONTEND_ORIGIN`, `CONNECT_INVOICING`, `DEFAULT_PROCESS_FEE_CENTS`, `BILLING_AUTO_SEND` and `BILLING_SWEEP_INTERVAL_MS` to the API container and also forwards `DEFAULT_PAYMENT_SUCCESS_URL` and `DEFAULT_PAYMENT_CANCEL_URL` (empty means unset), so setting those on the platform takes effect for that stack.
 
 ## 8. Legacy PayPal imports
 

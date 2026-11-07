@@ -512,7 +512,6 @@ describe("payments", () => {
   });
 
   it("uses default checkout redirect URLs and appends session_id to default success URL", async () => {
-    process.env.USE_CHECKOUT = "true";
     process.env.DEFAULT_PAYMENT_SUCCESS_URL = "https://payments.example.test/thanks?source=portal";
     process.env.DEFAULT_PAYMENT_CANCEL_URL = "https://payments.example.test/cancel";
     stripeMock.checkout.sessions.create.mockResolvedValue({
@@ -564,7 +563,6 @@ describe("payments", () => {
   });
 
   it("falls back to frontend checkout redirects when default redirect URLs are invalid", async () => {
-    process.env.USE_CHECKOUT = "true";
     process.env.FRONTEND_ORIGIN = "https://portal.example.test";
     process.env.DEFAULT_PAYMENT_SUCCESS_URL = "ftp://payments.example.test/thanks";
     process.env.DEFAULT_PAYMENT_CANCEL_URL = "not-a-url";
@@ -616,7 +614,6 @@ describe("payments", () => {
   });
 
   it("keeps group checkout redirect URLs ahead of default redirect URLs", async () => {
-    process.env.USE_CHECKOUT = "true";
     process.env.DEFAULT_PAYMENT_SUCCESS_URL = "https://payments.example.test/thanks";
     process.env.DEFAULT_PAYMENT_CANCEL_URL = "https://payments.example.test/cancel";
     stripeMock.checkout.sessions.create.mockResolvedValue({
@@ -1855,7 +1852,6 @@ describe("client groups", () => {
 
 describe("checkout fee integrity", () => {
   it("derives base amount from line items and ignores caller amount for checkout", async () => {
-    process.env.USE_CHECKOUT = "true";
     process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
     stripeMock.checkout.sessions.create.mockResolvedValue({
       id: "cs_test_mock123",
@@ -1907,7 +1903,6 @@ describe("checkout fee integrity", () => {
   });
 
   it("rejects mixed currencies in checkout line items", async () => {
-    process.env.USE_CHECKOUT = "true";
     const server = await createServer();
 
     const apiKey = "api-key-client_mixed_curr";
@@ -1956,7 +1951,6 @@ describe("checkout fee integrity", () => {
   });
 
   it("rejects invalid currency format", async () => {
-    process.env.USE_CHECKOUT = "true";
     const server = await createServer();
 
     const apiKey = "api-key-client_bad_curr";
@@ -1997,7 +1991,6 @@ describe("checkout fee integrity", () => {
 
 describe("metadata validation", () => {
   it("rejects metadata with too many keys", async () => {
-    process.env.USE_CHECKOUT = "true";
     const server = await createServer();
 
     const apiKey = "api-key-client_meta_many";
@@ -2042,7 +2035,6 @@ describe("metadata validation", () => {
   });
 
   it("rejects metadata with value exceeding 500 characters", async () => {
-    process.env.USE_CHECKOUT = "true";
     const server = await createServer();
 
     const apiKey = "api-key-client_meta_long";
@@ -2084,7 +2076,6 @@ describe("metadata validation", () => {
 
 describe("payment ledger", () => {
   it("inserts a ledger row after checkout session creation", async () => {
-    process.env.USE_CHECKOUT = "true";
     process.env.DEFAULT_PROCESS_FEE_CENTS = "100";
     stripeMock.checkout.sessions.create.mockResolvedValue({
       id: "cs_test_ledger_insert",
