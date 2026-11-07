@@ -137,6 +137,10 @@ Runs on pull requests and on pushes to `main`; a newer run on the same ref cance
 
 The pre-push hook runs the root `npm run lint` (Biome only), while CI also runs `npx eslint src` in `front/`. Run `cd front && npm run lint` before pushing frontend changes to catch ESLint failures locally.
 
+### Publishing the integrator guide
+
+[CLIENT_INTEGRATION.md](../CLIENT_INTEGRATION.md) is the source of truth for the integrator guide. It is also published as the Nextcloud collective "Developer Integration Guide" (https://cloud.dfwsc.com/apps/collectives/Developer-Integration-Guide-4), and `front/nginx.conf` redirects `/docs` there with a 301. Whenever you change `CLIENT_INTEGRATION.md`, update the Nextcloud collective to match; CI does not do this.
+
 ## 6. Worktrees and other gotchas
 
 - **Hooks do not run in a fresh worktree** until `npm install` has run at the root of that worktree (it creates the hook directory that `husky` points git at). Until then commits and pushes from the worktree skip every check above; CI is then the first gate. Install, then check that a commit with a bad message is rejected.

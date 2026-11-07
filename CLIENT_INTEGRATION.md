@@ -2,6 +2,8 @@
 
 This guide is for developers integrating the DFWSC payment API into their own application. By the end you will be able to charge customers directly from your app.
 
+> **Maintainer note.** This file is the source of truth for the integrator guide. It is also published as the Nextcloud collective "Developer Integration Guide" (https://cloud.dfwsc.com/apps/collectives/Developer-Integration-Guide-4), which `https://dfwsc.com/docs` redirects to. When this file changes, update the Nextcloud collective to match.
+
 **Prerequisites:** You have already been onboarded and received your API key. If you haven't, contact your DFWSC administrator.
 
 > **Invoicing.** This guide also covers sending invoices to your own customers: see [Invoicing your customers](#invoicing-your-customers). It is optional and enabled per client by DFWSC.
@@ -15,7 +17,7 @@ This guide is for developers integrating the DFWSC payment API into their own ap
 After onboarding you should have been given:
 
 - **API Key** — a long string of letters and numbers. This authenticates every request. Keep it secret — treat it like a password and never expose it in frontend code.
-- **API Base URL** — `https://api.dfwsc.com/api/v1` in production. Every path in this guide is relative to it (`/payments/create` means `https://api.dfwsc.com/api/v1/payments/create`). If your administrator gave you a different base URL, use that one.
+- **API Base URL** — `https://api.dfwsc.com/api/v1` is the production base URL. Every path in this guide is relative to it (`/payments/create` means `https://api.dfwsc.com/api/v1/payments/create`). If your administrator gave you a different base URL for another environment, use that one.
 
 ---
 

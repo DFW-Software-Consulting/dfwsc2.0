@@ -28,7 +28,7 @@ dfwsc2.0/
 ├── fallow-baselines/         # Dead-code gate baselines used by CI
 ├── scripts/                  # Repo-level scripts (legacy backup-db.sh, manual/)
 ├── docs/                     # Reference documentation (see below)
-├── plans/ reviews/ reports/  # Planning and review notes
+├── plans/                    # Planning notes
 │
 ├── docker-compose.base.yml   # Services shared by dev and prod
 ├── docker-compose.dev.yml    # Dev override (use together with base)
