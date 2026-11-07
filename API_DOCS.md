@@ -71,7 +71,7 @@ Codes you can see on the client routes:
 | 429 | `RATE_LIMITED` | Too many requests, or Stripe is rate limiting; wait `Retry-After` |
 | 502 | `STRIPE_FAILED` | Stripe could not be reached or failed in an unclassified way |
 | 502 | `EMAIL_DELIVERY_FAILED` | A required email could not be sent |
-| 503 | `STRIPE_BUSY` | Too many Stripe calls in flight; `Retry-After: 5`; nothing was created |
+| 503 | `STRIPE_BUSY` | Too many Stripe calls in flight; `Retry-After: 5`; nothing was created. The refusal gives the rate-limit token back |
 | 503 | `STRIPE_CIRCUIT_OPEN` | Stripe calls are paused after repeated failures; retry in about 30 seconds |
 | 503 | `LEDGER_PERSISTENCE_FAILED` | Stripe created the session but the record could not be saved; retry with the same key |
 
@@ -87,7 +87,7 @@ Limits apply per client IP unless noted. The full table, and how the client IP i
 |---|---|
 | `POST /payments/create` | Token bucket per Stripe account: 200 at once, refilling at 120 per minute |
 | `GET /payments/session/:sessionId` | 30 per minute per IP without a key; 600 per minute per client with `X-Api-Key` |
-| `POST /connect/onboarding-link`, `POST /connect/dashboard-link` | 10 per minute per client |
+| `POST /connect/onboarding-link`, `POST /connect/dashboard-link` | 10 per minute per client, combined (one shared allowance) |
 | `GET /connect/account` | 60 per minute per client |
 | `POST /api-key/regenerate-request` | 5 per minute per IP |
 | `POST /api-key/regenerate`, `POST /contact` | 10 per minute per IP |
@@ -123,7 +123,7 @@ Headers:
 | `Idempotency-Key` | Yes | A new UUID per payment attempt. The key is combined with your client id, and the result must fit in 255 characters (a key of up to 218 characters is always accepted). A missing or too long key is `400` |
 | `Content-Type` | Yes | `application/json` |
 
-Body (unknown fields are ignored):
+Body (unknown field names are ignored, but known top-level fields are type-checked: `"amount": "100"` is a `400`):
 
 | Field | Required | Description |
 |---|---|---|
@@ -153,7 +153,7 @@ Response `201`:
 { "url": "https://checkout.stripe.com/c/pay/cs_test_...", "sessionId": "cs_test_..." }
 ```
 
-Store `sessionId` with your order. After payment Stripe sends the customer to your success URL with `?session_id=<id>` appended (or `&session_id=` when the URL already has a query string). Success and cancel URLs come from your account settings, then your group's, then the DFWSC default, then the portal's own `/payment-success` and `/payment-cancel` pages; ask your administrator to set yours.
+Store `sessionId` with your order. After payment Stripe sends the customer to your success URL with `?session_id=<id>` appended (or `&session_id=` when the URL already has a query string; a URL that already contains `{CHECKOUT_SESSION_ID}` is left as it is). Success and cancel URLs come from your account settings, then your group's, then the DFWSC default, then the portal's own `/payment-success` and `/payment-cancel` pages; ask your administrator to set yours.
 
 Errors: `400` (validation, missing `Idempotency-Key`), `401`, `402 CARD_DECLINED`, `409 ACCOUNT_NOT_CONNECTED`, `409 CARD_PAYMENTS_NOT_ACTIVE`, `409 IDEMPOTENCY_KEY_REUSED`, `409 IDEMPOTENCY_KEY_IN_USE`, `429 RATE_LIMITED`, `502 STRIPE_FAILED`, `503 STRIPE_BUSY`, `503 STRIPE_CIRCUIT_OPEN`, `503 LEDGER_PERSISTENCE_FAILED`. What to retry, and how, is in [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md).
 
