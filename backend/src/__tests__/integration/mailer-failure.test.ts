@@ -10,7 +10,8 @@ vi.mock("../../lib/stripe", () => ({
   },
 }));
 
-vi.mock("../../lib/mailer", () => ({
+vi.mock("../../lib/mailer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/mailer")>()),
   sendMail: vi.fn().mockResolvedValue(undefined),
   sendInvoiceEmail: vi.fn().mockResolvedValue(undefined),
   clearTransporterCache: vi.fn(),
