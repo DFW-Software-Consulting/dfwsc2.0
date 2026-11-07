@@ -31,7 +31,7 @@ The primary entity for each consulting client.
 - **Stripe**: `stripeAccountId` (linked Express account; unique), `stripeCustomerId` (unique where not null).
 - **Status**: `"active"`, `"inactive"`, `"pending"`, `"failed"`, `"archived"` (CHECK `clients_status_check`, widened to include `archived` by migration `0020`).
 - **Group**: `groupId` (optional FK → `client_groups.id`).
-- **Pricing**: `processingFeePercent`, `processingFeeCents` (set one, not both).
+- **Pricing**: `processingFeePercent` (`numeric(5,2)`, nullable), `processingFeeCents` (integer, nullable). Set one, not both; the CHECKs below enforce it in the database (see "Processing fee constraints").
 - **URLs**: `paymentSuccessUrl`, `paymentCancelUrl`.
 - **Connect redirect origins**: `connectRedirectOrigins` (`text[]`, NOT NULL, default empty; migration `0038_client_connect_redirect_origins`). The origins (`https://host[:port]`; plain `http` only for localhost) that a client app may use as `returnUrl` and `refreshUrl` for `POST /connect/onboarding-link`. An empty list means the client cannot use that endpoint. Set by admin `PATCH /clients/:id` (at most 10 entries, each a bare origin). See [STRIPE.md](./STRIPE.md), "Client-facing Connect endpoints".
 - **Contact**: `phone`, `billingContactName`.
@@ -49,6 +49,7 @@ The primary entity for each consulting client.
 - `clients_api_key_hash_unique`, `clients_api_key_lookup_unique` — the unique constraints on the two credential columns (these are the lookup indexes; the separate non-unique `clients_api_key_hash_idx` and `clients_api_key_lookup_idx` were dropped by migration `0019_brave_ravenous`)
 - `clients_group_id_idx`, `clients_workspace_idx` — plain indexes
 - `clients_workspace_check`, `clients_status_check` — CHECK constraints on the enums above
+- `clients_processing_fee_percent_check`, `clients_processing_fee_cents_check`, `clients_processing_fee_exclusive_check` — fee CHECKs (migration `0042`; see "Processing fee constraints")
 - `group_id` references `client_groups.id` with `ON DELETE SET NULL`
 
 ### `client_groups`
@@ -60,7 +61,31 @@ Groups multiple clients to share fee and redirect URL configuration.
 - **Shared config**: `processingFeePercent`, `processingFeeCents`, `paymentSuccessUrl`, `paymentCancelUrl`.
 - **Timestamps**: `createdAt`, `updatedAt`.
 
-**Indexes and constraints:** `client_groups_workspace_idx`; CHECKs `client_groups_workspace_check` and `client_groups_status_check`.
+**Indexes and constraints:** `client_groups_workspace_idx`; CHECKs `client_groups_workspace_check` and `client_groups_status_check`, plus the three fee CHECKs `client_groups_processing_fee_percent_check`, `client_groups_processing_fee_cents_check` and `client_groups_processing_fee_exclusive_check` (migration `0042`; see "Processing fee constraints").
+
+### Processing fee constraints
+Migration `0042_daily_ironclad` adds the same three CHECKs to `clients` and `client_groups`. They mirror `addFeeIssues` in `backend/src/lib/admin-crud.ts` (the only writer, via `PATCH /clients/:id` and `PATCH /groups/:id`) and never reject anything the app accepts. A NULL column always passes.
+
+| Constraint suffix | Rule | Why this range |
+|-------------------|------|----------------|
+| `_processing_fee_percent_check` | `processing_fee_percent >= 0 AND processing_fee_percent <= 100` | `MAX_FEE_PERCENT` is 100 (`lib/constants.ts`). The API requires `> 0`, but a tiny value such as `0.001` is stored as `0.00` by `numeric(5,2)`, and the readers (`resolveClientFee`, `settings`) accept 0, so the database allows 0. |
+| `_processing_fee_cents_check` | `processing_fee_cents >= 0` | The API requires a non-negative integer. |
+| `_processing_fee_exclusive_check` | `processing_fee_percent IS NULL OR processing_fee_cents IS NULL` | The API rejects both in one request, and `feeSetValues` clears the other column when one is set. |
+
+The constraints were added `NOT VALID`: Postgres checks every new or updated row but does not scan the rows that already exist, so the migration cannot fail the production `migrator` (and so block the API) on a bad legacy row. `NOT VALID` is not in Drizzle's `check()` API, so the generated SQL was edited by hand; the snapshot is unaffected, so `drizzle-kit generate` still reports no schema changes. A `NOT VALID` constraint still applies to any `UPDATE` of an old violating row, even one that does not touch the fee columns, so find and fix such rows, then validate:
+
+```sql
+-- read-only: rows that would fail the constraints
+SELECT 'clients' AS tbl, id, processing_fee_percent, processing_fee_cents FROM clients
+WHERE processing_fee_percent < 0 OR processing_fee_percent > 100 OR processing_fee_cents < 0
+   OR (processing_fee_percent IS NOT NULL AND processing_fee_cents IS NOT NULL)
+UNION ALL
+SELECT 'client_groups', id, processing_fee_percent, processing_fee_cents FROM client_groups
+WHERE processing_fee_percent < 0 OR processing_fee_percent > 100 OR processing_fee_cents < 0
+   OR (processing_fee_percent IS NOT NULL AND processing_fee_cents IS NOT NULL);
+```
+
+Once it returns no rows, run a follow-up migration (`drizzle-kit generate --custom`) with `ALTER TABLE ... VALIDATE CONSTRAINT <name>;` for each of the six constraints. `VALIDATE` takes only a `SHARE UPDATE EXCLUSIVE` lock, so writes continue during the scan.
 
 ### `onboarding_tokens`
 Manages the lifecycle of a client's Stripe Connect onboarding session.
