@@ -131,7 +131,7 @@ The project uses a dual light/dark theme with a blue brand accent. Token tables 
 - **Linting/Formatting:** Biome.
 - **Testing:** Vitest (backend integration tests); React Testing Library (frontend).
 - **Migrations:** Drizzle-kit (`npm run db:generate` / `npm run db:migrate`).
-- **Swagger:** Enabled when `ENABLE_SWAGGER` is exactly `true` in any environment. The Swagger packages are regular dependencies (also installed by `npm ci --omit=dev`) and no code guards production, so only the env value controls it. UI at `/docs` on the API. `docker-compose.base.yml` hard-codes `ENABLE_SWAGGER: 'false'`, so it is off in the Docker stacks. On the public site, nginx redirects `/docs` to Nextcloud instead.
+- **Swagger:** Enabled when `ENABLE_SWAGGER` is exactly `true` in any environment. The Swagger packages are regular dependencies (also installed by `npm ci --omit=dev`) and no code guards production, so only the env value controls it. UI at `/docs` on the API. `docker-compose.base.yml` sets `ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}`, so it is off in the Docker stacks unless `.env` enables it; the prod compose does not forward it. On the public site, nginx redirects `/docs` to Nextcloud instead.
 
 ## 11. Deployment topology
 - **Frontend:** a separate nginx container built from `front/Dockerfile`; it serves the prerendered site and proxies `/api/` to `dfwsc-api:4242`.

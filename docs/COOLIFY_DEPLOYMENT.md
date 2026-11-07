@@ -130,7 +130,7 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 2. **Test API Endpoints**
    - Health: `https://<api-domain>/api/v1/health` returns `{"status":"ok","database":"connected",...}`.
    - Swagger UI (`/docs` on the API) is off unless `ENABLE_SWAGGER` is exactly `true` on the API. `docker-compose.prod.yml` does not pass that variable, so it is off in this deployment. There is no production guard in the code: if you add it to the compose file, the UI is served in production.
-   - `/api/v1/metrics` answers 404 unless `METRICS_TOKEN` is set, and the compose file does not forward that variable, so it is always 404 in this deployment.
+   - `/api/v1/metrics` answers 404 unless `METRICS_TOKEN` is set. The compose file forwards it, so setting `METRICS_TOKEN` in Coolify (and redeploying) enables the route.
 
 3. **Test Frontend**
    - Open the frontend domain and confirm the pages load.
@@ -165,11 +165,11 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 
 ### Environment Management
 - Use Coolify's secrets for `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_BILLING_WEBHOOK_SECRET`, `JWT_SECRET`, `DATABASE_URL`, `SMTP_PASS`, `NEXTCLOUD_APP_PASSWORD`, the `*_WEBHOOK_SECRET` values and `AWS_SECRET_ACCESS_KEY`.
-- **Only variables listed in `docker-compose.prod.yml` reach the containers.** Setting any other variable in Coolify does nothing. The ones the code reads but the compose file does not forward are `METRICS_TOKEN`, `TRUST_PROXY`, `CLOUDFLARE_IP_RANGES`, `DEFAULT_PAYMENT_SUCCESS_URL`, `DEFAULT_PAYMENT_CANCEL_URL`, `DB_POOL_MAX`, `HOST` and `ENABLE_SWAGGER`; making one effective requires adding it to the compose file. See [ENVIRONMENT.md](./ENVIRONMENT.md) section 8.
+- **Only variables listed in `docker-compose.prod.yml` reach the containers.** Setting any other variable in Coolify does nothing. The ones the code reads but the compose file does not forward are `HOST` and `ENABLE_SWAGGER`; making one effective requires adding it to the compose file. `METRICS_TOKEN`, `TRUST_PROXY`, `CLOUDFLARE_IP_RANGES`, `DEFAULT_PAYMENT_SUCCESS_URL`, `DEFAULT_PAYMENT_CANCEL_URL` and `DB_POOL_MAX` are forwarded, so a value defined in Coolify takes effect on the next deploy. See [ENVIRONMENT.md](./ENVIRONMENT.md) section 8.
 - A variable that is forwarded but unset in Coolify arrives as an empty string, which the code treats as unset (except `SMTP_FROM`; set it).
 
 ### Monitoring & Logging
-- `GET /api/v1/metrics` exposes sync and circuit-breaker state, but needs `METRICS_TOKEN` and a compose change (see above).
+- `GET /api/v1/metrics` exposes sync and circuit-breaker state, and needs `METRICS_TOKEN` set in Coolify (see above).
 - The API logs structured JSON to stdout, which Coolify's log view shows. The Loki and Promtail services exist only in the dev stack.
 - Set up resource monitoring (CPU, memory, disk) and alerting for service failures in Coolify. The `backup` container's own healthcheck fails when the last successful backup is older than `BACKUP_HEARTBEAT_MAX_AGE`.
 
@@ -212,7 +212,7 @@ The Dockerfiles are the source of truth; they are not copied here because the co
    - Any hostname the `api` service uses must be unique across everything on the `coolify` network; give shared-network services a unique service name rather than a generic one.
 
 6. **Every visitor shares one rate-limit bucket, or limits trigger too early**
-   - The API must see the real client address. Behind Cloudflare that comes from `CF-Connecting-IP`, honored only for connections from the built-in Cloudflare ranges. If Cloudflare publishes ranges that are missing from `backend/src/lib/client-ip.ts`, set `CLOUDFLARE_IP_RANGES` (it needs a compose change to be forwarded; see Environment Management).
+   - The API must see the real client address. Behind Cloudflare that comes from `CF-Connecting-IP`, honored only for connections from the built-in Cloudflare ranges. If Cloudflare publishes ranges that are missing from `backend/src/lib/client-ip.ts`, set `CLOUDFLARE_IP_RANGES` (the compose file forwards it).
 
 ## Maintenance
 
