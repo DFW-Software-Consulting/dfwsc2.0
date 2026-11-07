@@ -2,6 +2,8 @@
 
 This guide is for developers integrating the DFWSC payment API into their own application. By the end you will be able to charge customers directly from your app.
 
+> **Maintainer note.** This file is the source of truth for the integrator guide. It is also published as the Nextcloud collective "Developer Integration Guide" (https://cloud.dfwsc.com/apps/collectives/Developer-Integration-Guide-4), which `https://dfwsc.com/docs` redirects to. When this file changes, update the Nextcloud collective to match.
+
 **Prerequisites:** You have already been onboarded and received your API key. If you haven't, contact your DFWSC administrator.
 
 > **Invoicing.** This guide also covers sending invoices to your own customers: see [Invoicing your customers](#invoicing-your-customers). It is optional and enabled per client by DFWSC.
@@ -15,7 +17,7 @@ This guide is for developers integrating the DFWSC payment API into their own ap
 After onboarding you should have been given:
 
 - **API Key** — a long string of letters and numbers. This authenticates every request. Keep it secret — treat it like a password and never expose it in frontend code.
-- **API Base URL** — `https://api.dfwsc.com/api/v1` in production. Every path in this guide is relative to it (`/payments/create` means `https://api.dfwsc.com/api/v1/payments/create`). If your administrator gave you a different base URL, use that one.
+- **API Base URL** — `https://api.dfwsc.com/api/v1` is the production base URL. Every path in this guide is relative to it (`/payments/create` means `https://api.dfwsc.com/api/v1/payments/create`). If your administrator gave you a different base URL for another environment, use that one.
 
 ---
 
@@ -24,7 +26,7 @@ After onboarding you should have been given:
 1. Your backend calls the DFWSC API with a `lineItems` array — it returns a Stripe-hosted Checkout `url` and a `sessionId`. Store the `sessionId` with your order.
 2. You redirect the customer to that `url`
 3. The customer enters and submits their card on Stripe's hosted page — Stripe handles the actual charge
-4. Stripe redirects the customer back to your success or cancel URL. The success URL always has `?session_id=...` added to it.
+4. Stripe redirects the customer back to your success or cancel URL. The success URL has `?session_id=...` added to it (unless your configured URL already contains the `{CHECKOUT_SESSION_ID}` placeholder, in which case it is used as it is).
 5. Your backend checks the session ID with the DFWSC API and only fulfils the order once the status is `paid`. The API does not send you a webhook, so this check is how you learn that a payment succeeded.
 
 The customer is briefly redirected off your site to Stripe Checkout — Stripe hosts the payment form, so you never touch card data.
@@ -99,7 +101,7 @@ A key identifies one payment attempt, not one order:
 | `description` | No | Up to 2000 characters. Shows up in your Stripe dashboard |
 | `metadata` | No | String keys and string values you want attached to the payment (rules below) |
 
-Unknown fields are ignored (`amount` and `currency` at the top level are not used: the amount is always computed from `lineItems`). Amounts inside line items (`unit_amount`) are in **cents** (`5000` = $50.00).
+Unknown field names are ignored, but the known top-level fields are type-checked: for example `"amount": "100"` (a string) is a `400`. Even when valid, `amount` and `currency` at the top level are not used: the amount is always computed from `lineItems`. Amounts inside line items (`unit_amount`) are in **cents** (`5000` = $50.00).
 
 **Line item limits.** Each item is `{ "price_data": { "currency", "product_data": { "name", "description"? }, "unit_amount" }, "quantity"? }`.
 
@@ -135,7 +137,7 @@ Many customers can pay at the same moment, for example when rent is due. Each ac
 When a request is refused, the response tells you when to try again:
 
 - **`429`** with `code` `RATE_LIMITED` and a **`Retry-After`** header: the whole number of seconds to wait (at least 1). Every `429` from this API carries both. You also get a `429` if Stripe itself is rate limiting the platform; then `Retry-After` is `2`.
-- **`503`** with `code` `STRIPE_BUSY` and `Retry-After: 5`: the platform is already making its maximum of 25 Stripe calls at once, and yours did not get its turn within 10 seconds (or too many requests were already waiting). Nothing was created.
+- **`503`** with `code` `STRIPE_BUSY` and `Retry-After: 5`: the platform is already making its maximum of 25 Stripe calls at once, and yours did not get its turn within 10 seconds (or too many requests were already waiting). Nothing was created. A `STRIPE_BUSY` refusal does not use up any of your allowance of 200 checkouts, so retrying does not drain it. (A `STRIPE_CIRCUIT_OPEN` error that happens after the call to Stripe has started does use a token.)
 
 **Retry automatically, with the same `Idempotency-Key`.** On a `429` or a `503`, wait the `Retry-After` seconds **plus a small random extra delay** (for example up to one second, chosen separately for each request) and send the same request again with the same key, while your customer sees a waiting screen such as "Preparing your payment...". The customer should never have to click twice, and you should not generate a new key: a refused request created nothing, and a request that did get through is never created a second time under the same key. The random extra matters when many requests are refused together, as in a rent-day burst: if they all wait exactly the same time, they all come back at the same moment and are refused again. If the request is still refused after a few minutes of retries, stop and contact DFWSC support with the `X-Request-Id`.
 
@@ -150,7 +152,7 @@ Send the customer's browser to the `url` from Step 1 — Stripe hosts the paymen
 window.location.href = url;
 ```
 
-After payment, Stripe redirects the customer to your configured success URL (or the DFWSC default `/payment-success` page). On return to the success URL, `?session_id=...` is appended (or `&session_id=...` if your URL already has a query string), so you know which payment the customer is coming back from. Ask your DFWSC administrator to set your post-payment redirect URLs if you haven't already.
+After payment, Stripe redirects the customer to your configured success URL (or the DFWSC default `/payment-success` page). On return to the success URL, `?session_id=...` is appended (or `&session_id=...` if your URL already has a query string), so you know which payment the customer is coming back from. If your configured URL already contains the `{CHECKOUT_SESSION_ID}` placeholder, it is left as it is and Stripe fills in the placeholder. Ask your DFWSC administrator to set your post-payment redirect URLs if you haven't already.
 
 ---
 
@@ -404,7 +406,7 @@ These are the statuses `POST /api/v1/payments/create` can return for a failed re
 
 | Status | Cause | Retry? |
 |--------|-------|--------|
-| `400` | Missing or invalid field, an `Idempotency-Key` that is too long, or Stripe rejected a field of the request (`code`: `INVALID_REQUEST`, with `param` naming the field when Stripe says which) | No. Fix the request; the error message says what is wrong. After `INVALID_REQUEST`, send the corrected request with a new `Idempotency-Key`, because Stripe keeps its first answer for a key, errors included, for 24 hours |
+| `400` | Missing or invalid field, an `Idempotency-Key` that is too long, or Stripe rejected a field of the request (`code`: `INVALID_REQUEST`, with `param` naming the field when Stripe says which) | No. Fix the request; the error message says what is wrong. After `INVALID_REQUEST`, send the corrected request with a new `Idempotency-Key`: a key identifies one request body, and a changed body under the old key is a `409 IDEMPOTENCY_KEY_REUSED` |
 | `401` | Bad, missing or deactivated API key | No. Verify your `X-Api-Key` header. A deactivated client gets the same response — ask your DFWSC administrator |
 | `402` | The card was declined (`code`: `CARD_DECLINED`) | No, not with the same key. Start a new attempt with a new `Idempotency-Key` |
 | `409` | Stripe onboarding is not finished, or the account cannot take payments (`code`: `ACCOUNT_NOT_CONNECTED`) | No. Finish the Stripe onboarding for this account, or ask your DFWSC administrator to confirm it can accept charges |
@@ -436,7 +438,7 @@ A `502` or `503` returned while the API restarts during a deploy comes from the 
 
 Your admins can connect their bank account to Stripe without leaving your settings page. All three calls are made from your backend with your `x-api-key`, and always act on your own account.
 
-**One-time setup:** ask your DFWSC administrator to register the origin(s) of your app (for example `https://app.example.com`: scheme and host, no path; `http` is accepted only for `localhost`). Both `returnUrl` and `refreshUrl` must be absolute `https` URLs (up to 2048 characters) on a registered origin. Until an origin is registered the call fails with `409` `REDIRECT_ORIGINS_NOT_CONFIGURED`; a URL on any other origin fails with `400` `REDIRECT_URL_NOT_ALLOWED`.
+**One-time setup:** ask your DFWSC administrator to register the origin(s) of your app (for example `https://app.example.com`: scheme and host, no path; `http` is accepted only for `localhost`). Both `returnUrl` and `refreshUrl` must be absolute URLs (up to 2048 characters) on a registered origin. They must use `https`, except that `http` is accepted for `localhost`. Until an origin is registered the call fails with `409` `REDIRECT_ORIGINS_NOT_CONFIGURED`; a URL on any other origin fails with `400` `REDIRECT_URL_NOT_ALLOWED`.
 
 1. **Start.** `POST /api/v1/connect/onboarding-link` with `{ "returnUrl": "...", "refreshUrl": "..." }` returns `{ "url", "expiresAt" }`. Redirect the admin's browser to `url`; Stripe collects business details and bank account.
 2. **Come back.** Stripe sends the admin to `returnUrl`. That only means they left Stripe, so call `GET /api/v1/connect/account` to show real status: `hasAccount`, `detailsSubmitted`, `chargesEnabled`, `payoutsEnabled`, `requirements` (`currentlyDue`, `pastDue`, `disabledReason`) and `capabilities`. If `currentlyDue` is not empty, offer "Continue setup" (step 1 again). If Stripe sends them to `refreshUrl`, the link expired: call step 1 again and redirect to the new `url`.
@@ -444,7 +446,7 @@ Your admins can connect their bank account to Stripe without leaving your settin
 
 These three calls take no `Idempotency-Key`. Errors: retry `429` (after `Retry-After`), `502 STRIPE_FAILED` and `503` (`STRIPE_BUSY`, `STRIPE_CIRCUIT_OPEN`) automatically. Do not retry `400` `INVALID_REQUEST`, `400` `REDIRECT_URL_NOT_ALLOWED`, `409` `REDIRECT_ORIGINS_NOT_CONFIGURED`, `409` `ONBOARDING_INCOMPLETE` (dashboard link before onboarding is finished) or `409` `ACCOUNT_NOT_CONNECTED`: they will fail the same way until something changes, so show the admin an error and contact DFWSC. The redirect URLs are sent to Stripe in canonical form (for example a backslash becomes a slash).
 
-Links are single use and short lived: create one when the admin clicks, never store or log them. Limits: 10 requests per minute per client for the two link calls, 60 per minute for the status call. Error bodies are described in [API_DOCS.md](./API_DOCS.md#errors).
+Links are single use and short lived: create one when the admin clicks, never store or log them. Limits: 10 requests per minute per client for the two link calls combined (they share one allowance), 60 per minute for the status call. Error bodies are described in [API_DOCS.md](./API_DOCS.md#errors).
 
 ---
 
@@ -690,7 +692,7 @@ Status stays current in two ways. When DFWSC's Stripe Connect webhook endpoint i
 - **Reads** (`GET`): 600 requests per minute per client.
 - Over the limit returns `429 RATE_LIMITED` with a `Retry-After` header (seconds). Wait that long plus a small random extra delay and retry with the same `Idempotency-Key`.
 - Invoice creation also has the daily limit of 1000 described under "Money".
-- A `503` with `Retry-After` (`STRIPE_BUSY`) means the service is queueing; retry after the header's value.
+- A `503` with `Retry-After` (`STRIPE_BUSY`) means the service is queueing; retry after the header's value. It does not use up a write token.
 
 ### Error reference
 
@@ -700,7 +702,7 @@ Errors have the shape `{ "error": "...", "code": "...", "requestId": "..." }`. S
 |------|--------|---------|------------|
 | 400 | `BAD_REQUEST` (or no code) | Invalid or missing field, missing or too long `Idempotency-Key`, reserved `dfwsc_` metadata key, `finalize` or `send` in the create body, bad `cursor` | Fix the request. The `error` text says what is wrong |
 | 400 | `INVOICE_AMOUNT_TOO_LARGE` | A line or the total (with the fee) is over 2,500,000 cents | Split the invoice or lower the amount |
-| 400 | `INVALID_REQUEST` | Stripe rejected a field of a customer or invoice-create request (`param` names it when known) | Fix the field and retry with a new `Idempotency-Key` (Stripe remembers its first answer for a key) |
+| 400 | `INVALID_REQUEST` | Stripe rejected a field of a customer or invoice-create request (`param` names it when known) | Fix the field and retry with a new `Idempotency-Key` (the old key belongs to the rejected body) |
 | 401 | none | Missing, invalid or deactivated API key | Check `X-Api-Key` |
 | 403 | `INVOICING_NOT_ENABLED` | Invoicing is not enabled for your account | Ask your DFWSC administrator |
 | 404 | `NOT_FOUND` | Unknown customer or invoice, or one that belongs to another client | Check the id. For a customer in an invoice call, create the customer first |
@@ -728,7 +730,7 @@ Errors have the shape `{ "error": "...", "code": "...", "requestId": "..." }`. S
 | 502 | `INVOICE_TOTAL_MISMATCH` | Stripe's total did not match the amount computed. The invoice was left as an unsent draft or not finalized | Contact DFWSC with the invoice id. Delete the draft if needed |
 | 502 | `STRIPE_FAILED` | Stripe could not be reached or failed in an unclassified way | Retry with the same key; contact DFWSC if it persists |
 | 503 | `STRIPE_CIRCUIT_OPEN` | The invoicing service is temporarily unavailable | Retry with the same key in about 30 seconds |
-| 503 | `STRIPE_BUSY` | The service is busy; `Retry-After: 5` | Wait, then retry with the same key. Nothing was created |
+| 503 | `STRIPE_BUSY` | The service is busy; `Retry-After: 5` | Wait, then retry with the same key. Nothing was created, and nothing was emailed. For `POST /invoices/:id/send` the attempt is recorded as pending and counts toward the 3-send limit, but retrying with the same key does not count twice |
 | 503 | `LEDGER_PERSISTENCE_FAILED` | Stripe did the work but DFWSC could not record it | Repeat the same request (same key for create and send) |
 | 503 | `CUSTOMER_PERSISTENCE_FAILED` | The customer was created but not recorded | Retry the create with the same key |
 | 503 | `INVOICE_ADOPTION_INCOMPLETE` | A very old interrupted create could not be looked up safely; `Retry-After: 60` | Retry later with the same key, or contact DFWSC |

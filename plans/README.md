@@ -1,15 +1,16 @@
 # Plans
 
-Design plans written for earlier work. They are historical records, not current documentation. Current documentation is in [docs/](../docs/). Status below is as of 2026-11-06 and was checked against the code.
+Design plans written for earlier work. They are historical records, not current documentation. Current documentation is in [docs/](../docs/). Status below is as of 2026-11-07.
 
 | Plan | Status | Notes |
 |------|--------|-------|
-| [api-consistency.md](./api-consistency.md) | Done | Error helper, paginated list envelope and 204 deletes shipped as described in its banner. Step 4c (`buildOnboardingEmail`) was not done. |
-| [backend-resilience.md](./backend-resilience.md) | Superseded | Do not implement. Checkout-only payments, webhook leases, 502 on mail failure and the custom Redis-capable limiter replaced its steps. |
 | [cerebo.md](./cerebo.md) | Active | Phase 1 shipped behind `CEREBO_ENABLED` (default off). Phases 2 to 4 not started. Whether Cerebo stays is an owner decision. |
-| [database-schema-indexes.md](./database-schema-indexes.md) | Superseded | Do not re-add `invoices`. Open: CHECK constraints on the fee fields. |
-| [devops-monitoring-infra.md](./devops-monitoring-infra.md) | Superseded | Sentry, Prometheus and a deploy workflow were never added. Deployment is Coolify with Loki log shipping. |
-| [frontend-architecture.md](./frontend-architecture.md) | Done (one step open) | Lazy routes, memoized contexts and the modal focus trap shipped. The httpOnly-cookie JWT step is open. |
-| [security-hardening.md](./security-hardening.md) | Superseded | `/auth/setup` is gone, the proposed CSP is weaker than the shipped one, TLS is terminated by the platform proxy. |
 
-Related historical material: [reports/deep-review-20260315.md](../reports/deep-review-20260315.md), the four files in [reviews/](../reviews/), and [docs/PAYPAL_TO_STRIPE_MIGRATION.md](../docs/PAYPAL_TO_STRIPE_MIGRATION.md) all carry a historical banner.
+Finished and superseded plans were removed on 2026-11-07 and remain in git history.
+
+## Open follow-ups (from removed plans)
+
+- Admin JWT in an httpOnly cookie (from `frontend-architecture.md`, Step 7): still open. `POST /auth/login` returns the token in the JSON body and the client keeps it in React state (`front/src/contexts/AuthContext.jsx`). It is no longer in `sessionStorage`, and admin login now goes through Nextcloud (`docs/BACKEND.md`).
+- CHECK constraints on `processing_fee_percent` and `processing_fee_cents` of `clients` and `client_groups` (from `database-schema-indexes.md`, Step 5): still open. `backend/src/db/schema.ts` (lines 30-31, 83-84) has no CHECK on them, and no migration in `backend/drizzle/` adds one. The planned rules were percent in (0, 100], cents >= 0, and not both set.
+- `buildOnboardingEmail` in `mailer.ts` (from `api-consistency.md`, Step 4c): still open, low value. `backend/src/lib/mailer.ts` has no such helper; the onboarding emails are still built inline in `backend/src/routes/connect.ts` (around lines 438 and 614).
+
