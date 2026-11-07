@@ -1,3 +1,5 @@
+> **Historical / superseded (2026-11-06).** This document reflects the codebase as of 2026-04-12. It is not maintained and some instructions would reintroduce removed or insecure behavior. Current docs: [docs/](./)
+
 # PayPal to Stripe Migration (Completed)
 
 This migration is complete. Stripe is now the sole payment system.

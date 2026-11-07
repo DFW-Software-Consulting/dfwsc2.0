@@ -1,307 +1,199 @@
-# DFW Software Consulting - Full Stack Payment Portal
+# DFW Software Consulting - Payment Portal
 
-Monorepo with a React frontend and a Fastify API for Stripe payments and onboarding.
+Monorepo with a React frontend (marketing site, onboarding and admin pages) and a Fastify API for Stripe Connect payments and client onboarding.
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 dfwsc2.0/
-├── front/                    # React frontend (marketing + onboarding)
-│   ├── src/
-│   │   ├── pages/           # React pages (Home, Pricing, Team, OnboardClient, etc.)
-│   │   ├── components/      # Reusable React components
-│   │   └── assets/          # Images, icons, etc.
+├── front/                    # React + Vite frontend
+│   ├── src/                  # pages, components, api, hooks, seo, styles
+│   ├── scripts/              # prerender and build verification
 │   ├── vite.config.js
-│   ├── Dockerfile           # Builds React and serves via nginx
-│   └── nginx.conf           # Proxies /api to the backend
+│   ├── Dockerfile            # Builds with Vite, serves with nginx
+│   └── nginx.conf            # Clean URLs, /api proxy, security headers
 │
-├── backend/                  # Fastify API server
+├── backend/                  # Fastify API
 │   ├── src/
-│   │   ├── routes/          # API routes (/api/v1/*)
-│   │   ├── lib/             # Utilities (Stripe, mailer, auth, etc.)
-│   │   └── db/              # Database schema & client
-│   ├── package.json
-│   └── Dockerfile           # API-only Docker image
+│   │   ├── routes/           # HTTP routes (/api/v1/*)
+│   │   ├── lib/              # Stripe, mailer, auth, Nextcloud jobs, rate limiting
+│   │   ├── db/               # Drizzle schema and client
+│   │   ├── cerebo/           # Optional workspace API (CEREBO_ENABLED)
+│   │   └── scripts/          # One-off operational scripts
+│   ├── drizzle/              # SQL migrations
+│   └── Dockerfile
 │
-├── docker-compose.base.yml   # Base services config (extended by dev/prod)
-├── package.json              # Root monorepo scripts
-└── .gitignore                # Ignore node_modules, build outputs, etc.
+├── backup/                   # Scheduled Postgres backup image (prod stack)
+├── observability/            # Promtail config (dev stack logging)
+├── fallow-baselines/         # Dead-code gate baselines used by CI
+├── scripts/                  # Repo-level scripts (legacy backup-db.sh, manual/)
+├── docs/                     # Reference documentation (see below)
+├── plans/ reviews/ reports/  # Planning and review notes
+│
+├── docker-compose.base.yml   # Services shared by dev and prod
+├── docker-compose.dev.yml    # Dev override (use together with base)
+├── docker-compose.prod.yml   # Standalone prod stack
+├── Makefile                  # Primary task runner
+└── package.json              # Root scripts
 ```
 
-## 🚀 Tech Stack
+## Tech Stack
 
-### Frontend
-- **React 18** - UI framework
-- **Vite** - Build tool & dev server
-- **React Router 6** - Client-side routing
-- **TanStack Query v5** - Server state management & data fetching
-- **TailwindCSS v4** - Utility-first CSS
+| Layer | Stack |
+|-------|-------|
+| Frontend | React 18, Vite 8, React Router 7, TanStack Query v5, TailwindCSS v4, three.js (Home and Team only) |
+| Backend | Node.js >=22.12, Fastify 5, TypeScript, Drizzle ORM |
+| Data | PostgreSQL 17; Redis (optional, used when `REDIS_URL` is set) |
+| Integrations | Stripe Connect, Nodemailer (SMTP), Nextcloud (admin login and optional automations) |
+| Tooling | Biome, Vitest 5, Husky, Docker Compose |
 
-### Backend
-- **Node.js 22** - Runtime
-- **Fastify 5** - Web framework
-- **TypeScript** - Type safety
-- **PostgreSQL 17** - Database
-- **Drizzle ORM** - Type-safe database toolkit
-- **Stripe API** - Payment processing (Connect)
-- **Nodemailer** - Email delivery
-
-## 🛠️ Development
+## Development
 
 ### Prerequisites
-- Node.js 22+
-- PostgreSQL 17
-- npm or yarn
+- Node.js >=22.12.0
+- Docker with Compose (preferred) or a local PostgreSQL 17
 
-### Setup
-
-1. **Install dependencies:**
-   ```bash
-   npm run install:all
-   ```
-
-2. **Configure environment:**
-   ```bash
-   # Backend configuration
-   cp .env.example .env
-   # Edit .env with your Stripe keys, database URL, SMTP settings
-   ```
-
-3. **Run database migrations:**
-   ```bash
-   npm run db:migrate
-   ```
-
-### Development Options
-
-#### Option 1: Hot Reload (Recommended for development)
-Run frontend and backend separately with hot reload:
+### Docker dev stack (preferred)
 
 ```bash
-# Terminal 1 - Backend API (port 4242)
-npm run dev:backend
-
-# Terminal 2 - Frontend dev server (port 5173)
-npm run dev:frontend
+cp .env.example .env     # fill in Stripe keys and SMTP settings
+make up-build            # or: make up
 ```
 
-- **Frontend:** http://localhost:5173 (with hot reload)
-- **Backend:** http://localhost:4242
-- Frontend makes API calls to backend at http://localhost:4242/api/v1/*
+`make` runs `docker compose -f docker-compose.base.yml -f docker-compose.dev.yml`. Use that pair of files if you call Compose directly; `docker-compose.dev.yml` alone is only an override.
 
-If you run the frontend via `docker-compose.dev.yml`, it is served on `http://localhost:5173`.
+| Service | URL |
+|---------|-----|
+| Web UI (Vite) | http://localhost:5173 |
+| API | http://localhost:4242 |
+| Mailhog | http://localhost:8025 |
+| Loki (Promtail ships container logs to it) | http://localhost:3100 |
 
-#### Option 2: Docker Dev Stack (Full stack in containers)
+The stack also runs PostgreSQL, Redis and the Stripe CLI, which forwards webhooks to `/api/v1/webhooks/stripe`. The dev API container applies migrations on start.
+
+Common targets: `make down`, `make down-v` (also deletes the database volume), `make logs`, `make sh`. Run `make help` for the full list, including the prod and `backup-*` targets.
+
+### Without Docker
+
+1. `npm run install:all`
+2. `cp .env.example .env`. The API loads this root `.env` outside production, and the frontend reads it too (Vite `envDir` is the repo root). `.env.example` points `DATABASE_URL` at the host `db`; change it to your own host (for example `localhost`) when PostgreSQL runs outside Compose.
+3. `npm run dev:backend` (port 4242) and `npm run dev:frontend` (port 5173). Outside production the API applies pending migrations at start.
+4. To run Drizzle commands directly (`npm run db:generate`, `npm run db:migrate`), export `DATABASE_URL` in your shell first: `backend/drizzle.config.ts` does not read `.env`.
+
+For the frontend, `VITE_API_URL` defaults to `/api/v1` in the Docker build. For a dev server without the Compose proxy, set `VITE_API_URL=http://localhost:4242/api/v1` in `.env`. `VITE_ANALYTICS_SRC` and `VITE_ANALYTICS_DOMAIN` are optional.
+
+### Building
+
 ```bash
-docker compose -f docker-compose.dev.yml up --build
+npm run build     # frontend (output front/build-dist), then backend (TypeScript)
+npm start         # start the compiled API
 ```
 
-- **Web UI:** http://localhost:5173
-- **API:** http://localhost:4242
-- **Mailhog:** http://localhost:8025
-- **Stripe CLI:** forwards webhooks to `/api/v1/webhooks/stripe`
-- **Loki:** http://localhost:3100 (Promtail ships Docker container logs to Loki)
+### Testing
 
-The Fastify backend uses pino's structured JSON logs by default; Promtail forwards those container logs without changing application logging.
+| Command | What it does |
+|---------|--------------|
+| `make test-up` | Starts the dev stack, then runs backend tests in the container and frontend tests locally |
+| `make test-back` | Backend tests in the running dev container |
+| `make test-front` or `cd front && npm test` | Frontend tests |
+| `make coverage` | Backend tests with coverage thresholds |
+| `npm run test` | Root script. Exits unless `DATABASE_URL` is set, then runs backend tests followed by frontend tests |
 
-### Building for Production
+Lint and format: `npm run lint`, `npm run lint:fix`, `npm run format` (Biome). Hooks, CI jobs and the CLAUDE.md mirror rule are in [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md).
 
-```bash
-# Build both frontend and backend
-npm run build
+## Production
 
-# Start production server
-npm start
-```
+The prod stack (`make prod`, `docker-compose.prod.yml`) runs four services: `migrator` (applies migrations, then exits), `api`, `dfwsc-redis`, and `backup` (scheduled Postgres dumps). There is no bundled web container: the frontend is a separate nginx image built from `front/Dockerfile`. The `api` service joins the external `coolify` network under the alias `dfwsc-api`, which is where the frontend's nginx proxies `/api/`. Topology and deploy steps are in [docs/COOLIFY_DEPLOYMENT.md](./docs/COOLIFY_DEPLOYMENT.md).
 
-## 🐳 Docker Deployment
+- Health: `GET /api/v1/health` returns 200, or 503 when the database is unreachable.
+- Logs: `make logs-prod` for the API (`make logs` in dev).
 
-### Compose (Recommended)
-```bash
-make down
-make up-build
-```
+## API
 
-`make up-build` starts the DEV stack (base + dev compose):
-- **Web UI:** http://localhost:5173
-- **API:** http://localhost:4242
-- **Mailhog:** http://localhost:8025
+All routes are under `/api/v1`, except `GET /app-config.js` (served at the root). The complete route map, with auth, rate limits and feature-flag gating for each route, is in [docs/BACKEND.md section 7](./docs/BACKEND.md#7-api-route-map). Auth is either an `X-Api-Key` header (client routes) or an admin JWT from `POST /api/v1/auth/login`.
 
-The production stack (`make prod` → `docker-compose.prod.yml`) runs ONLY the `migrator` and `api` services — there is no bundled web container. The frontend is built and served separately (e.g. its own nginx container on Coolify).
+Main entry points:
 
-### Container Healthchecks & Logs
-- **Healthchecks**: `GET /api/v1/health` for the API; verify container status with `docker compose ps`.
-- **Logs**: `docker compose logs -f api` (backend) and `docker compose logs -f web` (frontend/nginx).
-
-## 📡 API Routes
-
-Most API routes are prefixed with `/api/v1` (the runtime config script `/app-config.js` is the one exception, served at the root):
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| GET | `/app-config.js` | Runtime API base URL script (served at root, no `/api/v1` prefix) | Public |
-| GET | `/api/v1/health` | Health check (verifies DB connectivity) | Public |
-| POST | `/api/v1/auth/login` | Admin login: Nextcloud credentials checked, returns JWT token | Public |
-| GET | `/api/v1/clients` | List clients (requires `workspace` query) | Admin (JWT) |
-| GET | `/api/v1/clients/:id` | Get a single client | Admin (JWT) |
-| PATCH | `/api/v1/clients/:id` | Update client config | Admin (JWT) |
-| POST | `/api/v1/accounts` | Create client + onboarding token (no email) | Admin (JWT) |
-| POST | `/api/v1/onboard-client/initiate` | Create client and email onboarding link | Admin (JWT) |
-| POST | `/api/v1/onboard-client/resend` | Resend onboarding email | Admin (JWT) |
-| GET | `/api/v1/onboard-client` | Get Stripe onboarding link (JSON) by token | Public |
-| GET | `/api/v1/connect/refresh` | Refresh Stripe account link (redirect) | Public |
-| GET | `/api/v1/connect/callback` | Stripe Connect return callback | Public |
-| POST | `/api/v1/payments/create` | Create a Stripe Checkout payment; returns `{ url, sessionId }` | Client (API key) or Admin (JWT) |
-| GET | `/api/v1/payments/session/:sessionId` | Confirm a payment by Checkout session ID (status + amounts) | Public (30/min per IP), or API key (600/min per client) |
-| GET | `/api/v1/reports/payments` | List payments | Admin (JWT) |
-| GET | `/api/v1/groups` | List client groups | Admin (JWT) |
-| POST | `/api/v1/groups` | Create client group | Admin (JWT) |
-| PATCH | `/api/v1/groups/:id` | Update group config | Admin (JWT) |
-| GET | `/api/v1/products` | List Stripe products | Admin (JWT) |
-| POST | `/api/v1/products` | Create Stripe product + price | Admin (JWT) |
-| GET | `/api/v1/tax-rates` | List active Stripe tax rates | Admin (JWT) |
-| GET | `/api/v1/settings` | Fetch global settings | Admin (JWT) |
-| PATCH | `/api/v1/settings/:key` | Update a global setting | Admin (JWT) |
-| GET | `/api/v1/metrics` | Prometheus metrics (requires METRICS_TOKEN; 404 if unset) | Token |
+| Method | Path | Purpose | Auth |
+|--------|------|---------|------|
+| POST | `/api/v1/auth/login` | Admin login against Nextcloud; returns a JWT | Public |
+| POST | `/api/v1/onboard-client/initiate` | Create a client and email its onboarding link | Admin |
+| POST | `/api/v1/onboard-client` | Exchange `{ token }` for a Stripe onboarding `{ url }` | Public (10/min per IP) |
+| POST | `/api/v1/payments/create` | Create a Stripe Checkout payment; returns `{ url, sessionId }`. Requires an `Idempotency-Key` header and `lineItems`; an admin JWT must also send `workspace` and `clientId`. Answers 409 when the client's connected account is missing or lacks active `card_payments` | API key or Admin |
+| GET | `/api/v1/payments/session/:sessionId` | Payment status by Checkout session id | Public (30/min per IP) or API key |
 | POST | `/api/v1/webhooks/stripe` | Stripe webhooks | Stripe signature |
+| GET | `/api/v1/health` | Health check (database connectivity) | Public |
 
-## 🌐 Frontend Routes
+Routes behind feature flags: `/customers` and `/invoices` need `CONNECT_INVOICING=true`; `/cerebo/*` needs `CEREBO_ENABLED=true`. Integrators should start with [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md).
 
-React Router handles these client-side routes:
+### Admin authentication
 
-- `/` - Home page
-- `/pricing` - Pricing page
-- `/team` - Team page
-- `/onboard#token=<token>` - Client Stripe onboarding
+Admin login is checked against Nextcloud. `POST /api/v1/auth/login` takes a Nextcloud username and password, verifies them with the Nextcloud OCS API, and issues a JWT when the account belongs to one of the groups in `ADMIN_NEXTCLOUD_GROUPS` (default `dfwsc-admins,managers`). There are no local admin accounts. Before deploying: create those groups and add members, and set `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD` (the service account must be a Nextcloud admin). Accounts with two-factor login must sign in with a Nextcloud app password. There is no local fallback: if Nextcloud is down, admin login answers 503 (payments are unaffected). Logins are rate limited per IP and per username because Nextcloud throttles failures by source IP. See [docs/BACKEND.md](./docs/BACKEND.md) (Admin login) and [docs/COOLIFY_DEPLOYMENT.md](./docs/COOLIFY_DEPLOYMENT.md).
 
-## 🔐 Environment Variables
+## Environment Variables
 
-### Backend (.env)
+Copy `.env.example` to `.env`. Minimum for a working API:
 
 ```env
-# Stripe
 STRIPE_SECRET_KEY=sk_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-
-# Server
-PORT=4242
-# For local dev: http://localhost:5173 (npm)
-# For Docker dev (docker-compose): http://localhost:5173
 FRONTEND_ORIGIN=http://localhost:5173
-API_BASE_URL=http://localhost:4242
-
-# Database
+API_BASE_URL=http://localhost:4242      # required in production
 DATABASE_URL=postgresql://user:pass@localhost:5432/stripe_portal
-
-# Email (SMTP)
-SMTP_HOST=smtp.gmail.com
+SMTP_HOST=...
 SMTP_PORT=587
-SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-app-password
-
-# Admin Authentication (JWT)
-JWT_SECRET=your_jwt_secret_minimum_32_characters_long
-JWT_EXPIRY=1h
-
-# Admin login is checked against Nextcloud (set NEXTCLOUD_BASE_URL, NEXTCLOUD_USERNAME, NEXTCLOUD_APP_PASSWORD)
-ADMIN_NEXTCLOUD_GROUPS=dfwsc-admins,managers
-
-# Payment Config
-DEFAULT_PROCESS_FEE_CENTS=100
-
+SMTP_USER=...
+SMTP_PASS=...
+JWT_SECRET=<at least 32 characters>
 ```
 
-**Admin Authentication:** Admin login is checked against Nextcloud. `POST /api/v1/auth/login` takes a Nextcloud username and password, verifies them with the Nextcloud OCS API, and issues a JWT when the account belongs to one of the groups in `ADMIN_NEXTCLOUD_GROUPS` (default `dfwsc-admins,managers`). There are no local admin accounts. Before deploying: create those groups and add members, and set `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD` (the service account must be a Nextcloud admin). Accounts with two-factor login must sign in with a Nextcloud app password. There is no local fallback: if Nextcloud is down, admin login answers 503 (payments are unaffected). Logins are rate limited per IP and per username because Nextcloud throttles failures by source IP. See `docs/BACKEND.md` (Admin login) and `docs/COOLIFY_DEPLOYMENT.md`.
+Every variable, its default, the feature flags (Nextcloud automations, mirrors, invoicing, Cerebo) and which ones the prod compose file forwards are listed in [docs/ENVIRONMENT.md](./docs/ENVIRONMENT.md).
 
-### Frontend (.env)
+## Frontend Routes
 
-```env
-# In docker, nginx proxies /api to the API container
-VITE_API_URL=/api/v1
+Routes are defined in `front/src/routes.js`. `/`, `/pricing`, `/team` and `/privacy` are prerendered at build time and indexable. The rest are client-rendered from `spa.html` and served with `noindex`.
 
-# For local dev without nginx, use:
-# VITE_API_URL=http://localhost:4242/api/v1
-```
+| Route | Page |
+|-------|------|
+| `/`, `/pricing`, `/team`, `/privacy` | Marketing pages (prerendered) |
+| `/demos` | Unlisted sample-sites page |
+| `/onboard#token=<token>` | Client Stripe onboarding |
+| `/admin` | Admin dashboard (Nextcloud login) |
+| `/payment-success`, `/payment-cancel` | Checkout return pages |
+| `/onboarding-success` | Return page after Stripe onboarding |
+| `/regenerate-key`, `/request-key-regeneration` | API key regeneration |
+| any other path | 404 page |
 
-## 📦 NPM Scripts
+`/docs` is not a React route: nginx redirects it (301) to the developer guide on Nextcloud. See [docs/FRONTEND.md section 3](./docs/FRONTEND.md#3-routes-routesjs-rendered-by-appjsx).
 
-### Root (Monorepo)
-- `npm run dev` - Start backend
-- `npm run dev:frontend` - Start frontend dev server
-- `npm run dev:backend` - Start backend dev server
-- `npm run build` - Build frontend + backend
-- `npm run build:frontend` - Build React static assets (output: front/build-dist)
-- `npm run build:backend` - Compile TypeScript backend
-- `npm run start` - Start production server
-- `npm run install:all` - Install all dependencies
-- `npm run test` - Run backend tests
-- `npm run db:generate` - Generate database migrations
-- `npm run db:migrate` - Run database migrations
-
-### Frontend (front/)
-- `npm run dev` - Vite dev server
-- `npm run build` - Build static assets
-- `npm run preview` - Preview production build
-
-### Backend (backend/)
-- `npm run dev` - Start with nodemon
-- `npm run start` - Start production server
-- `npm run build:server` - Compile TypeScript
-- `npm run test` - Run Vitest tests
-- `npm run db:generate` - Generate migrations
-- `npm run db:migrate` - Apply migrations
-
-## 🧪 Testing
-
-```bash
-# Run backend tests
-npm run test
-
-# Run with UI
-cd backend && npm run test:ui
-```
-
-## 📚 Documentation
-
-Detailed documentation lives in `docs/`:
+## Documentation
 
 | File | What it covers |
 |------|----------------|
-| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System overview, tech stack, data model |
-| [BACKEND.md](./docs/BACKEND.md) | API routes, auth, background jobs |
-| [FRONTEND.md](./docs/FRONTEND.md) | React, state, and routing |
-| [DATABASE.md](./docs/DATABASE.md) | Schema, Drizzle, migrations |
-| [STRIPE.md](./docs/STRIPE.md) | Stripe Connect, webhooks, payment flows |
-| [STYLES.md](./docs/STYLES.md) | Tailwind v4, UI patterns |
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System overview, flows, tech stack |
+| [docs/BACKEND.md](./docs/BACKEND.md) | Auth, rate limiting, route map, Nextcloud integrations, background jobs |
+| [docs/FRONTEND.md](./docs/FRONTEND.md) | React, state, routing, prerendering |
+| [docs/DATABASE.md](./docs/DATABASE.md) | Schema, Drizzle, migrations |
+| [docs/STRIPE.md](./docs/STRIPE.md) | Stripe Connect, webhooks, payment flows |
+| [docs/STYLES.md](./docs/STYLES.md) | Tailwind v4, theme, UI patterns |
+| [docs/ENVIRONMENT.md](./docs/ENVIRONMENT.md) | Env vars and feature flags |
+| [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) | Git hooks, CI, CLAUDE.md mirrors |
+| [docs/BACKUP.md](./docs/BACKUP.md) | Database backups and restore |
+| [docs/COOLIFY_DEPLOYMENT.md](./docs/COOLIFY_DEPLOYMENT.md) | Production deployment on Coolify |
+| [API_DOCS.md](./API_DOCS.md) | API reference for integrators |
+| [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md) | Integrator guide: payments and invoicing |
 
-## 🧯 Troubleshooting
+## Troubleshooting
 
-- **CORS errors**: ensure `FRONTEND_ORIGIN` matches the UI origin (local vs Docker).
-- **Database connection failures**: verify `DATABASE_URL` and container health (`docker compose logs -f db`).
-- **Stripe webhook signature errors**: update `STRIPE_WEBHOOK_SECRET` to match the Stripe CLI or dashboard endpoint.
-- **Onboarding redirect mismatch**: set `API_BASE_URL` when running behind a reverse proxy.
+- **CORS errors**: `FRONTEND_ORIGIN` must match the UI origin (local vs Docker).
+- **Database connection failures**: check `DATABASE_URL` and container health (`make ps`, then `make logs`; the `db` service logs via `docker compose -f docker-compose.base.yml -f docker-compose.dev.yml logs -f db`).
+- **Stripe webhook signature errors**: `STRIPE_WEBHOOK_SECRET` must match the Stripe CLI or dashboard endpoint.
+- **`/app-config.js` or onboarding links return 500 in production**: set `API_BASE_URL`.
 
-## 🔄 Migration Notes
-
-This project was recently restructured from separate frontend/backend repos:
-
-**Before:**
-- `dfwsc2.0/front` - Deployed to Netlify
-- `stripe_payment_portal` - Separate backend
-
-**After:**
-- `dfwsc2.0/front` - React frontend (built and served by nginx, deployed as a container on Coolify)
-- `dfwsc2.0/backend` - Fastify backend (API only)
-
-**Benefits:**
-- ✅ Frontend and API deploy independently
-- ✅ Easy to move API or UI to different hosts later
-- ✅ Clean separation of concerns
-
-## 📝 License
+## License
 
 ISC
 
-## 👥 Author
+## Author
 
 DFW Software Consulting - Jeremy Ashley

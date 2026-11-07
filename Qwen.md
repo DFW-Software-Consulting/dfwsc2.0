@@ -12,13 +12,15 @@ Payment portal for DFW Software Consulting clients integrating Stripe Connect.
 - [DATABASE.md](./docs/DATABASE.md) — Schema and Migrations.
 - [STRIPE.md](./docs/STRIPE.md) — Connect, Webhooks, and Payments.
 - [STYLES.md](./docs/STYLES.md) — Styling and UI Patterns.
-- [README.md](./README.md) — Quickstart and Setup.
+- [ENVIRONMENT.md](./docs/ENVIRONMENT.md) — Every env var and feature flag.
+- [DEVELOPMENT.md](./docs/DEVELOPMENT.md) — Git hooks, CI, and the CLAUDE.md mirrors.
+- [README.md](./README.md) — Quickstart and Setup (also indexes the remaining docs).
 
 ## Commands
 
 ### Dev stack (Docker — preferred for all backend work)
 ```sh
-make up           # Start dev stack (api, web, db, mailhog, stripe-cli)
+make up           # Start dev stack (api, web, db, redis, mailhog, stripe-cli, loki, promtail)
 make up-build     # Build + start
 make down         # Stop
 make down-v       # Stop + remove volumes (destroys pgdata)
@@ -27,6 +29,7 @@ make sh           # Shell into API container
 make test         # Run ALL tests (frontend local + backend in container)
 make test-back    # Run backend tests inside the dev container
 make test-up      # Start stack then run all tests (backend in container + frontend local)
+make coverage     # Backend tests with coverage; thresholds 87 statements / 79 branches / 82 functions / 87 lines
 ```
 
 ### Running tests
@@ -54,8 +57,15 @@ For full details, see [ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 - **Admin routes**: JWT Bearer token obtained from `POST /api/v1/auth/login`.
 
 ### Payment flow
-All payments use Stripe Checkout redirects (`POST /payments/create` requires `lineItems` and returns a hosted `url`), with `application_fee_amount` support. The former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.
+All payments use Stripe Checkout redirects (`POST /payments/create` requires `lineItems` and returns a hosted `url`), with `application_fee_amount` support. `Idempotency-Key` is required (400 without it), the response is `{ url, sessionId }`, an admin JWT must also send `workspace` and `clientId`, and a client without an active connected account or active `card_payments` capability gets 409 (`ACCOUNT_NOT_CONNECTED` / `CARD_PAYMENTS_NOT_ACTIVE`). The former Stripe Elements / PaymentIntent mode and its `USE_CHECKOUT` toggle have been removed.
 
 ### Environment variables
-Required: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `FRONTEND_ORIGIN`, `DATABASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `JWT_SECRET`.
+Required: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `FRONTEND_ORIGIN`, `DATABASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `JWT_SECRET`. `API_BASE_URL` is also required in production (an unset value makes `/app-config.js` and the Connect callback links answer 500). The full list, defaults, and feature flags are in [ENVIRONMENT.md](./docs/ENVIRONMENT.md).
+
+### Mirror files
+`AGENTS.md`, `Gemini.md`, `Qwen.md` and `.claude/CLAUDE.md` must stay byte-identical to `CLAUDE.md`. Edit `CLAUDE.md` only, then run:
+```sh
+cp CLAUDE.md AGENTS.md && cp CLAUDE.md Gemini.md && cp CLAUDE.md Qwen.md && cp CLAUDE.md .claude/CLAUDE.md
+```
+Details of the hook and CI checks are in [DEVELOPMENT.md](./docs/DEVELOPMENT.md).
 

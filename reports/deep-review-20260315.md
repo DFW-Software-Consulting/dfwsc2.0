@@ -1,3 +1,7 @@
+> **Historical / superseded (2026-11-06).** This document reflects the codebase as of 2026-03-15. It is not maintained and some instructions would reintroduce removed or insecure behavior. Current docs: [docs/](../docs/)
+>
+> Issues S-02 (Stripe error text leaked from `/connect/refresh`) and SM-01 (duplicated `isValidHttpsUrl`) listed below as deferred have since been fixed: the refresh handler now returns a generic message and `isValidHttpsUrl` exists once, in `backend/src/lib/validation.ts`.
+
 # Deep Review Report: Backend Full Codebase Audit
 
 **Date:** 2026-03-15

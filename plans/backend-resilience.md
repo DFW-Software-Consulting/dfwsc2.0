@@ -1,3 +1,12 @@
+> **Historical / superseded (2026-11-06).** This document reflects the codebase as of 2026-06-19. It is not maintained and some instructions would reintroduce removed or insecure behavior. Current docs: [docs/](../docs/)
+>
+> Status: superseded. Do not implement these steps; the shipped behavior differs and in places is the opposite.
+> - Payments are Stripe Checkout only (Step 3 and its PaymentIntent `clientSecret` flow no longer apply). See [STRIPE.md](../docs/STRIPE.md).
+> - Webhooks take a per-event lease; a retryable failure releases the claim and returns a non-2xx so Stripe retries, and a live lease from another delivery returns 409 (`backend/src/routes/webhooks.ts`, `backend/src/lib/webhook-lease.ts`). Step 1's "mark processed on error" approach was not adopted.
+> - A failed `sendMail` surfaces as 502 `EMAIL_DELIVERY_FAILED` (`errors.emailFailed`), not a swallowed error (Step 4).
+> - Rate limiting is the custom limiter in `backend/src/lib/rate-limit.ts`, Redis-backed only when `REDIS_URL` is set, not `@fastify/rate-limit` (Step 5).
+> - A SIGTERM handler that closes the server exists in `backend/src/index.ts` (Step 2).
+
 # Plan: Backend Resilience
 
 ## Goal

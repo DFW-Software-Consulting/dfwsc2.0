@@ -3,19 +3,33 @@
 This document details the backend implementation, API design, and core logic for the DFWSC Payment Portal.
 
 ## 1. Overview
-The backend is a **Fastify 5** application written in **TypeScript**, using **Node.js 22**. Routes handle HTTP concerns; `src/lib/` handles core business logic (Stripe, mailer, auth, etc.).
+The backend is a **Fastify 5** application written in **TypeScript**, using **Node.js 22**. Routes (`src/routes/`, plus `src/cerebo/`) handle HTTP concerns; `src/lib/` handles core business logic (Stripe, mailer, auth, Nextcloud, background jobs).
+
+Where things are documented:
+
+| Topic | Document |
+|---|---|
+| Every HTTP route (method, path, auth, rate limit, gate, purpose) | Section 7 of this file |
+| Integrator guide (payments, Connect setup from your app, invoicing) | [CLIENT_INTEGRATION.md](../CLIENT_INTEGRATION.md) |
+| Client-facing request and response reference | [API_DOCS.md](../API_DOCS.md) |
+| Stripe Connect flows, fees, webhooks | [STRIPE.md](./STRIPE.md) |
+| Environment variables and feature flags | [ENVIRONMENT.md](./ENVIRONMENT.md) |
+| Schema and migrations | [DATABASE.md](./DATABASE.md) |
+| Nextcloud integrations and background jobs | Sections 9 to 17 of this file |
 
 ## 2. Request Authentication
-Two distinct schemes are implemented:
+Four mechanisms are used. Which one a route needs is in the route table in section 7.
 
-- **Client-Facing Routes** (`POST /payments/create`):
-  - `X-Api-Key` header.
-  - `apiKeyLookup` (SHA256) for O(1) DB lookup + `apiKeyHash` (bcrypt) for secure verification.
-- **Admin Routes**:
-  - JWT Bearer token from `POST /api/v1/auth/login`.
-  - Claims must include `role: "admin"`. `requireAdminJwt` checks the signature (HS256), expiry and role only; it does not read the database.
+| Mechanism | Sent as | Check | Failure responses |
+|---|---|---|---|
+| API key | `X-Api-Key` header | `requireApiKey` (`lib/auth.ts`): `apiKeyLookup` (SHA-256 of the key) finds the client in O(1), `apiKeyHash` (bcrypt) verifies it, and the client must be `active`. | `401 { error: "API key is required." }` (missing or blank), `401 { error: "Invalid API key." }` (unknown, wrong or inactive), `500` on a database error |
+| Admin JWT | `Authorization: Bearer <jwt>` | `requireAdminJwt`: HS256 signature (`JWT_SECRET`), expiry and `role: "admin"`. It does not read the database. | `401 { error }` with `Authorization header required`, `Invalid authorization header format. Expected: Bearer <token>`, `Token expired`, `Invalid token` or `Authentication failed`; `403 { error: "Forbidden: Admin role required" }` |
+| Shared secret | `Stripe-Signature` (Stripe webhooks), `Authorization: Bearer <secret>` (Nextcloud webhooks, `/metrics`) | HMAC signature check by the Stripe SDK; constant-time secret comparison for the bearer secrets | See the webhook and operational tables in section 7 |
+| Single-use token | In the request body (`token`) or query string (`state`) | Looked up by hash (onboarding token, API key regeneration token) or by stored state (callback and refresh) | `400` or `404`, see section 7 |
 
-The payment route also accepts Admin JWT as a fallback (for admin-initiated payments).
+`POST /payments/create` accepts an API key or an admin JWT. When `X-Api-Key` is present and valid, the client is the key's owner. When it is present but rejected and there is no `Authorization` header, the answer is the API key `401`. When no `X-Api-Key` header is sent (or it is empty), the admin JWT check decides, so a request with no credentials gets `401 Authorization header required`. When both headers are present and the key is rejected, the admin JWT check decides. A request that sends `X-Api-Key` is always treated as an API call, which matters for `waiveFee` (section 3, "Payment Flow").
+
+The admin JWT is issued by `POST /auth/login` (below). The `admins` table is legacy and unused.
 
 ### Admin login (Nextcloud)
 `POST /auth/login` (`{ username, password }`, unchanged) is checked against Nextcloud (`lib/admin-login.ts`); the portal has no admin accounts of its own (the `admins` table is legacy and unused).
@@ -39,7 +53,22 @@ The password is sent only to `NEXTCLOUD_BASE_URL`, only on step 1, and is never 
 
 **Idempotency**: A nonblank `Idempotency-Key` header is required for all payment creation calls (both API-key and admin). Conflicts return 409: `IDEMPOTENCY_KEY_REUSED` (same key, different parameters; permanent, use a new key) or `IDEMPOTENCY_KEY_IN_USE` (same key still in progress; transient, retry shortly with the same key).
 
-**Metadata**: Caller-supplied metadata is validated against Stripe limits (max 50 keys, 40-char keys, 500-char values) before being passed to Stripe.
+**Request.** Unknown body fields are ignored. Header and body are validated before any Stripe call.
+
+| Field | Rules |
+|---|---|
+| `Idempotency-Key` (header) | Required, trimmed. The Stripe key is `<clientId>:<key>` and must fit in 255 characters, so the caller's key may be at most `255 - clientId.length - 1` characters (218 with the 36-character client ids the portal generates). Missing or too long: `400 BAD_REQUEST`. |
+| `lineItems` | Required, 1 to 100 items. Each item is `{ price_data: { currency, product_data: { name (1 to 200), description? (max 1000) }, unit_amount }, quantity? }`. `unit_amount` is an integer from 1 to 99,999,999 (cents). `quantity` is an integer from 1 to 999,999 (default 1). Every item must use the same 3-letter currency (stored lower-case). The computed base amount must be positive and a safe integer. |
+| `description` | Optional, max 2000 characters. Set as the PaymentIntent description. |
+| `metadata` | Optional string-to-string map, see Metadata below. |
+| `amount`, `currency` | Accepted by the schema and effectively ignored: the amount comes from `lineItems`, and the currency from the line items. |
+| `waiveFee`, `workspace`, `clientId` | Admin-initiated payments only, see below. |
+
+**Admin-initiated payments.** An admin JWT (no `X-Api-Key`) may create a payment for any client. The body must carry `workspace` (`client_portal`; `400` otherwise) and the target `clientId` (or, as a fallback, `metadata.clientId`; `400` when neither is given, `404` for an unknown client, `400` when the client belongs to another workspace). The same `409` account checks apply as for an API key. `waiveFee: true` leaves out the Processing Fee line and the application fee; the ledger records a fee of 0 and the PaymentIntent metadata `waivedFeeAmount` carries the fee that would have applied. `waiveFee` is honored only when no `X-Api-Key` header is sent, so an API key can never waive the fee. The Idempotency-Key is scoped to the target client, not to the admin.
+
+**Processing fee on top of the base amount.** The fee comes from the six-level chain below and is computed on the base amount (the sum of `unit_amount * quantity`). When it is above zero and not waived, a line item named **Processing Fee** (quantity 1, `unit_amount` = fee) is appended to the Checkout Session and the same amount is sent as `application_fee_amount`. The payer therefore pays **base + fee**, the hosted Stripe page shows the Processing Fee line, and DFWSC receives the fee as the application fee. The ledger row stores `baseAmountCents`, `feeAmountCents` and `totalAmountCents` (base + fee; just the base when waived), and `GET /payments/session/:sessionId` returns all three. The fee is fixed when the session is created.
+
+**Metadata**: caller-supplied metadata must be a string-to-string map (a non-string value is `400`). Limits: at most 50 keys, keys at most 40 characters, values at most 500 (`400` otherwise). It is placed on the PaymentIntent (`payment_intent_data.metadata`), not on the Checkout Session, whose own metadata is `{ clientId }`. The API writes `clientId`, `baseAmount`, `feeAmount` and `waivedFeeAmount` after the caller's keys, so a caller value for one of those four names is overwritten. Because those four keys count toward Stripe's own 50-key limit, a request that uses nearly all 50 keys can be rejected by Stripe (`400 INVALID_REQUEST`).
 
 **Payment Ledger**: Every payment creation inserts a row into the `payment_ledger` table synchronously after Stripe Checkout Session creation. The ledger tracks connected account, Stripe IDs, amounts, currency, and status. Webhook events update the ledger idempotently with ordering protection (stale events are ignored).
 
@@ -53,15 +82,28 @@ All payments resolve `application_fee_amount` via a 6-level priority chain:
 5. DB setting `default_fee_percent`
 6. DB setting `default_fee_cents`
 
-If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environment variable is applied as a fallback; if that is also unset, no fee is applied.
+If none of the six levels are set, the flat `DEFAULT_PROCESS_FEE_CENTS` environment variable is applied as a fallback; if that is also unset, no fee is applied. Client and group percentages are rounded to whole cents (`Math.round`); a client or group cannot hold both a percentage and a cent fee (the admin PATCH refuses both with `400`). A stored percentage outside 0 to 100 makes the payment fail with `400`.
 
 ### Onboarding Flow
-1. **Create client**: `POST /api/v1/accounts` creates the client's Stripe Express account first, then stores the client record (with `stripeAccountId` and readiness flags) + pending onboarding token in one transaction, and returns `apiKey`, `clientId`, and `onboardingUrlHint` (a URL embedding the onboarding token; the raw token is no longer returned as a separate `onboardingToken` field).
-2. **Send email**: `POST /api/v1/onboard-client/initiate` does the same but also emails the client. Unlike `/accounts`, it does **not** return the plaintext `apiKey` (response `apiKey` is `null`); instead the email includes a 15-minute `/regenerate-key#token=...` link that, when clicked, rotates and reveals the API key once via `POST /api/v1/api-key/regenerate` (token in request body, not URL).
-3. **Resend**: `POST /api/v1/onboard-client/resend` revokes active tokens and issues a new one (in one transaction) with a fresh email; it returns 200 only after the email is sent. A client with an account and `chargesEnabled` whose stored `card_payments_status` is `active` short-circuits with `alreadyOnboarded: true`. Any other stored value (including NULL) is re-read live with one `accounts.retrieve` through the circuit wrapper and stored unconditionally (`refreshCardPaymentsStatus`, which also overwrites `ach_payments_status`; an admin action sees Stripe's current state, so it works right after the capability is requested in the dashboard without waiting for the webhook; a failed read is `502`/`503`), and the fresh value decides: `active` short-circuits; a client whose card payments are `inactive` or `pending` gets a fresh link like an incomplete account. `unrequested` (the capability was never requested on the Stripe account) gets `409 CARD_PAYMENTS_UNREQUESTED` (admin-facing: request Card payments for the account in the Stripe dashboard, then resend), with no link and no email; the API does not call `accounts.update`.
-4. **Onboard**: `POST /api/v1/onboard-client` with body `{ "token": "..." }` returns an Account Link URL for the client's stored Stripe account. Clients created before eager provisioning (null `stripeAccountId`) get their account created here as a fallback.
-5. **Callback**: Stripe redirects to the platform-registered return URL, `GET /api/v1/connect/callback` with `client_id` and `state` (Stripe does not append `account`; it is accepted only as an optional legacy cross-check). Validates CSRF state, looks up `stripeAccountId` from the client record, marks token `completed`, redirects browser to `/onboarding-success`. The state expires after 24 hours; an expired state redirects to `/onboarding-success?status=expired` instead of returning an error.
-6. **Refresh**: `GET /api/v1/connect/refresh?client_id=...&state=...` regenerates an expired account link and redirects the client.
+Lifetimes: an onboarding token is valid for 24 hours from creation (`ONBOARDING_TOKEN_TTL_MS` in `routes/connect.ts`; an older one is `404`); the OAuth `state` minted with each Account Link is valid for 24 hours (`OAUTH_STATE_EXPIRY_MS`); an API key regeneration token is valid for 15 minutes.
+
+1. **Create client**: `POST /api/v1/accounts` with `{ name, email, workspace: "client_portal", groupId? }` creates the client's Stripe Express account first, then stores the client record (with `stripeAccountId` and readiness flags) + pending onboarding token in one transaction. It returns `201 { name, onboardingUrlHint, apiKey, clientId, workspace, groupId }`. `onboardingUrlHint` is `<FRONTEND_ORIGIN>/onboard#token=<token>`; the raw token is not returned as a separate field. This is the only route that returns a plaintext `apiKey`.
+2. **Send email**: `POST /api/v1/onboard-client/initiate` takes the same body and also emails the client. It does **not** return the plaintext key: the `201` body is `{ message, clientId, apiKey: null, groupId }`. The email includes a 15-minute `/regenerate-key#token=...` link that, when opened, rotates and reveals the API key once via `POST /api/v1/api-key/regenerate` (token in the request body, not the URL).
+3. **Resend**: `POST /api/v1/onboard-client/resend` with `{ email }` or `{ clientId }` (and optionally `workspace`) revokes active tokens and issues a new one (in one transaction) with a fresh email; it returns `200 { message, clientId }` only after the email is sent. A client with an account and `chargesEnabled` whose stored `card_payments_status` is `active` short-circuits with `200 { message, clientId, alreadyOnboarded: true }`. Any other stored value (including NULL) is re-read live with one `accounts.retrieve` through the circuit wrapper and stored unconditionally (`refreshCardPaymentsStatus`, which also overwrites `ach_payments_status`; an admin action sees Stripe's current state, so it works right after the capability is requested in the dashboard without waiting for the webhook; a failed read is `502`/`503`), and the fresh value decides: `active` short-circuits; a client whose card payments are `inactive` or `pending` gets a fresh link like an incomplete account. `unrequested` (the capability was never requested on the Stripe account) gets `409 CARD_PAYMENTS_UNREQUESTED` (admin-facing: request Card payments for the account in the Stripe dashboard, then resend), with no link and no email; the API does not call `accounts.update`.
+4. **Onboard**: `POST /api/v1/onboard-client` with body `{ "token": "..." }` (public, 10 requests per minute per IP) returns `{ url }`, an Account Link URL for the client's stored Stripe account. A token that is unknown, revoked, completed or older than 24 hours is `404`. Clients created before eager provisioning (null `stripeAccountId`) get their account created here as a fallback. Each call mints a fresh `state` and stores it on the token.
+5. **Callback**: Stripe redirects the browser to the platform-registered return URL, `GET /api/v1/connect/callback?client_id=...&state=...` (Stripe does not append `account`; it is accepted only as an optional legacy cross-check). The handler validates the CSRF state, looks up `stripeAccountId` from the client record, re-reads the account from Stripe, stores the readiness flags (`chargesEnabled`, card and ACH capability status, `payoutsEnabled`, `detailsSubmitted`) and clears the single-use `state`. The token becomes `completed` **only if Stripe reports `details_submitted`**; otherwise it stays `in_progress`. The browser is then redirected to `<FRONTEND_ORIGIN>/onboarding-success?status=<value>`:
+
+   | `status` | When |
+   |---|---|
+   | `completed` | `details_submitted` is true |
+   | `pending` | The client has not finished (token left `in_progress`), or no Stripe account id could be resolved |
+   | `expired` | The `state` is older than 24 hours. Nothing is consumed; the account is reconciled later by the `account.updated` webhook, and an unfinished client needs a new link (resend) |
+   | `error` | Stripe could not be reached to verify the account. The token is left `in_progress` |
+
+   Errors that are not redirects: `400` for a missing `state` or `client_id`, an unknown, replayed or already-consumed `state`, a malformed or mismatching `account`, or a non-Express account; `503 STRIPE_CIRCUIT_OPEN` when the breaker is open.
+6. **Refresh**: `GET /api/v1/connect/refresh?client_id=...&state=...` (Stripe's `refresh_url`) regenerates an expired Account Link and redirects the client (`302`) to it. Unlike the callback, an unknown or expired `state` is a `404`, not a redirect.
+
+A deployed client app can also drive Stripe onboarding for its own account with its API key, without admin involvement: `POST /connect/onboarding-link`, `GET /connect/account` and `POST /connect/dashboard-link` (section 7, "Client-facing Connect"). Those routes require an admin to register the client's allowed redirect origins first (`PATCH /clients/:id` with `connectRedirectOrigins`).
 
 ### Connected-account invoicing (overview)
 An optional feature, off unless `CONNECT_INVOICING=true` and the client's `invoicing_enabled` flag is set. An integrator with an API key creates Customers and invoices on its own connected account: create a customer, create a **draft** invoice, finalize, send (Stripe emails the customer), and the customer pays on Stripe's hosted page; a draft can be deleted and an open invoice voided. Statuses stay current through the Connect webhook and a stale re-check on `GET /invoices/:id`. Route details are in section 7 ("Connected-account invoicing"); the integrator-facing guide with examples, limits and the full error table is [CLIENT_INTEGRATION.md](../CLIENT_INTEGRATION.md) ("Invoicing your customers"); the Stripe-side design and the rollout checklist are in [STRIPE.md](./STRIPE.md).
@@ -70,9 +112,23 @@ An optional feature, off unless `CONNECT_INVOICING=true` and the client's `invoi
 - **Implementation**: Sliding-window limiter (`rateLimit` in `lib/rate-limit.ts`) — Redis-backed (shared across replicas) when `REDIS_URL` is set; otherwise falls back to per-process in-memory buckets and logs a one-time startup warning, since limits are then effectively multiplied by replica count under horizontal scaling.
 - **Bucket isolation**: Each limiter keeps its own bucket, namespaced by an optional `name` or, by default, the request's method and route pattern (`ratelimit:<METHOD>:<route>:<key>`), so hits on one route never count against or prune another's.
 - **Redis outage**: If Redis is unreachable or any pipeline command fails, the request is limited by the per-process in-memory buckets instead (fail-soft, not 503) and the error is logged at most once every 30 seconds. With a single API instance the in-memory limiter is as accurate as Redis, and failing closed would reject payments whenever Redis restarts.
-- **Admin login** (`POST /auth/login`): 5 req / 15 min per IP, plus 10 req / 15 min per submitted username (own bucket, `ratelimit:POST:/auth/login:username:<sha256>`).
-- **Admin/Onboard Routes**: 10 req/min per IP.
-- **Resend Route**: 5 req/min per IP.
+- **Tiers.** Limits are per client IP unless the key column says otherwise (`window` is one minute unless stated). The invoicing and checkout buckets, the session lookup and the key-failure budget are described in the bullets below.
+
+  | Tier | Limit | Key | Routes |
+  |---|---|---|---|
+  | Admin login | 5 per 15 min, plus 10 failed attempts per 15 min per username | client IP; username (own bucket `ratelimit:POST:/auth/login:username:<sha256>`) | `POST /auth/login` |
+  | Strict | 10 per min | client IP | `POST /accounts`, `POST /onboard-client/initiate`, `POST /onboard-client`, `GET /connect/callback`, `GET /connect/refresh`, `POST /api-key/regenerate-request/admin`, `POST /api-key/regenerate`, `POST /contact` |
+  | Auth | 5 per min | client IP | `POST /onboard-client/resend`, `POST /api-key/regenerate-request` |
+  | Admin CRUD | 120 per min | the admin (`sub` of the JWT; client IP if absent) | `/clients*`, `/groups*`, `/products`, `/tax-rates`, `/settings*`, `/cerebo/*` |
+  | Reports | 60 per min | the admin | `GET /reports/payments` |
+  | Checkout creation | token bucket, capacity 200, refill 120 per min | `stripe:<connected account id>` for an API key; client IP for an admin JWT | `POST /payments/create` |
+  | Session lookup | 30 per min anonymous; 600 per min with an API key | client IP; client | `GET /payments/session/:sessionId` |
+  | Client Connect | 10 per min (link calls), 60 per min (status) | the client | `POST /connect/onboarding-link`, `POST /connect/dashboard-link`; `GET /connect/account` |
+  | Invoicing | writes: token bucket 300, refill 120 per min; reads: 600 per min | `stripe:<account>` per route; the client | `/customers*`, `/invoices*` |
+  | Nextcloud webhooks | 60 per min each (own bucket per route) | client IP | `/webhooks/nextcloud/*` |
+  | None | - | - | `POST /webhooks/stripe` and `/webhooks/stripe-billing` (signature checked instead), `GET /health`, `GET /metrics` (bearer token), `GET /app-config.js` |
+
+- **Client IP and proxies.** `getClientIp` (`lib/client-ip.ts`) is the key for every IP-keyed limiter. It starts from `request.ip`, which Fastify resolves using `TRUST_PROXY`: unset or blank trusts the private-network ranges `loopback,linklocal,uniquelocal` (a client connecting from a public address cannot spoof `X-Forwarded-For`); `true` or `false` are booleans; anything else is a comma-separated list of IPs, CIDRs or named ranges (an invalid entry stops startup). A bare integer (the old hop-count form) is no longer supported by Fastify: it falls back to the default list and logs a warning. When `request.ip` is a Cloudflare edge address (the built-in ranges in `lib/client-ip.ts`, replaceable with `CLOUDFLARE_IP_RANGES` as a comma-separated CIDR list, or `none` to disable), the `CF-Connecting-IP` header is used instead; from any other peer that header is ignored. IPv4-mapped IPv6 addresses collapse to IPv4, and an IPv6 address collapses to its `/64` prefix (for example `2001:db8:0:1::/64`), so rotating addresses inside one `/64` does not escape a limit. See [ENVIRONMENT.md](./ENVIRONMENT.md) for how these variables reach the production containers.
 - **Checkout creation** (`POST /payments/create`): a token bucket (`tokenBucketRateLimit`, same file) per Stripe Account ID (fallback to IP): capacity 200, refilling at 120 per minute (`PAYMENT_CREATE_BUCKET_CAPACITY` and `PAYMENT_CREATE_REFILL_PER_MINUTE` in `lib/constants.ts`). In Redis it is one Lua script per request (atomic, so concurrent requests cannot both take the last token, with the refill computed from Redis's clock); it has the same per-route namespacing and the same in-memory fallback on Redis errors as the sliding window. Bucket keys are `ratelimit:bucket:<METHOD>:<route>:<key>`. A request that takes a token but is then refused before any Stripe call is made (`503 STRIPE_BUSY`, or `503 STRIPE_CIRCUIT_OPEN` from a breaker that was already open) gives that token back (`refund` on the limiter, with its own Lua script on Redis; it returns one token to the same store and bucket the take came from, never above capacity, and at most once per request), so the retry the caller is told to make is not charged twice. A request whose Stripe call went out keeps its token, including a Stripe `429` and a call that timed out, as do requests that fail validation. If the refund itself fails the token stays spent.
 - **Session Lookup** (`GET /payments/session/:sessionId`): 30 req/min per IP when anonymous. A request with an `X-Api-Key` header is authenticated with `requireApiKey` (a bad or inactive key is `401`, not a fall back to anonymous; each distinct key is charged to the client IP by `failureRateLimit` before its lookup, keyed by the key's SHA-256 lookup hash, 30 a minute: the same bad key repeated counts once, a charge is given back when the key is accepted or the lookup errors (500), and a blank or missing key is not counted; over 30 distinct keys a request with a key is refused with 429 before any lookup unless the key passed verification within `VERIFIED_KEY_TTL_MS`, and requests over budget while charges from this process are still in flight wait for them to settle; refusals are not counted. `requireApiKey` also remembers a lookup hash that matched no active client for `BAD_API_KEY_TTL_MS` (60 s) and answers repeats 401 without a lookup, cleared early when an admin PATCHes a client's status (`forgetBadApiKey`), so a reactivated client is refused for at most that long (a lookup that read the client as inactive before that PATCH and finishes after it records nothing); and concurrent verifications of the same key share one lookup, which is given up after `API_KEY_VERIFICATION_TIMEOUT_MS` (10 s): its entry is removed so the next request starts a fresh lookup, the requests waiting on it fail with `500` exactly as for a database error (not counted against the failed-auth budget, not recorded as a bad key), and a result that arrives after the timeout is discarded without touching the bad-key record or the verification cache. The database pool itself still has no query timeout), is limited to 600 req/min per client in its own bucket, and only sees its own client's sessions (another client's session is the same `404` as an unknown one).
 - **Refusals**: every `429` from these limiters is `{ "error": "Too Many Requests", "code": "RATE_LIMITED" }` with a `Retry-After` header in whole seconds (at least 1): for the sliding window, the time until the oldest counted hit leaves the window; for the token bucket, the time until one token is available.
@@ -80,7 +136,7 @@ An optional feature, off unless `CONNECT_INVOICING=true` and the client's `invoi
 - **Connected-account invoicing** (`/customers`, `/invoices`): writes (`POST`, `PATCH`) use a token bucket of the same shape as checkout creation, one per route and connected account (keyed `stripe:<connectedAccountId>` within the route's own namespace, so routes do not share tokens), with `INVOICE_WRITE_BUCKET_CAPACITY` 300 and `INVOICE_WRITE_REFILL_PER_MINUTE` 120 (`lib/constants.ts`) and the same token refund when a request is refused before reaching Stripe (`503 STRIPE_BUSY`, or an already-open circuit). Reads (`GET`) are 600 req/min per client (`client:<id>`), one sliding window per client, counted across the read routes.
 
 ## 5. Workspace
-All clients and groups belong to the `client_portal` workspace. The `workspace` query parameter is required on all admin list endpoints and validated server-side.
+There is one workspace value, `client_portal` (`lib/workspace.ts`), and every client and group row carries it. `workspace=client_portal` is required and validated (`400` otherwise) on `GET /clients`, `GET /clients/:id`, `GET /groups`, `POST /groups` (body), `POST /accounts` (body), `POST /onboard-client/initiate` (body), `GET /reports/payments` (query) and admin-initiated `POST /payments/create` (body). It is optional on `POST /onboard-client/resend`. `PATCH` and `DELETE` on clients and groups, the product and tax-rate routes (addressed by `clientId`) and the settings routes take no workspace.
 
 ## 6. Resilience: Circuit Breakers
 Outbound calls to Stripe and SMTP are wrapped by in-process circuit breakers (`lib/circuit-breakers.ts`, built on `opossum`). Each breaker opens after 5 consecutive failures and stays open for a 30-second reset timeout; while open, calls fail fast instead of hitting the upstream service.
@@ -89,69 +145,185 @@ A "failure" is defined per breaker. Errors that mean the caller's input was wron
 - **Stripe** counts calls with no HTTP status (connection errors), 5xx, 401 (platform key revoked or wrong) and opossum timeouts. Any other 4xx (invalid request, idempotency mismatch, permission, card errors, and 429 rate limiting) does not count. A Stripe 429 therefore never opens the breaker, and because opossum emits "success" for it, it also resets the consecutive-failure count. `POST /payments/create` answers it with `429 RATE_LIMITED` and `Retry-After: 2` (Stripe sends none).
 - **SMTP** counts every error except a permanent 5xx rejection of a recipient (`RCPT TO`). Auth, connection, `MAIL FROM`, `DATA` and temporary 4xx failures still count.
 
-- **Stripe** (`withStripeCircuit`): wraps Stripe API calls in the `payments`, `connect`, `products`, and `webhooks` routes. When the breaker is open, these routes catch `isCircuitOpenError` and respond `503` with `{ "error": "Payment service is temporarily unavailable.", "code": "STRIPE_CIRCUIT_OPEN" }`.
+- **Stripe** (`withStripeCircuit`): wraps Stripe API calls in the `payments`, `connect`, `connect-client`, `connect-invoicing`, `products` and `webhooks` routes and in the background jobs that call Stripe. When the breaker is open, these routes catch `isCircuitOpenError` and respond `503` with `{ "error": "Payment service is temporarily unavailable.", "code": "STRIPE_CIRCUIT_OPEN" }`.
 - **Stripe concurrency cap**: `withStripeCircuit` also limits Stripe calls in flight (`lib/concurrency-limiter.ts`, in front of the breaker): at most 25 at once (`STRIPE_MAX_CONCURRENT_CALLS`); further calls wait FIFO for a slot. A call that waits longer than 10 s (`STRIPE_QUEUE_MAX_WAIT_MS`), or arrives when 500 are already waiting (`STRIPE_QUEUE_MAX_WAITING`), fails with a busy error that is never counted by the breaker. `mapStripeError` turns it into `503 { "error", "code": "STRIPE_BUSY" }` with `Retry-After: 5` at every call site. A webhook that cannot get a slot answers `503`, releases its claim and is not marked processed, so Stripe redelivers it. The checkout status reconciliation lookup in `routes/payments.ts` stays outside `withStripeCircuit` (and so outside the cap) with its own 3 s timeout. The cap is per process.
 - **SMTP** (`withSmtpCircuit`): wraps outbound mail in `lib/mailer.ts` (onboarding and API-key-regeneration emails).
-- Breaker state (open/half-open/closed, plus fire/failure/success counts) is exposed via `GET /metrics` (bearer-token protected; the endpoint is disabled and returns 404 if `METRICS_TOKEN` is unset).
+- **Nextcloud** (`lib/nextcloud.ts`) uses a different policy from Stripe and SMTP: opossum's percentage trip (open at 50% errors once at least 5 calls were seen in its rolling window), a 30-second reset timeout, and an 8-second request timeout (the breaker's own timeout is 10 seconds). A 4xx answer other than 401 is the caller's error and does not count; connection errors, timeouts, 5xx and 401 do. There are four independent breakers so one integration's outage does not stop the others: `nextcloud` (admin login, sales lead, client onboarding, billing requests, CardDAV helpers used by the contact sync and the Stripe ID write-back, website leads), `nextcloud-portal-mirror`, `nextcloud-billing-mirror` and `nextcloud-cerebo`. While a job's breaker is open its cycle is skipped without using a retry attempt. Only the first one is reported by `GET /metrics` (`dfwsc_nextcloud_circuit_open`).
+- Breaker state for Stripe and SMTP (open, half-open, failures, rejects) is exposed by `GET /metrics` (section 6, "Observability").
+
+### Observability
+- **Request id.** Every response carries `X-Request-Id`. An inbound `X-Request-Id` is reused when it matches `^[A-Za-z0-9_-]{1,100}$` (so a proxy's id correlates end to end); otherwise a UUID is generated. Errors thrown to Fastify's error handler include the same value as `requestId`; replies a route sends directly do not (section 7, "Conventions").
+- **Logs.** Fastify's JSON logger. Error logging goes through `errorLogFields` / `safeErrorFields` (`lib/safe-error-log.ts`), which keep ids, status codes and error codes and leave out request bodies, provider messages and personal data. The background jobs follow the same rule (see sections 9 to 15).
+- **Health.** `GET /api/v1/health` runs `SELECT 1`: `200 { status: "ok", database: "connected", timestamp }` or `503 { status: "error", database: "disconnected", timestamp }`.
+- **Metrics.** `GET /api/v1/metrics` (Prometheus text format). Disabled (`404`) while `METRICS_TOKEN` is unset; otherwise it needs `Authorization: Bearer <METRICS_TOKEN>` (`401` on a mismatch, compared in constant time). What it exposes:
+
+  | Metric | Meaning |
+  |---|---|
+  | `dfwsc_clients_total`, `dfwsc_webhooks_total`, `dfwsc_webhooks_unprocessed` | Row counts of `clients` and `webhook_events` (processed events are pruned after 30 days, so the second is a current row count, not a lifetime total) |
+  | `dfwsc_circuit_open`, `_half_open`, `_failures_total`, `_rejects_total` (`service` = `stripe`, `smtp`) | Circuit breaker state and counters |
+  | `dfwsc_nextcloud_circuit_open` | The main Nextcloud breaker only |
+  | `dfwsc_sales_lead_submissions{status}`, `dfwsc_sales_lead_last_cycle_ok`, `dfwsc_sales_lead_last_cycle_timestamp_seconds` | Sales lead rows by status and the last cycle |
+  | `dfwsc_client_onboarding_submissions{status}`, `dfwsc_client_onboarding_flagged`, `dfwsc_client_onboarding_last_cycle_ok`, `dfwsc_client_onboarding_last_cycle_timestamp_seconds` | Onboarding rows by status, completed ones whose lead or contact needs an operator, and the last cycle |
+  | `dfwsc_stripe_id_writeback{target,status}`, `dfwsc_stripe_id_writeback_last_cycle_ok` | Write-back records by target and status, and whether the last cycle succeeded |
+
+  **Not covered by metrics:** the portal mirror, the billing mirror, billing requests and the contact-to-Stripe sync (check their tables and logs instead, see sections 12 to 14); the write-back has no last-cycle timestamp; the Nextcloud breakers other than the main one; the Stripe concurrency limiter queue; whether rate limiting fell back to in-memory buckets; and per-route request counts or latency. The metric values are computed per scrape from the database and from in-process state, so the cycle metrics reset on restart.
 
 ## 7. API Route Map
-All routes are prefixed with `/api/v1`.
+This section is the route reference. Every route registered in `backend/src/app.ts` and `backend/src/routes/` appears in the index table below; the subsections after it give the request and response details. Paths are relative to `/api/v1` unless a row says otherwise. An unregistered path answers `404 { "error": "Not Found" }`.
 
-### Public Routes
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check |
-| GET | `/app-config.js` | Public runtime config script (sets window API base URL from API_BASE_URL) |
+### Conventions
+- **Auth column.** `None`, `API key` (`X-Api-Key`), `Admin JWT` (`Authorization: Bearer`), `Token` (a single-use token in the body or query), `Secret` (shared secret or signature). See section 2.
+- **Limit column.** Tier names are defined in section 4; `-` means no rate limit.
+- **Gate column.** A route that exists only when a flag or secret is set. When the gate is closed the route is `404 { "error": "Not Found" }`, except where noted. Flags are exact: only the string `true` enables `CONNECT_INVOICING` and `CEREBO_ENABLED` (read once at boot, so a change needs a restart), and `ENABLE_SWAGGER`. See [ENVIRONMENT.md](./ENVIRONMENT.md).
+- **Error body.** Errors thrown by route code are `{ "error": string, "code": string, "requestId": string }` (`code` values such as `BAD_REQUEST`, `NOT_FOUND`, `UNAUTHORIZED`, `FORBIDDEN`, `CONFLICT`, `STRIPE_FAILED`, `EMAIL_DELIVERY_FAILED`, or a route-specific one). Schema-validation failures are `{ "error", "requestId" }`. Replies a route sends directly (the `401` and `403` auth failures, most `400` validation failures such as a bad body, and many `404`s on the admin routes) are `{ "error": string }` only, with no `code` and no `requestId`; the `X-Request-Id` header is always present. Rate limit refusals are `429 { "error": "Too Many Requests", "code": "RATE_LIMITED" }` with `Retry-After`.
+- **Pagination.** Admin list endpoints (`/clients`, `/groups`, Cerebo lists) take `limit` (1 to 100, default 20) and `offset` (default 0) and return `{ data, total, limit, offset }`. `/invoices` uses a keyset cursor (below).
+- **Idempotency.** `POST /payments/create`, `POST /customers`, `POST /invoices` and `POST /invoices/:id/send` require an `Idempotency-Key` header; the other invoicing writes (`PATCH /customers/:id`, finalize, void, `DELETE /invoices/:id`) do not.
 
-### Authentication
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| POST | `/auth/login` | Admin login: credentials checked against Nextcloud, returns a JWT (see "Admin login (Nextcloud)" in §2) | Public (5/15 min per IP, 10/15 min per username) |
+### Route index
+| Method | Path | Auth | Limit | Gate | Purpose |
+|---|---|---|---|---|---|
+| GET | `/app-config.js` (not under `/api/v1`) | None | - | - | Script that sets `window.API_URL` from `API_BASE_URL`; `500 { error }` when it is unset (any environment) |
+| GET | `/docs` (not under `/api/v1`) | None | - | `ENABLE_SWAGGER=true` | Swagger UI. Off in every environment unless the variable is exactly `true` |
+| GET | `/health` | None | - | - | Database health check |
+| GET | `/metrics` | Secret (`Bearer METRICS_TOKEN`) | - | `METRICS_TOKEN` set (else `404`) | Prometheus metrics (section 6, "Observability") |
+| POST | `/auth/login` | None | Admin login | - | Admin login against Nextcloud, returns a JWT (section 2) |
+| GET | `/clients` | Admin JWT | Admin CRUD | - | Paginated client list (requires `workspace`) |
+| GET | `/clients/:id` | Admin JWT | Admin CRUD | - | One client (requires `workspace`) |
+| PATCH | `/clients/:id` | Admin JWT | Admin CRUD | - | Update client fields, fees, URLs, redirect origins, invoicing opt-in |
+| DELETE | `/clients/:id` | Admin JWT | Admin CRUD | - | Archive a client (`204`); the row stays |
+| GET | `/groups` | Admin JWT | Admin CRUD | - | Paginated group list (requires `workspace`) |
+| POST | `/groups` | Admin JWT | Admin CRUD | - | Create a group |
+| PATCH | `/groups/:id` | Admin JWT | Admin CRUD | - | Update a group |
+| DELETE | `/groups/:id` | Admin JWT | Admin CRUD | - | Delete a group (`204`); its clients keep existing with `groupId` cleared |
+| POST | `/accounts` | Admin JWT | Strict | - | Create client + Stripe Express account + onboarding token; returns the API key, sends no email |
+| POST | `/onboard-client/initiate` | Admin JWT | Strict | - | Same, and emails the onboarding and API key links |
+| POST | `/onboard-client/resend` | Admin JWT | Auth | - | Revoke old tokens and email a new onboarding link |
+| POST | `/onboard-client` | Token (body) | Strict | - | Exchange an onboarding token for a Stripe Account Link URL |
+| GET | `/connect/callback` | Token (`state`) | Strict | - | Stripe return URL; syncs readiness and redirects the browser |
+| GET | `/connect/refresh` | Token (`state`) | Strict | - | Stripe refresh URL; redirects to a new Account Link |
+| POST | `/connect/onboarding-link` | API key | Client Connect | - | Account Link for the key's own account, for an app's settings page |
+| GET | `/connect/account` | API key | Client Connect | - | Live status of the key's own Stripe account |
+| POST | `/connect/dashboard-link` | API key | Client Connect | - | Stripe Express Dashboard login link |
+| POST | `/api-key/regenerate-request` | None | Auth | - | Public request for an API key regeneration email (never reveals whether the email exists) |
+| POST | `/api-key/regenerate-request/admin` | Admin JWT | Strict | - | Admin-initiated regeneration email for a client |
+| POST | `/api-key/regenerate` | Token (body) | Strict | - | Consume a regeneration token and return a new API key |
+| POST | `/payments/create` | API key or Admin JWT | Checkout creation | - | Create a Stripe Checkout Session; `201 { url, sessionId }` |
+| GET | `/payments/session/:sessionId` | None, or API key | Session lookup | - | Payment status from the ledger; how integrators confirm a payment |
+| GET | `/reports/payments` | Admin JWT | Reports | - | PaymentIntents of a client or group, read from Stripe |
+| GET | `/products` | Admin JWT | Admin CRUD | - | Active products on a client's connected account |
+| POST | `/products` | Admin JWT | Admin CRUD | - | Create product + price on a client's connected account |
+| GET | `/tax-rates` | Admin JWT | Admin CRUD | - | Active tax rates on a client's connected account |
+| GET | `/settings` | Admin JWT | Admin CRUD | - | Global settings (default fees, company name, contact email) |
+| PATCH | `/settings/:key` | Admin JWT | Admin CRUD | - | Update one setting |
+| POST | `/contact` | None | Strict | - | Public contact form: email to `CONTACT_INBOX`, plus a Nextcloud lead when sales automation is ready |
+| POST | `/customers` | API key + `Idempotency-Key` | Invoicing | `CONNECT_INVOICING=true` and client `invoicing_enabled` | Create a Customer on the key's connected account |
+| GET | `/customers` | API key | Invoicing | same | Look up one customer by `externalRef` |
+| GET | `/customers/:id` | API key | Invoicing | same | One customer |
+| PATCH | `/customers/:id` | API key | Invoicing | same | Update email, name or phone |
+| POST | `/invoices` | API key + `Idempotency-Key` | Invoicing | same | Create a draft invoice |
+| GET | `/invoices` | API key | Invoicing | same | List invoices (cursor pagination) |
+| GET | `/invoices/:id` | API key | Invoicing | same | One invoice (stale ones are re-checked against Stripe) |
+| POST | `/invoices/:id/finalize` | API key | Invoicing | same | Finalize a draft |
+| POST | `/invoices/:id/send` | API key + `Idempotency-Key` | Invoicing | same | Email an open invoice (at most 3 sends) |
+| POST | `/invoices/:id/void` | API key | Invoicing | same | Void an open or uncollectible invoice |
+| DELETE | `/invoices/:id` | API key | Invoicing | same | Delete a draft |
+| POST | `/webhooks/stripe` | Secret (`Stripe-Signature`, `STRIPE_WEBHOOK_SECRET`) | - | - | Connect-level Stripe webhook: ledger, account readiness, invoice sync |
+| POST | `/webhooks/stripe-billing` | Secret (`Stripe-Signature`, `STRIPE_BILLING_WEBHOOK_SECRET`) | - | `STRIPE_BILLING_WEBHOOK_SECRET` set (else `404`) | Account-level Stripe webhook for DFWSC's own billing Customers |
+| POST | `/webhooks/nextcloud/client-onboarding` | Secret (`Bearer`) | Nextcloud webhooks | Onboarding enabled and `CLIENT_ONBOARDING_WEBHOOK_SECRET` set | Start an onboarding cycle (section 10) |
+| POST | `/webhooks/nextcloud/sales-lead` | Secret (`Bearer`) | Nextcloud webhooks | Sales automation ready and `SALES_LEAD_WEBHOOK_SECRET` set | Start a sales lead cycle (section 9) |
+| POST | `/webhooks/nextcloud/billing-request` | Secret (`Bearer`) | Nextcloud webhooks | Billing requests enabled and `BILLING_REQUESTS_WEBHOOK_SECRET` set | Start a billing request cycle (section 14) |
+| GET | `/cerebo/nextcloud/status` | Admin JWT | Admin CRUD | `CEREBO_ENABLED=true` | Cerebo's Nextcloud connection status |
+| GET | `/cerebo/clients/:clientId/projects` | Admin JWT | Admin CRUD | same | Paginated projects of a client (`status` filter) |
+| POST | `/cerebo/clients/:clientId/projects` | Admin JWT | Admin CRUD | same | Create a project (`201`) |
+| GET | `/cerebo/clients/:clientId/links` | Admin JWT | Admin CRUD | same | Resource links of a client |
+| POST | `/cerebo/clients/:clientId/links` | Admin JWT | Admin CRUD | same | Add a resource link (`201`) |
+| GET | `/cerebo/projects/:id` | Admin JWT | Admin CRUD | same | Project with milestones, links and live Deck progress |
+| PATCH | `/cerebo/projects/:id` | Admin JWT | Admin CRUD | same | Update a project |
+| POST | `/cerebo/projects/:id/milestones` | Admin JWT | Admin CRUD | same | Add a milestone (`201`) |
+| PATCH | `/cerebo/milestones/:id` | Admin JWT | Admin CRUD | same | Update a milestone |
+| DELETE | `/cerebo/links/:id` | Admin JWT | Admin CRUD | same | Delete a link (`204`) |
+| GET | `/cerebo/audit` | Admin JWT | Admin CRUD | same | Paginated audit events |
+
+"Invoicing" in the Limit column is the token bucket for writes and the 600 per minute window for reads (section 4); void and delete take a write token. The "same" gate means both `CONNECT_INVOICING=true` (otherwise `404`) and the per-client opt-in (otherwise `403 INVOICING_NOT_ENABLED`).
+
+### Operational routes
+- `GET /app-config.js` returns `window.API_URL = "<API_BASE_URL>";` as `application/javascript` (trailing slash removed). It has no `/api/v1` prefix because the front end loads it before it knows the API path.
+- `GET /api/v1/health`: `200 { status: "ok", database: "connected", timestamp }`; `503 { status: "error", database: "disconnected", timestamp }` when the database check fails.
+- `GET /api/v1/metrics`: see "Observability" in section 6.
+- Swagger UI is mounted at `/docs` only when the process starts with `ENABLE_SWAGGER=true`; the Swagger packages are not loaded otherwise.
 
 ### Clients
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| GET | `/clients` | List clients (`?workspace=client_portal`) | Admin JWT |
-| GET | `/clients/:id` | Get single client | Admin JWT |
-| PATCH | `/clients/:id` | Update client fields. `invoicingEnabled` (boolean; a non-boolean is `400`) is the per-client opt-in for connected-account invoicing, admin-only, returned in the response and in the `GET /clients` list; gates the connected-account invoicing routes below | Admin JWT |
+All admin-only. Fee and URL rules are shared with groups (`lib/admin-crud.ts`).
+
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/clients?workspace=client_portal&groupId=&limit=&offset=` | Required `workspace` (`400` otherwise). Optional `groupId` must belong to that workspace (`400` otherwise). Archived clients are left out. Newest first. Returns `{ data: [{ id, name, email, stripeAccountId, status, workspace, groupId, chargesEnabled, invoicingEnabled, detailsSubmitted, payoutsEnabled, processingFeePercent, processingFeeCents, createdAt }], total, limit, offset }`. A bad `limit` or `offset` is `400` |
+| GET | `/clients/:id?workspace=client_portal` | `workspace` required. Returns `{ client }` with every column except `apiKeyHash` and `apiKeyLookup`; `404` if the id is not in that workspace |
+| PATCH | `/clients/:id` | Any subset of: `status` (`active`/`inactive`), `groupId` (string or null; must exist and share the client's workspace, `400` otherwise), `paymentSuccessUrl` / `paymentCancelUrl` (valid HTTPS URL or null), `processingFeePercent` (greater than 0 and at most 100, or null), `processingFeeCents` (non-negative integer, or null), `name` (non-empty), `email` (valid; a duplicate in the workspace is `409`), `phone`, `billingContactName`, `addressLine1`, `addressLine2`, `city`, `state`, `postalCode`, `country`, `notes` (strings or null), `defaultPaymentTermsDays` (positive integer or null; default due days for invoices), `invoicingEnabled` (boolean; a non-boolean is `400`; gates connected-account invoicing), `connectRedirectOrigins` (array of at most 10 bare origins, `https://host[:port]` with no path, or `http` for localhost; the allowlist for the client-facing Connect routes). Setting both fee types in one request is `400`. Returns the updated client without `apiKeyHash` / `apiKeyLookup`. A status change clears the short-lived "bad API key" memory so a reactivated client works at once |
+| DELETE | `/clients/:id` | Sets `status` to `archived` and returns `204`; `404` if unknown. Nothing is deleted in Stripe |
 
 ### Groups
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| GET | `/groups` | List groups (`?workspace=client_portal`) | Admin JWT |
-| POST | `/groups` | Create group | Admin JWT |
-| PATCH | `/groups/:id` | Update group | Admin JWT |
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/groups?workspace=client_portal&limit=&offset=` | Required `workspace`. Returns `{ data: [{ id, workspace, name, status, processingFeePercent, processingFeeCents, paymentSuccessUrl, paymentCancelUrl, createdAt, updatedAt }], total, limit, offset }`, newest first |
+| POST | `/groups` | Body `{ name, workspace: "client_portal" }`; `201` with the group (status `active`) |
+| PATCH | `/groups/:id` | Any of `name` (non-empty), `status` (`active`/`inactive`), the two fee fields and the two payment URLs, with the same rules as clients. `404` if unknown |
+| DELETE | `/groups/:id` | `204`; `404` if unknown. Clients in the group keep their rows with `groupId` set to null (foreign key `ON DELETE SET NULL`) |
 
-### Onboarding & Connect
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| POST | `/accounts` | Create Stripe Express account + client + onboarding token (no email) | Admin JWT |
-| POST | `/onboard-client/initiate` | Create Stripe Express account + client + onboarding/retrieval tokens + send email | Admin JWT |
-| POST | `/onboard-client/resend` | Revoke old tokens + send a newly issued link (502 and new-token revocation if delivery fails) | Admin JWT |
-| GET | `/onboard-client` | Get Stripe Account Link URL | Public (token) |
-| GET | `/connect/callback` | Stripe Connect callback | Public |
-| GET | `/connect/refresh` | Refresh expired account link | Public |
+### Onboarding and Connect (admin and public)
+The flow is described in section 3 ("Onboarding Flow"). Request bodies: `POST /accounts` and `POST /onboard-client/initiate` take `{ name, email, workspace: "client_portal", groupId? }`; `POST /onboard-client/resend` takes `{ email }` or `{ clientId }` plus optional `workspace`; `POST /onboard-client` takes `{ token }`. The callback and refresh routes take `client_id` and `state` query parameters.
 
 The two client-creation routes call Stripe before their atomic database write, without holding a transaction across the network call. A Stripe failure leaves no client row and returns no credentials (mapped Stripe errors such as `503 STRIPE_BUSY`, otherwise `502 STRIPE_FAILED`). A duplicate email is rejected with 409 before Stripe is called; the database unique constraint remains authoritative. A database failure after Stripe returned an account triggers best-effort account deletion; if deletion fails, the client and Stripe account IDs are logged at error level for reconciliation. An initiate email failure keeps the client and Stripe account but revokes exactly the newly issued onboarding and API-key retrieval tokens and returns `502 EMAIL_DELIVERY_FAILED`; recover with `/onboard-client/resend` (onboarding link) and `/api-key/regenerate-request/admin` (API key), not another initiate call. A resend email failure revokes its new token and returns the same 502 (older tokens stay revoked). If revoking an undelivered token fails, the response tells the admin to contact support. Legacy clients with no stored Stripe account are provisioned lazily when an Account Link is requested, and the link is created only after the account ID is confirmed persisted.
 
+
+### Client-facing Connect
+Called server-to-server by a client's own app with its `X-Api-Key`; always act on the authenticated client's own `stripeAccountId` (no route reads an account or client id from the request). Guide for integrators: [CLIENT_INTEGRATION.md](../CLIENT_INTEGRATION.md) ("Setting up payments from your own app"). Implementation: `routes/connect-client.ts`.
+
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | `/connect/onboarding-link` | `{ returnUrl, refreshUrl }` (strings, up to 2048 characters) | `200 { url, expiresAt }`. Creates the Express account on first use. Both URLs must be absolute `https` URLs (or `http` on localhost) whose origin is in the client's `connectRedirectOrigins`; Stripe receives the canonical parsed URL |
+| GET | `/connect/account` | none | `200 { hasAccount, detailsSubmitted, chargesEnabled, payoutsEnabled, requirements: { currentlyDue, pastDue, disabledReason }, capabilities }`. With no account yet: `hasAccount: false` and empty values. Otherwise a live Stripe read that also syncs the readiness flags to the client row |
+| POST | `/connect/dashboard-link` | none | `200 { url }`, a Stripe Express Dashboard login link |
+
+Errors: `409 REDIRECT_ORIGINS_NOT_CONFIGURED` (the client has no allowed origins; an admin sets them with `PATCH /clients/:id`), `400 REDIRECT_URL_NOT_ALLOWED` (a URL is not an allowed https origin), `409 ONBOARDING_INCOMPLETE` (dashboard link before `details_submitted`), `400 INVALID_REQUEST` (Stripe rejected a field; `param` when known), `409 ACCOUNT_NOT_CONNECTED` (Stripe refused for permission reasons), `429 RATE_LIMITED` (Stripe or the local limiter; `Retry-After`), `502 STRIPE_FAILED`, `503 STRIPE_CIRCUIT_OPEN` and `503 STRIPE_BUSY`. These routes take no `Idempotency-Key` header. Links are bearer credentials and are never logged.
+
+### API Key Management
+| Method | Path | Request | Response |
+|---|---|---|---|
+| POST | `/api-key/regenerate-request` | `{ email }` | Always `200 { message: "If an account with that email exists, a regeneration link has been sent." }` for a well-formed request, whether or not an active client has that email (no enumeration); the email is sent in the background. A client that already has a pending token younger than 5 minutes gets no new one (cooldown), so the public route cannot be used to flood an inbox or revoke the link in a welcome email |
+| POST | `/api-key/regenerate-request/admin` | `{ clientId }` | `200 { message, clientId }` after the email is sent; `404` unknown client; `502 EMAIL_DELIVERY_FAILED` if sending fails (the unsent token is revoked). No cooldown. Issuing a token revokes the client's earlier pending tokens |
+| POST | `/api-key/regenerate` | `{ token }` | `200 { apiKey }`: the new plaintext key, shown once. The old key stops working. A token that is unknown is `404`; one that is invalidated, already used, expired (15 minutes) or otherwise invalid is `400` |
+
+The link in the email is `<FRONTEND_ORIGIN>/regenerate-key#token=<token>` (the token is in the URL fragment, so it is not sent to servers or logged).
+
 ### Payments
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| POST | `/payments/create` | Create Checkout Session | API Key or Admin JWT + Idempotency-Key |
-| GET | `/payments/session/:sessionId` | Get checkout session result from ledger (how integrators confirm payment; 30 req/min per IP, or 600 req/min per client with `X-Api-Key`) | Public, or API key |
-| GET | `/reports/payments` | List Stripe PaymentIntents by client or group | Admin JWT |
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/payments/create` | Section 3, "Payment Flow", has the request rules. `201 { url, sessionId }`. Errors: `400` (validation, missing `Idempotency-Key`), `401` (auth), `402 CARD_DECLINED`, `404` (admin path: unknown client), `409 ACCOUNT_NOT_CONNECTED` / `CARD_PAYMENTS_NOT_ACTIVE` / `IDEMPOTENCY_KEY_REUSED` / `IDEMPOTENCY_KEY_IN_USE`, `429 RATE_LIMITED` (also when Stripe rate limits; `Retry-After: 2`), `502 STRIPE_FAILED`, `503 STRIPE_BUSY` / `STRIPE_CIRCUIT_OPEN` / `LEDGER_PERSISTENCE_FAILED` (Stripe created the session but the ledger insert failed; retry with the same key) |
+| GET | `/payments/session/:sessionId` | Below |
+| GET | `/reports/payments` | Below |
+
+**`GET /payments/session/:sessionId`.** `sessionId` must look like a Checkout Session id (`cs_test_...` or `cs_live_...`), otherwise `400`. Response `200`:
+
+```json
+{ "status": "paid", "baseAmountCents": 5000, "totalAmountCents": 5500, "feeAmountCents": 500, "currency": "usd", "createdAt": "2026-01-15T14:32:10.000Z" }
+```
+
+`status` is the ledger status: `created`, `paid`, `expired`, `failed`, `canceled`, `refunded` or `disputed`. Webhooks apply them with ordering protection (events older than the last applied one are ignored) and a precedence `created < expired/failed/canceled < paid < refunded < disputed`: a row never moves to a lower rank, but `failed`, `expired` and `canceled` can still move to `paid` (so they are not final), and `refunded` covers partial refunds too (the refunded amount is stored but not returned here). With an `X-Api-Key` the caller sees only its own client's sessions; another client's session and an unknown one are the same `404`. Without a key any valid session id is readable (the session id is the secret), at 30 requests per minute per IP. A row still `created` after 30 seconds is re-checked against Stripe at most once per session per 30 seconds per process (3-second timeout, no retries, skipped while the Stripe breaker is open) and updated the same way the webhook would; any failure returns the stored row. Rate limits and the failed-key budget: section 4.
+
+**`GET /reports/payments`** (admin). Query: `workspace` (required), and `clientId` or `groupId` (one is required; `400` otherwise), `limit` (1 to 100), `starting_after`, `ending_before`. For a client it returns `{ clientId, data, hasMore }`; `404` if the client is unknown or has no connected account; `400` if it belongs to another workspace. For a group it reads each connected client in the group (3 at a time) and returns `{ groupId, data, hasMore }`; the cursors do not apply across accounts, an unknown `groupId` is `400`, and if some accounts fail the response adds `partial: true` and `failedClientIds`. Each item is `{ id, amount, amountReceived, currency, status, created, description, metadata, paymentMethod }` (a Stripe PaymentIntent, never the raw object), with `clientId` and `clientName` added in group reports. It reads Stripe's PaymentIntents, not the ledger.
 
 ### Connected-account invoicing: customers
 Registered only when `CONNECT_INVOICING` is exactly `true` (otherwise these paths are `404`). Implementation: `routes/connect-invoicing.ts`. No `/customers` route existed before, so the plain `/api/v1/customers` prefix is used.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| POST | `/customers` | Create a Customer on the client's connected account. Body `{ email (required), name?, phone?, externalRef? (opaque, max 100, non-PII), metadata? }`; user metadata keys starting `dfwsc_` are rejected (`400`). `201` on create, `200` with the stored customer for a repeated `Idempotency-Key`, `409 CUSTOMER_EXISTS` (with the existing `id`) for a taken `externalRef`, `409 IDEMPOTENCY_KEY_REUSED` when the key is replayed with a different body (email, name, phone, `externalRef` or user metadata; email compared case-insensitively, absent equals empty) or from Stripe, `409 IDEMPOTENCY_KEY_IN_USE` from Stripe. Unknown body fields are ignored, as on `POST /payments/create` | API key + `Idempotency-Key` (required, max 255 with the client prefix) |
+| POST | `/customers` | Create a Customer on the client's connected account. Body `{ email (required), name?, phone?, externalRef? (opaque, max 100, non-PII), metadata? }`; user metadata keys starting `dfwsc_` are rejected (`400`). `201` on create, `200` with the stored customer for a repeated `Idempotency-Key`, `409 CUSTOMER_EXISTS` (with the existing `id`) for a taken `externalRef`, `409 IDEMPOTENCY_KEY_REUSED` when the key is replayed with a different body (email, name, phone, `externalRef` or user metadata; email compared case-insensitively, absent equals empty) or from Stripe, `409 IDEMPOTENCY_KEY_IN_USE` from Stripe. Unknown body fields are ignored, as on `POST /payments/create` | API key + `Idempotency-Key` (required, trimmed, max 255 characters; only a SHA-256 of it is stored and used in Stripe keys) |
 | GET | `/customers/:id` | Sanitized `{ id, email, name, phone, externalRef, createdAt }`; another client's or an unknown id, or a customer deleted on Stripe, is `404` | API key |
 | GET | `/customers?externalRef=` | Lookup of one customer by `externalRef` (not a list; `externalRef` is required, `400` without it). Same response; `404` when missing | API key |
 | PATCH | `/customers/:id` | `{ email?, name?, phone? }`, at least one | API key |
 
-There is no delete. Guard `requireInvoicingClient`: `requireApiKey`, then `clients.invoicing_enabled` (else `403 INVOICING_NOT_ENABLED`); writes also need an account that can take charges (`getChargeableAccountId`, else `409 ACCOUNT_NOT_CONNECTED`, same body as payments), reads only need a `stripeAccountId`. Invoice create, finalize and send (the `charge` guard mode) also need `clients.card_payments_status = 'active'`, else `409 CARD_PAYMENTS_NOT_ACTIVE`; NULL (never synced) is read live once through `withStripeCircuit` by `resolveCardPaymentsStatus` and stored only if still NULL (a concurrent webhook write wins), and a failed read fails closed (`503`/`502`). Customers, reads, void and delete do not need it. Every Stripe call passes `stripeAccount` and goes through `withStripeCircuit`; Stripe errors are mapped by `mapStripeError` (`permanentErrors`). Postgres keeps ids and `externalRef` only, logs carry ids and codes only (never email, name or phone), and no raw Stripe object is returned. Limits: section 4. Header and body validation (`400`) runs before a write token is taken, and a replay whose Stripe read is refused before reaching Stripe gives its token back. The id returned is the Stripe customer id (`cus_...`). Race handling and the orphan delete: docs/STRIPE.md "Connected-account invoicing: customers".
+There is no delete. Guard `requireInvoicingClient`: `requireApiKey`, then `clients.invoicing_enabled` (else `403 INVOICING_NOT_ENABLED`); writes also need an account that can take charges (`getChargeableAccountId`, else `409 ACCOUNT_NOT_CONNECTED`, same body as payments), reads only need a `stripeAccountId`. Invoice create, finalize and send (the `charge` guard mode) also need `clients.card_payments_status = 'active'`, else `409 CARD_PAYMENTS_NOT_ACTIVE`; NULL (never synced) is read live once through `withStripeCircuit` by `resolveCardPaymentsStatus` and stored only if still NULL (a concurrent webhook write wins), and a failed read fails closed (`503`/`502`). Customers, reads, void and delete do not need it. Every Stripe call passes `stripeAccount` and goes through `withStripeCircuit`; Stripe errors are mapped by `mapStripeError` (`permanentErrors`). Postgres keeps ids and `externalRef` only, logs carry ids and codes only (never email, name or phone), and no raw Stripe object is returned. Limits: section 4. Header and body validation (`400`) runs before a write token is taken, and a replay whose Stripe read is refused before reaching Stripe gives its token back. The id returned is the Stripe customer id (`cus_...`). A Postgres failure after Stripe created the customer is `503 CUSTOMER_PERSISTENCE_FAILED`: retry the create with the same `Idempotency-Key`. Race handling and the orphan delete: docs/STRIPE.md "Connected-account invoicing: customers".
 
 ### Connected-account invoicing: invoices
 Same flag, guard and file as the customers above (`routes/connect-invoicing.ts`; pure helpers in `lib/connect-invoice.ts`). Invoices are created as **drafts**, read, and then finalized, sent, voided or deleted through the lifecycle endpoints below. `finalize` / `send` on create are not available yet: a body containing either field is `400` (refused, not ignored, so a caller never believes an invoice was sent). Other unknown fields (`waiveFee`, `amount`, totals) are ignored, as on `POST /payments/create`.
@@ -188,36 +360,71 @@ A create replay (same key and body) on a deleted row is `200` with the deleted i
 
 Write limits: `POST /invoices` takes one token from the write bucket (keyed `stripe:<connectedAccountId>`, namespaced by route like the other limiters, so it is separate from the customers bucket) after validation and the 4xx checks, and gives it back when refused before reaching Stripe. Reads share the 600 req/min per client window.
 
-### Products & Settings
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| GET | `/products?clientId=...` | List Stripe products on connected account | Admin JWT |
-| POST | `/products` | Create Stripe product on connected account (requires `clientId`) | Admin JWT |
-| GET | `/tax-rates?clientId=...` | List Stripe tax rates on connected account | Admin JWT |
-| GET | `/settings` | Get system settings | Admin JWT |
-| POST | `/webhooks/stripe` | Stripe webhook handler (updates payment ledger) | Stripe Signature |
+### Products and Settings
+All admin-only. Products and tax rates act on a client's connected account (`clientId` required: `400` if missing, `404` if unknown, `400` if the client has no connected account that can take charges). Stripe calls go through `withStripeCircuit`; an open breaker answers `503 { error: "Stripe service temporarily unavailable." }`.
 
-### API Key Management
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| POST | `/api-key/regenerate-request` | Request API key regeneration email | Public (rate-limited) |
-| POST | `/api-key/regenerate-request/admin` | Admin-initiated API key regeneration | Admin JWT |
-| POST | `/api-key/regenerate` | Consume regeneration token, return new API key | Public (rate-limited, token in body) |
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/products?clientId=` | Up to 100 active products with their default price. Returns a bare array of `{ id, name, description, defaultPrice: { id, amountCents, currency } \| null }` |
+| POST | `/products` | Body `{ clientId, name, amountCents (positive integer), description?, currency? (default "usd") }`. Creates the product and a price on the connected account and sets it as the default price; if the price fails the product is archived. `201` with the same product shape |
+| GET | `/tax-rates?clientId=` | Up to 100 active tax rates as a bare array of `{ id, displayName, description, percentage, inclusive, jurisdiction }` |
+| GET | `/settings` | `{ defaultFeeCents, defaultFeePercent, companyName, contactEmail, smtpFrom }`. Missing values fall back to `DEFAULT_PROCESS_FEE_CENTS` (or `"0"`), `null`, `"DFW Software Consulting"` and `SMTP_FROM` |
+| PATCH | `/settings/:key` | Body `{ value }`. Allowed keys: `default_fee_cents` (non-negative integer), `default_fee_percent` (0 to 100, or an empty string to clear), `company_name` (1 to 120 characters), `contact_email` (valid email or empty). Anything else is `400 Invalid setting key.`. `200 { message: "Setting updated successfully." }` |
 
 ### Contact
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| POST | `/contact` | Contact form submission (`company` required): emailed to `CONTACT_INBOX` and, when sales automation is ready, submitted as a lead to the New Lead form (honeypot hits get the same 201 and are dropped). Optional `context` (referrer host, landing path, UTM, pages, seconds on site; `lib/visit-context.ts`) is appended to the email and the lead's Notes as a `--- Visit context ---` block; an invalid context is dropped, never a 400. 201 if at least one enabled channel succeeded, else 502 `EMAIL_DELIVERY_FAILED` | Public (rate-limited) |
+`POST /contact` is public (10 per minute per IP).
+
+- **Body:** `{ name (1 to 100), email (valid, max 320), company (1 to 100), message (1 to 2000), context?, _hp? }`. All strings are trimmed. A missing required field is `400`.
+- **Honeypot:** a non-empty `_hp` string returns `201 { ok: true }` and drops the submission, so a bot cannot tell.
+- **Visit context:** the optional `context` object is validated by `lib/visit-context.ts`. Allowed keys only (`referrer`: a host name; `landingPath`: a path of up to 200 characters; `utm`: `source`, `medium`, `campaign`, `term`, `content`, each 1 to 64 characters of letters, digits, space and `- _ . + | ( )`; `pages`: up to 20 paths; `secondsOnSite`: integer 0 to 86400). Any violation drops the whole object and the request still succeeds (never a `400`); a valid one is appended to the email and the lead's Notes as a `--- Visit context ---` block of at most 1000 characters.
+- **Delivery:** two channels run in parallel. Email goes to `CONTACT_INBOX`, falling back to `SMTP_FROM`; a missing or invalid address fails that channel only. When sales automation is ready (section 9) the contact is also submitted to the New Lead form, capped at 20 lead submissions per rolling hour per process. `201 { ok: true }` if at least one channel succeeded; otherwise `502 EMAIL_DELIVERY_FAILED`.
+
+### Stripe webhooks
+Two endpoints with different secrets, because Stripe signs Connect-level and account-level events with different endpoint secrets. Both read the raw body, answer `400` for a missing `Stripe-Signature` header or a failed signature check (`{ error: "Webhook Error: ..." }`), and de-duplicate by event id with a claim in `webhook_events` (`lib/webhook-lease.ts`). Processed events are pruned after 30 days (section 17).
+
+| Outcome | `POST /webhooks/stripe` and `/webhooks/stripe-billing` |
+|---|---|
+| Handled, or an event already processed | `200 { received: true }` |
+| Another delivery of the same event is being processed (a lease younger than 15 minutes) | `409 { error: "Webhook processing in progress" }`; Stripe retries later. A lease older than 15 minutes is treated as abandoned and taken over |
+| Processing failed (retryable) | The claim is released and Stripe retries: `503` when the Stripe breaker is open or busy (`STRIPE_BUSY` includes `Retry-After: 5`), else `500 { error: "Webhook processing failed" }` (`/webhooks/stripe-billing` always answers `500`, since it makes no Stripe call) |
+| Processing hit a non-retryable database error (a unique violation) | The event is marked processed and answered `200`, so one poison event cannot wedge Stripe's retry queue (`/webhooks/stripe` only) |
+| `/webhooks/stripe-billing` with `STRIPE_BILLING_WEBHOOK_SECRET` unset | `404 { error: "Not Found" }` |
+
+**`POST /webhooks/stripe` (Connect endpoint).** Requires `STRIPE_WEBHOOK_SECRET`; the API does not start without it. Events handled:
+
+| Event | Effect |
+|---|---|
+| `account.updated` | Re-reads the account from Stripe (so out-of-order delivery cannot write stale state) and syncs `chargesEnabled`, card and ACH capability status, `payoutsEnabled`, `detailsSubmitted` onto the client |
+| `checkout.session.completed` | Ledger `paid` if `payment_status` is `paid` or `no_payment_required`; otherwise the row stays `created` (bank debits settle later) |
+| `checkout.session.async_payment_succeeded` / `async_payment_failed` | Ledger `paid` / `failed` |
+| `checkout.session.expired` | Ledger `expired` |
+| `payment_intent.succeeded` / `payment_failed` / `canceled` | Ledger `paid` / `failed` / `canceled` (matched by PaymentIntent id; the id is attached to the row from the session event) |
+| `charge.refunded` | Ledger `refunded` and `refundedAmountCents` (also for partial refunds) |
+| `charge.dispute.created` | Ledger `disputed` (the charge is fetched from Stripe to find the PaymentIntent) |
+| `invoice.finalized`, `invoice.sent`, `invoice.paid`, `invoice.payment_succeeded` (alias of paid), `invoice.voided`, `invoice.marked_uncollectible`, `invoice.updated`, `invoice.deleted`, `invoice.payment_failed` | Connected-account invoice sync (`lib/connect-invoice-sync.ts`), see "Connected-account invoicing: invoices" |
+| `application_fee.refunded`, `payout.paid`, `payout.failed`, `customer.subscription.updated` / `paused` / `resumed` / `deleted`, `subscription_schedule.canceled` | Logged only |
+| Any other type | Acknowledged, logged at debug level |
+
+Ledger changes kick the portal mirror (section 16). The Stripe-side setup (which events to subscribe, Connect versus account endpoint) is in [STRIPE.md](./STRIPE.md) and [COOLIFY_DEPLOYMENT.md](./COOLIFY_DEPLOYMENT.md). **Connected-account invoicing needs `CONNECT_INVOICING=true`, the per-client `invoicingEnabled` flag, and this Connect endpoint subscribed to the invoice events above** for webhook-driven status updates; without the subscription, `GET /invoices/:id` still re-checks a stale draft, open or uncollectible invoice against Stripe (30 seconds), but `paid` and `void` transitions are then only seen when someone reads that invoice.
+
+**`POST /webhooks/stripe-billing` (account-level endpoint).** For DFWSC's own billing Customers on the platform account. Handles only the types in `BILLING_WEBHOOK_EVENTS` (`routes/webhooks-billing.ts`: `invoice.created`, `finalized`, `updated`, `paid`, `payment_failed`, `voided`, `marked_uncollectible`, `overdue`, `deleted`; `customer.subscription.created` / `updated` / `deleted`; `subscription_schedule.created` / `updated` / `canceled` / `completed` / `released` / `aborted`; `customer.deleted`) and acknowledges everything else, and any event that carries a connected `account`, without acting. It makes no Stripe API call: it only marks the Customer's `billing_snapshots` row dirty, and the billing mirror (section 13) re-reads Stripe.
 
 ### Nextcloud webhooks
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| POST | `/webhooks/nextcloud/client-onboarding` | Trigger for the client onboarding (§10): starts a cycle, answers 202. The body is ignored. 404 when the onboarding or its webhook secret is not configured | `Authorization: Bearer <CLIENT_ONBOARDING_WEBHOOK_SECRET>` (rate-limited) |
-| POST | `/webhooks/nextcloud/sales-lead` | Trigger for the "New Lead" form (§9): starts a cycle, answers 202. The body is ignored. 404 when sales automation or its webhook secret are not configured | `Authorization: Bearer <SALES_LEAD_WEBHOOK_SECRET>` (rate-limited) |
-| POST | `/webhooks/nextcloud/billing-request` | Trigger for the "New invoice" form (§14): starts a cycle, answers 202. The body is ignored. 404 when billing requests or their webhook secret are not configured | `Authorization: Bearer <BILLING_REQUESTS_WEBHOOK_SECRET>` (rate-limited) |
+Triggers for the form-driven jobs. Each is sent by Nextcloud's `webhook_listeners` app on `OCA\Forms\Events\FormSubmittedEvent`. The body is never read (any or no `Content-Type` is accepted, up to 256 KB, and dropped); the call only starts or queues one cycle, which re-reads the submissions from the Forms API. The rate limit and the secret check run in the `onRequest` hook, before the body is buffered.
+
+| Path | Secret variable | Job |
+|---|---|---|
+| `/webhooks/nextcloud/client-onboarding` | `CLIENT_ONBOARDING_WEBHOOK_SECRET` | Client onboarding (section 10) |
+| `/webhooks/nextcloud/sales-lead` | `SALES_LEAD_WEBHOOK_SECRET` | Sales leads (section 9) |
+| `/webhooks/nextcloud/billing-request` | `BILLING_REQUESTS_WEBHOOK_SECRET` | New invoice form (section 14) |
+
+Responses: `202 { accepted: true }` when the cycle was started or queued; `401 { error: "Unauthorized" }` for a missing or wrong `Authorization: Bearer <secret>`; `404 { error: "Not Found" }` when that job or its secret is not configured; `429 RATE_LIMITED` over 60 per minute per IP. Secrets are at least 32 characters.
+
+### Cerebo (flag-gated)
+Cerebo is a client/project workspace (projects, milestones, resource links, an audit trail, live Deck progress). Its routes are served only when the process starts with `CEREBO_ENABLED=true`; its tables are created by the normal migrations either way. Routes live under `/api/v1/cerebo` (`src/cerebo/routes.ts`). Every route needs an admin JWT, is limited with the Admin CRUD tier, and additionally requires the token to carry a `sub` (the Nextcloud user id) so that every write is attributed in the audit trail (`403` without one). The project and audit lists take `limit` / `offset` and return `{ data, total, limit, offset }`; the links list returns `{ data }`. Project statuses: `planned`, `active`, `paused`, `completed`, `canceled`; milestone statuses: `planned`, `in_progress`, `done`, `canceled`; dates are `YYYY-MM-DD`; milestone `stripeInvoiceId` must look like `in_...`; links need an HTTPS `url` when given. Nextcloud calls use their own breaker (section 6). The route list is in the index table above.
 
 ## 8. Swagger
-Swagger UI is available at `/docs` when the backend is started with `ENABLE_SWAGGER=true`. It is disabled by default in production to keep the build lean.
+Swagger UI is served at `/docs` only when the backend process is started with `ENABLE_SWAGGER=true` (the exact string). It is off in every environment, including development, unless that variable is set; when it is off the Swagger packages are not loaded. Whether the variable reaches the container depends on the compose file in use: see [ENVIRONMENT.md](./ENVIRONMENT.md).
 
 ## 9. Sales Lead Automation (Nextcloud)
 When an operator submits the Nextcloud Form **DFWSC — New Lead**, the API creates, exactly once per submission:
@@ -479,6 +686,14 @@ A read-only Nextcloud Table, **Client Billing**, shows the billing state of DFWS
 
 **Environment.** `BILLING_REQUESTS_ENABLED` (default false), `BILLING_REQUESTS_FORM_ID`, `BILLING_REQUESTS_WEBHOOK_SECRET` (32+ characters; unset = webhook answers 404, poll only), `BILLING_REQUESTS_POLL_INTERVAL_MS` (300000, min 30000), `BILLING_REQUESTS_ALLOWED_GROUPS`, `BILLING_REQUESTS_SHARE_GROUPS`, `BILLING_REQUESTS_MAX_AGE_HOURS` (72), `BILLING_MAX_AMOUNT_CENTS` (2500000), `BILLING_AUTO_SEND` (true), `BILLING_DEFAULT_DAYS_UNTIL_DUE` (7). Needs `NEXTCLOUD_*`.
 
+**Rollout safety.** Every accepted submission creates real Stripe objects, and there is no dry-run mode. The controls that exist are:
+- *Who*: `BILLING_REQUESTS_ALLOWED_GROUPS` (default `dfwsc-admins,managers`) is enforced by the API on top of the form's own sharing; anonymous and unknown submitters fail with `unauthorized`.
+- *How much*: `BILLING_MAX_AMOUNT_CENTS` (default 2,500,000) per invoice or per plan payment. Plans have no cap on the total.
+- *How old*: a submission older than `BILLING_REQUESTS_MAX_AGE_HOURS` (default 72) is expired, not billed. Submissions made while the flag was off and still younger than that are billed when it is switched on; submissions that existed when the form was first read are never billed.
+- *Sending*: with `BILLING_AUTO_SEND=false`, one-off invoices stay drafts in Stripe (status "Draft created") for review. It does not affect recurring plans, which Stripe invoices and emails by itself.
+- *First run*: use a small one-off request for a known client code with `BILLING_AUTO_SEND=false`, check the draft in the Stripe Dashboard and the Billing Requests table, then turn auto-send on. Failures: `SELECT form_id, submission_id, client_code, kind, last_error_code, created_at FROM billing_request_submissions WHERE status = 'failed';`
+- *Stop*: set `BILLING_REQUESTS_ENABLED=false` and restart; nothing already created is changed.
+
 **Known limits.** The amount cap is per invoice or per plan payment; there is no cap on a plan's total (payments x amount, up to 104 x $25,000), so keep the form restricted. Answers are re-read on every attempt and not snapshotted: keep "Allow editing responses" **off** on the form, because an edit during a retry changes the parameters of an idempotent call (Stripe then refuses it and the request fails).
 
 ### Form setup (exact)
@@ -532,7 +747,7 @@ When a DFWSC billing client is linked to a Stripe Customer (`billing_customers.s
 - **DB wins: change a link with the backfill script, not by editing the cell.** `billing_customers` is the truth; a hand edit of the cell or the URL entry is reverted by the next verify pass (within 24 h). To relink a client, run the backfill script (section 10 step 6) and the new id follows.
 - **Logs** carry client codes, Customer ids, contact UIDs, counts and statuses only (no emails or names).
 - **Metrics** (`GET /api/v1/metrics`): `dfwsc_stripe_id_writeback{target,status}` (target `project_row` or `contact_card`; status `ok`, `not_found`, `ambiguous`, `read_only`, `forbidden`, `error`) and `dfwsc_stripe_id_writeback_last_cycle_ok`.
-- **Environment.** `STRIPE_ID_WRITEBACK` (default false), `STRIPE_ID_WRITEBACK_DRY_RUN` (default false: log the planned writes, write nothing to Nextcloud or to `stripe_id_writebacks`; `true`/`1`/`yes` in any case turn it on, unset/empty/`false`/`0`/`no` leave it off, any other value is treated as a dry run and logs a config warning), `STRIPE_ID_WRITEBACK_INTERVAL_MS`. Needs `NEXTCLOUD_*`, `CLIENT_ONBOARDING_PROJECTS_TABLE_ID` and `CLIENT_ONBOARDING_ADDRESSBOOK_PATH`; does not need `CLIENT_ONBOARDING_ENABLED`.
+- **Environment.** `STRIPE_ID_WRITEBACK` (default false), `STRIPE_ID_WRITEBACK_DRY_RUN` (**unset means live writes**: unset, empty, `false`, `0` and `no` all write to Nextcloud and to `stripe_id_writebacks`; `true`, `1` and `yes`, in any case, log the planned writes and write nothing; any other value is treated as a dry run and logs a config warning), `STRIPE_ID_WRITEBACK_INTERVAL_MS`. Needs `NEXTCLOUD_*`, `CLIENT_ONBOARDING_PROJECTS_TABLE_ID` and `CLIENT_ONBOARDING_ADDRESSBOOK_PATH`; does not need `CLIENT_ONBOARDING_ENABLED`.
 - **Rollout.**
   1. Deploy with the flag off (migration `0041_stripe_id_writeback`).
   2. Add a single-line text column titled exactly **Stripe Customer ID** to the Client Projects table (6) by hand.
@@ -547,7 +762,7 @@ When a DFWSC billing client is linked to a Stripe Customer (`billing_customers.s
   - Statuses: `not_found` (row, or card, missing), `ambiguous` (several rows with the code, or the email on several cards), `read_only` (card in a read-only book), `forbidden` (the Stripe Customer ID column is missing and could not be created), `error` (retried with backoff, 1 min doubling to 1 h; `last_error` is a code, never a message). Card keys are the contact UID, or `client:<code>` for the email fallback.
 
 ## 16. Event-driven triggers
-The timed jobs stay as the safety net; events start a cycle at once. `lib/coalesced-runner.ts` is the shared helper: a burst of kicks becomes one cycle plus one follow-up, a kick never throws into its caller, and it is a no-op when the job's flag is off or the job has not started. Kicks of the mirrors are debounced by 1.5 s (`KICK_DEBOUNCE_MS`). A kicked cycle that returns `busy` (another process holds the job's advisory lock) is retried once after 5 s (`KICK_BUSY_RETRY_MS`) instead of being dropped.
+The timed jobs stay as the safety net; events start a cycle at once. `lib/coalesced-runner.ts` is the shared helper: a burst of kicks becomes one cycle plus one follow-up, a kick never throws into its caller, and it is a no-op when the job's flag is off or the job has not started. The registry (`KickableJob`) knows four jobs: `salesLead`, `billingMirror`, `portalMirror` and `stripeIdWriteback`; client onboarding and billing requests are started by their webhook handlers, and the contact sync has no trigger besides its timer (see section 17). Kicks of the mirrors are debounced by 1.5 s (`KICK_DEBOUNCE_MS`). A kicked cycle that returns `busy` (another process holds the job's advisory lock) is retried once after 5 s (`KICK_BUSY_RETRY_MS`) instead of being dropped.
 
 | Job | Kicked from |
 |---|---|
@@ -562,3 +777,23 @@ The timed jobs stay as the safety net; events start a cycle at once. `lib/coales
 **Group delete.** Deleting a group nulls `clients.group_id` through the FK without bumping the clients' `updated_at`, so the kick runs a cycle that finds nothing dirty for those clients; the daily reconcile picks them up.
 
 **Safety-net intervals at rollout.** The code defaults are unchanged; set them by env when the kicks are live: `CONTACT_STRIPE_SYNC_INTERVAL_MS=30000` (contact to Stripe has no event source, Nextcloud Contacts has no webhook, so this one stays short), and about 15 minutes (`900000`) for `SALES_POLL_INTERVAL_MS`, `CLIENT_ONBOARDING_POLL_INTERVAL_MS`, `BILLING_REQUESTS_POLL_INTERVAL_MS`, `PORTAL_MIRROR_INTERVAL_MS` and `STRIPE_ID_WRITEBACK_INTERVAL_MS`. `BILLING_SWEEP_INTERVAL_MS` is unaffected.
+
+## 17. Background jobs reference
+One table for every in-process job, so an operator can see what runs, why, and how it fails. Each job starts from `index.ts` after the server is listening, is **off unless its flag is exactly `true`** (webhook event pruning is the exception), and never blocks startup: an invalid configuration is logged once and the job stays off while payments keep working. On `SIGTERM`/`SIGINT` the jobs are stopped first (waiting for a running cycle), then the server closes and the database pool ends. Variable details, defaults and whether the production compose file forwards them: [ENVIRONMENT.md](./ENVIRONMENT.md). A misconfiguration shows up in the startup logs, not as a failed boot.
+
+| Job (section) | What it does | Enabled by | Starts a cycle | Needs | Idempotency and failure behavior |
+|---|---|---|---|---|---|
+| Webhook event pruning | Deletes processed `webhook_events` older than 30 days | Always on | At boot, then every 24 h | Database | Touches only rows with `processed_at`; a failure is logged and retried at the next sweep |
+| Sales lead (9) | New Lead form submission becomes a Sales Pipeline row, a vCard and a folder | `SALES_AUTOMATION_ENABLED` | Poll `SALES_POLL_INTERVAL_MS` (120000, minimum 30000); `POST /webhooks/nextcloud/sales-lead`; `POST /contact` | `NEXTCLOUD_*`, `SALES_LEAD_FORM_ID`, `SALES_PIPELINE_TABLE_ID`, `SALES_ADDRESSBOOK_PATH`, `SALES_LEADS_FOLDER` | Per-step output saved in `sales_lead_submissions`; deterministic UID and `Lead Ref` make retries adopt instead of repeat; claim lease 10 min; transient errors retried (1 min doubling to 1 h, 10 attempts) then `failed`; submissions at or below the first-read baseline are never processed |
+| Client onboarding (10) | "Convert Won Lead to Client" submission creates folder, contact, Client Projects row, page, lead update; optionally Teams and a billing Stripe Customer | `CLIENT_ONBOARDING_ENABLED` (sub-flags `CLIENT_ONBOARDING_PROJECT_TEAMS`, `CLIENT_ONBOARDING_BILLING_CUSTOMER`) | Poll `CLIENT_ONBOARDING_POLL_INTERVAL_MS` (300000, minimum 30000); `POST /webhooks/nextcloud/client-onboarding` | `NEXTCLOUD_*`, `CLIENT_ONBOARDING_FORM_ID`, `..._PROJECTS_TABLE_ID`, `..._PIPELINE_TABLE_ID`, `..._ADDRESSBOOK_PATH`, `..._CLIENTS_FOLDER`, `..._COLLECTIVE_ID`; `STRIPE_SECRET_KEY` for the billing step | Same model as the sales lead; project codes allocated once under an advisory lock and never reused; the billing Customer is reused, never modified |
+| Billing requests (14) | "New invoice" form creates a live one-off invoice or a recurring plan for a billing Customer | `BILLING_REQUESTS_ENABLED` | Poll `BILLING_REQUESTS_POLL_INTERVAL_MS` (300000, minimum 30000); `POST /webhooks/nextcloud/billing-request` | `NEXTCLOUD_*`, `BILLING_REQUESTS_FORM_ID`, `STRIPE_SECRET_KEY` | Every Stripe call has a deterministic idempotency key and its object id is saved at once; creates only, never updates or voids; requests older than `BILLING_REQUESTS_MAX_AGE_HOURS` are expired without a Stripe call |
+| Contact card to Stripe (11) | Pushes edits of onboarding client contact cards to the billing Customer | `CONTACT_STRIPE_SYNC` | Poll `CONTACT_STRIPE_SYNC_INTERVAL_MS` (120000, minimum 10000); no event source | `NEXTCLOUD_*`, `CLIENT_ONBOARDING_ADDRESSBOOK_PATH`, `STRIPE_SECRET_KEY` | First sight of a card is a baseline, never a push; blank fields never clear Stripe fields; non-retryable errors wait for the card to change |
+| Portal mirror (12) | Mirrors clients, groups and payment aggregates to the read-only "Portal Accounts" table | `PORTAL_MIRROR` | Poll `PORTAL_MIRROR_INTERVAL_MS` (60000, minimum 10000) plus kicks; daily full reconcile | `NEXTCLOUD_*` | Database wins; unchanged rows are skipped by content hash; batch of `PORTAL_MIRROR_BATCH` (25, max 100) rows per cycle; own Nextcloud breaker |
+| Billing mirror (13) | Refreshes Stripe billing state per Customer and mirrors it to "Client Billing" | `BILLING_MIRROR` | Same interval as the portal mirror; full sweep every `BILLING_SWEEP_INTERVAL_MS` (3600000, minimum 60000); `POST /webhooks/stripe-billing` marks Customers dirty | `NEXTCLOUD_*`, `STRIPE_SECRET_KEY` (read-only use) | Reads Stripe only; a failed refresh shows as "Check failed" with the last good figures; own Nextcloud breaker |
+| Stripe ID write-back (15) | Writes the billing Customer id onto the Client Projects row and the contact card | `STRIPE_ID_WRITEBACK` | Poll `STRIPE_ID_WRITEBACK_INTERVAL_MS` (300000, minimum 60000) plus kicks; daily verify | `NEXTCLOUD_*`, `CLIENT_ONBOARDING_PROJECTS_TABLE_ID`, `CLIENT_ONBOARDING_ADDRESSBOOK_PATH` | Desired-state hash compared with the last confirmed write; **`STRIPE_ID_WRITEBACK_DRY_RUN` unset means live writes** |
+
+**Kick registry.** `kickJob(name)` (`lib/coalesced-runner.ts`) lets a write site start a cycle without importing the job. Only four jobs register a runner: `salesLead`, `billingMirror`, `portalMirror`, `stripeIdWriteback`. Client onboarding and billing requests are started by their webhook handlers calling the runner directly, and the contact sync has no trigger besides its timer. A kick for a job that is off or not started is a no-op and never throws. Triggers per job are listed in section 16.
+
+**Shared guards.** Jobs that can run in more than one process (deploy overlap, restarts) hold a Postgres advisory lock per cycle and skip with status `busy` when another process holds it. Submission-driven jobs additionally claim rows with a 10-minute lease (`FOR UPDATE SKIP LOCKED`).
+
+**Operating summary.** Sales lead (section 9) and client onboarding (section 10) each have a runbook with the SQL to list failed submissions and to retry or skip one. For billing requests, list failures with `SELECT form_id, submission_id, client_code, kind, last_error_code, created_at FROM billing_request_submissions WHERE status = 'failed';` and read the Billing Requests table in Nextcloud. For the write-back use the runbook SQL in section 15. The mirrors have no failure table: check the logs and the Nextcloud tables.

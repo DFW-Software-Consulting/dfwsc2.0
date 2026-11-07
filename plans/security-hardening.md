@@ -1,3 +1,7 @@
+> **Historical / superseded (2026-11-06).** This document reflects the codebase as of 2026-06-19. It is not maintained and some instructions would reintroduce removed or insecure behavior. Current docs: [docs/](../docs/)
+>
+> Status: superseded. Step 2 refers to `/auth/setup`, which no longer exists (`POST /api/v1/auth/setup`, `GET /api/v1/auth/setup/status` and `POST /api/v1/auth/confirm-bootstrap` return 404; admin login is Nextcloud-based). Step 6 (attaching the decoded admin to the request) is in place: Cerebo reads `request.admin.sub` (`backend/src/cerebo/context.ts`). Step 7 (TLS termination in the stack) is obsolete: nginx in `front/nginx.conf` sits behind the platform proxy. Do not use the CSP proposed in Step 5: it allows `'unsafe-inline'` and `'unsafe-eval'` scripts, and the shipped policy in `front/nginx.conf` is stricter (`script-src 'self'` plus the analytics origin when configured). Current security notes: [BACKEND.md](../docs/BACKEND.md).
+
 # Plan: Security Hardening
 
 ## Goal

@@ -1,359 +1,243 @@
 # Coolify Deployment Guide for DFWSC Payment Portal
 
-This guide explains how to deploy the DFW Software Consulting payment portal to Coolify as separate services while maintaining the monorepo structure.
+This guide explains how the DFW Software Consulting payment portal deploys to Coolify as separate resources from one monorepo. Every environment variable is documented in [ENVIRONMENT.md](./ENVIRONMENT.md); this guide does not repeat them.
+
+Statements marked **Production setup** describe the live deployment as confirmed by the owner. They cannot be derived from the repository, so check them against Coolify before relying on them. Everything else is read from the files named next to it.
 
 ## Overview
 
 The application deploys to Coolify as two independent resources, plus a database:
-1. **Database** - PostgreSQL (Coolify-managed or an external instance — there is no `db` service in `docker-compose.prod.yml`)
-2. **Backend** - a Coolify **Docker Compose** resource built from `docker-compose.prod.yml`, which runs four containers: `migrator`, `api`, `dfwsc-redis`, and `backup` (see below)
-3. **Frontend** - a **separate** Coolify **Nginx** application serving the built React app with API proxying — it is not one of the services in `docker-compose.prod.yml` and deploys/scales independently of the backend
+1. **Database** - PostgreSQL (Coolify-managed or an external instance). There is no `db` service in `docker-compose.prod.yml`.
+2. **Backend** - a Coolify **Docker Compose** resource built from `docker-compose.prod.yml`, which runs four containers: `migrator`, `api`, `dfwsc-redis` and `backup` (see below).
+3. **Frontend** - a **separate** Coolify application serving the nginx image built from `front/Dockerfile`, with `/api/` proxied to the API. It is not one of the services in `docker-compose.prod.yml` and deploys independently of the backend.
 
-All resources can be deployed independently on Coolify while sharing the same monorepo.
+### Production setup
+
+- The frontend is served at `dfwsc.com`; the API at `api.dfwsc.com`. No Netlify or other host is involved.
+- Requests travel Cloudflare, then Coolify's Traefik proxy, then the container. The address the API sees as `request.ip` is therefore a Cloudflare edge address, not the visitor. The client address used for rate limiting comes from the `CF-Connecting-IP` header, honored only when the connection comes from a Cloudflare range (`backend/src/lib/client-ip.ts`; `TRUST_PROXY` and `CLOUDFLARE_IP_RANGES` in [ENVIRONMENT.md](./ENVIRONMENT.md) section 2).
+- A merge to `main` deploys both applications automatically. The API is unavailable for a short time (about 30 seconds) while its containers are replaced.
+- Coolify ignores network aliases declared in compose files. That is why the Redis service is named `dfwsc-redis` (see below).
 
 ## Service Configuration
 
 ### 1. Database Service
-- **Type**: PostgreSQL (Use Coolify's managed PostgreSQL or an external/custom instance)
-- **Not in the Compose file**: `docker-compose.prod.yml` has no `db` service — provision this separately and point the Backend's `DATABASE_URL` at it
-- **Port**: 5432 (internal only)
-- **Environment Variables**:
-  - POSTGRES_USER=postgres
-  - POSTGRES_PASSWORD=<generate a strong random value with `openssl rand -hex 32`, which is safe to place in `DATABASE_URL`; never use a default such as `postgres`. A password with a `/`, `@` or `:` in it (as `openssl rand -base64 32` often produces) must be percent-encoded in the URL, or the migration and the API fail to start>
+- **Type**: PostgreSQL 17 (Coolify's managed PostgreSQL or an external/custom instance; the dev stack, CI and the backup image all use major 17).
+- **Not in the Compose file**: provision it separately and point the Backend's `DATABASE_URL` at it.
+- **Port**: 5432 (internal only).
+- **Credentials**:
+  - `POSTGRES_USER=postgres`
+  - `POSTGRES_PASSWORD=<generate a strong random value with `openssl rand -hex 32`, which is safe to place in `DATABASE_URL`; never use a default such as `postgres`. A password with a `/`, `@` or `:` in it (as `openssl rand -base64 32` often produces) must be percent-encoded in the URL, or the migration and the API fail to start>`
   - **Existing databases**: the Postgres image reads `POSTGRES_PASSWORD` only when it initialises an empty data directory, so changing the variable alone rotates nothing. To replace a default password, run `ALTER ROLE postgres PASSWORD '<new password>';` and update `DATABASE_URL` in the same change.
-  - POSTGRES_DB=stripe_portal
-- **Storage**: Enable persistent volume for data directory
+  - `POSTGRES_DB=stripe_portal`
+- **Storage**: persistent volume for the data directory.
 - **Healthcheck**: `pg_isready -U postgres -d stripe_portal`
 
 ### 2. Backend Service (API)
-- **Source**: `./backend` directory, deployed as a Coolify **Docker Compose** resource pointing at `docker-compose.prod.yml`
-- **Containers**: that compose file defines four services:
-  - `migrator` - runs `npm run db:migrate` once against `DATABASE_URL`, then exits; `api` will not start until this completes successfully
-  - `api` (reachable as `dfwsc-api` via a network alias on Coolify's `coolify` network; Coolify ignores `container_name`) - the Fastify server, `node dist/index.js`, port 4242
-  - `dfwsc-redis` - backs rate limiting and circuit-breaker state; the service itself is named `dfwsc-redis` and sits only on the stack's `backend` network, and `docker-compose.prod.yml` sets the API's `REDIS_URL` to `redis://dfwsc-redis:6379`. The plain name `redis` is not used because the `api` service also sits on Coolify's shared `coolify` network, where Coolify's own control-plane Redis (password-protected) answers to `redis` too. A network alias would not help, since Coolify ignores custom network aliases; the unique service name is what makes it resolve. The Coolify `REDIS_URL` variable is **not read** by the API in production; it is not interpolated into the compose file, so it can be deleted, and leaving a stale value there does nothing. To use an external Redis instead, edit the `REDIS_URL` line in `docker-compose.prod.yml`.
-  - `backup` - runs `scripts/backup-db.sh` on a nightly cron schedule (`0 2 * * *`) into the `postgres_backups` volume, optionally pushing to S3 if `AWS_S3_BACKUP_BUCKET` is set
-- **Build**: Use existing Dockerfile (multi-stage production build)
-- **Port**: 4242 (expose for internal communication)
-- **Environment Variables**:
-  ```
-  STRIPE_SECRET_KEY=your_stripe_secret_key
-  STRIPE_WEBHOOK_SECRET=your_stripe_webhook_secret
-  DATABASE_URL=<postgres-connection-url>
-  FRONTEND_ORIGIN=https://your-frontend-domain.com
-  JWT_SECRET=your_jwt_secret_minimum_32_chars
-  DEFAULT_PROCESS_FEE_CENTS=100
-  SMTP_HOST=your_smtp_host
-  SMTP_PORT=your_smtp_port
-  SMTP_USER=your_smtp_user
-  SMTP_PASS=your_smtp_password
-  SMTP_FROM=noreply@yourdomain.com
-  API_BASE_URL=https://your-backend-domain.com
-  # Admin panel login: Nextcloud groups allowed to sign in (comma-separated; default shown)
-  ADMIN_NEXTCLOUD_GROUPS=dfwsc-admins,managers
-  # Optional: Nextcloud New Lead automation (docs/BACKEND.md §9); off unless enabled
-  NEXTCLOUD_BASE_URL=https://cloud.example.com
-  NEXTCLOUD_USERNAME=dfwsc-admin
-  NEXTCLOUD_APP_PASSWORD=your_nextcloud_app_password
-  SALES_AUTOMATION_ENABLED=false
-  SALES_LEAD_FORM_ID=12
-  SALES_PIPELINE_TABLE_ID=8
-  SALES_ADDRESSBOOK_PATH=dfwsc-sales_shared_by_messyginger0804
-  SALES_LEADS_FOLDER=DFWSC Sales/Leads
-  SALES_POLL_INTERVAL_MS=120000
-  # SALES_LEAD_WEBHOOK_SECRET=at_least_32_random_characters   (unset = poll only; docs/BACKEND.md "Sales lead webhook")
-  # Optional: client onboarding (docs/BACKEND.md §10); off unless enabled
-  CLIENT_ONBOARDING_ENABLED=false
-  CLIENT_ONBOARDING_FORM_ID=2
-  CLIENT_ONBOARDING_PROJECTS_TABLE_ID=6
-  CLIENT_ONBOARDING_PIPELINE_TABLE_ID=8
-  CLIENT_ONBOARDING_ADDRESSBOOK_PATH=dfwsc-sales_shared_by_messyginger0804
-  CLIENT_ONBOARDING_CLIENTS_FOLDER=clients
-  CLIENT_ONBOARDING_COLLECTIVE_ID=1
-  CLIENT_ONBOARDING_WEBHOOK_SECRET=at_least_32_random_characters
-  CLIENT_ONBOARDING_POLL_INTERVAL_MS=300000
-  # Optional: per-project Nextcloud Teams, wikis and folder shares (docs/BACKEND.md section 10); off by default
-  CLIENT_ONBOARDING_PROJECT_TEAMS=false
-  CLIENT_ONBOARDING_TEAM_ADMINS=user-id-one,user-id-two
-  # Optional: create/link a Stripe Customer on the platform account per client (docs/BACKEND.md section 10); off by default
-  CLIENT_ONBOARDING_BILLING_CUSTOMER=false
-  # Optional: push edits of a client's Nextcloud contact card to its billing Stripe Customer (docs/BACKEND.md section 11); off by default
-  CONTACT_STRIPE_SYNC=false
-  CONTACT_STRIPE_SYNC_INTERVAL_MS=120000
-  # Optional: read-only "Portal Accounts" Nextcloud Table with portal client status (docs/BACKEND.md section 12); off by default
-  PORTAL_MIRROR=false
-  # Optional: read-only "Client Billing" Nextcloud Table with each billing client's Stripe status (docs/BACKEND.md section 13); off by default
-  BILLING_MIRROR=false
-  # BILLING_MIRROR_SHARE_GROUPS=dfwsc-admins,managers   (default; both read-only)
-  # BILLING_SWEEP_INTERVAL_MS=3600000
-  # Optional: write each billing client's Stripe Customer id onto its Client Projects row and contact card (docs/BACKEND.md section 15); off by default. Start with the dry run.
-  STRIPE_ID_WRITEBACK=false
-  # STRIPE_ID_WRITEBACK_DRY_RUN=false   (true/1/yes = log only; any unrecognised value also means dry run)
-  # STRIPE_ID_WRITEBACK_INTERVAL_MS=300000
-  # Secret of the account-level Stripe webhook endpoint https://api.dfwsc.com/api/v1/webhooks/stripe-billing (docs/STRIPE.md); unset = endpoint answers 404
-  # STRIPE_BILLING_WEBHOOK_SECRET=whsec_...
-  # Optional: "New invoice" Nextcloud form that creates REAL Stripe invoices and plans (docs/BACKEND.md section 14); off by default.
-  # Rollout: create and restrict the form, share responses with dfwsc-admin, set the form id and secret, register the
-  # webhook listener, deploy, then set BILLING_REQUESTS_ENABLED=true (the first cycle records a baseline).
-  BILLING_REQUESTS_ENABLED=false
-  # BILLING_REQUESTS_FORM_ID=<id of the New invoice form>
-  # BILLING_REQUESTS_WEBHOOK_SECRET=at_least_32_random_characters   (unset = poll only)
-  # BILLING_REQUESTS_POLL_INTERVAL_MS=300000
-  # BILLING_REQUESTS_ALLOWED_GROUPS=dfwsc-admins,managers   (who may submit; default shown)
-  # BILLING_REQUESTS_SHARE_GROUPS=dfwsc-admins,managers   (read-only "Billing Requests" table; default shown)
-  # BILLING_REQUESTS_MAX_AGE_HOURS=72   (older submissions are marked Expired, not billed, when the flag is switched on again)
-  # BILLING_MAX_AMOUNT_CENTS=2500000   (per invoice or per plan payment)
-  # BILLING_AUTO_SEND=true   (false = leave one-off invoices as drafts)
-  # BILLING_DEFAULT_DAYS_UNTIL_DUE=7
-  # Optional: connected-account invoicing API (/api/v1/customers; docs/BACKEND.md section 7). Global kill switch, off by default;
-  # only the exact value "true" registers the routes, and each client also needs invoicing_enabled (admin PATCH /clients/:id).
-  CONNECT_INVOICING=false
-  ```
-- **Admin login (Nextcloud)**: the admin panel signs users in against Nextcloud; there are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ALLOW_ADMIN_SETUP` are no longer read (remove them from Coolify). Before deploying this change:
+- **Source**: the repository root, deployed as a Coolify **Docker Compose** resource pointing at `docker-compose.prod.yml` (the `api` and `migrator` services build from `./backend`).
+- **Containers**: the compose file defines four services:
+  - `migrator` - builds the `builder` target of `backend/Dockerfile`, runs `npm run db:migrate` once against `DATABASE_URL`, then exits (`restart: "no"`). `api` will not start until it completes successfully.
+  - `api` - the Fastify server (`node dist/index.js`, port 4242, published only on `127.0.0.1:4242` of the host). It also joins Coolify's external `coolify` network under the alias `dfwsc-api` (Coolify ignores `container_name`), which is how the frontend's nginx reaches it.
+  - `dfwsc-redis` - `redis:7-alpine`, backing rate limiting and circuit-breaker state. It sits only on the stack's `backend` network, and the compose file fixes the API's `REDIS_URL` to `redis://dfwsc-redis:6379`. The plain name `redis` is not used because the `api` service also sits on Coolify's shared `coolify` network, where Coolify's own control-plane Redis (password-protected) answers to `redis` too. A network alias would not help, since Coolify ignores custom network aliases; the unique service name is what makes it resolve. A `REDIS_URL` set in Coolify is not read: it is not interpolated into the compose file, so it can be deleted. To use an external Redis instead, edit the `REDIS_URL` line in `docker-compose.prod.yml`.
+  - `backup` - built from `./backup` (`backup/Dockerfile`: Alpine with `pg_dump`, `aws-cli` and `supercronic`). `backup/scripts/scheduler.sh` runs `backup.sh` on `BACKUP_SCHEDULE` (default `0 2 * * *`) under a file lock, writing gzipped dumps to the `postgres_backups` volume and uploading to S3 when `BACKUP_S3_BUCKET` is set. Variables, restore drills and the healthcheck: [BACKUP.md](./BACKUP.md).
+- **Build**: `backend/Dockerfile`, multi-stage on `node:22-alpine`; the `production` target installs production dependencies only, runs as the `node` user and starts `node dist/index.js`.
+- **Environment variables**: add them in Coolify on the Backend resource. The complete list, with required/default/purpose per variable, is in [ENVIRONMENT.md](./ENVIRONMENT.md). The minimum to start the API is:
+
+  | Variable | Notes |
+  |----------|-------|
+  | `DATABASE_URL` | Connection URL of the database above. |
+  | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Live keys in production. |
+  | `JWT_SECRET` | At least 32 characters. |
+  | `FRONTEND_ORIGIN` | The site origin, for example `https://dfwsc.com`; comma-separated list allowed. |
+  | `API_BASE_URL` | Required in production, for example `https://api.dfwsc.com`. Without it onboarding links and `/app-config.js` answer 500. |
+  | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Outgoing mail. Set `SMTP_FROM` explicitly. |
+  | `CONTACT_INBOX` | Recipient of the website contact form (falls back to `SMTP_FROM`). |
+  | `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_APP_PASSWORD` | Required for admin login and for every Nextcloud feature flag. |
+
+  Feature flags (`SALES_AUTOMATION_ENABLED`, `CLIENT_ONBOARDING_ENABLED`, `BILLING_REQUESTS_ENABLED`, `CONNECT_INVOICING`, `CEREBO_ENABLED` and the mirror and sync flags) all default to off. Their prerequisites, and a rollout warning for `STRIPE_ID_WRITEBACK_DRY_RUN`, are in [ENVIRONMENT.md](./ENVIRONMENT.md) section 4; the features themselves are in [BACKEND.md](./BACKEND.md) sections 9-16.
+- **Admin login (Nextcloud)**: the admin panel signs users in against Nextcloud; there are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ALLOW_ADMIN_SETUP` are not read (remove them from Coolify). Before relying on it:
   1. **Create the Nextcloud groups first and put members in them.** The defaults are `dfwsc-admins` and `managers` (override with `ADMIN_NEXTCLOUD_GROUPS`, comma-separated, exact ids). A user whose Nextcloud account is in none of them gets 403 "This Nextcloud account isn't authorized for the admin panel".
   2. **`NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD` must be set** (HTTPS only). The service account must be a Nextcloud admin: it reads each user's groups with `GET /ocs/v2.php/cloud/users/{id}/groups`. Without them login answers 503 "Admin login is unavailable".
-  3. **Accounts with two-factor login must sign in with a Nextcloud app password** (Settings → Security → Devices & sessions), not the account password.
-  - **No local fallback.** If Nextcloud is down, slow or its breaker is open, admin login answers 503 until it recovers. Payments, webhooks and API-key routes do not depend on Nextcloud and are unaffected. Admin JWTs already issued stay valid until they expire (`JWT_EXPIRY`, default 1h); tokens issued before this change (whose `sub` was an `admins` row id) also keep working until then.
-  - **Brute-force note.** Nextcloud throttles failed logins by source IP, and every check comes from the API server, so unthrottled guessing here would also slow the service account's own automation calls (forms, contacts, files). `POST /auth/login` is therefore limited to 5 requests per 15 minutes per client IP and 10 per 15 minutes per username (case-insensitive). Nextcloud's own throttle (HTTP 429) is reported as 503.
-  - The `admins` table is left in the database for now and is no longer read or written; a later change drops it.
-- **Startup Command**: `node dist/index.js` (handled by Dockerfile). DB migrations run automatically on each deploy via the `migrator` service above — no separate manual migration step is needed.
-- **Dependencies**: Database must be reachable via `DATABASE_URL` before deploying; within the compose stack, `api` also depends on `migrator` (completed) and `dfwsc-redis` (started) automatically
-- **Healthcheck**: `curl -f http://localhost:4242/api/v1/health || exit 1` (the compose file itself uses an equivalent `wget` healthcheck)
+  3. **Accounts with two-factor login must sign in with a Nextcloud app password** (Settings, Security, Devices & sessions), not the account password.
+  - **No local fallback.** If Nextcloud is down, slow or its breaker is open, admin login answers 503 until it recovers. Payments, webhooks and API-key routes do not depend on Nextcloud and are unaffected. Admin JWTs already issued stay valid until they expire (`JWT_EXPIRY`, default 1h).
+  - **Brute-force note.** Nextcloud throttles failed logins by source IP, and every check comes from the API server, so unthrottled guessing here would also slow the service account's own automation calls. `POST /auth/login` is therefore limited to 5 requests per 15 minutes per client IP, and to 10 failed attempts per 15 minutes per username (case-insensitive). Nextcloud's own throttle (HTTP 429) is reported as 503.
+  - The `admins` table is still in the schema but is no longer read or written.
+- **Startup Command**: `node dist/index.js`. Migrations run on each deploy through the `migrator` service; no manual step is needed. In production the API itself does not migrate; at boot it only verifies that the expected tables exist and exits if one is missing (`backend/src/lib/schema-check.ts`, [DATABASE.md](./DATABASE.md)).
+- **Dependencies**: the database must be reachable through `DATABASE_URL` before deploying; inside the stack, `api` waits for `migrator` (completed) and `dfwsc-redis` (started).
+- **Healthcheck**: defined in the compose file as `wget -qO- http://127.0.0.1:4242/api/v1/health` (every 10 s, 5 retries, 10 s start period). The image is Alpine and has `wget` but not `curl`, so use `wget` for any check you add. The endpoint returns 200 with `database: "connected"`, or 503 when the database is unreachable.
 
 ### 3. Frontend Service (React + Nginx)
-- **Deployment**: a **separate** Coolify Nginx application, independent of the backend's Compose stack — it is not a service in `docker-compose.prod.yml` and is deployed/scaled on its own
-- **Source**: `./front` directory
-- **Build**: Multi-stage `front/Dockerfile` (already exists — see below)
-- **Port**: 80 (expose as HTTP/HTTPS via Coolify)
-- **Environment Variables** (minimal):
-  - `VITE_API_URL=/api/v1` (optional, used during build if needed)
-  - `VITE_ANALYTICS_SRC` and `VITE_ANALYTICS_DOMAIN` (optional; configure as
-    Docker **build arguments**, not runtime-only variables). The image derives
-    the analytics origin from the script URL and limits CSP script and event
-    connections to that origin.
-- **Configuration**: Uses existing `front/nginx.conf` which:
-  - Serves React static files from root path (`/`)
-  - Proxies `/api/*` requests to the API container by its network alias (`dfwsc-api:4242`) — the `api` service joins the external `coolify` network with that alias in `docker-compose.prod.yml`, and the frontend container is on that network by default
-- **Dependencies**: Backend service must be reachable (both for the internal nginx proxy above and for any direct/cross-origin API calls the SPA makes)
-- **Healthcheck**: `curl -f http://localhost || exit 1`
+- **Deployment**: a **separate** Coolify application, independent of the backend's Compose stack. It is not a service in `docker-compose.prod.yml` and is deployed and scaled on its own.
+- **Source**: the `./front` directory, built with `front/Dockerfile`.
+- **Build**: multi-stage. The builder runs `npm run build` (Vite client build plus a prerender step for the marketing pages), then `scripts/verify-build.mjs`, which fails the image build if a prerendered page nginx routes to is missing, then renders `nginx.conf` into the production config. The final stage is `nginx:alpine` running as the non-root `nginx` user with its pid file in `/tmp`. Read `front/Dockerfile` for the exact steps.
+- **Port**: 80 (exposed as HTTP/HTTPS by Coolify).
+- **Build arguments** (not runtime variables; see [ENVIRONMENT.md](./ENVIRONMENT.md) section 5):
+  - `VITE_API_URL` (default `/api/v1`; keep the default so calls go through the nginx proxy).
+  - `VITE_ANALYTICS_SRC` and `VITE_ANALYTICS_DOMAIN` (optional, set together). The image derives the analytics origin from the script URL and limits the CSP script and connection sources to it. Redeploy after changing either, because Vite bakes them into the static assets.
+- **Dependencies**: the API must be reachable on the `coolify` network as `dfwsc-api:4242`.
+- **Healthcheck**: configure an HTTP check on `/` in Coolify. It is not defined in the repository.
 
 ## Dockerfiles
 
-### Backend Dockerfile (already exists)
-The backend/Dockerfile is already optimized for production:
-```dockerfile
-FROM node:22-alpine AS base
-WORKDIR /app
+The Dockerfiles are the source of truth; they are not copied here because the copies drifted.
 
-FROM base AS builder
-ENV NODE_ENV=development
-
-COPY package*.json ./
-RUN npm ci
-
-COPY tsconfig*.json ./
-COPY drizzle.config.ts ./drizzle.config.ts
-COPY drizzle ./drizzle
-COPY src ./src
-
-RUN npm run build:server
-
-FROM base AS production
-ENV NODE_ENV=production
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm ci --omit=dev
-
-COPY --from=builder /app/build-dist ./dist
-COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
-COPY --from=builder /app/drizzle ./drizzle
-
-USER node
-
-CMD ["node", "dist/index.js"]
-```
-
-### Frontend Dockerfile (already exists)
-`front/Dockerfile` already exists in the repo; it builds the Vite app and serves it via nginx running as a non-root user (required so the container doesn't crash-loop on `/var/cache/nginx` / `/run/nginx.pid` permissions):
-```dockerfile
-FROM node:22-alpine AS builder
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm ci
-
-COPY . .
-
-ARG VITE_API_URL=/api/v1
-ARG VITE_ANALYTICS_SRC=
-ARG VITE_ANALYTICS_DOMAIN=
-ENV VITE_API_URL=$VITE_API_URL
-ENV VITE_ANALYTICS_SRC=$VITE_ANALYTICS_SRC
-ENV VITE_ANALYTICS_DOMAIN=$VITE_ANALYTICS_DOMAIN
-
-RUN npm run build
-
-RUN ANALYTICS_ORIGIN="$(node -e 'const source = process.env.VITE_ANALYTICS_SRC; if (!source) process.exit(0); const url = new URL(source); if (!/^https?:$/.test(url.protocol)) throw new Error("VITE_ANALYTICS_SRC must use http or https"); process.stdout.write(url.origin);')" \
-    && sed "s|__ANALYTICS_ORIGIN__|${ANALYTICS_ORIGIN}|g" nginx.conf > nginx.production.conf
-
-FROM nginx:alpine AS production
-COPY --from=builder /app/build-dist /usr/share/nginx/html
-COPY --from=builder /app/nginx.production.conf /etc/nginx/conf.d/default.conf
-
-RUN chown -R nginx:nginx /usr/share/nginx/html /etc/nginx/conf.d /var/cache/nginx \
-    && sed -i 's#pid .*nginx\.pid;#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf
-
-USER nginx
-
-EXPOSE 80
-
-CMD ["nginx", "-g", "daemon off;"]
-```
+| File | Image | Notes |
+|------|-------|-------|
+| `backend/Dockerfile` | `api` (target `production`) and `migrator` (target `builder`) | `node:22-alpine`; the builder compiles TypeScript to `build-dist`; production keeps `drizzle/` and `drizzle.config.ts` so `drizzle-kit migrate` can run. |
+| `front/Dockerfile` | Frontend | Build args for `VITE_*`, `verify-build` step, CSP origin substitution with a check that no placeholder remains, non-root nginx. |
+| `backup/Dockerfile` | `backup` | Alpine 3.21 with `postgresql17-client`, `aws-cli`, `supercronic`, `tini`; non-root `backup` user. |
 
 ## Nginx Configuration
-The existing `front/nginx.conf` is already configured correctly:
-- Serves React app from root
-- Proxies `/api/*` to the API container by its network alias (`dfwsc-api:4242`) — the `api` service joins the external `coolify` network with that alias, which the frontend container is on by default
-- Includes security headers and compression
+
+`front/nginx.conf` is rendered at build time (`__ANALYTICS_ORIGIN__` replaced) and does the following:
+
+- **Prerendered marketing pages**: `/`, `/pricing`, `/team` and `/privacy` are served from the files the build prerenders (`index.html`, `pricing.html`, `team.html`, `privacy.html`). A trailing slash on the last three redirects (301) to the clean path. Keep this list in sync with `PUBLIC_ROUTES` in `front/src/seo/meta.js`.
+- **Client-rendered routes**: `/admin`, `/demos`, `/onboard`, `/payment-success`, `/payment-cancel`, `/onboarding-success`, `/regenerate-key` and `/request-key-regeneration` get the SPA shell `spa.html`, sent with `X-Robots-Tag: noindex, nofollow`.
+- **Real 404s**: any other path that is not a real file returns the `404.html` page with status 404 and `noindex`, not the app. Static files such as `robots.txt`, `sitemap.xml` and `llms.txt` are served as files.
+- **`/docs`**: `/docs` and `/docs.html` redirect (301) to a Nextcloud Collective page on `cloud.dfwsc.com`.
+- **Caching**: `/assets/*` is `public, max-age=31536000, immutable` only when served successfully; a missing asset returns a plain-text 404 with `no-store` (so a stale tab after a deploy gets an error, not HTML), and every 404 is `no-store`. `*.html` and `theme-init.js` are `no-cache`.
+- **API proxy**: `/api/` is proxied to `http://dfwsc-api:4242` (the compose alias on the `coolify` network), resolved at request time through Docker's resolver, with `X-Forwarded-For`, `X-Real-IP` and `X-Forwarded-Proto` set. Timeouts: connect 10 s, read 30 s, send 10 s; request bodies up to 10 MB.
+- **Security headers**: `nosniff`, `X-Frame-Options: DENY`, referrer and permissions policies, HSTS (two years, include subdomains) and a Content-Security-Policy. The CSP `connect-src` hardcodes `https://api.dfwsc.com` besides `'self'`, so serving the site against another API host needs an `nginx.conf` change.
+- **Compression**: gzip for text, JSON, XML and SVG.
 
 ## Deployment Sequence
 
 ### Phase 1: Infrastructure Setup
 1. **Create Database Service**
-   - Choose PostgreSQL 17
-   - Set environment variables: POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
-   - Enable persistent storage
-   - Save and wait for service to become healthy
+   - Choose PostgreSQL 17.
+   - Set `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`.
+   - Enable persistent storage.
+   - Save and wait for the service to become healthy.
 
 2. **Create Backend Service** (Coolify "Docker Compose" resource type)
-   - Set source to your repository
-   - Point it at `docker-compose.prod.yml` — this single resource brings up `migrator`, `api`, `dfwsc-redis`, and `backup` together
-   - Add all environment variables from the list above
-   - Set dependency on Database being reachable (`DATABASE_URL`)
-   - Healthcheck is already defined per-service in the compose file
-   - Save and deploy
+   - Set the source to your repository.
+   - Point it at `docker-compose.prod.yml`. This single resource brings up `migrator`, `api`, `dfwsc-redis` and `backup` together.
+   - Add the environment variables from the table above, plus any feature flags you want ([ENVIRONMENT.md](./ENVIRONMENT.md)).
+   - Make sure the external `coolify` network exists on the host (Coolify creates it).
+   - Healthchecks are already defined per service in the compose file.
+   - Save and deploy.
 
-3. **Create Frontend Service** (separate Coolify Nginx application — not part of `docker-compose.prod.yml`)
-   - Set source to your repository
-   - Set build context to `./front`
-   - Use the existing `front/Dockerfile`
-   - Add minimal build arguments (`VITE_API_URL=/api/v1` if needed). For
-     analytics, pass both `VITE_ANALYTICS_SRC` and `VITE_ANALYTICS_DOMAIN` as
-     build arguments; redeploy after changing either because Vite bakes them
-     into the static assets.
-   - Leave it on Coolify's default `coolify` network; the backend's `api` service joins that network as `dfwsc-api`, so the nginx proxy can reach `dfwsc-api:4242`
-   - Add healthcheck: `curl -f http://localhost || exit 1`
-   - Save and deploy
+3. **Create Frontend Service** (separate Coolify application, not part of `docker-compose.prod.yml`)
+   - Set the source to your repository.
+   - Set the build context to `./front` and use `front/Dockerfile`.
+   - Add the build arguments (`VITE_API_URL=/api/v1` if you set it at all; the analytics pair only if you use analytics).
+   - Leave it on Coolify's default `coolify` network; the backend's `api` service joins that network as `dfwsc-api`, so the nginx proxy can reach `dfwsc-api:4242`.
+   - Save and deploy.
 
 ### Phase 2: Configuration & Testing
 1. **Verify Database Connection**
-   - Check backend logs for successful connection and migration completion
+   - Check the `migrator` logs for completed migrations and the `api` logs for a successful start. If a required table is missing, the API exits at boot.
 
 2. **Test API Endpoints**
-   - Access backend health: `https://[backend-service].coolify.app/api/v1/health`
-   - Swagger UI (`/docs`) is off unless `ENABLE_SWAGGER=true` is set on the API, and `docker-compose.prod.yml` does not pass that variable. There is no production guard in the code: if you set it, the UI is served in production, so leave it unset
+   - Health: `https://<api-domain>/api/v1/health` returns `{"status":"ok","database":"connected",...}`.
+   - Swagger UI (`/docs` on the API) is off unless `ENABLE_SWAGGER` is exactly `true` on the API. `docker-compose.prod.yml` does not pass that variable, so it is off in this deployment. There is no production guard in the code: if you add it to the compose file, the UI is served in production.
+   - `/api/v1/metrics` answers 404 unless `METRICS_TOKEN` is set, and the compose file does not forward that variable, so it is always 404 in this deployment.
 
 3. **Test Frontend**
-   - Access frontend: `https://[frontend-service].coolify.app`
-   - Verify React app loads correctly
-   - Test API proxy: Check network tab for requests to `/api/*` reaching backend
+   - Open the frontend domain and confirm the pages load.
+   - Test the API proxy: the network tab should show `/api/*` requests answered by the backend.
 
-4. **End-to-End Testing**
-   - Test admin login and setup
-   - Test client onboarding flow
-   - Test payment processing (with Stripe test keys)
-   - Verify email delivery
-   - Test webhook handling
+4. **Register webhooks** (payments are not reconciled without the first one)
+
+   | Endpoint (on the API host) | Secret variable | Behavior when the secret is unset |
+   |----------------------------|-----------------|-----------------------------------|
+   | `POST /api/v1/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` (required at boot) | API does not start. |
+   | `POST /api/v1/webhooks/stripe-billing` | `STRIPE_BILLING_WEBHOOK_SECRET` | Endpoint answers 404. |
+   | `POST /api/v1/webhooks/nextcloud/sales-lead` | `SALES_LEAD_WEBHOOK_SECRET` | 404; the poller still runs. |
+   | `POST /api/v1/webhooks/nextcloud/client-onboarding` | `CLIENT_ONBOARDING_WEBHOOK_SECRET` | 404; the poller still runs. |
+   | `POST /api/v1/webhooks/nextcloud/billing-request` | `BILLING_REQUESTS_WEBHOOK_SECRET` | 404; the poller still runs. |
+
+   - `/webhooks/stripe` is the Stripe Connect endpoint. It handles `account.updated`, the `checkout.session.*` events, `payment_intent.succeeded|payment_failed|canceled`, `charge.refunded`, `charge.dispute.created`, `application_fee.refunded`, `payout.paid|failed`, the `invoice.*` events used by connected-account invoicing, `customer.subscription.updated|paused|resumed|deleted` and `subscription_schedule.canceled` (`backend/src/routes/webhooks.ts:298-466`). Which events to subscribe to and how to register the endpoint: [STRIPE.md](./STRIPE.md).
+   - `/webhooks/stripe-billing` is an **account-level** (platform) endpoint, separate from the Connect one. It handles customer, subscription, subscription-schedule and `invoice.*` events for DFWSC's own billing customers and ignores any event that carries a connected `account` (`backend/src/routes/webhooks-billing.ts:20-42,82`).
+   - The three Nextcloud endpoints are called by Nextcloud's webhook listener on a form submission, with `Authorization: Bearer <secret>`. Secrets must be at least 32 characters (`openssl rand -hex 32`). They only trigger an immediate poll cycle; see [BACKEND.md](./BACKEND.md) sections 9, 10 and 14.
+
+5. **End-to-End Testing**
+   - Sign in to the admin panel with a Nextcloud account that is in one of the `ADMIN_NEXTCLOUD_GROUPS` (there is no setup step or local admin account).
+   - Test the client onboarding flow.
+   - Test payment processing (with Stripe test keys).
+   - Verify email delivery.
+   - Test webhook handling (Stripe CLI or a test-mode endpoint).
 
 ## Coolify-Specific Recommendations
 
 ### Service Dependencies
-- Use Coolify's dependency management to ensure resources start in correct order:
-  - Database → Backend → Frontend
-- Within the Backend resource, `docker-compose.prod.yml`'s own `depends_on` already orders `migrator` (must complete) and `dfwsc-redis` (must start) before `api` — no extra Coolify configuration is needed for that internal ordering
+- Deploy order: Database, then Backend, then Frontend. The frontend only needs the backend reachable at request time.
+- Within the Backend resource, `docker-compose.prod.yml`'s own `depends_on` already orders `migrator` (must complete) and `dfwsc-redis` (must start) before `api`; no extra Coolify configuration is needed.
 
 ### Environment Management
-- Use Coolify's built-in secrets management for:
-  - STRIPE_SECRET_KEY
-  - STRIPE_WEBHOOK_SECRET
-  - JWT_SECRET
-  - Database passwords
-  - SMTP credentials
-- Store non-sensitive configuration in environment variables
+- Use Coolify's secrets for `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_BILLING_WEBHOOK_SECRET`, `JWT_SECRET`, `DATABASE_URL`, `SMTP_PASS`, `NEXTCLOUD_APP_PASSWORD`, the `*_WEBHOOK_SECRET` values and `AWS_SECRET_ACCESS_KEY`.
+- **Only variables listed in `docker-compose.prod.yml` reach the containers.** Setting any other variable in Coolify does nothing. The ones the code reads but the compose file does not forward are `METRICS_TOKEN`, `TRUST_PROXY`, `CLOUDFLARE_IP_RANGES`, `DEFAULT_PAYMENT_SUCCESS_URL`, `DEFAULT_PAYMENT_CANCEL_URL`, `DB_POOL_MAX`, `HOST` and `ENABLE_SWAGGER`; making one effective requires adding it to the compose file. See [ENVIRONMENT.md](./ENVIRONMENT.md) section 8.
+- A variable that is forwarded but unset in Coolify arrives as an empty string, which the code treats as unset (except `SMTP_FROM`; set it).
 
 ### Monitoring & Logging
-- Enable log aggregation for all services
-- Set up resource monitoring (CPU, memory, disk)
-- Configure alerting for service failures
+- `GET /api/v1/metrics` exposes sync and circuit-breaker state, but needs `METRICS_TOKEN` and a compose change (see above).
+- The API logs structured JSON to stdout, which Coolify's log view shows. The Loki and Promtail services exist only in the dev stack.
+- Set up resource monitoring (CPU, memory, disk) and alerting for service failures in Coolify. The `backup` container's own healthcheck fails when the last successful backup is older than `BACKUP_HEARTBEAT_MAX_AGE`.
 
 ### Backup Strategy
-- The Backend resource already includes a `backup` service (`docker-compose.prod.yml`) that runs `scripts/backup-db.sh` nightly via its own cron (`0 2 * * *`), writing gzipped `pg_dump` output to the `postgres_backups` volume; set `AWS_S3_BACKUP_BUCKET` to also push backups to S3
-- If using Coolify's managed PostgreSQL, also enable its automatic backups for redundancy
-- If using self-hosted/external PostgreSQL, ensure `postgres_backups` sits on persistent storage and periodically run a restore drill — an untested backup is not a backup
-- Consider backing up uploaded files if you add file storage later
+- The Backend resource includes the `backup` service described above: nightly gzipped `pg_dump` into the `postgres_backups` volume, optionally uploaded to S3 (`BACKUP_S3_BUCKET` and the `AWS_*` credentials; `BACKUP_REQUIRE_REMOTE` makes a missing bucket a failure). Without a bucket, backups exist only on that Docker volume on the same host.
+- If using Coolify's managed PostgreSQL, also enable its automatic backups for redundancy.
+- Run a restore drill periodically ([BACKUP.md](./BACKUP.md)); an untested backup is not a backup.
 
 ### SSL/TLS
-- Coolify automatically handles SSL termination
-- No need to configure SSL in your services
-- Access via HTTPS://your-domain.com
+- Coolify's proxy terminates TLS; no certificate handling is needed in the services.
+- Cloudflare sits in front of Coolify (**Production setup**); nginx sends HSTS itself.
 
 ## Troubleshooting
 
 ### Common Issues
 1. **Database Connection Failures**
-   - Verify DATABASE_URL uses correct service name
-   - Check that database service is healthy before starting backend
-   - Confirm username/password/database name match
+   - The database is not part of the compose stack. Verify `DATABASE_URL` points at a host reachable from the containers (an external host or a Coolify database's internal address), not at a compose service name.
+   - Check that the database is healthy before deploying the backend.
+   - Confirm username, password and database name match; percent-encode special characters in the password.
+   - If `migrator` fails, `api` never starts; read the `migrator` logs first.
 
-2. **API Proxy Not Working**
-   - Verify nginx.conf is being used in frontend service
-   - Check that backend service is healthy and accessible
-   - Ensure frontend service depends on backend service
+2. **API Proxy Not Working** (`/api/*` returns 502 or 504 on the frontend domain)
+   - The frontend's nginx proxies to `dfwsc-api:4242`. That name exists only while the `api` container is running and attached to the `coolify` network with the alias `dfwsc-api` (`docker-compose.prod.yml`, `api.networks.coolify.aliases`). From the frontend container, `getent hosts dfwsc-api` must return an address.
+   - Confirm both applications are on the same `coolify` network, and that `api` is healthy.
+   - During a backend deploy the alias disappears briefly, so a short burst of 502 is expected (**Production setup**).
 
 3. **Build Failures**
-   - Check that all dependencies are in package.json
-   - Verify node_modules are not being excluded incorrectly
-   - Check build output for specific error messages
+   - Frontend: `scripts/verify-build.mjs` fails the image build when a prerendered page is missing; read its output. A `__ANALYTICS_ORIGIN__` placeholder left in the rendered nginx config also fails the build.
+   - Backend: dependencies come from `npm ci`, so `package.json` and `package-lock.json` must agree.
+   - Check the build output for the specific error.
 
 4. **Environment Variable Issues**
-   - Double-check variable names match exactly
-   - Verify secrets are properly injected
-   - Check for extra spaces or quotes in values
+   - Variable names must match exactly, with no extra spaces or quotes.
+   - If a variable has no effect, check whether `docker-compose.prod.yml` forwards it (see Environment Management).
+   - A flag set to anything but `true` stays off. A flag that is on but misconfigured is logged once at startup and its job stays off; look for the problem list in the `api` logs.
 
 5. **`Rate limiter Redis error` / `NOAUTH Authentication required` in the API log**
    - The API is talking to a Redis other than the stack's own, usually Coolify's control-plane Redis reached through the short name `redis` on the shared `coolify` network. Limits still work through the in-memory fallback, but are no longer shared or persistent.
    - Confirm `docker-compose.prod.yml` points `REDIS_URL` at `redis://dfwsc-redis:6379`, and that `docker exec <api container> getent hosts dfwsc-redis` returns an address on the stack's `backend` network.
-   - Any hostname the `api` service uses must be unique across everything on the `coolify` network; give shared-network services an explicit alias rather than relying on the compose service name.
+   - Any hostname the `api` service uses must be unique across everything on the `coolify` network; give shared-network services a unique service name rather than a generic one.
+
+6. **Every visitor shares one rate-limit bucket, or limits trigger too early**
+   - The API must see the real client address. Behind Cloudflare that comes from `CF-Connecting-IP`, honored only for connections from the built-in Cloudflare ranges. If Cloudflare publishes ranges that are missing from `backend/src/lib/client-ip.ts`, set `CLOUDFLARE_IP_RANGES` (it needs a compose change to be forwarded; see Environment Management).
 
 ## Maintenance
 
 ### Updates
-1. Push changes to your repository
-2. Coolify will detect changes based on your monitor paths configuration
-3. Each service will rebuild and redeploy if its source changed
-4. Services will restart in dependency order
+1. Push changes to your repository.
+2. **Production setup**: a merge to `main` deploys both applications automatically (the API with a brief interruption). The repository holds no Coolify deployment configuration, so the trigger, watched paths and branch are set in Coolify.
+3. Within the backend resource, `migrator` runs first and `api` starts after it succeeds.
 
 ### Scaling
-- Scale frontend independently based on web traffic
-- Scale backend based on API usage
-- Database scaling handled by Coolify's PostgreSQL offering
+- The frontend is static and scales independently of the backend.
+- More than one `api` replica shares rate-limit counters only through Redis (`dfwsc-redis` in the stack); without it every replica keeps its own counters.
+- Database scaling is handled by the PostgreSQL provider.
 
 ### Environment Promotion
-- Use the same configuration for dev/staging/prod
-- Only change environment variable values
-- Consider using Coolify's environment promotion features
+- Keep the same variable names in every environment and change only the values. The repository defines one production compose file; any staging environment is configured separately in Coolify.
 
 ## Files Reference
 
 Key files for Coolify deployment:
-- `backend/Dockerfile` - Production backend build
+- `backend/Dockerfile` - API and migrator image
 - `docker-compose.prod.yml` - Compose source for the Backend resource (`migrator`, `api`, `dfwsc-redis`, `backup`)
-- `front/Dockerfile` - Frontend build (already exists)
-- `front/nginx.conf` - Already configured for API proxying
-- `scripts/backup-db.sh` - Nightly DB backup script, run by the `backup` service
-- `backend/.env` - Reference for environment variable names (use values, don't commit file)
-- `docker-compose.base.yml` / `docker-compose.dev.yml` - Local dev stack reference for service relationships
-
-This setup gives you the benefits of both worlds:
-- **Development**: Monorepo simplicity with atomic commits and shared tooling
-- **Deployment**: Microservice flexibility with independent scaling, fault isolation, and deployment
+- `front/Dockerfile` - Frontend image
+- `front/nginx.conf` - Static serving, redirects, caching, security headers and API proxy
+- `backup/` - Backup image (`Dockerfile`, `scripts/scheduler.sh`, `backup.sh`, `restore.sh`, `healthcheck.sh`); see [BACKUP.md](./BACKUP.md)
+- `.env.example` (repository root) - Template of environment variable names for local development; there is no `backend/.env`. Production values live in Coolify.
+- [ENVIRONMENT.md](./ENVIRONMENT.md) - Reference for every variable and feature flag
+- `docker-compose.base.yml` / `docker-compose.dev.yml` - Local dev stack ([DEVELOPMENT.md](./DEVELOPMENT.md))
+- `scripts/backup-db.sh` - Older standalone backup script. The `backup` service does not run it; the comment at the top of the file still says it does, which is out of date.

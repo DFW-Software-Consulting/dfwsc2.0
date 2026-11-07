@@ -1,3 +1,7 @@
+> **Historical / superseded (2026-11-06).** This document reflects the codebase as of 2026-06-19. It is not maintained and some instructions would reintroduce removed or insecure behavior. Current docs: [docs/](../docs/)
+>
+> Status: mostly done. Route-level lazy loading (`front/src/utils/lazyPage.js`), memoized context values, and the modal focus trap (`front/src/components/admin/shared/useModalLayer.js`) are in place. Still open: Step 7 (move the admin JWT to an httpOnly cookie); the JWT is held in memory only (`AuthContext`). `EditGroupModal` (Step 6a) was not extracted. The current frontend is described in [FRONTEND.md](../docs/FRONTEND.md).
+
 # Plan: Frontend Architecture & Quality
 
 ## Goal

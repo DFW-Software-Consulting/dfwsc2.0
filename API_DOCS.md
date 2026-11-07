@@ -1,154 +1,99 @@
-# DFW Software Consulting — Payment Portal API Docs
+# DFWSC Payment API Reference
 
-> **STALE — PARTIALLY OUT OF DATE.** This document is a legacy snapshot and does not reflect the current backend. Treat `backend/src/app.ts` and `backend/src/routes/` as the source of truth for registered routes. The following sections describe features that are **NOT implemented** and should be ignored: Stripe Customers (`/api/v1/stripe-customers`), DFWSC Clients (`/api/v1/dfwsc-clients`) and the `dfwsc_services` workspace concept, Invoices as described below (connected-account invoicing is a different, newer feature: see `CLIENT_INTEGRATION.md`), and Subscriptions (`/api/v1/subscriptions`). Additionally, the real Products endpoints take no `workspace` parameter, contrary to what may be documented below.
+Request and response reference for the routes a client application calls with its API key, plus the few public routes. For a step-by-step integration guide (retries, confirming payments, invoicing examples) read [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md). For the complete route table (admin panel routes, webhooks, rate limits, feature flags) read [docs/BACKEND.md](./docs/BACKEND.md), section 7.
 
-This is the internal API for the DFWSC payment portal. It handles client onboarding through Stripe Connect and payment processing. This document covers everything you need to work with the API.
-
----
-
-## Table of Contents
-
-1. [Overview](#overview)
-2. [Base URL & Environment Setup](#base-url--environment-setup)
-3. [Authentication](#authentication)
-4. [Rate Limits](#rate-limits)
-5. [Error Format](#error-format)
-6. [Endpoints](#endpoints)
-   - [Health](#health)
-   - [Contact](#contact)
-   - [Admin Auth](#admin-auth)
-   - [Client Onboarding](#client-onboarding)
-   - [Stripe Connect](#stripe-connect)
-   - [Payments](#payments)
-   - [Reports](#reports)
-   - [Clients](#clients)
-   - [Groups](#groups)
-   - [Invoices](#invoices)
-   - [Subscriptions](#subscriptions)
-   - [Webhooks](#webhooks)
-7. [Flows](#flows)
-   - [Onboarding a New Client](#onboarding-a-new-client)
-   - [Processing a Payment](#processing-a-payment)
-8. [Fee Calculation](#fee-calculation)
-9. [Environment Variables Reference](#environment-variables-reference)
+## Contents
+1. [Base URL and conventions](#base-url-and-conventions)
+2. [Authentication](#authentication)
+3. [Errors](#errors)
+4. [Rate limits](#rate-limits)
+5. [Endpoints](#endpoints)
+6. [Fee calculation](#fee-calculation)
+7. [Routes that are not documented here](#routes-that-are-not-documented-here)
 
 ---
 
-## Overview
+## Base URL and conventions
 
-The portal supports two types of users:
+| Item | Value |
+|---|---|
+| Production base URL | `https://api.dfwsc.com/api/v1` |
+| Format | JSON request and response bodies (`Content-Type: application/json`) |
+| Transport | HTTPS only. Never send an API key over plain HTTP |
+| Amounts | Integer cents (`5000` is $50.00) |
+| Request id | Every response has an `X-Request-Id` header. Send your own `X-Request-Id` (1 to 100 characters of letters, digits, `_` and `-`) to have it reused; quote it when you contact support |
 
-| User Type | How They Auth | What They Do |
-|-----------|--------------|--------------|
-| **Admin** | JWT Bearer token (login via `/auth/login`) | Manage clients, view reports, initiate onboarding |
-| **Client** | API key (`X-Api-Key` header) | Create payments |
-
-Clients are businesses that use the platform to accept payments through their own Stripe Express accounts. Admins manage the platform.
-
----
-
-## Base URL & Environment Setup
-
-- **Dev:** `http://localhost:4242`
-- **All routes** are prefixed with `/api/v1` (except the dev-only Swagger `/docs` and `/api/v1/health`)
-- **Swagger UI** (dev only): `http://localhost:4242/docs`
-- **Integration guide:** The developer integration guide lives in Nextcloud (Collective "Developer Integration Guide", access via the `integrators` group). The public website no longer has a docs page; `dfwsc.com/docs` redirects there.
-
-### Starting the dev stack
-
-```sh
-make up          # Start everything (API, frontend, DB, MailHog, Stripe CLI)
-make logs        # Watch API logs
-make down        # Stop everything
-make down-v      # Stop + wipe the database
-```
+Every route below is under `/api/v1`. The one exception is `GET /app-config.js` (no prefix), which serves the DFWSC web front end and is not part of the integrator API. Swagger UI (`/docs`) is served only when the API process is started with `ENABLE_SWAGGER=true`, so do not rely on it.
 
 ---
 
 ## Authentication
 
-### Admin: JWT Bearer Token
+| Caller | Header | Used for |
+|---|---|---|
+| Client application | `X-Api-Key: <your key>` | Everything in the Endpoints section except the public routes |
+| DFWSC administrator | `Authorization: Bearer <JWT>` from `POST /auth/login` | The admin panel routes (see [docs/BACKEND.md](./docs/BACKEND.md), section 7) |
+| Public | none | `GET /health`, `POST /contact`, `GET /payments/session/:sessionId` (optional key), the API key regeneration routes |
 
-Most admin endpoints require a JWT. Get one by logging in:
-
-```
-POST /api/v1/auth/login
-```
-
-Include it on all admin requests:
-
-```
-Authorization: Bearer <token>
-```
-
-Tokens expire in 1 hour by default (configurable via `JWT_EXPIRY`).
-
-### Client: API Key
-
-Clients authenticate with an API key passed in a header:
-
-```
-X-Api-Key: <api-key>
-```
-
-The API key is generated when a client is created and is only shown **once** in plaintext. Store it securely — it cannot be retrieved again.
+An API key belongs to one client and is created when DFWSC onboards you. Keep it on your server. A missing or blank key returns `401 { "error": "API key is required." }`; an unknown, wrong or deactivated key returns `401 { "error": "Invalid API key." }`. If your key is lost or leaked, use the regeneration routes below or ask your DFWSC administrator.
 
 ---
 
-## Rate Limits
+## Errors
 
-Rate limiting is per-IP (IPv6 visitors are limited per /64 prefix) or per Stripe account ID for payment routes.
+Most errors are:
 
-| Endpoint | Limit |
-|----------|-------|
-| `POST /auth/login` | 5 req / 15 min per IP, and 10 req / 15 min per username |
-| `POST /accounts` | 10 req / min |
-| `POST /onboard-client/initiate` | 10 req / min |
-| `POST /onboard-client/resend` | 5 req / min |
-| `GET /onboard-client` | 10 req / min |
-| `GET /connect/refresh` | 10 req / min |
-| `POST /connect/onboarding-link`, `POST /connect/dashboard-link` | 10 req / min per client |
-| `GET /connect/account` | 60 req / min per client |
-| `POST /payments/create` | Burst of 200, refilling at 120 / min (per Stripe account) |
-| `GET /payments/session/:sessionId` | 30 req / min per IP; 600 req / min per client when `X-Api-Key` is sent (and 30 distinct rejected keys / min per IP; the same bad key counts once) |
-| `POST /contact` | 10 req / min |
-
-`POST /payments/create` uses a token bucket: a burst of up to 200 requests is admitted by the limiter at once, then requests are admitted at 120 per minute (2 per second) as the bucket refills. Admitted requests then wait for one of 25 concurrent Stripe slots, for at most 10 seconds; when Stripe is slow, the tail of a burst can get `503` `STRIPE_BUSY` and should be retried. The other limits are sliding windows.
-
-**Rate limit exceeded response:**
 ```json
-{ "error": "Too Many Requests", "code": "RATE_LIMITED" }
+{ "error": "Human-readable message", "code": "MACHINE_CODE", "requestId": "..." }
 ```
-Status: `429`, with a `Retry-After` header giving the number of whole seconds (at least 1) until the request can succeed. Stripe rate limiting on `POST /payments/create` also returns `429` with `code` `RATE_LIMITED`, with `Retry-After: 2`.
+
+- Branch on `code` when it is present, and on the HTTP status otherwise. The text of `error` can change.
+- Some errors have no `code` or no `requestId`: authentication failures (`401`), many `400` validation errors (`{ "error": "..." }`), and schema errors (`{ "error", "requestId" }`).
+- `429` is always `{ "error": "Too Many Requests", "code": "RATE_LIMITED" }` with a `Retry-After` header in whole seconds (at least 1).
+- An unknown path is `404 { "error": "Not Found" }`.
+- A `502` or `503` returned while the API restarts during a deploy comes from the proxy in front of it and has neither this body nor `X-Request-Id`; check the status before parsing.
+
+Codes you can see on the client routes:
+
+| HTTP | `code` | Meaning |
+|---|---|---|
+| 400 | `BAD_REQUEST` (or none) | Missing or invalid field. `error` says which |
+| 400 | `INVALID_REQUEST` | Stripe rejected a field; `param` names it when known |
+| 400 | `REDIRECT_URL_NOT_ALLOWED` | A Connect return or refresh URL is not on one of your allowed origins |
+| 402 | `CARD_DECLINED` | The card was declined |
+| 404 | `NOT_FOUND` | Unknown resource, or one that belongs to another client |
+| 409 | `ACCOUNT_NOT_CONNECTED` | Stripe onboarding is not finished or the account cannot take charges |
+| 409 | `CARD_PAYMENTS_NOT_ACTIVE` | The `card_payments` capability is not active on your Stripe account |
+| 409 | `IDEMPOTENCY_KEY_REUSED` | The `Idempotency-Key` was used with a different request body |
+| 409 | `IDEMPOTENCY_KEY_IN_USE` | A request with this key is still running; retry the same request shortly |
+| 409 | `REDIRECT_ORIGINS_NOT_CONFIGURED` | No redirect origins are registered for your account |
+| 409 | `ONBOARDING_INCOMPLETE` | A dashboard link was requested before Stripe onboarding finished |
+| 429 | `RATE_LIMITED` | Too many requests, or Stripe is rate limiting; wait `Retry-After` |
+| 502 | `STRIPE_FAILED` | Stripe could not be reached or failed in an unclassified way |
+| 502 | `EMAIL_DELIVERY_FAILED` | A required email could not be sent |
+| 503 | `STRIPE_BUSY` | Too many Stripe calls in flight; `Retry-After: 5`; nothing was created |
+| 503 | `STRIPE_CIRCUIT_OPEN` | Stripe calls are paused after repeated failures; retry in about 30 seconds |
+| 503 | `LEDGER_PERSISTENCE_FAILED` | Stripe created the session but the record could not be saved; retry with the same key |
+
+Invoicing adds its own codes; they are listed in the error reference of [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md#error-reference).
 
 ---
 
-## Error Format
+## Rate limits
 
-All errors return a consistent JSON body:
+Limits apply per client IP unless noted. The full table, and how the client IP is determined behind the proxy, are in [docs/BACKEND.md](./docs/BACKEND.md), section 4.
 
-```json
-{
-  "error": "Human-readable message describing what went wrong",
-  "requestId": "uuid"
-}
-```
+| Route | Limit |
+|---|---|
+| `POST /payments/create` | Token bucket per Stripe account: 200 at once, refilling at 120 per minute |
+| `GET /payments/session/:sessionId` | 30 per minute per IP without a key; 600 per minute per client with `X-Api-Key` |
+| `POST /connect/onboarding-link`, `POST /connect/dashboard-link` | 10 per minute per client |
+| `GET /connect/account` | 60 per minute per client |
+| `POST /api-key/regenerate-request` | 5 per minute per IP |
+| `POST /api-key/regenerate`, `POST /contact` | 10 per minute per IP |
+| Invoicing writes / reads | Token bucket 300, refilling at 120 per minute / 600 per minute per client |
 
-The `requestId` is also in the `X-Request-Id` response header — useful for debugging.
-
-**Common status codes:**
-
-| Code | Meaning |
-|------|---------|
-| 400 | Bad request — check your request body/params |
-| 401 | Not authenticated — missing or invalid credentials |
-| 403 | Forbidden — you're authenticated but don't have permission |
-| 404 | Resource not found |
-| 409 | Conflict — concurrent operation in progress |
-| 429 | Too many requests — wait the `Retry-After` seconds and retry |
-| 500 | Server error |
-| 502 | External service (Stripe) failed |
-| 503 | Temporarily unavailable — Stripe busy (`STRIPE_BUSY`, `Retry-After: 5`), circuit open (`STRIPE_CIRCUIT_OPEN`), or ledger write failed (`LEDGER_PERSISTENCE_FAILED`) |
+Environment variables are not part of the client API; operators find them in [docs/ENVIRONMENT.md](./docs/ENVIRONMENT.md).
 
 ---
 
@@ -156,936 +101,157 @@ The `requestId` is also in the `X-Request-Id` response header — useful for deb
 
 ### Health
 
-#### `GET /api/v1/health`
+`GET /health` (public)
 
-No auth required. Use this to check if the API is running.
-
-**Response `200`:**
 ```json
-{ "status": "ok" }
+{ "status": "ok", "database": "connected", "timestamp": "2026-01-15T14:32:10.000Z" }
 ```
 
----
+If the database check fails the status is `503` and the body is `{ "status": "error", "database": "disconnected", "timestamp": "..." }`.
 
-### Contact
+### Create a payment
 
-#### `POST /api/v1/contact`
+`POST /payments/create`
 
-Public, unauthenticated lead-capture endpoint. Valid submissions are emailed to `CONTACT_INBOX` (or `SMTP_FROM` when `CONTACT_INBOX` is unset) and, when sales automation is enabled and configured, also created as a lead in the Nextcloud sales pipeline. The two channels run in parallel (the lead channel is capped globally at 20 submissions per rolling hour; over the cap only the email is sent); `201` is returned if at least one enabled channel succeeded.
+Creates a Stripe Checkout Session on your connected account. Redirect the customer to the returned `url`. Payments are Checkout-only; there is no embedded card form and no PaymentIntent client secret.
 
-**Request:**
-```json
-{
-  "name": "Jane Doe",
-  "email": "jane@example.com",
-  "company": "Acme Co",
-  "message": "I'd like to discuss a project."
-}
-```
+Headers:
 
-`name` is limited to 100 characters, `email` to 320, required `company` to 100 (non-blank), and `message` to 2000. The frontend also sends an internal `_hp` honeypot field; consumers should omit it.
-
-**Response `201`:**
-```json
-{ "ok": true }
-```
-
-Honeypot submissions are silently discarded and answered with the same `201 { "ok": true }` as a real success. Invalid bodies return `400`, rate-limited requests return `429`, and `502` (`EMAIL_DELIVERY_FAILED`) is returned only when every enabled channel failed.
-
----
-
-### Admin Auth
-
-#### `POST /api/v1/auth/login`
-
-Get a JWT token for admin access. The credentials are a **Nextcloud** username and password, checked against Nextcloud; the account must belong to a group in `ADMIN_NEXTCLOUD_GROUPS` (default `dfwsc-admins,managers`). Accounts with two-factor login must use a Nextcloud app password.
-
-**Request:**
-```json
-{
-  "username": "admin",
-  "password": "your-password"
-}
-```
-
-**Response `200`:**
-```json
-{
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expiresIn": "1h"
-}
-```
-
-**Errors:**
-- `400` — Missing username or password
-- `401` — Wrong credentials
-- `403` — Valid Nextcloud credentials, but the account is not in an allowed group ("This Nextcloud account isn't authorized for the admin panel")
-- `429` — Rate limited
-- `503` — Nextcloud unreachable, erroring or not configured ("Admin login is unavailable"). There is no local fallback.
-
----
-
-### Client Onboarding
-
-#### `POST /api/v1/accounts`
-
-**Auth: Admin JWT**
-
-Creates a new client record and returns their credentials. Does **not** send an email — use `/onboard-client/initiate` if you want an email sent automatically.
-
-**Request:**
-```json
-{
-  "name": "Acme Corp",
-  "email": "billing@acmecorp.com"
-}
-```
-
-**Response `201`:**
-```json
-{
-  "name": "Acme Corp",
-  "clientId": "abc123",
-  "apiKey": "64-hex-char-string",
-  "onboardingUrlHint": "http://localhost:5173/onboard#token=..."
-}
-```
-
-> **Important:** The `apiKey` is only shown here, one time. Copy and securely deliver it to the client. It cannot be retrieved again.
-
----
-
-#### `POST /api/v1/onboard-client/initiate`
-
-**Auth: Admin JWT**
-
-Creates a new client and sends them an onboarding email with a link to connect their Stripe account. The client's API key is **not** returned to the admin; instead the email includes a separate, time-limited link that reveals the API key when clicked.
-
-**Request:**
-```json
-{
-  "name": "Acme Corp",
-  "email": "billing@acmecorp.com"
-}
-```
-
-**Response `201`:**
-```json
-{
-  "message": "Onboarding email sent successfully.",
-  "clientId": "abc123",
-  "apiKey": null,
-  "groupId": null
-}
-```
-
-The email contains two links:
-- `<FRONTEND_ORIGIN>/onboard#token=<token>` — Stripe onboarding (24h).
-- `<FRONTEND_ORIGIN>/regenerate-key#token=<token>` — reveals the API key once. Expires in **15 minutes**. The frontend redeems it with `POST /api/v1/api-key/regenerate` and body `{ "token": "<token>" }`, which rotates and returns the plaintext key.
-
-> If the 15-minute retrieval link expires before the client opens it, an admin can re-issue one via `POST /api/v1/api-key/regenerate-request/admin`.
-
----
-
-#### `POST /api/v1/onboard-client/resend`
-
-**Auth: Admin JWT**
-
-Resends the onboarding email with a new token. The old token is revoked. Use this if a client lost their link or the token expired.
-
-**Request** (provide one of `email` or `clientId`):
-```json
-{
-  "email": "billing@acmecorp.com"
-}
-```
-or:
-```json
-{
-  "clientId": "abc123"
-}
-```
-
-**Response `200`:**
-```json
-{
-  "message": "New onboarding link sent successfully.",
-  "clientId": "abc123"
-}
-```
-
----
-
-#### `POST /api/v1/onboard-client`
-
-No auth. Called by the frontend when a client visits their onboarding link. Send `{ "token": "<token>" }` in the JSON body.
-
-Validates the token, creates a Stripe Express account (if not already created), and returns the Stripe account link URL.
-
-**Response `200`:**
-```json
-{
-  "url": "https://connect.stripe.com/setup/acct_..."
-}
-```
-
-**Errors:**
-- `404` — Token not found, already used, revoked, or expired
-- `502` — Stripe API failure
-
----
-
-### Stripe Connect
-
-#### `GET /api/v1/connect/callback?client_id=...&state=...`
-
-No auth. This is the redirect URL Stripe calls after a client completes onboarding. You don't call this manually — Stripe does. Stripe only redirects to the platform-registered `return_url` (`client_id` + `state`); it does not append `account`. An `account` query param is accepted only as an optional legacy/manual cross-check — the client's `stripeAccountId` is looked up from the database.
-
-After successful validation, the client's `stripeAccountId` is saved and the user is redirected to `<FRONTEND_ORIGIN>/onboarding-success`. If the state has expired (24-hour window), the user is instead redirected to `<FRONTEND_ORIGIN>/onboarding-success?status=expired` and nothing is changed.
-
-**Errors:**
-- `400` — Missing or invalid parameters, or invalid/replayed state
-
----
-
-#### `GET /api/v1/connect/refresh?client_id=<client_id>&state=<state>`
-
-No auth. Regenerates a Stripe account link for an incomplete onboarding. Stripe calls this when an account link expires. Redirects (302) directly to the new Stripe account link.
-
----
-
-#### Client-facing Connect (set up payments from your own app)
-
-**Auth: `X-Api-Key`.** The connected account is always the one belonging to the key's client; no request field can select a different account. Redirect URLs must be on an origin an admin has stored in the client's `connectRedirectOrigins` (see `PATCH /clients/:id`). Link URLs from Stripe are single-use credentials: pass them straight to the user's browser and do not log or store them.
-
-##### `POST /api/v1/connect/onboarding-link`
-
-Starts or resumes Stripe-hosted onboarding (business details, bank account). Creates the Express account on first use. Rate limit: 10 req / min per client.
-
-**Request:** `{ "returnUrl": "https://app.example.com/settings/payments?done=1", "refreshUrl": "https://app.example.com/settings/payments?refresh=1" }`
-
-**Response `200`:** `{ "url": "https://connect.stripe.com/...", "expiresAt": "2026-11-04T20:00:00.000Z" }`. Redirect the user to `url`. When Stripe sends them to `refreshUrl` (the link expired or was already used), call this endpoint again and redirect to the new `url`. On `returnUrl`, call `GET /connect/account` for the real status; returning does not mean onboarding is finished.
-
-**Errors:** `400 REDIRECT_URL_NOT_ALLOWED` (not https, or origin not allowlisted), `409 REDIRECT_ORIGINS_NOT_CONFIGURED`, `401`, `429`, `502/503` (Stripe unavailable; retry), and the permanent errors below (do not retry).
-
-The URLs are sent to Stripe in their canonical parsed form (for example a backslash becomes a slash), so Stripe may redirect to a slightly normalized URL.
-
-##### `GET /api/v1/connect/account`
-
-Live account status, also stored on the client. Rate limit: 60 req / min per client.
-
-**Response `200`:**
-```json
-{
-  "hasAccount": true,
-  "detailsSubmitted": true,
-  "chargesEnabled": true,
-  "payoutsEnabled": true,
-  "requirements": { "currentlyDue": [], "pastDue": [], "disabledReason": null },
-  "capabilities": { "card_payments": "active", "transfers": "active" }
-}
-```
-`hasAccount: false` (all other flags false, empty lists) when the client has not started onboarding.
-
-##### `POST /api/v1/connect/dashboard-link`
-
-Returns a link to the Stripe Express Dashboard, where the user updates bank and payout details. Empty body. Rate limit: 10 req / min per client.
-
-**Response `200`:** `{ "url": "https://connect.stripe.com/express/..." }`
-
-**Errors:** `409 ONBOARDING_INCOMPLETE` when the account does not exist or onboarding is not finished; use the onboarding link instead. Also the permanent errors below, and `502/503` (retry).
-
-##### Stripe errors on the Connect routes
-
-All three Connect routes share this mapping. Retry only the retryable ones.
-
-| Status | `code` | Retry? |
+| Header | Required | Description |
 |---|---|---|
-| 400 | `INVALID_REQUEST` (Stripe rejected the request, e.g. a non-https redirect URL on a live key) | No. Fix the input |
-| 409 | `IDEMPOTENCY_KEY_REUSED` (the account was first requested with different details, e.g. the client email changed within 24h) | No. Contact DFWSC |
-| 409 | `ACCOUNT_NOT_CONNECTED` (the connected account is disconnected or lacks permission) | No. Contact DFWSC |
-| 409 | `IDEMPOTENCY_KEY_IN_USE` (the first request is still running) | Yes, shortly |
-| 429 | `RATE_LIMITED`, with `Retry-After` | Yes |
-| 502 | `STRIPE_FAILED` | Yes |
-| 503 | `STRIPE_BUSY` (with `Retry-After`) or `STRIPE_CIRCUIT_OPEN` | Yes |
+| `X-Api-Key` | Yes | Your API key |
+| `Idempotency-Key` | Yes | A new UUID per payment attempt. The key is combined with your client id, and the result must fit in 255 characters (a key of up to 218 characters is always accepted). A missing or too long key is `400` |
+| `Content-Type` | Yes | `application/json` |
 
----
+Body (unknown fields are ignored):
 
-### Payments
+| Field | Required | Description |
+|---|---|---|
+| `lineItems` | Yes | 1 to 100 items: `{ price_data: { currency, product_data: { name, description? }, unit_amount }, quantity? }`. `name` is 1 to 200 characters, `description` up to 1000. `unit_amount` is an integer from 1 to 99,999,999 (cents). `quantity` is an integer from 1 to 999,999 (default 1). All items must use the same 3-letter currency. Only inline `price_data` is accepted (no Stripe price ids) |
+| `description` | No | Up to 2000 characters. Shown in your Stripe dashboard |
+| `metadata` | No | String-to-string map. At most 50 keys; keys up to 40 characters; values up to 500. Attached to the PaymentIntent. The names `clientId`, `baseAmount`, `feeAmount` and `waivedFeeAmount` are set by the API and overwrite yours |
 
-#### `POST /api/v1/payments/create`
+`amount` and `currency` are not used; the amount is computed from `lineItems`. `waiveFee`, `workspace` and `clientId` are for DFWSC administrators and have no effect on an API key call (an API key can never waive the fee).
 
-**Auth: Client API key (`X-Api-Key`)**
-
-Creates a payment. The client must have completed Stripe onboarding (have a `stripeAccountId`).
-
-**Required header:**
-```
-Idempotency-Key: <unique-string>
-```
-
-Use a unique key per payment attempt (e.g., a UUID). This prevents duplicate charges if the request is retried.
-
-All payments use a hosted Stripe Checkout page — the user is redirected to Stripe to complete payment.
-
-**Request:**
-```json
-{
-  "description": "Invoice #1234",
-  "metadata": { "invoiceId": "1234" },
-  "lineItems": [
-    {
-      "price_data": {
-        "currency": "usd",
-        "product_data": { "name": "Web Development" },
-        "unit_amount": 5000
-      },
+```bash
+curl -X POST https://api.dfwsc.com/api/v1/payments/create \
+  -H "X-Api-Key: $KEY" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lineItems": [{
+      "price_data": { "currency": "usd", "product_data": { "name": "Invoice #1234" }, "unit_amount": 5000 },
       "quantity": 1
-    }
-  ]
-}
+    }],
+    "metadata": { "invoiceId": "1234" }
+  }'
 ```
 
-- `lineItems` — required, must be non-empty. `unit_amount` is in cents (e.g., `5000` = $50.00)
-- `description` — optional
-- `metadata` — optional key/value pairs passed to Stripe
-- `amount` — optional explicit total in cents; required only when line items reference Stripe price IDs instead of `price_data`
+Response `201`:
 
-**Response `201`:**
 ```json
-{
-  "url": "https://checkout.stripe.com/pay/cs_..."
-}
+{ "url": "https://checkout.stripe.com/c/pay/cs_test_...", "sessionId": "cs_test_..." }
 ```
 
-Redirect the user to this URL to complete payment. After payment, Stripe redirects to the client's configured `paymentSuccessUrl` (or `FRONTEND_ORIGIN/payment-success` as fallback).
+Store `sessionId` with your order. After payment Stripe sends the customer to your success URL with `?session_id=<id>` appended (or `&session_id=` when the URL already has a query string). Success and cancel URLs come from your account settings, then your group's, then the DFWSC default, then the portal's own `/payment-success` and `/payment-cancel` pages; ask your administrator to set yours.
 
-**Common payment errors:**
-- `400` — Missing or empty `Idempotency-Key`
-- `400` — Missing or empty `lineItems`
-- `401` — Missing or invalid API key
-- `429` — `RATE_LIMITED`; wait the `Retry-After` seconds plus a small random extra delay and retry with the same `Idempotency-Key`
-- `503` — `STRIPE_BUSY`; too many Stripe calls in progress, wait `Retry-After` (5) seconds plus a small random extra delay and retry with the same `Idempotency-Key`
+Errors: `400` (validation, missing `Idempotency-Key`), `401`, `402 CARD_DECLINED`, `409 ACCOUNT_NOT_CONNECTED`, `409 CARD_PAYMENTS_NOT_ACTIVE`, `409 IDEMPOTENCY_KEY_REUSED`, `409 IDEMPOTENCY_KEY_IN_USE`, `429 RATE_LIMITED`, `502 STRIPE_FAILED`, `503 STRIPE_BUSY`, `503 STRIPE_CIRCUIT_OPEN`, `503 LEDGER_PERSISTENCE_FAILED`. What to retry, and how, is in [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md).
 
----
+### Get a payment's status
 
-### Reports
+`GET /payments/session/{sessionId}` (public; send `X-Api-Key` for the higher limit and to see only your own sessions)
 
-#### `GET /api/v1/reports/payments`
-
-**Auth: Admin JWT**
-
-Retrieve payment history for a client or group.
-
-**Query params** (one of `clientId` or `groupId` required):
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `clientId` | string | Get payments for a specific client |
-| `groupId` | string | Get aggregated payments for all clients in a group |
-| `limit` | number | 1–100, limits results |
-| `starting_after` | string | Stripe PaymentIntent ID for cursor-based pagination |
-| `ending_before` | string | Stripe PaymentIntent ID for cursor-based pagination |
-
-**Response `200` (by client):**
-```json
-{
-  "clientId": "abc123",
-  "data": [
-    {
-      "id": "pi_xxx",
-      "amount": 5000,
-      "status": "succeeded",
-      "created": 1710000000,
-      "currency": "usd"
-    }
-  ],
-  "hasMore": false
-}
-```
-
-**Response `200` (by group):**
-```json
-{
-  "groupId": "grp_123",
-  "data": [...],
-  "hasMore": false
-}
-```
-
-**Errors:**
-- `400` — Neither `clientId` nor `groupId` provided, or `limit` out of range
-- `404` — Client/group not found, or client has no linked Stripe account
-
----
-
-### Clients
-
-#### `GET /api/v1/clients`
-
-**Auth: Admin JWT**
-
-List all clients.
-
-**Query params:**
-- `groupId` (optional) — filter to clients in a specific group
-
-**Response `200`:**
-```json
-[
-  {
-    "id": "abc123",
-    "name": "Acme Corp",
-    "email": "billing@acmecorp.com",
-    "stripeAccountId": "acct_xxx",
-    "status": "active",
-    "groupId": "grp_123",
-    "processingFeePercent": "2.50",
-    "processingFeeCents": null,
-    "createdAt": "2024-03-14T10:30:00Z"
-  }
-]
-```
-
----
-
-#### `PATCH /api/v1/clients/:id`
-
-**Auth: Admin JWT**
-
-Update a client's configuration. All fields are optional — only send what you want to change.
-
-**Request:**
-```json
-{
-  "status": "active",
-  "groupId": "grp_123",
-  "paymentSuccessUrl": "https://acmecorp.com/payment-success",
-  "paymentCancelUrl": "https://acmecorp.com/payment-cancel",
-  "processingFeePercent": 2.5,
-  "processingFeeCents": null
-}
-```
-
-**Field rules:**
-- `connectRedirectOrigins` — array of up to 10 origins (`https://host[:port]`, no path; `http` only for localhost) the client app may use as onboarding return/refresh URLs. Replaces the stored list.
-- `status` — `"active"` or `"inactive"`
-- `groupId` — existing group ID, or `null` to remove from group
-- `paymentSuccessUrl` / `paymentCancelUrl` — must be HTTPS
-- `processingFeePercent` — 0–100, cannot be set alongside `processingFeeCents`
-- `processingFeeCents` — non-negative integer in cents, cannot be set alongside `processingFeePercent`
-
-**Response `200`:** Updated client object (same shape as GET response)
-
-**Errors:**
-- `400` — Invalid values (bad URL, both fee fields set, etc.)
-- `404` — Client not found
-
----
-
-### Groups
-
-Groups let you organize clients and apply shared fee/URL defaults.
-
-#### `POST /api/v1/groups`
-
-**Auth: Admin JWT**
-
-**Request:**
-```json
-{ "name": "Enterprise Clients" }
-```
-
-**Response `201`:**
-```json
-{
-  "id": "grp_abc",
-  "name": "Enterprise Clients",
-  "status": "active",
-  "processingFeePercent": null,
-  "processingFeeCents": null,
-  "paymentSuccessUrl": null,
-  "paymentCancelUrl": null,
-  "createdAt": "2024-03-14T10:30:00Z",
-  "updatedAt": "2024-03-14T10:30:00Z"
-}
-```
-
----
-
-#### `GET /api/v1/groups`
-
-**Auth: Admin JWT**
-
-Returns all groups (same shape as POST response, as array).
-
----
-
-#### `PATCH /api/v1/groups/:id`
-
-**Auth: Admin JWT**
-
-All fields optional:
+`sessionId` must be a Checkout Session id (`cs_test_...` or `cs_live_...`), otherwise `400`. Response `200`:
 
 ```json
 {
-  "name": "New Group Name",
-  "status": "active",
-  "processingFeePercent": 3.0,
-  "processingFeeCents": null,
-  "paymentSuccessUrl": "https://example.com/success",
-  "paymentCancelUrl": "https://example.com/cancel"
+  "status": "paid",
+  "baseAmountCents": 5000,
+  "totalAmountCents": 5500,
+  "feeAmountCents": 500,
+  "currency": "usd",
+  "createdAt": "2026-01-15T14:32:10.000Z"
 }
 ```
 
-Same validation rules as `PATCH /clients/:id`. Returns updated group object.
+| `status` | Meaning |
+|---|---|
+| `created` | Checkout not finished yet (or a delayed payment method such as a bank debit has not settled) |
+| `paid` | Paid. The only status to fulfil an order on |
+| `expired` | The session expired unpaid |
+| `failed` | A payment attempt failed. Not final: a later successful attempt on the same session can still make it `paid` |
+| `canceled` | The payment was canceled |
+| `refunded` | Paid, then refunded. Includes partial refunds; the refunded amount is not returned |
+| `disputed` | Paid, then disputed |
+
+`baseAmountCents` is the sum of your line items, `feeAmountCents` the DFWSC processing fee, and `totalAmountCents` what the customer paid (base plus fee). An unknown session, or (with `X-Api-Key`) another client's session, is `404`. A `created` session older than 30 seconds is re-checked against Stripe, at most once per session per 30 seconds.
+
+### Set up payments from your own app (Stripe Connect)
+
+All three calls need `X-Api-Key` and always act on your own Stripe account. An administrator must first register your app's origin(s) on your account (`connectRedirectOrigins`).
+
+| Method and path | Body | Response |
+|---|---|---|
+| `POST /connect/onboarding-link` | `{ "returnUrl": "...", "refreshUrl": "..." }` (up to 2048 characters each; absolute `https` URLs, or `http` on localhost, on an allowed origin) | `200 { "url", "expiresAt" }`. Creates your Stripe account the first time |
+| `GET /connect/account` | none | `200 { hasAccount, detailsSubmitted, chargesEnabled, payoutsEnabled, requirements: { currentlyDue, pastDue, disabledReason }, capabilities }`. `hasAccount: false` with empty values when you have no account yet |
+| `POST /connect/dashboard-link` | none | `200 { "url" }` to the Stripe Express Dashboard (bank and payout details) |
+
+Errors: `409 REDIRECT_ORIGINS_NOT_CONFIGURED`, `400 REDIRECT_URL_NOT_ALLOWED`, `409 ONBOARDING_INCOMPLETE` (dashboard link before onboarding is finished), `400 INVALID_REQUEST`, `409 ACCOUNT_NOT_CONNECTED`, `429`, `502 STRIPE_FAILED`, `503 STRIPE_BUSY` / `STRIPE_CIRCUIT_OPEN`. Links are single use and short lived: create one when the user clicks, never store or log it.
+
+### API key regeneration
+
+Both routes are public and token based.
+
+| Method and path | Body | Response |
+|---|---|---|
+| `POST /api-key/regenerate-request` | `{ "email": "..." }` | Always `200 { "message": "If an account with that email exists, a regeneration link has been sent." }` for a valid request, whether or not the email belongs to a client. An email with a link valid for 15 minutes is sent to an active client. A client that was sent a link in the last 5 minutes is not sent another |
+| `POST /api-key/regenerate` | `{ "token": "..." }` (the token from the email link) | `200 { "apiKey": "..." }`, shown once; the old key stops working. `404` for an unknown token, `400` for a used, invalidated or expired one |
+
+DFWSC administrators can also trigger the email for you.
+
+### Contact form
+
+`POST /contact` (public, 10 per minute per IP). Used by the DFWSC marketing site.
+
+Body: `{ "name", "email", "company", "message" }` (name and company up to 100 characters, message up to 2000, email up to 320), plus an optional `context` object (visit details such as referrer host, landing path, UTM tags, pages and seconds on site; invalid context is dropped, never an error) and a honeypot field `_hp` that must stay empty. Response `201 { "ok": true }` when the message reached the inbox or the sales pipeline; `502 EMAIL_DELIVERY_FAILED` otherwise. Details: [docs/BACKEND.md](./docs/BACKEND.md), section 7 ("Contact").
+
+### Invoicing your customers (optional)
+
+Create customers and invoices on your own Stripe account with the same API key:
+
+`POST /customers`, `GET /customers?externalRef=`, `GET /customers/{id}`, `PATCH /customers/{id}`, `POST /invoices`, `GET /invoices`, `GET /invoices/{id}`, `POST /invoices/{id}/finalize`, `POST /invoices/{id}/send`, `POST /invoices/{id}/void`, `DELETE /invoices/{id}`.
+
+These routes exist only when DFWSC has enabled invoicing on the API (`CONNECT_INVOICING=true`; otherwise every path is `404 Not Found`) and for your account (otherwise `403 INVOICING_NOT_ENABLED`). Webhook-driven status updates also need the Connect webhook endpoint subscribed to the invoice events; a read of an invoice still refreshes a stale one. Full request and response shapes, limits, idempotency rules and error codes: [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md#invoicing-your-customers).
 
 ---
 
-### Invoices
+## Fee calculation
 
-Invoices represent one-time or subscription-generated billing records. Clients pay invoices via a public payment token URL.
+DFWSC's processing fee is set per account (and per group, and as a default) by your administrator. For each payment the API takes the first of these that is set, in order:
 
-#### `GET /api/v1/invoices`
+1. Your account's percentage (`processingFeePercent`)
+2. Your account's flat fee in cents (`processingFeeCents`)
+3. Your group's percentage
+4. Your group's flat fee in cents
+5. The portal default percentage
+6. The portal default flat fee in cents
 
-**Auth: Admin JWT**
-
-List invoices. Supports optional filters.
-
-**Query params:**
-- `clientId` (optional) — filter to a specific client
-- `status` (optional) — `pending`, `paid`, or `cancelled`
-- `limit` (optional) — max results to return
-
-**Response `200`:** Array of invoice objects.
+If none is set, the server's `DEFAULT_PROCESS_FEE_CENTS` applies, and if that is also unset there is no fee. Percentages are applied to the base amount and rounded to whole cents. When the fee is above zero it is added to the Checkout Session as a separate line named **Processing Fee**, so the customer pays the base amount plus the fee, and the fee is sent as the application fee to DFWSC. The fee is fixed when the session is created and returned in `feeAmountCents`.
 
 ---
 
-#### `POST /api/v1/invoices`
-
-**Auth: Admin JWT**
-
-Create a new invoice.
-
-**Request:**
-```json
-{
-  "clientId": "abc123",
-  "amountCents": 15000,
-  "description": "March retainer",
-  "dueDate": "2026-04-01",
-  "subscriptionId": null
-}
-```
-
-- `clientId` — required
-- `amountCents` — required, positive integer
-- `description` — required
-- `dueDate` — optional ISO date string
-- `subscriptionId` — optional, links invoice to a subscription
-
-**Response `201`:** Created invoice object including `paymentToken`.
-
----
-
-#### `PATCH /api/v1/invoices/:id`
-
-**Auth: Admin JWT**
-
-Cancel a pending invoice.
-
-**Request:**
-```json
-{ "status": "cancelled" }
-```
-
-Only `pending` invoices can be cancelled.
-
-**Response `200`:** Updated invoice object.
-
-**Errors:**
-- `400` — Invoice is not in `pending` status
-- `404` — Invoice not found
-
----
-
-#### `GET /api/v1/invoices/pay/:token`
-
-No auth. Public endpoint for clients to fetch their invoice via the payment token.
-
-**Response `200`:** Invoice details including amount and description.
-
-**Errors:**
-- `404` — Token not found or invoice already paid/cancelled
-
----
-
-#### `POST /api/v1/invoices/pay/:token`
-
-No auth. Submit a mock payment for an invoice.
-
-**Request:** Card fields (not validated — mock only):
-```json
-{
-  "cardNumber": "4242424242424242",
-  "expiry": "12/27",
-  "cvc": "123"
-}
-```
-
-**Response `200`:** Confirmation that payment was recorded and invoice marked `paid`.
-
-**Errors:**
-- `404` — Token not found
-- `409` — Invoice already paid or cancelled
-
----
-
-### Subscriptions
-
-Subscriptions define recurring billing schedules. Each billing cycle generates an invoice automatically.
-
-#### `GET /api/v1/subscriptions`
-
-**Auth: Admin JWT**
-
-List all subscriptions.
-
-**Response `200`:** Array of subscription objects.
-
----
-
-#### `POST /api/v1/subscriptions`
-
-**Auth: Admin JWT**
-
-Create a new subscription.
-
-**Request:**
-```json
-{
-  "clientId": "abc123",
-  "amountCents": 15000,
-  "description": "Monthly retainer",
-  "interval": "monthly",
-  "totalPayments": 12
-}
-```
-
-- `clientId` — required
-- `amountCents` — required, positive integer
-- `description` — required
-- `interval` — required: `monthly`, `quarterly`, or `yearly`
-- `totalPayments` — optional; omit for indefinite billing
-
-**Response `201`:** Created subscription object with `nextBillingDate`.
-
----
-
-#### `GET /api/v1/subscriptions/:id`
-
-**Auth: Admin JWT**
-
-Get a single subscription and its associated invoices.
-
-**Response `200`:**
-```json
-{
-  "id": "sub_abc",
-  "clientId": "abc123",
-  "amountCents": 15000,
-  "description": "Monthly retainer",
-  "interval": "monthly",
-  "totalPayments": 12,
-  "paymentsMade": 3,
-  "status": "active",
-  "nextBillingDate": "2026-04-01",
-  "invoices": [...]
-}
-```
-
-**Errors:**
-- `404` — Subscription not found
-
----
-
-#### `PATCH /api/v1/subscriptions/:id`
-
-**Auth: Admin JWT**
-
-Update a subscription's status.
-
-**Request:**
-```json
-{ "status": "paused" }
-```
-
-Valid values: `active`, `paused`, `cancelled`.
-
-**Response `200`:** Updated subscription object.
-
-**Errors:**
-- `400` — Invalid status value
-- `404` — Subscription not found
-
----
-
-### Webhooks
-
-#### `POST /api/v1/webhooks/stripe`
-
-Stripe calls this endpoint automatically. You don't call it manually. It requires a valid `Stripe-Signature` header and uses the raw request body.
-
-The server handles these events:
-- `account.updated` — syncs client name/email when Stripe onboarding is submitted
-- `payment_intent.succeeded` — logged
-- `payment_intent.payment_failed` — logged
-- `charge.refunded` — logged
-- `payout.paid` — logged
-- `payout.failed` — logged
-
-Events are stored in `webhook_events` for idempotency — duplicate events are ignored.
-
----
-
-### Configuration
-
-#### `GET /app-config.js`
-
-No auth required. Registered without the `/api/v1` prefix. Returns a small JavaScript snippet (not JSON) that the frontend loads to discover the API base URL:
-
-```js
-window.API_URL = "https://api.example.com";
-```
-
----
-
-### Products
-
-#### `GET /api/v1/products`
-
-**Auth: Admin JWT**
-
-List Stripe products for the workspace.
-
-**Query params:**
-- `workspace` (optional) — `"dfwsc_services"` or `"client_portal"` (default: `"client_portal"`)
-- `limit` (optional) — Max results (1-100, default: 10)
-
-**Response `200`:**
-```json
-{
-  "workspace": "client_portal",
-  "data": [
-    {
-      "id": "prod_xxx",
-      "name": "Monthly Retainer",
-      "description": "...",
-      "active": true
-    }
-  ],
-  "hasMore": false
-}
-```
-
-#### `POST /api/v1/products`
-
-**Auth: Admin JWT**
-
-Create a new Stripe product.
-
-**Request:**
-```json
-{
-  "workspace": "client_portal",
-  "name": "Consulting Package",
-  "description": "10 hours of consulting",
-  "unitAmount": 50000,
-  "currency": "usd"
-}
-```
-
-**Response `201`:** Created product object.
-
----
-
-### Stripe Customers
-
-#### `GET /api/v1/stripe-customers`
-
-**Auth: Admin JWT**
-
-List Stripe customers linked to workspace clients.
-
-**Query params:**
-- `workspace` (optional) — Filter by workspace
-- `clientId` (optional) — Filter by specific client
-- `limit` (optional) — Max results (1-100, default: 10)
-
-**Response `200`:** Array of customer objects with `stripeCustomerId`, `email`, `name`, etc.
-
-#### `POST /api/v1/stripe-customers`
-
-**Auth: Admin JWT**
-
-Create a Stripe customer for a client.
-
-**Request:**
-```json
-{
-  "clientId": "abc123",
-  "email": "billing@example.com",
-  "name": "Acme Corp"
-}
-```
-
-**Response `201`:** Created customer object with `stripeCustomerId`.
-
----
-
-### DFWSC Clients
-
-#### `GET /api/v1/dfwsc-clients`
-
-**Auth: Admin JWT**
-
-List all clients in the `dfwsc_services` workspace (internal DFWSC clients). Same response format as `GET /api/v1/clients`.
-
-**Query params:**
-- `limit` (optional) — Max results
-- `starting_after` (optional) — Cursor for pagination
-- `ending_before` (optional) — Cursor for pagination
-
----
-
-### Settings
-
-#### `GET /api/v1/settings`
-
-**Auth: Admin JWT**
-
-Get system settings and billing defaults.
-
-**Response `200`:**
-```json
-{
-  "defaultPaymentTermsDays": 30,
-  "processingFeePercent": 2.5
-}
-```
-
----
-
-## Flows
-
-### Onboarding a New Client
-
-**Step 1 — Create the client (admin)**
-
-```
-POST /api/v1/auth/login         → get token
-POST /api/v1/onboard-client/initiate  → creates client + sends email
-```
-
-Save the `apiKey` from the response. You will not see it again. The client receives an email with their onboarding link.
-
-**Step 2 — Client connects Stripe (client action)**
-
-The client clicks the link in their email, which opens the frontend at `/onboard#token=...`. The frontend calls `POST /api/v1/onboard-client` with the token in the JSON body to get a Stripe Connect URL, then redirects the client to Stripe.
-
-**Step 3 — Stripe redirects back**
-
-After the client finishes on Stripe, they're redirected back to `GET /api/v1/connect/callback`. The server validates the state, saves the `stripeAccountId`, and redirects to the success page.
-
-**Client is now ready to accept payments.**
-
-**If the client never finishes onboarding:**
-
-```
-POST /api/v1/onboard-client/resend    → sends new link, revokes old one
-```
-
----
-
-### Processing a Payment
-
-**PaymentIntent flow (embedded form):**
-
-```
-POST /api/v1/payments/create
-  Header: X-Api-Key: <client-api-key>
-  Header: Idempotency-Key: <unique-uuid>
-  Body: { amount: 5000, currency: "usd" }
-
-→ Returns: { clientSecret: "pi_xxx_secret_yyy" }
-
-→ Frontend uses Stripe.js to confirm the payment with clientSecret
-```
-
-**Checkout flow (hosted page):**
-
-```
-POST /api/v1/payments/create
-  Header: X-Api-Key: <client-api-key>
-  Header: Idempotency-Key: <unique-uuid>
-  Body: { amount: 5000, currency: "usd", lineItems: [...] }
-
-→ Returns: { url: "https://checkout.stripe.com/..." }
-
-→ Redirect user to that URL
-```
-
----
-
-## Fee Calculation
-
-When a payment is created, the platform fee is calculated using this priority order:
-
-1. **Client `processingFeePercent`** — percentage of the payment amount
-2. **Client `processingFeeCents`** — flat fee in cents
-3. **Group `processingFeePercent`** — if client belongs to a group
-4. **Group `processingFeeCents`** — if client belongs to a group
-5. **`DEFAULT_PROCESS_FEE_CENTS`** env var — global default (defaults to `0`)
-
-Only one rule applies — whichever is first in the list. You cannot set both `processingFeePercent` and `processingFeeCents` on the same client or group.
-
-Example: if a client has `processingFeePercent = 2.5` and the payment amount is `$100.00` (10000 cents), the platform fee is `$2.50` (250 cents).
-
----
-
-## Environment Variables Reference
-
-### Required
-
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | PostgreSQL connection string |
-| `STRIPE_SECRET_KEY` | Stripe secret key (`sk_test_...` or `sk_live_...`) |
-| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
-| `FRONTEND_ORIGIN` | Comma-separated allowed CORS origins (e.g., `http://localhost:5173`) |
-| `SMTP_HOST` | SMTP server hostname |
-| `SMTP_PORT` | SMTP server port number |
-| `SMTP_USER` | SMTP username |
-| `SMTP_PASS` | SMTP password |
-| `JWT_SECRET` | At least 32 characters — used to sign admin JWTs |
-
-### Optional
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `4242` | API server port |
-| `JWT_EXPIRY` | `1h` | JWT token expiry (e.g., `24h`, `7d`) |
-| `API_BASE_URL` | auto-detected | Public API base URL |
-| `DEFAULT_PROCESS_FEE_CENTS` | `0` | Global default platform fee in cents |
-| `SMTP_FROM` | auto-generated | Sender email address |
-| `CONTACT_INBOX` | `SMTP_FROM` | Recipient for public contact-form submissions |
-| `ENABLE_SWAGGER` | `true` (non-prod) | Set to `false` to disable `/docs` |
-| `NODE_ENV` | — | `production`, `development`, or `test` |
-| `TRUST_PROXY` | `loopback,linklocal,uniquelocal` | Reverse proxies trusted for `X-Forwarded-For` (so `request.ip`, and per-IP rate limits, use the real client). Accepts `true`, `false`, or a comma-separated IP/CIDR list. Default trusts private-network proxies only. Numeric hop counts are no longer supported (Fastify 5.12+); a numeric value logs a warning and uses the default |
-| `CLOUDFLARE_IP_RANGES` | built-in Cloudflare ranges | Comma-separated CIDRs that replace the built-in Cloudflare edge list; when the proxied peer is inside this list, per-IP rate limits key on the `CF-Connecting-IP` header instead of the edge address (IPv6 visitors are limited per /64 prefix). Set to `none` to ignore `CF-Connecting-IP`; invalid entries abort startup |
-
-### Admin login
-
-| Variable | Description |
-|----------|-------------|
-| `ADMIN_NEXTCLOUD_GROUPS` | Comma-separated Nextcloud groups allowed to sign in (default `dfwsc-admins,managers`). Login also needs `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME` and `NEXTCLOUD_APP_PASSWORD` |
+## Routes that are not documented here
+
+These exist but are not part of the client API. Their reference is [docs/BACKEND.md](./docs/BACKEND.md), section 7.
+
+| Area | Routes |
+|---|---|
+| Admin login | `POST /auth/login` |
+| Clients and groups | `/clients`, `/groups` (list, read, update, archive or delete) |
+| Admin onboarding | `POST /accounts`, `POST /onboard-client/initiate`, `POST /onboard-client/resend`, `POST /onboard-client`, `GET /connect/callback`, `GET /connect/refresh`, `POST /api-key/regenerate-request/admin` |
+| Admin Stripe | `GET /reports/payments`, `/products`, `/tax-rates`, `/settings` |
+| Webhooks | `POST /webhooks/stripe`, `POST /webhooks/stripe-billing`, `POST /webhooks/nextcloud/*` |
+| Operations | `GET /metrics` (needs a bearer token; disabled unless `METRICS_TOKEN` is set), `GET /app-config.js` |
+| Cerebo | `/cerebo/*` (admin only, only when `CEREBO_ENABLED=true`) |
+
+The API has no PaymentIntent payment flow, and no subscription, Stripe customer or DFWSC client routes.

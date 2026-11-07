@@ -8,7 +8,14 @@ The production stack uses a dedicated, locally built `dfwsc-backup` image that r
 - `backup/scripts/backup.sh` — dumps the database to a `.partial` temp file, renames it to `<timestamp>_<db>.sql.gz` only after the dump, `gzip -t` and the completeness check succeed (a failed or cut-short dump never leaves a normal-looking file), optionally uploads it, then writes a success heartbeat.
 - `backup/scripts/restore.sh` — checks the archive with `gzip -t` and refuses a dump that lacks the `-- PostgreSQL database dump complete` trailer, restores only after explicit confirmation, and runs `psql` with `ON_ERROR_STOP` in a single transaction so the first SQL error aborts and rolls back.
 - `backup/scripts/healthcheck.sh` — checks the success heartbeat age.
-- `backup/scripts/scheduler.sh` — foreground cron-like scheduler using `supercronic`.
+- `backup/scripts/scheduler.sh` — foreground cron-like scheduler using `supercronic`. It writes one crontab line, `<BACKUP_SCHEDULE> flock -n /tmp/backup.lock backup.sh`, so a run that starts while the previous one still holds the lock is skipped rather than overlapping. It is the image entrypoint (`tini`, then `scheduler.sh`).
+
+### What a run does and its limits
+- **Dump scope.** `pg_dump` of the whole database named in `DATABASE_URL`, plain SQL, gzip-compressed, with `--clean --if-exists --no-owner --no-acl`. That includes every schema (`public` and `cerebo`; see [DATABASE.md](./DATABASE.md)) and excludes roles and other cluster-level objects. The image uses the `postgresql17-client` package, so the database server should be Postgres 17.
+- **File name.** `<YYYYmmdd_HHMMSS>_<database name>.sql.gz` in `/backups/postgres` (override with `BACKUP_DIR`). The database name is taken from the `DATABASE_URL` path.
+- **`.partial` handling.** The dump is written to `<name>.sql.gz.partial` and renamed only after it is non-empty, passes `gzip -t` and ends with the `-- PostgreSQL database dump complete` trailer. An exit trap removes the partial file; if a run is killed outright, the next run deletes `*.sql.gz.partial` files older than 24 hours.
+- **Order within a run.** Dump and verify, local retention prune, S3 upload (if configured), then the heartbeat. A failed prune does not stop the upload, but the run still exits non-zero after writing the heartbeat. A failed dump, verification or upload exits non-zero without a heartbeat.
+- **Container limits** (from `docker-compose.prod.yml`): 0.25 CPU and 128 MB of memory, with the `postgres_backups` named volume mounted at `/backups`.
 
 ## Environment variables
 
@@ -27,6 +34,18 @@ All variables are optional unless marked **required**.
 | `AWS_ENDPOINT_URL_S3` | — | S3-compatible endpoint (e.g. MinIO, R2, DigitalOcean Spaces). Also accepts `AWS_S3_ENDPOINT`. |
 | `BACKUP_REQUIRE_REMOTE` | — | Opt-in strictness. Set to `yes` (or `1`/`true`) to make a run fail, with no heartbeat, when no S3 bucket is configured. The local dump is still kept and local retention still runs, so dumps do not pile up. Unset keeps the default: local-only backups with a warning. |
 | `BACKUP_HEARTBEAT_MAX_AGE` | `90000` | Fail healthcheck if the last successful backup is older than this many seconds (default 25 h). |
+
+## Destination and configuration
+Where a backup goes depends only on configuration:
+
+- **Local volume (always).** The dump is kept on the `postgres_backups` volume for `BACKUP_RETENTION_DAYS` days.
+- **S3-compatible bucket (optional).** If `BACKUP_S3_BUCKET` (or the legacy `AWS_S3_BACKUP_BUCKET`) is set, each dump is also uploaded to `s3://<bucket>/<BACKUP_S3_PREFIX><file>`, using `AWS_ENDPOINT_URL_S3` for non-AWS stores. With no bucket the run logs a warning and is local only, unless `BACKUP_REQUIRE_REMOTE` makes it fail.
+- **Source database.** `DATABASE_URL` of the backup container. `docker-compose.prod.yml` has no database service; the URL points at whatever Postgres instance the deployment configures.
+
+Which bucket and database a given deployment actually uses is deployment configuration and is not recorded in this repository. Check the `backup` service's environment in the deployment platform, and confirm that a recent object exists in the bucket, before relying on the remote copy.
+
+## Standalone script: `scripts/backup-db.sh`
+A separate, simpler script at the repository root. It is not part of the `dfwsc-backup` image and nothing in `docker-compose.prod.yml` or the Makefile invokes it; the `backup` service runs `backup/scripts/backup.sh`. It requires `DATABASE_URL`, runs `pg_dump "$DATABASE_URL" | gzip` into `/backups/postgres/stripe_portal_<timestamp>.sql.gz`, copies the file to `s3://$AWS_S3_BACKUP_BUCKET/backups/` when that variable is set, and deletes `*.sql.gz` files older than 30 days. Unlike `backup.sh` it has no `.partial` file, completeness check, heartbeat or lock, and it does not read the `BACKUP_*` variables. Its header comment, which says the `backup` service runs it nightly, does not match the compose file. Prefer `backup.sh` for anything scheduled.
 
 ## Makefile helpers
 
@@ -78,6 +97,16 @@ docker compose -f docker-compose.prod.yml run --rm \
 
    **Restore drills should target a scratch database, never production.** The script still prints the target database and requires `RESTORE_CONFIRM=yes`.
 
+   The restore source can be given three ways:
+
+   | Form | Example | Notes |
+   |------|---------|-------|
+   | Local file | `/backups/postgres/20260102_030405_stripe_portal.sql.gz` | Path inside the backup container |
+   | S3 URL | `s3://my-bucket/backups/20260102_030405_stripe_portal.sql.gz` | Downloaded to `/tmp/restore-<name>` in the container; uses `AWS_ENDPOINT_URL_S3` if set |
+   | Basename | `20260102_030405_stripe_portal.sql.gz` | Only if the path is not a local file; needs `BACKUP_S3_BUCKET` and builds the key from `BACKUP_S3_PREFIX` |
+
+   The downloaded copy is not removed by the script; it stays in the container's `/tmp` until the container is recreated.
+
    On Coolify there is no Makefile checkout. Run the script inside the running backup container instead (find its name with `docker ps --filter name=backup`):
 
    ```sh
@@ -97,6 +126,8 @@ docker compose -f docker-compose.prod.yml run --rm \
    ```
 
 Last restore drill: 2026-10-03, a dump of a disposable Postgres 17 restored into a scratch database with the built image (good dump restored; truncated archive, a dump with a failing statement, a 20-byte dump from a `pg_dump` that could not connect, and a good dump cut mid-COPY and re-gzipped were each refused with a non-zero exit and the target left unchanged). A drill against a real production dump is still owed; record its date here when done.
+
+For restores that follow a bad migration, see the production migration runbook in [DATABASE.md](./DATABASE.md).
 
 ## Dumps taken before the completeness check
 

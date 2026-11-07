@@ -1,84 +1,76 @@
 # DFWSC Frontend
 
-React + Vite application serving the DFW Software Consulting marketing website and Stripe payment portal client onboarding interface.
-
-## What This Is
-
-This frontend provides:
-- **Marketing Website**: Company homepage, pricing, team pages
-- **Client Onboarding**: Stripe Connect integration for new clients
-- **Admin Dashboard**: Client management and payment oversight
-- **Payment Processing**: Integration with Stripe for client payments
+React + Vite application for the DFW Software Consulting marketing site, client onboarding and payment return pages, and the admin dashboard.
 
 ## Tech Stack
 
-- **React 18** with React Router 6
-- **Vite** for build tooling and dev server
-- **TailwindCSS v4** for styling
-- **Vitest** for testing
+- React 18 with React Router 7 (imports still come from `react-router-dom`)
+- Vite 8, TailwindCSS v4, TanStack Query v5
+- three.js for the Home and Team scenes only (lazy-loaded)
+- Vitest 5 for tests
+
+Architecture, data fetching, theming, prerendering and SEO are documented in [docs/FRONTEND.md](../docs/FRONTEND.md); tokens and UI rules in [docs/STYLES.md](../docs/STYLES.md).
 
 ## Development
 
-### Local Development (Hot Reload)
+### Docker dev stack (recommended)
+
+From the repository root:
+
+```bash
+cp .env.example .env
+make up-build
+```
+
+The `web` service runs the Vite dev server on `http://localhost:5173` against the containerized API on `http://localhost:4242`. Details are in the root [README.md](../README.md).
+
+### Without Docker
+
 ```bash
 npm install
-npm run dev
-```
-Runs on `http://localhost:5173` with API calls to `http://localhost:4242/api/v1`
-
-### Docker Development
-```bash
-# From project root
-docker compose -f docker-compose.dev.yml up
-```
-Runs on `http://localhost:5173` with API calls to the containerized backend
-
-## Testing
-
-```bash
-npm test
-```
-Tests use Vitest with core flow coverage in `src/__tests__/coreFlows.test.jsx`
-
-## Application Routes
-
-- `/` - Marketing homepage
-- `/pricing` - Service pricing information  
-- `/team` - Team member profiles
-- `/onboard` - Client onboarding and admin dashboard
-
-## Admin Dashboard
-
-Access the admin interface at `/onboard`:
-
-1. Click "Admin Login" 
-2. Sign in with your Nextcloud account (it must be in one of the `ADMIN_NEXTCLOUD_GROUPS`; accounts with two-factor login need a Nextcloud app password)
-3. Manage clients, create accounts, and initiate onboarding
-4. View payment reports and client status
-
-Admin features:
-- Client list with status management (active/inactive)
-- Create new client accounts
-- Send onboarding emails
-- Payment reporting
-
-## Environment Configuration
-
-Copy `.env.example` to `.env` and configure:
-
-```env
-# For local development
-VITE_API_URL=http://localhost:4242/api/v1
-
-# For Docker (nginx proxies /api to backend)
-VITE_API_URL=/api/v1
+npm run dev     # http://localhost:5173
 ```
 
-## Production Build
+Set `VITE_API_URL=http://localhost:4242/api/v1` in the root `.env` so the dev server reaches a locally running API.
 
-The `Dockerfile` creates a production build:
-1. Builds React app with Vite
-2. Serves via nginx
-3. Proxies `/api/*` requests to backend container
+### Scripts
 
-Built assets are served from nginx with API requests proxied to the backend service.
+| Command | What it does |
+|---------|--------------|
+| `npm run dev` | Vite dev server |
+| `npm run build` | Production build to `build-dist/`, followed by a prerender step (`scripts/prerender.mjs`) |
+| `npm run preview` | Preview the production build |
+| `npm test` | Vitest |
+| `npm run lint` | ESLint (react-hooks rules) and Biome |
+
+## Routes
+
+Defined in `src/routes.js`.
+
+| Route | Page |
+|-------|------|
+| `/`, `/pricing`, `/team`, `/privacy` | Marketing pages, prerendered at build time |
+| `/demos` | Unlisted sample-sites page |
+| `/onboard#token=<token>` | Client Stripe onboarding (token entry) |
+| `/admin` | Admin dashboard |
+| `/payment-success`, `/payment-cancel` | Checkout return pages |
+| `/onboarding-success` | Return page after Stripe onboarding |
+| `/regenerate-key`, `/request-key-regeneration` | API key regeneration |
+| any other path | 404 page |
+
+The prerendered marketing pages are indexable. All other routes are served from an unrendered shell (`spa.html`) with `noindex`. `/docs` is not a React route: nginx redirects it (301) to the developer guide on Nextcloud.
+
+## Admin dashboard
+
+Open `/admin` and sign in with your Nextcloud account. The account must be in one of the groups in `ADMIN_NEXTCLOUD_GROUPS`; accounts with two-factor login need a Nextcloud app password.
+
+From the dashboard you can manage clients and groups, create accounts, send onboarding emails, and view payment reports. See [docs/FRONTEND.md section 6](../docs/FRONTEND.md#6-admin-dashboard).
+
+## Environment and build
+
+- Vite reads the **repository-root** `.env` (`envDir: '../'` in `vite.config.js`); there is no `front/.env.example`.
+- `VITE_API_URL` is the API base. It defaults to `/api/v1` in the Docker build, where nginx proxies `/api/` to the API.
+- `VITE_ANALYTICS_SRC` and `VITE_ANALYTICS_DOMAIN` are optional.
+- The `Dockerfile` takes `VITE_API_URL`, `VITE_ANALYTICS_SRC` and `VITE_ANALYTICS_DOMAIN` as build arguments, builds with Vite, checks that the prerendered pages exist, and serves `build-dist/` from nginx with `nginx.conf`.
+
+The API variables and feature flags are in [docs/ENVIRONMENT.md](../docs/ENVIRONMENT.md).

@@ -1,3 +1,12 @@
+> **Historical / superseded (2026-11-06).** This document reflects the codebase as of 2026-06-19. It is not maintained and some instructions would reintroduce removed or insecure behavior. Current docs: [docs/](../docs/)
+>
+> Status: done, with differences from the steps below.
+> - Error helper (`AppError`, `errors`) and the global error handler shipped in `backend/src/lib/errors.ts` and `backend/src/app.ts`; error bodies are `{ error, code, requestId }` for `AppError` and `{ error, requestId }` otherwise. The `NOT_FOUND` message is `"<resource> not found."` (with a period).
+> - `GET /clients` and `GET /groups` take `workspace`, `limit` (1-100, default 20) and `offset`, and return `{ data, total, limit, offset }`.
+> - `DELETE /clients/:id` archives the client (`status = archived`) and returns 204; `DELETE /groups/:id` deletes the group and returns 204. Neither returns the `{ message, id }` body shown in Step 6.
+> - `isValidHttpsUrl` lives in `backend/src/lib/validation.ts` and `resolveFrontendOrigin` in `backend/src/lib/config.ts`.
+> - Step 4c (`buildOnboardingEmail` in `mailer.ts`) was not done.
+
 # Plan: API Consistency & Quality
 
 ## Goal
