@@ -1,29 +1,28 @@
 #!/usr/bin/env bash
-# Syncs root mirror docs whenever CLAUDE.md is written.
-# Supports both root and .claude/CLAUDE.md.
+# Syncs mirror docs whenever CLAUDE.md is written.
+# The file that was edited (root CLAUDE.md or .claude/CLAUDE.md) is the source.
 
 file=$(echo "$CLAUDE_TOOL_INPUT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('file_path',''))" 2>/dev/null)
 
 [[ "$file" == *"CLAUDE.md" ]] || exit 0
 
-# Determine the source file (prefers root CLAUDE.md if available)
-if [[ -f "CLAUDE.md" ]]; then
-    src="CLAUDE.md"
-else
-    src="$file"
-fi
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+root_doc="$repo_root/CLAUDE.md"
+claude_doc="$repo_root/.claude/CLAUDE.md"
 
-# Determine the root directory
-if [[ "$file" == *"/.claude/CLAUDE.md" ]]; then
-    repo_root=$(dirname "$(dirname "$file")")
+# Resolve the edited path (absolute or relative to cwd) and pick the source.
+abs=$(realpath -m -- "$file")
+if [[ "$abs" == "$claude_doc" ]]; then
+    src="$claude_doc"
+    targets=("$root_doc")
+elif [[ "$abs" == "$root_doc" ]]; then
+    src="$root_doc"
+    targets=("$claude_doc")
 else
-    repo_root="."
+    exit 0
 fi
+targets+=("$repo_root/AGENTS.md" "$repo_root/Gemini.md" "$repo_root/Qwen.md")
 
-# Sync the mirrors
-cp "$src" "$repo_root/AGENTS.md"
-cp "$src" "$repo_root/Qwen.md"
-cp "$src" "$repo_root/Gemini.md"
-if [[ "$src" != "$repo_root/.claude/CLAUDE.md" ]]; then
-    cp "$src" "$repo_root/.claude/CLAUDE.md"
-fi
+for t in "${targets[@]}"; do
+    [[ "$t" == "$src" ]] || cp "$src" "$t"
+done
