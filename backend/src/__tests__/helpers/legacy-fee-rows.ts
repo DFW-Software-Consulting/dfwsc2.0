@@ -9,6 +9,10 @@ import { clientGroups, clients } from "../../db/schema";
  * insert can no longer create one, so this drops the table's fee constraints, inserts, and puts the
  * same constraints back as NOT VALID, all in one transaction. That leaves the table exactly as
  * production has it: new writes are checked, the legacy row is not.
+ *
+ * Dropping and re-adding a constraint takes an ACCESS EXCLUSIVE lock on the table for the whole
+ * transaction. That is safe only because vitest runs test files serially (`fileParallelism: false`
+ * in backend/vitest.config.ts, line 7); parallel files touching these tables would block or deadlock.
  */
 async function insertLegacy<T extends typeof clients | typeof clientGroups>(
   table: T,

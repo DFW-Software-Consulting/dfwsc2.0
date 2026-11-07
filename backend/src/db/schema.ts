@@ -49,6 +49,9 @@ export const clientGroups = pgTable(
     ),
     // Fee rules mirror addFeeIssues (lib/admin-crud.ts). Percent: 0..100 inclusive, because the app
     // accepts any positive number and numeric(5,2) can round a tiny one to 0.00. Cents: >= 0. Never both.
+    // Migration 0042 adds these by hand as NOT VALID so existing prod rows are not scanned or rejected.
+    // If a drizzle regenerate re-emits them, the SQL must keep NOT VALID. A later migration will run
+    // VALIDATE CONSTRAINT once prod has no violating rows.
     processingFeePercentCheck: check(
       "client_groups_processing_fee_percent_check",
       sql`${table.processingFeePercent} >= 0 AND ${table.processingFeePercent} <= 100`

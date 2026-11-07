@@ -486,6 +486,31 @@ describe("Clients API Integration", () => {
       expect(response.json().error).toBe("processingFeeCents must be a non-negative integer.");
     });
 
+    it("returns 400 when processingFeeCents exceeds the int4 maximum", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Fee Cap Client",
+        email: `${clientId}@example.com`,
+        status: "active",
+      });
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId}`,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: { processingFeeCents: 2147483648 },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("processingFeeCents must be at most 2147483647.");
+    });
+
     it("returns 400 when groupId does not exist", async () => {
       const clientId = randomUUID();
       cleanupIds.push(clientId);
