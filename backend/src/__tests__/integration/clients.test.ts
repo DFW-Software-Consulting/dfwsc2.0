@@ -7,6 +7,7 @@ import { clientGroups, clients } from "../../db/schema";
 import { MAX_FEE_PERCENT } from "../../lib/constants";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
+import { insertLegacyClient } from "../helpers/legacy-fee-rows";
 
 describe("Clients API Integration", () => {
   let app: any;
@@ -993,14 +994,17 @@ describe("Clients API Integration", () => {
     async function seed(fees: { processingFeePercent?: string; processingFeeCents?: number }) {
       const id = randomUUID();
       cleanupIds.push(id);
-      await db.insert(clients).values({
+      const row = {
         id,
         name: "Fee Client",
         email: `fee-${id}@example.com`,
         workspace,
         status: "active",
         ...fees,
-      });
+      } as const;
+      // Both fee types set is a legacy state the CHECKs (migration 0042) reject on new writes.
+      if (fees.processingFeePercent && fees.processingFeeCents) await insertLegacyClient(row);
+      else await db.insert(clients).values(row);
       return id;
     }
 
@@ -1057,8 +1061,8 @@ describe("Clients API Integration", () => {
       expect(Number(row.percent)).toBeCloseTo(3);
     });
 
-    it("leaves both fees unchanged when neither is in the body", async () => {
-      const id = await seed({ processingFeePercent: "3", processingFeeCents: 100 });
+    it("leaves the stored fee unchanged when neither is in the body", async () => {
+      const id = await seed({ processingFeePercent: "3" });
       const before = await stored(id);
       const res = await patch(id, { notes: "unrelated" });
       expect(res.statusCode).toBe(200);

@@ -47,6 +47,20 @@ export const clientGroups = pgTable(
       "client_groups_status_check",
       sql`${table.status} IN ('active', 'inactive')`
     ),
+    // Fee rules mirror addFeeIssues (lib/admin-crud.ts). Percent: 0..100 inclusive, because the app
+    // accepts any positive number and numeric(5,2) can round a tiny one to 0.00. Cents: >= 0. Never both.
+    processingFeePercentCheck: check(
+      "client_groups_processing_fee_percent_check",
+      sql`${table.processingFeePercent} >= 0 AND ${table.processingFeePercent} <= 100`
+    ),
+    processingFeeCentsCheck: check(
+      "client_groups_processing_fee_cents_check",
+      sql`${table.processingFeeCents} >= 0`
+    ),
+    processingFeeExclusiveCheck: check(
+      "client_groups_processing_fee_exclusive_check",
+      sql`${table.processingFeePercent} IS NULL OR ${table.processingFeeCents} IS NULL`
+    ),
   })
 );
 
@@ -113,6 +127,19 @@ export const clients = pgTable(
     statusCheck: check(
       "clients_status_check",
       sql`${table.status} IN ('active', 'inactive', 'pending', 'failed', 'archived')`
+    ),
+    // Same fee rules as client_groups; see the comment there.
+    processingFeePercentCheck: check(
+      "clients_processing_fee_percent_check",
+      sql`${table.processingFeePercent} >= 0 AND ${table.processingFeePercent} <= 100`
+    ),
+    processingFeeCentsCheck: check(
+      "clients_processing_fee_cents_check",
+      sql`${table.processingFeeCents} >= 0`
+    ),
+    processingFeeExclusiveCheck: check(
+      "clients_processing_fee_exclusive_check",
+      sql`${table.processingFeePercent} IS NULL OR ${table.processingFeeCents} IS NULL`
     ),
   })
 );
