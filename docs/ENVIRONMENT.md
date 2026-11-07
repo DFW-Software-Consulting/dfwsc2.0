@@ -9,7 +9,7 @@ Sources: `backend/src/lib/env.ts` (boot validation), `backend/src/lib/config.ts`
 - **Required** means the process refuses to start (or the named feature cannot work) without it.
 - **Default** is the value used when the variable is unset or empty. A dash means no default.
 - **Prod compose** says whether `docker-compose.prod.yml` forwards the variable to the container:
-  - `Yes` - forwarded as `${NAME}` with no default. If the variable is not set in Coolify, the container receives an empty string, which the code treats as unset (see "Empty strings" below).
+  - `Yes` - forwarded as `${NAME}` (or `${NAME:-}`) with no default. If the variable is not set in Coolify, the container receives an empty string, which the code treats as unset (see "Empty strings" below).
   - `Yes, default X` - forwarded as `${NAME:-X}`.
   - `Fixed` - the compose file sets a literal value; a Coolify variable of the same name has no effect.
   - **No** - the code reads it, but the compose file does not forward it. Setting it in Coolify has **no effect in production today**, because the container only receives variables listed in the compose file. These are current behavior, not mistakes in this document.
@@ -29,7 +29,7 @@ Validated at boot by `validateEnv()` (called from `buildServer()` in `backend/sr
 | `PORT` | No | `4242` | API listen port (`backend/src/index.ts:58`). | Yes, default `4242` |
 | `HOST` | No | `0.0.0.0` | API listen address (`backend/src/index.ts:59`). | **No** |
 | `DATABASE_URL` | **Yes** | - | PostgreSQL connection string. Also used by `drizzle-kit` and the migrator. A password containing `/`, `@` or `:` must be percent-encoded. | Yes (api, migrator, backup) |
-| `DB_POOL_MAX` | No | `10` | `pg` pool size (`backend/src/db/client.ts:7`, `DEFAULT_DB_POOL_MAX` in `constants.ts`). | **No** |
+| `DB_POOL_MAX` | No | `10` | `pg` pool size (`backend/src/db/client.ts:7`, `DEFAULT_DB_POOL_MAX` in `constants.ts`). The code uses `??`, so an empty string would give `NaN`; the compose fallback therefore is the default. | Yes, default 10 |
 | `STRIPE_SECRET_KEY` | **Yes** | - | Platform Stripe secret key. `backend/src/lib/stripe.ts:3` also throws at import time if it is missing. | Yes |
 | `STRIPE_WEBHOOK_SECRET` | **Yes** | - | Signing secret for `POST /api/v1/webhooks/stripe` (`backend/src/routes/webhooks.ts:473`). | Yes |
 | `FRONTEND_ORIGIN` | **Yes** | - | Comma-separated CORS allow-list. The first entry (trailing slash removed) is also the base for Checkout and onboarding redirects (`resolveFrontendOrigin` in `config.ts`). | Yes |
@@ -43,8 +43,8 @@ Validated at boot by `validateEnv()` (called from `buildServer()` in `backend/sr
 | `CONTACT_INBOX` | No | `SMTP_FROM` | Recipient of `POST /api/v1/contact`. Must be a valid email address or the route answers 500 `CONFIGURATION_ERROR` (`config.ts`, `resolveContactInboxEmail`). | Yes |
 | `API_BASE_URL` | Yes in production | - | Public base URL of the API (for example `https://api.dfwsc.com`). Used to build Stripe onboarding callback and refresh links. In production an unset value is a 500 `CONFIGURATION_ERROR` at request time; outside production the code falls back to the request `Host` and `X-Forwarded-*` headers (`config.ts`, `resolveServerBaseUrl`). `GET /app-config.js` answers 500 whenever it is unset, in every environment (`backend/src/routes/config.ts`). | Yes |
 | `DEFAULT_PROCESS_FEE_CENTS` | No | `0` | Platform processing fee in cents, used when the `default_fee_cents` setting is not stored in the database (`stripe-billing.ts:209`, `routes/settings.ts:49`). | Yes |
-| `DEFAULT_PAYMENT_SUCCESS_URL` | No | - | Checkout success redirect used after client and group URLs and before the `FRONTEND_ORIGIN` fallback. Must be `http(s)`; `session_id={CHECKOUT_SESSION_ID}` is appended if missing. | **No** |
-| `DEFAULT_PAYMENT_CANCEL_URL` | No | - | Checkout cancel redirect, same precedence. | **No** |
+| `DEFAULT_PAYMENT_SUCCESS_URL` | No | - | Checkout success redirect used after client and group URLs and before the `FRONTEND_ORIGIN` fallback. Must be `http(s)`; `session_id={CHECKOUT_SESSION_ID}` is appended if missing. | Yes |
+| `DEFAULT_PAYMENT_CANCEL_URL` | No | - | Checkout cancel redirect, same precedence. | Yes |
 | `ADMIN_NEXTCLOUD_GROUPS` | No | `dfwsc-admins,managers` | Comma-separated Nextcloud group ids allowed to sign in to the admin panel (`backend/src/lib/admin-login.ts:95`). Admin login also needs the Nextcloud service account in section 3; without it login answers 503. | Yes, default `dfwsc-admins,managers` |
 | `REDIS_URL` | No | - | Enables Redis-backed rate limiting. Unset or unreachable: per-process in-memory buckets, with a warning at boot (`backend/src/lib/rate-limit.ts:21`). | **Fixed**: `redis://dfwsc-redis:6379`. A Coolify `REDIS_URL` is ignored. |
 
@@ -56,12 +56,12 @@ There are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `A
 
 | Variable | Required | Default | Purpose | Prod compose |
 |----------|----------|---------|---------|--------------|
-| `TRUST_PROXY` | No | `loopback,linklocal,uniquelocal` | Which proxies Fastify trusts for `X-Forwarded-For`. Accepts `true`, `false`, or a comma-separated list of IPs, CIDRs or named ranges. A bare number (the old hop-count form) is rejected: the default list is used and a warning is logged (`backend/src/app.ts:25-60,113`). | **No** (the default applies) |
-| `CLOUDFLARE_IP_RANGES` | No | Built-in Cloudflare ranges (`client-ip.ts`) | Comma-separated CIDRs whose connections may supply the client address through `CF-Connecting-IP`. `none` disables that path. An invalid entry throws at startup. IPv6 clients are rate limited per /64. | **No** (the built-in list applies) |
-| `METRICS_TOKEN` | No | - | Bearer token for `GET /api/v1/metrics`. Unset means the route answers 404 (`backend/src/routes/metrics.ts:44`). | **No**: in production `/metrics` is always 404 today |
-| `ENABLE_SWAGGER` | No | off | Exactly `true` registers Swagger UI at `/docs` (`app.ts:208`). There is no production guard in code. | **No**: Swagger is off in production |
+| `TRUST_PROXY` | No | `loopback,linklocal,uniquelocal` | Which proxies Fastify trusts for `X-Forwarded-For`. Accepts `true`, `false`, or a comma-separated list of IPs, CIDRs or named ranges. A bare number (the old hop-count form) is rejected: the default list is used and a warning is logged (`backend/src/app.ts:25-60,113`). Blank is treated as unset. | Yes |
+| `CLOUDFLARE_IP_RANGES` | No | Built-in Cloudflare ranges (`client-ip.ts`) | Comma-separated CIDRs whose connections may supply the client address through `CF-Connecting-IP`. `none` disables that path. An invalid entry throws at startup. IPv6 clients are rate limited per /64. Blank is treated as unset. | Yes |
+| `METRICS_TOKEN` | No | - | Bearer token for `GET /api/v1/metrics`. Unset means the route answers 404 (`backend/src/routes/metrics.ts:44`). Blank is treated as unset. | Yes (404 until set in Coolify) |
+| `ENABLE_SWAGGER` | No | off | Exactly `true` registers Swagger UI at `/docs` (`app.ts:208`). There is no production guard in code. | **No**: not forwarded, so Swagger is off in production |
 
-Dev note: `docker-compose.base.yml` sets `ENABLE_SWAGGER: 'false'` as a literal in the `api` service, and compose `environment:` wins over `env_file`, so the dev stack cannot enable Swagger from `.env` without editing the compose file.
+Dev note: `docker-compose.base.yml` sets `ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}` in the `api` service, so set `ENABLE_SWAGGER=true` in `.env` to enable Swagger in the dev stack; unset stays `false`. (Compose `environment:` wins over `env_file`, but the interpolation reads `.env`.)
 
 ## 3. Nextcloud service account
 
@@ -196,7 +196,9 @@ The backend test run pins its own values in `backend/vitest.config.ts` (`NODE_EN
 
 ## 8. Prod compose forwarding at a glance
 
-Read by the code but **not** forwarded by `docker-compose.prod.yml`, so unsettable in the Coolify deployment without a compose change: `METRICS_TOKEN`, `TRUST_PROXY`, `CLOUDFLARE_IP_RANGES`, `DEFAULT_PAYMENT_SUCCESS_URL`, `DEFAULT_PAYMENT_CANCEL_URL`, `DB_POOL_MAX`, `HOST`, `ENABLE_SWAGGER`.
+Forwarded with an empty default (`${NAME:-}`), which the code treats as unset: `METRICS_TOKEN`, `TRUST_PROXY`, `CLOUDFLARE_IP_RANGES`, `DEFAULT_PAYMENT_SUCCESS_URL`, `DEFAULT_PAYMENT_CANCEL_URL`. `DB_POOL_MAX` is forwarded as `${DB_POOL_MAX:-10}` because the code uses `??`.
+
+Read by the code but **not** forwarded by `docker-compose.prod.yml`, so unsettable in the Coolify deployment without a compose change: `HOST`, `ENABLE_SWAGGER`.
 
 Set by the compose file itself regardless of Coolify: `REDIS_URL`.
 

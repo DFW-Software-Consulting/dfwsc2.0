@@ -24,3 +24,6 @@ fi
 cp "$src" "$repo_root/AGENTS.md"
 cp "$src" "$repo_root/Qwen.md"
 cp "$src" "$repo_root/Gemini.md"
+if [[ "$src" != "$repo_root/.claude/CLAUDE.md" ]]; then
+    cp "$src" "$repo_root/.claude/CLAUDE.md"
+fi

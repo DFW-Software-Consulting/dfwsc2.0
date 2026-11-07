@@ -95,6 +95,14 @@ services:
       # needs a password), so a Coolify-level REDIS_URL must not override this.
       REDIS_URL: redis://dfwsc-redis:6379
       CONTACT_INBOX: ${CONTACT_INBOX}
+      # Forwarded so Coolify values take effect. Fallbacks reproduce the code's
+      # behavior when the var is unset (unset renders as "" in compose).
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      TRUST_PROXY: ${TRUST_PROXY:-}
+      CLOUDFLARE_IP_RANGES: ${CLOUDFLARE_IP_RANGES:-}
+      DEFAULT_PAYMENT_SUCCESS_URL: ${DEFAULT_PAYMENT_SUCCESS_URL:-}
+      DEFAULT_PAYMENT_CANCEL_URL: ${DEFAULT_PAYMENT_CANCEL_URL:-}
+      DB_POOL_MAX: ${DB_POOL_MAX:-10}
     ports:
       - "127.0.0.1:4242:4242"
     depends_on:

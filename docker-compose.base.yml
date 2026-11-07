@@ -7,7 +7,7 @@ services:
       - .env
     environment:
       NODE_ENV: development
-      ENABLE_SWAGGER: 'false'
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}
       MAILHOG_ENABLED: 'true'
     ports:
       - "4242:4242"

@@ -154,7 +154,6 @@ jobs:
       JWT_EXPIRY: 1h
       FRONTEND_ORIGIN: http://localhost:5173
       API_BASE_URL: http://localhost:4242
-      USE_CHECKOUT: "true"
       DEFAULT_PROCESS_FEE_CENTS: "100"
       SMTP_HOST: localhost
       SMTP_PORT: "1025"
@@ -230,11 +229,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Agent docs in sync with CLAUDE.md
+      - name: Agent docs (and .claude/CLAUDE.md) in sync with CLAUDE.md
         run: |
           set -eu
           fail=0
-          for f in AGENTS.md Qwen.md Gemini.md; do
+          for f in AGENTS.md Qwen.md Gemini.md .claude/CLAUDE.md; do
             if ! diff -q CLAUDE.md "$f" >/dev/null 2>&1; then
               echo "::error::$f is out of sync with CLAUDE.md"
               diff CLAUDE.md "$f" || true
