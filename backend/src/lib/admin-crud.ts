@@ -1,6 +1,6 @@
 import type { z } from "zod";
 import { requireAdminJwt } from "./auth";
-import { MAX_FEE_PERCENT, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./constants";
+import { MAX_FEE_CENTS, MAX_FEE_PERCENT, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./constants";
 import { adminRateLimit } from "./rate-limit";
 import { isValidHttpsUrl } from "./validation";
 
@@ -62,6 +62,12 @@ export function addFeeIssues(body: FeeAndUrlFields, ctx: z.core.$RefinementCtx) 
     ctx.addIssue({
       code: "custom",
       message: "processingFeeCents must be a non-negative integer.",
+      path: ["processingFeeCents"],
+    });
+  } else if (body.processingFeeCents != null && body.processingFeeCents > MAX_FEE_CENTS) {
+    ctx.addIssue({
+      code: "custom",
+      message: `processingFeeCents must be at most ${MAX_FEE_CENTS}.`,
       path: ["processingFeeCents"],
     });
   }
