@@ -22,5 +22,6 @@
 
 - Phone: (214) 326-0128
 - Email: mail@dfwsc.com
+- Mailing address: DFW Software Consulting, PO Box 411123, Dallas, TX 75241
 - [GitHub](https://github.com/DFW-Software-Consulting)
 - [Contact form](https://dfwsc.com/#contact)
