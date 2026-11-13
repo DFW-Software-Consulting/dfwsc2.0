@@ -15,6 +15,7 @@ export default function Privacy() {
               DFW Software Consulting. You can reach us at{" "}
               <a href="mailto:mail@dfwsc.com">mail@dfwsc.com</a>.
             </p>
+            <p>Mailing address: DFW Software Consulting, PO Box 411123, Dallas, TX 75241.</p>
           </Disclosure>
 
           <Disclosure summary={<h2>What the contact form collects</h2>}>
