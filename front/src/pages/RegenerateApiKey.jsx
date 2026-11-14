@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useCallback, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useRegenerateApiKey } from "../hooks/useApiKey";
+import { useClearUrlParams } from "../hooks/useClearUrlParams";
 import logger from "../utils/logger";
 
 export default function RegenerateApiKey() {
   const location = useLocation();
-  const navigate = useNavigate();
   const [token] = useState(() => {
     const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
     return hashParams.get("token") || "";
@@ -15,11 +15,7 @@ export default function RegenerateApiKey() {
   const [copied, setCopied] = useState(false);
   const { mutate, isPending } = useRegenerateApiKey();
 
-  useEffect(() => {
-    if (location.search || location.hash) {
-      navigate(location.pathname, { replace: true });
-    }
-  }, [location.hash, location.pathname, location.search, navigate]);
+  useClearUrlParams();
 
   const handleRegenerate = useCallback(() => {
     if (!token) {

@@ -37,6 +37,7 @@ import {
   BILLING_REQUESTS_RETRY_BASE_MS,
   BILLING_REQUESTS_RETRY_MAX_MS,
 } from "./constants";
+import { createCyclePoller } from "./cycle-poller";
 import {
   intVar,
   isAuthError,
@@ -815,44 +816,17 @@ export function startBillingRequests(
     return null;
   }
 
-  let running: Promise<unknown> | null = null;
-  let again = false;
-  let stopped = false;
-  const run = () => {
-    running = runBillingRequestsCycle({ logger, env })
-      .catch((error: unknown) => {
-        logger.error({ errorName: (error as Error)?.name }, "Billing requests cycle crashed.");
-      })
-      .finally(() => {
-        running = null;
-        if (again && !stopped) {
-          again = false;
-          run();
-        }
-      });
-  };
-  const trigger = () => {
-    if (stopped) return;
-    if (running) {
-      again = true;
-      return;
-    }
-    run();
-  };
-  const timer = setInterval(trigger, config.settings.pollIntervalMs);
-  timer.unref();
-
-  const runner: BillingRequestsRunner = {
-    trigger,
-    async stop() {
-      stopped = true;
-      clearInterval(timer);
+  const runner: BillingRequestsRunner = createCyclePoller({
+    logger,
+    cycle: () => runBillingRequestsCycle({ logger, env }),
+    intervalMs: config.settings.pollIntervalMs,
+    crashMessage: "Billing requests cycle crashed.",
+    onStop: () => {
       if (active?.runner === runner) active = null;
-      while (running) await running;
     },
-  };
+  });
   active = { runner, webhookSecret: config.settings.webhookSecret };
-  trigger();
+  runner.trigger();
   logger.info(
     {
       formId: config.settings.formId,
