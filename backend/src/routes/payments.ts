@@ -12,6 +12,17 @@ import {
   sha256Lookup,
 } from "../lib/auth";
 import {
+  assertLineItemCount,
+  assertValidFee,
+  buildCheckoutLineItems,
+  buildCheckoutSessionParams,
+  buildStripeIdempotencyKey,
+  type CheckoutLineItemInput,
+  computeBaseAmount,
+  computeTotalAmount,
+  resolveCheckoutCurrency,
+} from "../lib/checkout-session";
+import {
   getCircuitBreakerStates,
   isCircuitOpenError,
   isStripeBusyError,
@@ -20,7 +31,6 @@ import {
 import { getClientIp } from "../lib/client-ip";
 import { kickJob } from "../lib/coalesced-runner";
 import {
-  appendCheckoutSessionId,
   resolveDefaultPaymentCancelUrl,
   resolveDefaultPaymentSuccessUrl,
   resolveFrontendOrigin,
@@ -48,12 +58,7 @@ import { stripe } from "../lib/stripe";
 import { resolveClientFee } from "../lib/stripe-billing";
 import { resolveCardPaymentsStatus } from "../lib/stripe-connect-account";
 import { mapStripeError } from "../lib/stripe-errors";
-import {
-  CURRENCY_REGEX,
-  lineItemSchema,
-  MAX_SAFE_AMOUNT,
-  validateStripeMetadata,
-} from "../lib/stripe-input";
+import { lineItemSchema, validateStripeMetadata } from "../lib/stripe-input";
 import { parseBody, validateWorkspace, validateWorkspaceQuery } from "../lib/validation";
 import { applyCheckoutSessionOutcome } from "./webhooks";
 
@@ -393,6 +398,206 @@ async function insertPaymentLedger(row: {
   return existing.stripeSessionId === row.stripeSessionId ? "recorded" : "key_reused";
 }
 
+type PaymentClient = typeof clients.$inferSelect;
+type PaymentCreateBucket = ReturnType<typeof tokenBucketRateLimit>;
+
+type PaymentClientGroup = typeof clientGroups.$inferSelect;
+
+async function loadClientGroup(client: PaymentClient): Promise<PaymentClientGroup | null> {
+  return client.groupId
+    ? ((
+        await db.select().from(clientGroups).where(eq(clientGroups.id, client.groupId)).limit(1)
+      )[0] ?? null)
+    : null;
+}
+
+// Client override, then group override, then the configured default; the frontend origin is
+// only resolved (and may throw) when a URL is still missing.
+function resolveCheckoutRedirects(client: PaymentClient, group: PaymentClientGroup | null) {
+  const defaultSuccessUrl = resolveDefaultPaymentSuccessUrl();
+  const defaultCancelUrl = resolveDefaultPaymentCancelUrl();
+  const successUrl = client.paymentSuccessUrl ?? group?.paymentSuccessUrl ?? defaultSuccessUrl;
+  const cancelUrl = client.paymentCancelUrl ?? group?.paymentCancelUrl ?? defaultCancelUrl;
+  const frontendOrigin = successUrl && cancelUrl ? undefined : resolveFrontendOrigin();
+  return { successUrl, cancelUrl, frontendOrigin };
+}
+
+// Require nonblank Idempotency-Key for ALL payment creation (API-key and admin).
+function requireIdempotencyKey(request: FastifyRequest): string {
+  const idempotencyKeyHeader = extractIdempotencyKey(request);
+  if (!idempotencyKeyHeader || idempotencyKeyHeader.trim().length === 0) {
+    throw errors.badRequest("Idempotency-Key header is required.");
+  }
+  return idempotencyKeyHeader.trim();
+}
+
+// API-key callers carry their client; admins name one in the body. Returns null when a
+// response has already been sent (invalid workspace).
+async function resolvePaymentClient(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  input: { workspace: string | undefined; bodyClientId: string | undefined }
+): Promise<PaymentClient | null> {
+  let client = (request as RequestWithClient).client;
+
+  if (!client) {
+    const validWorkspace = validateWorkspace(input.workspace, reply);
+    if (!validWorkspace) return null;
+    if (!input.bodyClientId) {
+      throw errors.badRequest("clientId is required when using Admin authentication.");
+    }
+    [client] = await db.select().from(clients).where(eq(clients.id, input.bodyClientId)).limit(1);
+  }
+
+  if (!client) {
+    throw errors.notFound("Client");
+  }
+  return client;
+}
+
+// Checkout is a direct charge on the connected account, which needs card_payments active.
+// Checked before any Checkout call; a failed live read fails closed. Returns false when a
+// response has already been sent.
+async function ensureCardPaymentsActive(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  paymentCreateBucket: PaymentCreateBucket,
+  client: PaymentClient,
+  stripeAccountId: string
+): Promise<boolean> {
+  let cardPayments: string;
+  try {
+    cardPayments = await resolveCardPaymentsStatus(client, stripeAccountId);
+  } catch (err) {
+    request.log.error(
+      { clientId: client.id, ...errorLogFields(err) },
+      "Could not read the card_payments capability from Stripe"
+    );
+    if (isStripeBusyError(err) || isCircuitOpenError(err)) {
+      await paymentCreateBucket.refund(request);
+    }
+    if (
+      mapStripeError(err, reply, {
+        circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+        rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
+      })
+    )
+      return false;
+    throw errors.stripeFailed("Payment processing failed. Please try again.");
+  }
+  if (cardPayments !== "active") {
+    reply.code(409).send(CARD_PAYMENTS_NOT_ACTIVE_ERROR);
+    return false;
+  }
+  return true;
+}
+
+// Creates the Checkout session on the connected account. Returns null when a response has
+// already been sent.
+async function createCheckoutSession(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  paymentCreateBucket: PaymentCreateBucket,
+  input: {
+    sessionParams: Stripe.Checkout.SessionCreateParams;
+    stripeAccountId: string;
+    stripeIdempotencyKey: string;
+  }
+): Promise<Stripe.Checkout.Session | null> {
+  let stripeCalled = false;
+  try {
+    return await withStripeCircuit(() => {
+      stripeCalled = true;
+      return stripe.checkout.sessions.create(input.sessionParams, {
+        stripeAccount: input.stripeAccountId,
+        idempotencyKey: input.stripeIdempotencyKey,
+      });
+    });
+  } catch (err) {
+    request.log.error(errorLogFields(err), "Stripe Checkout session creation failed");
+    // A request refused before it reached Stripe (no slot in time, or the circuit already
+    // open) is told to retry, so it gives its rate-limit token back and the retry is not
+    // charged twice. A circuit-open error after the call started is a timeout of a call
+    // that did go out, so it keeps its token like every other outcome that reached Stripe.
+    if (isStripeBusyError(err) || (isCircuitOpenError(err) && !stripeCalled)) {
+      await paymentCreateBucket.refund(request);
+    }
+    if (
+      mapStripeError(err, reply, {
+        circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
+        cardDeclinedCode: "CARD_DECLINED",
+        rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
+        permanentErrors: true,
+      })
+    )
+      return null;
+    throw errors.stripeFailed("Payment processing failed. Please try again.");
+  }
+}
+
+// CRITICAL: Persist ledger synchronously BEFORE returning the checkout URL.
+// If this fails, we return 503 — the caller can retry with the same
+// idempotency key and Stripe will return the existing session.
+async function recordCheckoutLedger(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  session: Stripe.Checkout.Session,
+  input: {
+    idempotencyKey: string;
+    stripeAccountId: string;
+    clientId: string;
+    baseAmount: number;
+    totalAmount: number;
+    feeAmount: number;
+    currency: string;
+    userMetadata: Record<string, string>;
+  }
+) {
+  let ledgerResult: "recorded" | "key_reused";
+  try {
+    ledgerResult = await insertPaymentLedger({
+      id: uuidv4(),
+      idempotencyKey: input.idempotencyKey,
+      connectedAccountId: input.stripeAccountId,
+      stripeSessionId: session.id,
+      stripePaymentIntentId: null,
+      clientId: input.clientId,
+      source: "checkout",
+      status: "created",
+      baseAmountCents: input.baseAmount,
+      totalAmountCents: input.totalAmount,
+      feeAmountCents: input.feeAmount,
+      refundedAmountCents: 0,
+      currency: input.currency,
+      metadata:
+        Object.keys(input.userMetadata).length > 0 ? JSON.stringify(input.userMetadata) : null,
+    });
+  } catch (err) {
+    request.log.error(
+      { ...errorLogFields(err), stripeSessionId: session.id },
+      "Ledger insert failed after Stripe Checkout session creation — returning 503"
+    );
+    return reply.code(503).send({
+      error:
+        "Payment recorded but confirmation failed. Please retry with the same Idempotency-Key.",
+      code: "LEDGER_PERSISTENCE_FAILED",
+    });
+  }
+
+  if (ledgerResult === "key_reused") {
+    request.log.warn(
+      { clientId: input.clientId, stripeSessionId: session.id },
+      "Idempotency-Key already used for a different payment session"
+    );
+    return reply.code(409).send({
+      error: "This Idempotency-Key was already used with a different request body.",
+      code: "IDEMPOTENCY_KEY_REUSED",
+    });
+  }
+
+  return reply.code(201).send({ url: session.url, sessionId: session.id });
+}
+
 export default async function paymentsRoutes(fastify: FastifyInstance) {
   const paymentCreateBucket = tokenBucketRateLimit({
     capacity: PAYMENT_CREATE_BUCKET_CAPACITY,
@@ -406,12 +611,7 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       preHandler: [requireClientOrAdmin, paymentCreateBucket],
     },
     async (request, reply) => {
-      const idempotencyKeyHeader = extractIdempotencyKey(request);
-      // Require nonblank Idempotency-Key for ALL payment creation (API-key and admin).
-      if (!idempotencyKeyHeader || idempotencyKeyHeader.trim().length === 0) {
-        throw errors.badRequest("Idempotency-Key header is required.");
-      }
-      const idempotencyKey = idempotencyKeyHeader.trim();
+      const idempotencyKey = requireIdempotencyKey(request);
       const isApiCall = !!request.headers["x-api-key"];
 
       const body = parseBody(paymentCreateBodySchema, request.body, reply);
@@ -424,26 +624,17 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         waiveFee = false,
         workspace,
       } = body as Omit<typeof body, "lineItems"> & {
-        lineItems?: z.infer<typeof lineItemSchema>[];
+        lineItems?: CheckoutLineItemInput[];
       };
 
       const userMetadata = validateStripeMetadata(rawMetadata);
 
-      let client = (request as RequestWithClient).client;
-
-      if (!client) {
-        const validWorkspace = validateWorkspace(workspace, reply);
-        if (!validWorkspace) return;
-        const bodyClientId = body.clientId || userMetadata?.clientId;
-        if (!bodyClientId) {
-          throw errors.badRequest("clientId is required when using Admin authentication.");
-        }
-        [client] = await db.select().from(clients).where(eq(clients.id, bodyClientId)).limit(1);
-      }
-
-      if (!client) {
-        throw errors.notFound("Client");
-      }
+      const resolved = await resolvePaymentClient(request, reply, {
+        workspace,
+        bodyClientId: body.clientId || userMetadata?.clientId,
+      });
+      if (!resolved) return;
+      const client = resolved;
 
       const stripeAccountId = getChargeableAccountId(client);
       if (!stripeAccountId) {
@@ -453,30 +644,16 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
         });
       }
 
-      // Checkout is a direct charge on the connected account, which needs card_payments active.
-      // Checked before any Checkout call; a failed live read fails closed.
-      let cardPayments: string;
-      try {
-        cardPayments = await resolveCardPaymentsStatus(client, stripeAccountId);
-      } catch (err) {
-        request.log.error(
-          { clientId: client.id, ...errorLogFields(err) },
-          "Could not read the card_payments capability from Stripe"
-        );
-        if (isStripeBusyError(err) || isCircuitOpenError(err)) {
-          await paymentCreateBucket.refund(request);
-        }
-        if (
-          mapStripeError(err, reply, {
-            circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
-            rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
-          })
-        )
-          return;
-        throw errors.stripeFailed("Payment processing failed. Please try again.");
-      }
-      if (cardPayments !== "active") {
-        return reply.code(409).send(CARD_PAYMENTS_NOT_ACTIVE_ERROR);
+      if (
+        !(await ensureCardPaymentsActive(
+          request,
+          reply,
+          paymentCreateBucket,
+          client,
+          stripeAccountId
+        ))
+      ) {
+        return;
       }
 
       const effectiveWaiveFee = isApiCall ? false : waiveFee;
@@ -486,65 +663,15 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       }
 
       const clientId = client.id;
+      const stripeIdempotencyKey = buildStripeIdempotencyKey(clientId, idempotencyKey);
 
-      // Keys are scoped per client: namespace the key sent to Stripe so two
-      // clients using the same key never collide on the platform. Stripe limits
-      // idempotency keys to 255 characters, so the namespaced key must fit.
-      const stripeIdempotencyKey = `${clientId}:${idempotencyKey}`;
-      if (stripeIdempotencyKey.length > 255) {
-        throw errors.badRequest(
-          `Idempotency-Key must not exceed ${255 - clientId.length - 1} characters.`
-        );
-      }
-
-      const group = client.groupId
-        ? ((
-            await db.select().from(clientGroups).where(eq(clientGroups.id, client.groupId)).limit(1)
-          )[0] ?? null)
-        : null;
+      const group = await loadClientGroup(client);
 
       // ── Checkout flow ──────────────────────────────────────────────────────
-      if (!Array.isArray(lineItems) || lineItems.length === 0) {
-        throw errors.badRequest("lineItems are required.");
-      }
-
-      if (lineItems.length > 100) {
-        throw errors.badRequest("lineItems must not exceed 100 items.");
-      }
-
-      // Derive baseAmount strictly from line items server-side.
-      // The caller-supplied `amount` is ignored for Checkout to prevent fee
-      // integrity attacks where a caller sends a lower amount than the line
-      // items imply.
-      let baseAmount = 0;
-      let lineItemCurrency: string | undefined;
-      for (const item of lineItems) {
-        const unitAmount = item.price_data.unit_amount;
-        const qty = item.quantity;
-        const lineTotal = unitAmount * qty;
-        if (!Number.isSafeInteger(lineTotal) || lineTotal > MAX_SAFE_AMOUNT * 999_999) {
-          throw errors.badRequest("Line item total exceeds safe integer bounds.");
-        }
-        baseAmount += lineTotal;
-        if (!lineItemCurrency) {
-          lineItemCurrency = item.price_data.currency;
-        } else if (lineItemCurrency !== item.price_data.currency) {
-          throw errors.badRequest("All line items must use the same currency.");
-        }
-      }
-
-      if (baseAmount <= 0) {
-        throw errors.badRequest("Computed base amount must be positive.");
-      }
-
-      if (!Number.isSafeInteger(baseAmount)) {
-        throw errors.badRequest("Computed base amount exceeds safe integer bounds.");
-      }
-
-      const resolvedCurrency = lineItemCurrency ?? currency;
-      if (!resolvedCurrency || !CURRENCY_REGEX.test(resolvedCurrency)) {
-        throw errors.badRequest("currency must be a 3-letter ISO code (e.g. 'usd').");
-      }
+      assertLineItemCount(lineItems);
+      const items = lineItems as CheckoutLineItemInput[];
+      const { baseAmount, lineItemCurrency } = computeBaseAmount(items);
+      const resolvedCurrency = resolveCheckoutCurrency(lineItemCurrency, currency);
 
       let feeAmount: number;
       try {
@@ -552,149 +679,47 @@ export default async function paymentsRoutes(fastify: FastifyInstance) {
       } catch (e: unknown) {
         throw errors.badRequest((e as Error).message);
       }
+      assertValidFee(feeAmount);
 
-      if (!Number.isSafeInteger(feeAmount) || feeAmount < 0) {
-        throw errors.badRequest("Computed fee is invalid.");
-      }
+      const checkoutLineItems = buildCheckoutLineItems(items, {
+        amount: feeAmount,
+        waived: effectiveWaiveFee,
+        currency: resolvedCurrency,
+      });
+      const totalAmount = computeTotalAmount(baseAmount, feeAmount, effectiveWaiveFee);
 
-      const checkoutLineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = lineItems.map(
-        (item) => ({
-          price_data: {
-            currency: item.price_data.currency,
-            product_data: {
-              name: item.price_data.product_data.name,
-              ...(item.price_data.product_data.description
-                ? { description: item.price_data.product_data.description }
-                : {}),
-            },
-            unit_amount: item.price_data.unit_amount,
-          },
-          quantity: item.quantity,
-        })
-      );
+      const { successUrl, cancelUrl, frontendOrigin } = resolveCheckoutRedirects(client, group);
 
-      if (feeAmount > 0 && !effectiveWaiveFee) {
-        checkoutLineItems.push({
-          price_data: {
-            currency: resolvedCurrency,
-            product_data: {
-              name: "Processing Fee",
-            },
-            unit_amount: feeAmount,
-          },
-          quantity: 1,
-        });
-      }
+      const sessionParams = buildCheckoutSessionParams({
+        checkoutLineItems,
+        successUrl,
+        cancelUrl,
+        frontendOrigin,
+        description,
+        userMetadata,
+        clientId,
+        baseAmount,
+        feeAmount,
+        waived: effectiveWaiveFee,
+      });
 
-      const totalAmount = effectiveWaiveFee ? baseAmount : baseAmount + feeAmount;
+      const session = await createCheckoutSession(request, reply, paymentCreateBucket, {
+        sessionParams,
+        stripeAccountId,
+        stripeIdempotencyKey,
+      });
+      if (!session) return;
 
-      const defaultSuccessUrl = resolveDefaultPaymentSuccessUrl();
-      const defaultCancelUrl = resolveDefaultPaymentCancelUrl();
-      const successUrl = client.paymentSuccessUrl ?? group?.paymentSuccessUrl ?? defaultSuccessUrl;
-      const cancelUrl = client.paymentCancelUrl ?? group?.paymentCancelUrl ?? defaultCancelUrl;
-      const frontendOrigin = successUrl && cancelUrl ? undefined : resolveFrontendOrigin();
-
-      const sessionParams: Stripe.Checkout.SessionCreateParams = {
-        mode: "payment",
-        line_items: checkoutLineItems,
-        success_url: appendCheckoutSessionId(
-          successUrl ?? `${frontendOrigin}/payment-success?session_id={CHECKOUT_SESSION_ID}`
-        ),
-        cancel_url: cancelUrl ?? `${frontendOrigin}/payment-cancel`,
-        payment_intent_data: {
-          description,
-          metadata: {
-            ...userMetadata,
-            clientId,
-            baseAmount: baseAmount.toString(),
-            feeAmount: effectiveWaiveFee ? "0" : feeAmount.toString(),
-            waivedFeeAmount: effectiveWaiveFee ? feeAmount.toString() : "0",
-          },
-        },
-        metadata: {
-          clientId,
-        },
-      };
-
-      let session: Stripe.Checkout.Session;
-      let stripeCalled = false;
-      try {
-        if (sessionParams.payment_intent_data && !effectiveWaiveFee) {
-          sessionParams.payment_intent_data.application_fee_amount = feeAmount;
-        }
-        session = await withStripeCircuit(() => {
-          stripeCalled = true;
-          return stripe.checkout.sessions.create(sessionParams, {
-            stripeAccount: stripeAccountId,
-            idempotencyKey: stripeIdempotencyKey,
-          });
-        });
-      } catch (err) {
-        request.log.error(errorLogFields(err), "Stripe Checkout session creation failed");
-        // A request refused before it reached Stripe (no slot in time, or the circuit already
-        // open) is told to retry, so it gives its rate-limit token back and the retry is not
-        // charged twice. A circuit-open error after the call started is a timeout of a call
-        // that did go out, so it keeps its token like every other outcome that reached Stripe.
-        if (isStripeBusyError(err) || (isCircuitOpenError(err) && !stripeCalled)) {
-          await paymentCreateBucket.refund(request);
-        }
-        if (
-          mapStripeError(err, reply, {
-            circuitOpen: STRIPE_CIRCUIT_OPEN_ERROR,
-            cardDeclinedCode: "CARD_DECLINED",
-            rateLimited: { error: "Payment service is busy. Please retry.", code: "RATE_LIMITED" },
-            permanentErrors: true,
-          })
-        )
-          return;
-        throw errors.stripeFailed("Payment processing failed. Please try again.");
-      }
-
-      // CRITICAL: Persist ledger synchronously BEFORE returning the checkout URL.
-      // If this fails, we return 503 — the caller can retry with the same
-      // idempotency key and Stripe will return the existing session.
-      let ledgerResult: "recorded" | "key_reused";
-      try {
-        ledgerResult = await insertPaymentLedger({
-          id: uuidv4(),
-          idempotencyKey,
-          connectedAccountId: stripeAccountId,
-          stripeSessionId: session.id,
-          stripePaymentIntentId: null,
-          clientId,
-          source: "checkout",
-          status: "created",
-          baseAmountCents: baseAmount,
-          totalAmountCents: totalAmount,
-          feeAmountCents: effectiveWaiveFee ? 0 : feeAmount,
-          refundedAmountCents: 0,
-          currency: resolvedCurrency,
-          metadata: Object.keys(userMetadata).length > 0 ? JSON.stringify(userMetadata) : null,
-        });
-      } catch (err) {
-        request.log.error(
-          { ...errorLogFields(err), stripeSessionId: session.id },
-          "Ledger insert failed after Stripe Checkout session creation — returning 503"
-        );
-        return reply.code(503).send({
-          error:
-            "Payment recorded but confirmation failed. Please retry with the same Idempotency-Key.",
-          code: "LEDGER_PERSISTENCE_FAILED",
-        });
-      }
-
-      if (ledgerResult === "key_reused") {
-        request.log.warn(
-          { clientId, stripeSessionId: session.id },
-          "Idempotency-Key already used for a different payment session"
-        );
-        return reply.code(409).send({
-          error: "This Idempotency-Key was already used with a different request body.",
-          code: "IDEMPOTENCY_KEY_REUSED",
-        });
-      }
-
-      return reply.code(201).send({ url: session.url, sessionId: session.id });
+      return recordCheckoutLedger(request, reply, session, {
+        idempotencyKey,
+        stripeAccountId,
+        clientId,
+        baseAmount,
+        totalAmount,
+        feeAmount: effectiveWaiveFee ? 0 : feeAmount,
+        currency: resolvedCurrency,
+        userMetadata,
+      });
     }
   );
 
