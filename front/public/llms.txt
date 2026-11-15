@@ -12,7 +12,7 @@
 
 ## Team
 
-- [Our team](https://dfwsc.com/team): A small team of full-stack, DevOps, and network engineers: Jeremy Ashley (Founder & CTO), Diego Espino (Full Stack & DevOps Engineer), and Hector Oropesa (Full Stack Developer, DevOps & Network Engineer).
+- [Our team](https://dfwsc.com/team): A small team of full-stack, DevOps, and network engineers: Michael Diltz (CEO), Jeremy Ashley (Founder & CTO), Diego Espino (Full Stack & DevOps Engineer), and Hector Oropesa (Full Stack Developer, DevOps & Network Engineer).
 
 ## Developer documentation
 
