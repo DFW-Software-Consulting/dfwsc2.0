@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import DiegoEspinoImage from "../assets/diego-espino.jpg";
 import HectorOropesaImage from "../assets/hector-oropesa.webp";
 import JeremyAshleyImage from "../assets/jeremy-ashley.jpg";
-import MichelDiltzImage from "../assets/michel-diltz.webp";
+import MichaelDiltzImage from "../assets/michael-diltz.webp";
 import CtaStrip from "../components/CtaStrip.jsx";
 import Disclosure from "../components/Disclosure.jsx";
 import HeroBackdrop, { loadTerrain } from "../components/HeroBackdrop.jsx";
@@ -24,7 +24,7 @@ import "../styles/studio.css";
 import "./Team.css";
 
 const memberImages = {
-  "Michel Diltz": MichelDiltzImage,
+  "Michael Diltz": MichaelDiltzImage,
   "Jeremy Ashley": JeremyAshleyImage,
   "Diego Espino": DiegoEspinoImage,
   "Hector Oropesa": HectorOropesaImage,

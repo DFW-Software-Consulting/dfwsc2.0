@@ -128,7 +128,7 @@ describe("Team", () => {
     renderWithProviders(<Team />, { initialEntries: ["/team"] });
 
     const members = [
-      ["Michel Diltz", "CEO", "Company strategy · Client partnerships"],
+      ["Michael Diltz", "CEO", "Company strategy · Client partnerships"],
       ["Jeremy Ashley", "Founder & CTO", "Discovery · Technical direction"],
       ["Diego Espino", "Full Stack & DevOps Engineer", "Deployment · Performance"],
       ["Hector Oropesa", "DevOps & Network Engineer", "Cloud systems · Networking"],
@@ -137,7 +137,7 @@ describe("Team", () => {
       const article = screen.getByRole("heading", { name }).closest("article");
       const card = within(article);
       const linkName = `${name} on LinkedIn (opens in a new tab)`;
-      if (name === "Michel Diltz") {
+      if (name === "Michael Diltz") {
         expect(card.queryByRole("link", { name: linkName })).not.toBeInTheDocument();
       } else {
         expect(card.getByRole("link", { name: linkName })).toBeInTheDocument();
@@ -151,7 +151,7 @@ describe("Team", () => {
     renderWithProviders(<Team />, { initialEntries: ["/team"] });
 
     const photos = {
-      "Michel Diltz": "michel-diltz",
+      "Michael Diltz": "michael-diltz",
       "Jeremy Ashley": "jeremy-ashley",
       "Diego Espino": "diego-espino",
       "Hector Oropesa": "hector-oropesa",

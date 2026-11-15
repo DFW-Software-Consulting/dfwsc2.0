@@ -1,10 +1,10 @@
 // Add a member's personal profile as `linkedin` (https://www.linkedin.com/in/...) to link their photo.
 export const teamMembers = [
   {
-    name: "Michel Diltz",
+    name: "Michael Diltz",
     role: "CEO",
     intro: "Setting the direction—and making sure every client is set up to win.",
-    bio: "Leads company strategy, client partnerships, and day-to-day operations. Focused on building lasting relationships, growing the business, and keeping the team aligned on delivering real results for every client.",
+    bio: "Leads company strategy, operations, and client partnerships. Keeps every engagement tied to real business outcomes and builds long-term relationships with the teams we serve.",
     focus: "Company strategy · Client partnerships · Growth",
   },
   {
