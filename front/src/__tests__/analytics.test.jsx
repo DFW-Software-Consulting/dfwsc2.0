@@ -10,6 +10,7 @@ async function renderAnalytics({ src, domain, path = "/" } = {}) {
   vi.stubEnv("VITE_ANALYTICS_DOMAIN", domain ?? "");
   const { default: Analytics } = await import("../components/Analytics");
   let navigate;
+  // biome-ignore lint/correctness/noComponentHookFactories: test-local component captures the router's navigate for the test body.
   function Nav() {
     navigate = useNavigate();
     return null;
