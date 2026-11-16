@@ -1,0 +1,6 @@
+ALTER TABLE "client_groups" ADD CONSTRAINT "client_groups_processing_fee_percent_check" CHECK ("client_groups"."processing_fee_percent" >= 0 AND "client_groups"."processing_fee_percent" <= 100) NOT VALID;--> statement-breakpoint
+ALTER TABLE "client_groups" ADD CONSTRAINT "client_groups_processing_fee_cents_check" CHECK ("client_groups"."processing_fee_cents" >= 0) NOT VALID;--> statement-breakpoint
+ALTER TABLE "client_groups" ADD CONSTRAINT "client_groups_processing_fee_exclusive_check" CHECK ("client_groups"."processing_fee_percent" IS NULL OR "client_groups"."processing_fee_cents" IS NULL) NOT VALID;--> statement-breakpoint
+ALTER TABLE "clients" ADD CONSTRAINT "clients_processing_fee_percent_check" CHECK ("clients"."processing_fee_percent" >= 0 AND "clients"."processing_fee_percent" <= 100) NOT VALID;--> statement-breakpoint
+ALTER TABLE "clients" ADD CONSTRAINT "clients_processing_fee_cents_check" CHECK ("clients"."processing_fee_cents" >= 0) NOT VALID;--> statement-breakpoint
+ALTER TABLE "clients" ADD CONSTRAINT "clients_processing_fee_exclusive_check" CHECK ("clients"."processing_fee_percent" IS NULL OR "clients"."processing_fee_cents" IS NULL) NOT VALID;

@@ -1,6 +1,8 @@
 export const RATE_LIMIT_MAX = 120;
 export const RATE_LIMIT_WINDOW_MS = 60_000;
 export const MAX_FEE_PERCENT = 100;
+// Postgres int4 max; the processing_fee_cents column is an integer, so larger values overflow (500).
+export const MAX_FEE_CENTS = 2147483647;
 export const MAX_COMPANY_NAME_LENGTH = 120;
 export const REPORT_MAX_CONCURRENCY = 3;
 export const MIN_JWT_SECRET_LENGTH = 32;

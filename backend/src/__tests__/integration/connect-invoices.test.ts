@@ -35,6 +35,7 @@ import {
   fakeConnectInvoicing as stripe,
   stripeApiError,
 } from "../helpers/fake-stripe-connect-invoicing";
+import { insertLegacyClient, insertLegacyGroup } from "../helpers/legacy-fee-rows";
 
 const sha = (v: string) => createHash("sha256").update(v).digest("hex");
 const HOUR = 60 * 60 * 1000;
@@ -46,11 +47,21 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
   const clientIds: string[] = [];
   const groupIds: string[] = [];
 
-  async function seedClient(over: Partial<typeof clients.$inferInsert> = {}): Promise<Seeded> {
+  /**
+   * `legacy` seeds a row the fee CHECKs (migration 0042) reject, such as both fee types set or a
+   * percent above 100, as production can still hold from before they were added NOT VALID.
+   */
+  async function seedClient(
+    over: Partial<typeof clients.$inferInsert> = {},
+    legacy = false
+  ): Promise<Seeded> {
     const id = randomUUID();
     const apiKey = `inv_key_${randomUUID().replace(/-/g, "")}`;
     const account = `acct_inv_${id.slice(0, 8)}`;
-    await db.insert(clients).values({
+    const insert = legacy
+      ? insertLegacyClient
+      : (v: typeof clients.$inferInsert) => db.insert(clients).values(v);
+    await insert({
       id,
       name: "Invoices Client",
       email: `inv-${id}@example.com`,
@@ -495,7 +506,7 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
     });
 
     it("uses the client percentage first, rounded", async () => {
-      const c = await seedClient({ processingFeePercent: "2.50", processingFeeCents: 999 });
+      const c = await seedClient({ processingFeePercent: "2.50", processingFeeCents: 999 }, true);
       const res = await post(c.apiKey, body(await seedCustomer(c)));
       expect(res.json()).toMatchObject({ feeAmountCents: 2500, totalCents: 102_500 });
       expect(stripe.callsTo("invoices.create")[0].params?.application_fee_amount).toBe(2500);
@@ -510,7 +521,7 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
     it("falls back to the group percentage, then the group cents", async () => {
       const make = async (over: Partial<typeof clientGroups.$inferInsert>) => {
         const id = `grp-${randomUUID().replace(/-/g, "").slice(0, 12)}`;
-        await db.insert(clientGroups).values({
+        const row = {
           id,
           name: "Fee Group",
           status: "active",
@@ -518,7 +529,10 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
           createdAt: new Date(),
           updatedAt: new Date(),
           ...over,
-        });
+        } as const;
+        // A group with both fee types set only exists as a legacy row (migration 0042 CHECKs).
+        if (over.processingFeePercent && over.processingFeeCents) await insertLegacyGroup(row);
+        else await db.insert(clientGroups).values(row);
         groupIds.push(id);
         return id;
       };
@@ -574,7 +588,7 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
     });
 
     it("answers 400 for an invalid configured percentage, before any Stripe call", async () => {
-      const c = await seedClient({ processingFeePercent: "150.00" });
+      const c = await seedClient({ processingFeePercent: "150.00" }, true);
       const res = await post(c.apiKey, body(await seedCustomer(c)));
       expect(res.statusCode).toBe(400);
       expect(stripe.calls).toHaveLength(0);

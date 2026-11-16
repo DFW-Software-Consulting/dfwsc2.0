@@ -7,6 +7,7 @@ import { clientGroups, clients } from "../../db/schema";
 import { MAX_FEE_PERCENT } from "../../lib/constants";
 import { makeAdminToken } from "../helpers/auth";
 import { ensureBaseEnv } from "../helpers/env";
+import { insertLegacyClient } from "../helpers/legacy-fee-rows";
 
 describe("Clients API Integration", () => {
   let app: any;
@@ -483,6 +484,31 @@ describe("Clients API Integration", () => {
 
       expect(response.statusCode).toBe(400);
       expect(response.json().error).toBe("processingFeeCents must be a non-negative integer.");
+    });
+
+    it("returns 400 when processingFeeCents exceeds the int4 maximum", async () => {
+      const clientId = randomUUID();
+      cleanupIds.push(clientId);
+
+      await db.insert(clients).values({
+        id: clientId,
+        name: "Fee Cap Client",
+        email: `${clientId}@example.com`,
+        status: "active",
+      });
+
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/v1/clients/${clientId}`,
+        headers: {
+          authorization: `Bearer ${makeAdminToken()}`,
+          "content-type": "application/json",
+        },
+        payload: { processingFeeCents: 2147483648 },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toBe("processingFeeCents must be at most 2147483647.");
     });
 
     it("returns 400 when groupId does not exist", async () => {
@@ -993,14 +1019,17 @@ describe("Clients API Integration", () => {
     async function seed(fees: { processingFeePercent?: string; processingFeeCents?: number }) {
       const id = randomUUID();
       cleanupIds.push(id);
-      await db.insert(clients).values({
+      const row = {
         id,
         name: "Fee Client",
         email: `fee-${id}@example.com`,
         workspace,
         status: "active",
         ...fees,
-      });
+      } as const;
+      // Both fee types set is a legacy state the CHECKs (migration 0042) reject on new writes.
+      if (fees.processingFeePercent && fees.processingFeeCents) await insertLegacyClient(row);
+      else await db.insert(clients).values(row);
       return id;
     }
 
@@ -1057,8 +1086,8 @@ describe("Clients API Integration", () => {
       expect(Number(row.percent)).toBeCloseTo(3);
     });
 
-    it("leaves both fees unchanged when neither is in the body", async () => {
-      const id = await seed({ processingFeePercent: "3", processingFeeCents: 100 });
+    it("leaves the stored fee unchanged when neither is in the body", async () => {
+      const id = await seed({ processingFeePercent: "3" });
       const before = await stored(id);
       const res = await patch(id, { notes: "unrelated" });
       expect(res.statusCode).toBe(200);
