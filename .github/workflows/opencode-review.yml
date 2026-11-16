@@ -148,7 +148,7 @@ jobs:
         # Credentials stay persisted: with use_github_token, `opencode github run` does
         # `git fetch origin <branch>` itself and relies on the checkout's credentials (this repo's
         # private fetch would otherwise fail). The model is blocked from reading .git/ instead.
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Restore OpenCode cache
         id: cache
