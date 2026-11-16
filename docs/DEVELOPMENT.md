@@ -23,7 +23,7 @@ make up-build            # first run; later: make up
 | `redis` | `redis:7-alpine` | 127.0.0.1:6379 | Used only if `REDIS_URL` is set in `.env`; otherwise rate limiting is in-memory. |
 | `mailhog` | `mailhog/mailhog` | SMTP 1025, UI 8025 | The `.env.example` SMTP values point here. |
 | `stripe-cli` | `stripe/stripe-cli` | - | Forwards Stripe events to `api:4242/api/v1/webhooks/stripe`; needs a real `STRIPE_SECRET_KEY` in `.env`. |
-| `loki`, `promtail` | Grafana | 3100 | Log aggregation; configuration in `observability/`. Port 3100 can clash with another local Loki. |
+| `loki`, `alloy` | Grafana | 3100 | Log aggregation; configuration in `observability/`. Port 3100 can clash with another local Loki. |
 
 The dev `api` container runs with `NODE_ENV=development`, so it applies migrations itself. Production never does: the `migrator` service runs `npm run db:migrate` once per deploy ([COOLIFY_DEPLOYMENT.md](./COOLIFY_DEPLOYMENT.md)). Swagger is forced off in the dev stack (see [ENVIRONMENT.md](./ENVIRONMENT.md) section 2).
 

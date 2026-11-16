@@ -170,7 +170,7 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 
 ### Monitoring & Logging
 - `GET /api/v1/metrics` exposes sync and circuit-breaker state, and needs `METRICS_TOKEN` set in Coolify (see above).
-- The API logs structured JSON to stdout, which Coolify's log view shows. The Loki and Promtail services exist only in the dev stack.
+- The API logs structured JSON to stdout, which Coolify's log view shows. The Loki and Alloy services exist only in the dev stack.
 - Set up resource monitoring (CPU, memory, disk) and alerting for service failures in Coolify. The `backup` container's own healthcheck fails when the last successful backup is older than `BACKUP_HEARTBEAT_MAX_AGE`.
 
 ### Backup Strategy
