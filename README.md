@@ -24,7 +24,7 @@ dfwsc2.0/
 │   └── Dockerfile
 │
 ├── backup/                   # Scheduled Postgres backup image (prod stack)
-├── observability/            # Promtail config (dev stack logging)
+├── observability/            # Alloy config (dev stack logging)
 ├── fallow-baselines/         # Dead-code gate baselines used by CI
 ├── scripts/                  # Repo-level scripts (legacy backup-db.sh, manual/)
 ├── docs/                     # Reference documentation (see below)
@@ -67,7 +67,7 @@ make up-build            # or: make up
 | Web UI (Vite) | http://localhost:5173 |
 | API | http://localhost:4242 |
 | Mailhog | http://localhost:8025 |
-| Loki (Promtail ships container logs to it) | http://localhost:3100 |
+| Loki (Alloy ships container logs to it) | http://localhost:3100 |
 
 The stack also runs PostgreSQL, Redis and the Stripe CLI, which forwards webhooks to `/api/v1/webhooks/stripe`. The dev API container applies migrations on start.
 
