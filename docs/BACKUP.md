@@ -147,4 +147,4 @@ The container is healthy when `/backups/heartbeat` exists and is newer than `BAC
 
 ## Image packages
 
-The base image (`alpine:3.21.3`) is pinned, but the `apk` packages in `backup/Dockerfile` are deliberately not pinned to exact revisions: Alpine removes superseded revisions from its index, so exact pins stop resolving on their own schedule and break the image build (and with it the production deploy). Packages float within the Alpine 3.21 branch and `postgresql17-client` stays on Postgres major 17. To pick up newer package revisions, rebuild with `make backup-build`.
+The base image (`alpine:3.24.0`) is pinned, but the `apk` packages in `backup/Dockerfile` are deliberately not pinned to exact revisions: Alpine removes superseded revisions from its index, so exact pins stop resolving on their own schedule and break the image build (and with it the production deploy). Packages float within the Alpine 3.24 branch and `postgresql17-client` stays on Postgres major 17. To pick up newer package revisions, rebuild with `make backup-build`.

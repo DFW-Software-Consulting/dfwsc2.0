@@ -84,7 +84,7 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 |------|-------|-------|
 | `backend/Dockerfile` | `api` (target `production`) and `migrator` (target `builder`) | `node:22-alpine`; the builder compiles TypeScript to `build-dist`; production keeps `drizzle/` and `drizzle.config.ts` so `drizzle-kit migrate` can run. |
 | `front/Dockerfile` | Frontend | Build args for `VITE_*`, `verify-build` step, CSP origin substitution with a check that no placeholder remains, non-root nginx. |
-| `backup/Dockerfile` | `backup` | Alpine 3.21 with `postgresql17-client`, `aws-cli`, `supercronic`, `tini`; non-root `backup` user. |
+| `backup/Dockerfile` | `backup` | Alpine 3.24 with `postgresql17-client`, `aws-cli`, `supercronic`, `tini`; non-root `backup` user. |
 
 ## Nginx Configuration
 

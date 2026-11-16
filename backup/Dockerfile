@@ -1,9 +1,9 @@
-FROM alpine:3.21.3
+FROM alpine:3.24.0
 
 # The base image is pinned; apk packages are intentionally NOT pinned to exact
 # revisions. Alpine drops superseded revisions from its index, so exact pins stop
 # resolving on their own schedule and break the build (and the Coolify deploy).
-# Packages stay on the Alpine 3.21 branch (and postgresql17-client on major 17).
+# Packages stay on the Alpine 3.24 branch (and postgresql17-client on major 17).
 RUN apk add --no-cache --upgrade \
     bash \
     ca-certificates \
