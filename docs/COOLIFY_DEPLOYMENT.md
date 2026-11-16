@@ -21,37 +21,39 @@ The application deploys to Coolify as two independent resources, plus a database
 ## Service Configuration
 
 ### 1. Database Service
+
 - **Type**: PostgreSQL 17 (Coolify's managed PostgreSQL or an external/custom instance; the dev stack, CI and the backup image all use major 17).
 - **Not in the Compose file**: provision it separately and point the Backend's `DATABASE_URL` at it.
 - **Port**: 5432 (internal only).
 - **Credentials**:
   - `POSTGRES_USER=postgres`
-  - `POSTGRES_PASSWORD=<generate a strong random value with `openssl rand -hex 32`, which is safe to place in `DATABASE_URL`; never use a default such as `postgres`. A password with a `/`, `@` or `:` in it (as `openssl rand -base64 32` often produces) must be percent-encoded in the URL, or the migration and the API fail to start>`
+  - `POSTGRES_PASSWORD=<generate a strong random value with `openssl rand -hex 32`, which is safe to place in `DATABASE_URL`; never use a default such as `postgres`. A password with a `/`, `@`or`:`in it (as`openssl rand -base64 32` often produces) must be percent-encoded in the URL, or the migration and the API fail to start>`
   - **Existing databases**: the Postgres image reads `POSTGRES_PASSWORD` only when it initialises an empty data directory, so changing the variable alone rotates nothing. To replace a default password, run `ALTER ROLE postgres PASSWORD '<new password>';` and update `DATABASE_URL` in the same change.
   - `POSTGRES_DB=stripe_portal`
 - **Storage**: persistent volume for the data directory.
 - **Healthcheck**: `pg_isready -U postgres -d stripe_portal`
 
 ### 2. Backend Service (API)
+
 - **Source**: the repository root, deployed as a Coolify **Docker Compose** resource pointing at `docker-compose.prod.yml` (the `api` and `migrator` services build from `./backend`).
 - **Containers**: the compose file defines four services:
   - `migrator` - builds the `builder` target of `backend/Dockerfile`, runs `npm run db:migrate` once against `DATABASE_URL`, then exits (`restart: "no"`). `api` will not start until it completes successfully.
   - `api` - the Fastify server (`node dist/index.js`, port 4242, published only on `127.0.0.1:4242` of the host). It also joins Coolify's external `coolify` network under the alias `dfwsc-api` (Coolify ignores `container_name`), which is how the frontend's nginx reaches it.
   - `dfwsc-redis` - `redis:7-alpine`, backing rate limiting and circuit-breaker state. It sits only on the stack's `backend` network, and the compose file fixes the API's `REDIS_URL` to `redis://dfwsc-redis:6379`. The plain name `redis` is not used because the `api` service also sits on Coolify's shared `coolify` network, where Coolify's own control-plane Redis (password-protected) answers to `redis` too. A network alias would not help, since Coolify ignores custom network aliases; the unique service name is what makes it resolve. A `REDIS_URL` set in Coolify is not read: it is not interpolated into the compose file, so it can be deleted. To use an external Redis instead, edit the `REDIS_URL` line in `docker-compose.prod.yml`.
   - `backup` - built from `./backup` (`backup/Dockerfile`: Alpine with `pg_dump`, `aws-cli` and `supercronic`). `backup/scripts/scheduler.sh` runs `backup.sh` on `BACKUP_SCHEDULE` (default `0 2 * * *`) under a file lock, writing gzipped dumps to the `postgres_backups` volume and uploading to S3 when `BACKUP_S3_BUCKET` is set. Variables, restore drills and the healthcheck: [BACKUP.md](./BACKUP.md).
-- **Build**: `backend/Dockerfile`, multi-stage on `node:22-alpine`; the `production` target installs production dependencies only, runs as the `node` user and starts `node dist/index.js`.
+- **Build**: `backend/Dockerfile`, multi-stage on `node:24-alpine`; the `production` target installs production dependencies only, runs as the `node` user and starts `node dist/index.js`.
 - **Environment variables**: add them in Coolify on the Backend resource. The complete list, with required/default/purpose per variable, is in [ENVIRONMENT.md](./ENVIRONMENT.md). The minimum to start the API is:
 
-  | Variable | Notes |
-  |----------|-------|
-  | `DATABASE_URL` | Connection URL of the database above. |
-  | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Live keys in production. |
-  | `JWT_SECRET` | At least 32 characters. |
-  | `FRONTEND_ORIGIN` | The site origin, for example `https://dfwsc.com`; comma-separated list allowed. |
-  | `API_BASE_URL` | Required in production, for example `https://api.dfwsc.com`. Without it onboarding links and `/app-config.js` answer 500. |
-  | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Outgoing mail. Set `SMTP_FROM` explicitly. |
-  | `CONTACT_INBOX` | Recipient of the website contact form (falls back to `SMTP_FROM`). |
-  | `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_APP_PASSWORD` | Required for admin login and for every Nextcloud feature flag. |
+  | Variable                                                             | Notes                                                                                                                     |
+  | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+  | `DATABASE_URL`                                                       | Connection URL of the database above.                                                                                     |
+  | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`                         | Live keys in production.                                                                                                  |
+  | `JWT_SECRET`                                                         | At least 32 characters.                                                                                                   |
+  | `FRONTEND_ORIGIN`                                                    | The site origin, for example `https://dfwsc.com`; comma-separated list allowed.                                           |
+  | `API_BASE_URL`                                                       | Required in production, for example `https://api.dfwsc.com`. Without it onboarding links and `/app-config.js` answer 500. |
+  | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`      | Outgoing mail. Set `SMTP_FROM` explicitly.                                                                                |
+  | `CONTACT_INBOX`                                                      | Recipient of the website contact form (falls back to `SMTP_FROM`).                                                        |
+  | `NEXTCLOUD_BASE_URL`, `NEXTCLOUD_USERNAME`, `NEXTCLOUD_APP_PASSWORD` | Required for admin login and for every Nextcloud feature flag.                                                            |
 
   Feature flags (`SALES_AUTOMATION_ENABLED`, `CLIENT_ONBOARDING_ENABLED`, `BILLING_REQUESTS_ENABLED`, `CONNECT_INVOICING`, `CEREBO_ENABLED` and the mirror and sync flags) all default to off. Their prerequisites, and a rollout warning for `STRIPE_ID_WRITEBACK_DRY_RUN`, are in [ENVIRONMENT.md](./ENVIRONMENT.md) section 4; the features themselves are in [BACKEND.md](./BACKEND.md) sections 9-16.
 - **Admin login (Nextcloud)**: the admin panel signs users in against Nextcloud; there are no local admin accounts, and `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `ALLOW_ADMIN_SETUP` are not read (remove them from Coolify). Before relying on it:
@@ -66,6 +68,7 @@ The application deploys to Coolify as two independent resources, plus a database
 - **Healthcheck**: defined in the compose file as `wget -qO- http://127.0.0.1:4242/api/v1/health` (every 10 s, 5 retries, 10 s start period). The image is Alpine and has `wget` but not `curl`, so use `wget` for any check you add. The endpoint returns 200 with `database: "connected"`, or 503 when the database is unreachable.
 
 ### 3. Frontend Service (React + Nginx)
+
 - **Deployment**: a **separate** Coolify application, independent of the backend's Compose stack. It is not a service in `docker-compose.prod.yml` and is deployed and scaled on its own.
 - **Source**: the `./front` directory, built with `front/Dockerfile`.
 - **Build**: multi-stage. The builder runs `npm run build` (Vite client build plus a prerender step for the marketing pages), then `scripts/verify-build.mjs`, which fails the image build if a prerendered page nginx routes to is missing, then renders `nginx.conf` into the production config. The final stage is `nginx:alpine` running as the non-root `nginx` user with its pid file in `/tmp`. Read `front/Dockerfile` for the exact steps.
@@ -80,11 +83,11 @@ The application deploys to Coolify as two independent resources, plus a database
 
 The Dockerfiles are the source of truth; they are not copied here because the copies drifted.
 
-| File | Image | Notes |
-|------|-------|-------|
-| `backend/Dockerfile` | `api` (target `production`) and `migrator` (target `builder`) | `node:22-alpine`; the builder compiles TypeScript to `build-dist`; production keeps `drizzle/` and `drizzle.config.ts` so `drizzle-kit migrate` can run. |
-| `front/Dockerfile` | Frontend | Build args for `VITE_*`, `verify-build` step, CSP origin substitution with a check that no placeholder remains, non-root nginx. |
-| `backup/Dockerfile` | `backup` | Alpine 3.24 with `postgresql17-client`, `aws-cli`, `supercronic`, `tini`; non-root `backup` user. |
+| File                 | Image                                                         | Notes                                                                                                                                                    |
+| -------------------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `backend/Dockerfile` | `api` (target `production`) and `migrator` (target `builder`) | `node:24-alpine`; the builder compiles TypeScript to `build-dist`; production keeps `drizzle/` and `drizzle.config.ts` so `drizzle-kit migrate` can run. |
+| `front/Dockerfile`   | Frontend                                                      | Build args for `VITE_*`, `verify-build` step, CSP origin substitution with a check that no placeholder remains, non-root nginx.                          |
+| `backup/Dockerfile`  | `backup`                                                      | Alpine 3.24 with `postgresql17-client`, `aws-cli`, `supercronic`, `tini`; non-root `backup` user.                                                        |
 
 ## Nginx Configuration
 
@@ -102,6 +105,7 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 ## Deployment Sequence
 
 ### Phase 1: Infrastructure Setup
+
 1. **Create Database Service**
    - Choose PostgreSQL 17.
    - Set `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`.
@@ -124,6 +128,7 @@ The Dockerfiles are the source of truth; they are not copied here because the co
    - Save and deploy.
 
 ### Phase 2: Configuration & Testing
+
 1. **Verify Database Connection**
    - Check the `migrator` logs for completed migrations and the `api` logs for a successful start. If a required table is missing, the API exits at boot.
 
@@ -138,14 +143,13 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 
 4. **Register webhooks** (payments are not reconciled without the first one)
 
-   | Endpoint (on the API host) | Secret variable | Behavior when the secret is unset |
-   |----------------------------|-----------------|-----------------------------------|
-   | `POST /api/v1/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` (required at boot) | API does not start. |
-   | `POST /api/v1/webhooks/stripe-billing` | `STRIPE_BILLING_WEBHOOK_SECRET` | Endpoint answers 404. |
-   | `POST /api/v1/webhooks/nextcloud/sales-lead` | `SALES_LEAD_WEBHOOK_SECRET` | 404; the poller still runs. |
-   | `POST /api/v1/webhooks/nextcloud/client-onboarding` | `CLIENT_ONBOARDING_WEBHOOK_SECRET` | 404; the poller still runs. |
-   | `POST /api/v1/webhooks/nextcloud/billing-request` | `BILLING_REQUESTS_WEBHOOK_SECRET` | 404; the poller still runs. |
-
+   | Endpoint (on the API host)                          | Secret variable                            | Behavior when the secret is unset |
+   | --------------------------------------------------- | ------------------------------------------ | --------------------------------- |
+   | `POST /api/v1/webhooks/stripe`                      | `STRIPE_WEBHOOK_SECRET` (required at boot) | API does not start.               |
+   | `POST /api/v1/webhooks/stripe-billing`              | `STRIPE_BILLING_WEBHOOK_SECRET`            | Endpoint answers 404.             |
+   | `POST /api/v1/webhooks/nextcloud/sales-lead`        | `SALES_LEAD_WEBHOOK_SECRET`                | 404; the poller still runs.       |
+   | `POST /api/v1/webhooks/nextcloud/client-onboarding` | `CLIENT_ONBOARDING_WEBHOOK_SECRET`         | 404; the poller still runs.       |
+   | `POST /api/v1/webhooks/nextcloud/billing-request`   | `BILLING_REQUESTS_WEBHOOK_SECRET`          | 404; the poller still runs.       |
    - `/webhooks/stripe` is the Stripe Connect endpoint. It handles `account.updated`, the `checkout.session.*` events, `payment_intent.succeeded|payment_failed|canceled`, `charge.refunded`, `charge.dispute.created`, `application_fee.refunded`, `payout.paid|failed`, the `invoice.*` events used by connected-account invoicing, `customer.subscription.updated|paused|resumed|deleted` and `subscription_schedule.canceled` (`backend/src/routes/webhooks.ts:298-466`). Which events to subscribe to and how to register the endpoint: [STRIPE.md](./STRIPE.md).
    - `/webhooks/stripe-billing` is an **account-level** (platform) endpoint, separate from the Connect one. It handles customer, subscription, subscription-schedule and `invoice.*` events for DFWSC's own billing customers and ignores any event that carries a connected `account` (`backend/src/routes/webhooks-billing.ts:20-42,82`).
    - The three Nextcloud endpoints are called by Nextcloud's webhook listener on a form submission, with `Authorization: Bearer <secret>`. Secrets must be at least 32 characters (`openssl rand -hex 32`). They only trigger an immediate poll cycle; see [BACKEND.md](./BACKEND.md) sections 9, 10 and 14.
@@ -160,31 +164,37 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 ## Coolify-Specific Recommendations
 
 ### Service Dependencies
+
 - Deploy order: Database, then Backend, then Frontend. The frontend only needs the backend reachable at request time.
 - Within the Backend resource, `docker-compose.prod.yml`'s own `depends_on` already orders `migrator` (must complete) and `dfwsc-redis` (must start) before `api`; no extra Coolify configuration is needed.
 
 ### Environment Management
+
 - Use Coolify's secrets for `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_BILLING_WEBHOOK_SECRET`, `JWT_SECRET`, `DATABASE_URL`, `SMTP_PASS`, `NEXTCLOUD_APP_PASSWORD`, the `*_WEBHOOK_SECRET` values and `AWS_SECRET_ACCESS_KEY`.
 - **Only variables listed in `docker-compose.prod.yml` reach the containers.** Setting any other variable in Coolify does nothing. The ones the code reads but the compose file does not forward are `HOST` and `ENABLE_SWAGGER`; making one effective requires adding it to the compose file. `METRICS_TOKEN`, `TRUST_PROXY`, `CLOUDFLARE_IP_RANGES`, `DEFAULT_PAYMENT_SUCCESS_URL`, `DEFAULT_PAYMENT_CANCEL_URL` and `DB_POOL_MAX` are forwarded, so a value defined in Coolify takes effect on the next deploy. See [ENVIRONMENT.md](./ENVIRONMENT.md) section 8.
 - A variable that is forwarded but unset in Coolify arrives as an empty string, which the code treats as unset (except `SMTP_FROM`; set it).
 
 ### Monitoring & Logging
+
 - `GET /api/v1/metrics` exposes sync and circuit-breaker state, and needs `METRICS_TOKEN` set in Coolify (see above).
 - The API logs structured JSON to stdout, which Coolify's log view shows. The Loki and Promtail services exist only in the dev stack.
 - Set up resource monitoring (CPU, memory, disk) and alerting for service failures in Coolify. The `backup` container's own healthcheck fails when the last successful backup is older than `BACKUP_HEARTBEAT_MAX_AGE`.
 
 ### Backup Strategy
+
 - The Backend resource includes the `backup` service described above: nightly gzipped `pg_dump` into the `postgres_backups` volume, optionally uploaded to S3 (`BACKUP_S3_BUCKET` and the `AWS_*` credentials; `BACKUP_REQUIRE_REMOTE` makes a missing bucket a failure). Without a bucket, backups exist only on that Docker volume on the same host.
 - If using Coolify's managed PostgreSQL, also enable its automatic backups for redundancy.
 - Run a restore drill periodically ([BACKUP.md](./BACKUP.md)); an untested backup is not a backup.
 
 ### SSL/TLS
+
 - Coolify's proxy terminates TLS; no certificate handling is needed in the services.
 - Cloudflare sits in front of Coolify (**Production setup**); nginx sends HSTS itself.
 
 ## Troubleshooting
 
 ### Common Issues
+
 1. **Database Connection Failures**
    - The database is not part of the compose stack. Verify `DATABASE_URL` points at a host reachable from the containers (an external host or a Coolify database's internal address), not at a compose service name.
    - Check that the database is healthy before deploying the backend.
@@ -217,16 +227,19 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 ## Maintenance
 
 ### Updates
+
 1. Push changes to your repository.
 2. **Production setup**: a merge to `main` deploys both applications automatically (the API with a brief interruption). The repository holds no Coolify deployment configuration, so the trigger, watched paths and branch are set in Coolify.
 3. Within the backend resource, `migrator` runs first and `api` starts after it succeeds.
 
 ### Scaling
+
 - The frontend is static and scales independently of the backend.
 - More than one `api` replica shares rate-limit counters only through Redis (`dfwsc-redis` in the stack); without it every replica keeps its own counters.
 - Database scaling is handled by the PostgreSQL provider.
 
 ### Environment Promotion
+
 - Keep the same variable names in every environment and change only the values. The repository defines one production compose file; any staging environment is configured separately in Coolify.
 
 ## Files Reference
