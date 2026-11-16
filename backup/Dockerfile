@@ -1,4 +1,4 @@
-FROM alpine:3.24.0
+FROM alpine:3.24.4
 
 # The base image is pinned; apk packages are intentionally NOT pinned to exact
 # revisions. Alpine drops superseded revisions from its index, so exact pins stop
