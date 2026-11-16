@@ -7,7 +7,7 @@ The DFWSC Payment Portal is a platform for DFW Software Consulting to manage cli
 
 ## 2. Tech Stack
 - **Frontend:** React 18, Vite 8, React Router 7, TanStack Query v5, TailwindCSS v4, three.js (Home and Team scenes only).
-- **Backend:** Node.js >=22.12, Fastify 5, TypeScript.
+- **Backend:** Node.js >=24.15, Fastify 5, TypeScript.
 - **Database:** PostgreSQL 17, Drizzle ORM. Redis is optional (rate limiting, used when `REDIS_URL` is set).
 - **Integrations:** see section 4.
 - **Environment:** Docker (multi-stage builds), nginx (serves the built frontend and proxies `/api/` to the API).

@@ -39,7 +39,7 @@ The application deploys to Coolify as two independent resources, plus a database
   - `api` - the Fastify server (`node dist/index.js`, port 4242, published only on `127.0.0.1:4242` of the host). It also joins Coolify's external `coolify` network under the alias `dfwsc-api` (Coolify ignores `container_name`), which is how the frontend's nginx reaches it.
   - `dfwsc-redis` - `redis:7-alpine`, backing rate limiting and circuit-breaker state. It sits only on the stack's `backend` network, and the compose file fixes the API's `REDIS_URL` to `redis://dfwsc-redis:6379`. The plain name `redis` is not used because the `api` service also sits on Coolify's shared `coolify` network, where Coolify's own control-plane Redis (password-protected) answers to `redis` too. A network alias would not help, since Coolify ignores custom network aliases; the unique service name is what makes it resolve. A `REDIS_URL` set in Coolify is not read: it is not interpolated into the compose file, so it can be deleted. To use an external Redis instead, edit the `REDIS_URL` line in `docker-compose.prod.yml`.
   - `backup` - built from `./backup` (`backup/Dockerfile`: Alpine with `pg_dump`, `aws-cli` and `supercronic`). `backup/scripts/scheduler.sh` runs `backup.sh` on `BACKUP_SCHEDULE` (default `0 2 * * *`) under a file lock, writing gzipped dumps to the `postgres_backups` volume and uploading to S3 when `BACKUP_S3_BUCKET` is set. Variables, restore drills and the healthcheck: [BACKUP.md](./BACKUP.md).
-- **Build**: `backend/Dockerfile`, multi-stage on `node:22-alpine`; the `production` target installs production dependencies only, runs as the `node` user and starts `node dist/index.js`.
+- **Build**: `backend/Dockerfile`, multi-stage on `node:24-alpine`; the `production` target installs production dependencies only, runs as the `node` user and starts `node dist/index.js`.
 - **Environment variables**: add them in Coolify on the Backend resource. The complete list, with required/default/purpose per variable, is in [ENVIRONMENT.md](./ENVIRONMENT.md). The minimum to start the API is:
 
   | Variable | Notes |
@@ -82,7 +82,7 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 
 | File | Image | Notes |
 |------|-------|-------|
-| `backend/Dockerfile` | `api` (target `production`) and `migrator` (target `builder`) | `node:22-alpine`; the builder compiles TypeScript to `build-dist`; production keeps `drizzle/` and `drizzle.config.ts` so `drizzle-kit migrate` can run. |
+| `backend/Dockerfile` | `api` (target `production`) and `migrator` (target `builder`) | `node:24-alpine`; the builder compiles TypeScript to `build-dist`; production keeps `drizzle/` and `drizzle.config.ts` so `drizzle-kit migrate` can run. |
 | `front/Dockerfile` | Frontend | Build args for `VITE_*`, `verify-build` step, CSP origin substitution with a check that no placeholder remains, non-root nginx. |
 | `backup/Dockerfile` | `backup` | Alpine 3.24 with `postgresql17-client`, `aws-cli`, `supercronic`, `tini`; non-root `backup` user. |
 

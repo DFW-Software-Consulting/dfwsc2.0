@@ -14,7 +14,7 @@
   "author": "Jeremy Ashley",
   "main": "index.js",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=24.15.0"
   },
   "scripts": {
     "dev": "nodemon --exec ts-node src/index.ts",
@@ -64,7 +64,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/node": "^24.9.1",
+    "@types/node": "^24.19.2",
     "@types/opossum": "^8.1.9",
     "@vitest/coverage-v8": "^5.1.0",
     "@vitest/ui": "^5.0.3",

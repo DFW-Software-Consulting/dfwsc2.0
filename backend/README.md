@@ -4,7 +4,7 @@ Fastify + TypeScript API for the DFW Software Consulting payment portal: Stripe 
 
 ## Requirements
 
-- Node.js >=22.12
+- Node.js >=24.15
 - PostgreSQL 17
 - A Stripe account with Connect enabled
 - Redis (optional): when `REDIS_URL` is set, rate limits are shared across replicas; otherwise they are per-process

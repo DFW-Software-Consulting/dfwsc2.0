@@ -2,7 +2,7 @@
 
 Local setup, tests, git hooks and CI for the portal. Environment variables are in [ENVIRONMENT.md](./ENVIRONMENT.md); deployment is in [COOLIFY_DEPLOYMENT.md](./COOLIFY_DEPLOYMENT.md).
 
-Requirements: Node `>=22.12.0` (root, `backend` and `front` `package.json` `engines`), Docker with the Compose plugin.
+Requirements: Node `>=24.15.0` (root, `backend` and `front` `package.json` `engines`), Docker with the Compose plugin.
 
 ## 1. Local dev stack
 
@@ -17,8 +17,8 @@ make up-build            # first run; later: make up
 
 | Service | Source | Port | Notes |
 |---------|--------|------|-------|
-| `api` | `node:22-alpine` with `./backend` mounted | 4242 | Runs `npm install`, waits for `db`, runs `drizzle-kit migrate`, then `npm run dev` (nodemon + ts-node). A failed migration is logged and the API still starts. |
-| `web` | `node:22-alpine` with `./front` mounted | 5173 | Vite dev server. |
+| `api` | `node:24-alpine` with `./backend` mounted | 4242 | Runs `npm install`, waits for `db`, runs `drizzle-kit migrate`, then `npm run dev` (nodemon + ts-node). A failed migration is logged and the API still starts. |
+| `web` | `node:24-alpine` with `./front` mounted | 5173 | Vite dev server. |
 | `db` | `postgres:17` | 127.0.0.1:5432 | Volume `pgdata`. |
 | `redis` | `redis:7-alpine` | 127.0.0.1:6379 | Used only if `REDIS_URL` is set in `.env`; otherwise rate limiting is in-memory. |
 | `mailhog` | `mailhog/mailhog` | SMTP 1025, UI 8025 | The `.env.example` SMTP values point here. |

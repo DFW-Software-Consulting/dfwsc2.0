@@ -4,7 +4,7 @@
   "description": "DFW Software Consulting - Full-stack payment portal with React frontend and Fastify backend",
   "private": true,
   "engines": {
-    "node": ">=22.22.1"
+    "node": ">=24.15.0"
   },
   "scripts": {
     "dev": "npm run dev --prefix backend",
