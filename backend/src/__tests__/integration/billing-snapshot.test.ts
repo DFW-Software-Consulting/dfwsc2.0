@@ -192,28 +192,31 @@ describe("billing snapshot refresh", () => {
       () =>
         new Stripe.errors.StripeAPIError({ type: "api_error", message: "oops", statusCode: 503 }),
     ],
-  ])("a %s error on a payment lookup fails the refresh and keeps the previous snapshot, not Late", async (_name, make) => {
-    await addCustomer("CP-001", "cus_1");
-    const data = {
-      invoices: [attempted("in_1")],
-      invoicePayments: withPayments("in_1", "pi_1"),
-      paymentIntents: [{ id: "pi_1", status: "processing" }],
-    };
-    fakeStripe.set("cus_1", data);
-    await refresh();
-    const before = (await snapshot("CP-001")).rendered;
-    expect(before).toMatchObject({ status: "Payment processing" });
-    await db.update(billingSnapshots).set({ dirtyAt: sql`now()` });
-    resetBillingSnapshotStateForTests();
-    fakeStripe.failures.set("paymentIntents.retrieve", make());
-    const out = await refresh();
-    expect(out).toMatchObject({ failed: 1, changed: 0 });
-    expect((await snapshot("CP-001")).rendered).toEqual(before);
-    expect(logger.warn).not.toHaveBeenCalledWith(
-      expect.objectContaining({ invoiceId: "in_1" }),
-      expect.anything()
-    );
-  });
+  ])(
+    "a %s error on a payment lookup fails the refresh and keeps the previous snapshot, not Late",
+    async (_name, make) => {
+      await addCustomer("CP-001", "cus_1");
+      const data = {
+        invoices: [attempted("in_1")],
+        invoicePayments: withPayments("in_1", "pi_1"),
+        paymentIntents: [{ id: "pi_1", status: "processing" }],
+      };
+      fakeStripe.set("cus_1", data);
+      await refresh();
+      const before = (await snapshot("CP-001")).rendered;
+      expect(before).toMatchObject({ status: "Payment processing" });
+      await db.update(billingSnapshots).set({ dirtyAt: sql`now()` });
+      resetBillingSnapshotStateForTests();
+      fakeStripe.failures.set("paymentIntents.retrieve", make());
+      const out = await refresh();
+      expect(out).toMatchObject({ failed: 1, changed: 0 });
+      expect((await snapshot("CP-001")).rendered).toEqual(before);
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.objectContaining({ invoiceId: "in_1" }),
+        expect.anything()
+      );
+    }
+  );
 
   it("a rate limit during a payment lookup stops the run, as before", async () => {
     await addCustomer("CP-001", "cus_1");

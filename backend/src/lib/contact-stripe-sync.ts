@@ -20,6 +20,7 @@ import {
   type MappedFields,
   mapCardToStripe,
 } from "./contact-stripe-fields";
+import { createCyclePoller } from "./cycle-poller";
 import {
   getNextcloudConfig,
   NextcloudCircuitOpenError,
@@ -713,46 +714,16 @@ export function startContactStripeSync(
     return null;
   }
 
-  let running: Promise<unknown> | null = null;
-  let again = false;
-  let stopped = false;
-  const run = () => {
-    running = runContactStripeSyncCycle({ logger, env })
-      .catch((error: unknown) => {
-        logger.error(
-          { errorName: (error as Error)?.name },
-          "Contact to Stripe sync cycle crashed."
-        );
-      })
-      .finally(() => {
-        running = null;
-        if (again && !stopped) {
-          again = false;
-          run();
-        }
-      });
-  };
-  const trigger = () => {
-    if (stopped) return;
-    if (running) {
-      again = true;
-      return;
-    }
-    run();
-  };
-  const timer = setInterval(trigger, config.settings.intervalMs);
-  timer.unref();
-  trigger();
+  const runner = createCyclePoller({
+    logger,
+    cycle: () => runContactStripeSyncCycle({ logger, env }),
+    intervalMs: config.settings.intervalMs,
+    crashMessage: "Contact to Stripe sync cycle crashed.",
+  });
+  runner.trigger();
   logger.info(
     { addressbook: config.settings.addressbook, intervalMs: config.settings.intervalMs },
     "Contact to Stripe sync started."
   );
-  return {
-    trigger,
-    async stop() {
-      stopped = true;
-      clearInterval(timer);
-      while (running) await running;
-    },
-  };
+  return runner;
 }

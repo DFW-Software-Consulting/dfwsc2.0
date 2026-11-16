@@ -129,7 +129,11 @@ describe("JSON-LD", () => {
     expect(org.areaServed.name).toBe("Dallas–Fort Worth");
     expect(org.priceRange).toBe("$40–$200 per month");
     expect(ofType("/team", "WebSite")).toHaveLength(1);
-    expect(org).not.toHaveProperty("address");
+    expect(org.address).toMatchObject({
+      "@type": "PostalAddress",
+      postOfficeBoxNumber: "411123",
+      postalCode: "75241",
+    });
   });
 
   it("builds the pricing FAQPage from the same data the page renders", () => {

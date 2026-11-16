@@ -8,6 +8,7 @@ import {
 } from "../api/clients";
 import { resendOnboardingLink } from "../api/onboarding";
 import { useAuth } from "../contexts/AuthContext";
+import { withPagination } from "./withPagination";
 
 export function useClient(id, workspace) {
   const { token } = useAuth();
@@ -30,14 +31,7 @@ export function useClients(params = {}) {
     queryKey: ["clients", effectiveParams],
     queryFn: () => getClients(token, effectiveParams),
     enabled: !!token,
-    select: (response) => {
-      const data = Array.isArray(response) ? response : response.data;
-      return Object.assign(data ?? [], {
-        pagination: Array.isArray(response)
-          ? { total: response.length, limit: response.length, offset: 0 }
-          : { total: response.total, limit: response.limit, offset: response.offset },
-      });
-    },
+    select: withPagination,
   });
 }
 

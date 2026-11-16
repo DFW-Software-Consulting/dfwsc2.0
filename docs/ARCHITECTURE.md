@@ -7,7 +7,7 @@ The DFWSC Payment Portal is a platform for DFW Software Consulting to manage cli
 
 ## 2. Tech Stack
 - **Frontend:** React 18, Vite 8, React Router 7, TanStack Query v5, TailwindCSS v4, three.js (Home and Team scenes only).
-- **Backend:** Node.js >=22.12, Fastify 5, TypeScript.
+- **Backend:** Node.js >=24.15, Fastify 5, TypeScript.
 - **Database:** PostgreSQL 17, Drizzle ORM. Redis is optional (rate limiting, used when `REDIS_URL` is set).
 - **Integrations:** see section 4.
 - **Environment:** Docker (multi-stage builds), nginx (serves the built frontend and proxies `/api/` to the API).
@@ -131,7 +131,7 @@ The project uses a dual light/dark theme with a blue brand accent. Token tables 
 - **Linting/Formatting:** Biome.
 - **Testing:** Vitest (backend integration tests); React Testing Library (frontend).
 - **Migrations:** Drizzle-kit (`npm run db:generate` / `npm run db:migrate`).
-- **Swagger:** Enabled when `ENABLE_SWAGGER` is exactly `true` in any environment. The Swagger packages are regular dependencies (also installed by `npm ci --omit=dev`) and no code guards production, so only the env value controls it. UI at `/docs` on the API. `docker-compose.base.yml` hard-codes `ENABLE_SWAGGER: 'false'`, so it is off in the Docker stacks. On the public site, nginx redirects `/docs` to Nextcloud instead.
+- **Swagger:** Enabled when `ENABLE_SWAGGER` is exactly `true` in any environment. The Swagger packages are regular dependencies (also installed by `npm ci --omit=dev`) and no code guards production, so only the env value controls it. UI at `/docs` on the API. `docker-compose.base.yml` sets `ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}`, so it is off in the Docker stacks unless `.env` enables it; the prod compose does not forward it. On the public site, nginx redirects `/docs` to Nextcloud instead.
 
 ## 11. Deployment topology
 - **Frontend:** a separate nginx container built from `front/Dockerfile`; it serves the prerendered site and proxies `/api/` to `dfwsc-api:4242`.

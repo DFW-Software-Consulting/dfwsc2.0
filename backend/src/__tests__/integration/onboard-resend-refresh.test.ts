@@ -10,7 +10,8 @@ vi.mock("../../lib/stripe", () => ({
   },
 }));
 
-vi.mock("../../lib/mailer", () => ({
+vi.mock("../../lib/mailer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/mailer")>()),
   sendMail: vi.fn().mockResolvedValue(undefined),
   sendInvoiceEmail: vi.fn().mockResolvedValue(undefined),
   clearTransporterCache: vi.fn(),
@@ -344,18 +345,18 @@ describe("Onboard Resend + Connect Refresh", () => {
       const storedOf = async (id: string) =>
         (await db.select().from(clients).where(eq(clients.id, id)))[0].cardPaymentsStatus;
 
-      it.each([
-        "inactive",
-        "pending",
-      ])("issues a fresh onboarding link when card_payments is %s", async (status) => {
-        const id = await seedLive(status);
-        stripeNow(status);
-        const res = await resend(id);
-        expect(res.statusCode).toBe(200);
-        expect(res.json().alreadyOnboarded).toBeUndefined();
-        expect(await tokenCount(id)).toBe(1);
-        expect(stripe.accounts.retrieve).toHaveBeenCalledTimes(1);
-      });
+      it.each(["inactive", "pending"])(
+        "issues a fresh onboarding link when card_payments is %s",
+        async (status) => {
+          const id = await seedLive(status);
+          stripeNow(status);
+          const res = await resend(id);
+          expect(res.statusCode).toBe(200);
+          expect(res.json().alreadyOnboarded).toBeUndefined();
+          expect(await tokenCount(id)).toBe(1);
+          expect(stripe.accounts.retrieve).toHaveBeenCalledTimes(1);
+        }
+      );
 
       it("does not read Stripe when the stored status is already active", async () => {
         const id = await seedLive("active");

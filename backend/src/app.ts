@@ -59,7 +59,7 @@ export function resolveTrustProxy(): boolean | string {
 }
 
 // Reuse an inbound X-Request-Id for tracing so a request's logs correlate
-// end-to-end across the proxy and the app in Loki/Promtail-aggregated output,
+// end-to-end across the proxy and the app in Loki-aggregated output,
 // instead of always minting a fresh id server-side. Bounded to a safe charset
 // and length so a client can't inject arbitrary values into log lines.
 const REQUEST_ID_HEADER_PATTERN = /^[A-Za-z0-9_-]{1,100}$/;

@@ -1,16 +1,16 @@
 import { Fragment, useCallback, useState } from "react";
 import { useClients } from "../../hooks/useClients";
+import { useGroupForm } from "../../hooks/useGroupForm";
 import { useCreateGroup, useDeleteGroup, useGroups, usePatchGroup } from "../../hooks/useGroups";
-import { validateFeeValue, validateUrl } from "../../utils/validation";
 import ClientProfileView from "./ClientProfileView";
 import ConfirmModal from "./ConfirmModal";
 import AdminCard from "./shared/AdminCard";
 import BaseModal from "./shared/BaseModal";
 import Button from "./shared/Button";
-import ErrorMessage from "./shared/ErrorMessage";
 import FeeConfigSection from "./shared/FeeConfigSection";
 import FormInput from "./shared/FormInput";
 import LoadingSpinner from "./shared/LoadingSpinner";
+import ModalSaveFooter from "./shared/ModalSaveFooter";
 import { getOnboardingState } from "./shared/onboardingState";
 import RowActions from "./shared/RowActions";
 import StatusBadge from "./shared/StatusBadge";
@@ -111,67 +111,25 @@ function MemberList({ group, members }) {
 function EditGroupModal({ group, onClose, showToast }) {
   const patchGroupMutation = usePatchGroup();
 
-  const [name, setName] = useState(group.name);
-  const [feeType, setFeeType] = useState(() => {
-    if (group.processingFeePercent != null) return "percent";
-    if (group.processingFeeCents != null) return "cents";
-    return "none";
-  });
-  const [feeValue, setFeeValue] = useState(() => {
-    if (group.processingFeePercent != null) return String(group.processingFeePercent);
-    if (group.processingFeeCents != null) return String(group.processingFeeCents);
-    return "";
-  });
-  const [successUrl, setSuccessUrl] = useState(group.paymentSuccessUrl ?? "");
-  const [cancelUrl, setCancelUrl] = useState(group.paymentCancelUrl ?? "");
-  const [error, setError] = useState("");
-
-  const handleFeeTypeChange = useCallback((type) => {
-    setFeeType(type);
-    setFeeValue("");
-    setError("");
-  }, []);
+  const {
+    name,
+    setName,
+    successUrl,
+    setSuccessUrl,
+    cancelUrl,
+    setCancelUrl,
+    error,
+    setError,
+    feeType,
+    feeValue,
+    setFeeValue,
+    handleFeeTypeChange,
+    buildPatchBody,
+  } = useGroupForm(group, "Name is required.");
 
   const handleSave = useCallback(() => {
-    setError("");
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      setError("Name is required.");
-      return;
-    }
-
-    const body = {
-      name: trimmedName,
-      paymentSuccessUrl: successUrl.trim() || null,
-      paymentCancelUrl: cancelUrl.trim() || null,
-    };
-
-    if (feeType !== "none") {
-      const feeErr = validateFeeValue(feeValue, feeType);
-      if (feeErr) {
-        setError(feeErr);
-        return;
-      }
-      if (feeType === "percent") {
-        body.processingFeePercent = parseFloat(feeValue);
-        body.processingFeeCents = null;
-      } else {
-        body.processingFeeCents = parseInt(feeValue, 10);
-        body.processingFeePercent = null;
-      }
-    } else {
-      body.processingFeePercent = null;
-      body.processingFeeCents = null;
-    }
-
-    if (validateUrl(body.paymentSuccessUrl)) {
-      setError("Success URL must be a valid HTTPS URL.");
-      return;
-    }
-    if (validateUrl(body.paymentCancelUrl)) {
-      setError("Cancel URL must be a valid HTTPS URL.");
-      return;
-    }
+    const body = buildPatchBody();
+    if (!body) return;
 
     patchGroupMutation.mutate(
       { id: group.id, body },
@@ -183,17 +141,7 @@ function EditGroupModal({ group, onClose, showToast }) {
         onError: (err) => setError(err.message),
       }
     );
-  }, [
-    group.id,
-    name,
-    feeType,
-    feeValue,
-    successUrl,
-    cancelUrl,
-    onClose,
-    showToast,
-    patchGroupMutation,
-  ]);
+  }, [group.id, buildPatchBody, onClose, showToast, patchGroupMutation, setError]);
 
   return (
     <BaseModal isOpen onClose={onClose} title="Edit Group" titleId="edit-group-title">
@@ -235,16 +183,12 @@ function EditGroupModal({ group, onClose, showToast }) {
         wrapperClassName="mb-5"
       />
 
-      <ErrorMessage message={error} className="mb-3" />
-
-      <div className="flex justify-end gap-3">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button variant="primary" isLoading={patchGroupMutation.isPending} onClick={handleSave}>
-          {patchGroupMutation.isPending ? "Saving..." : "Save Changes"}
-        </Button>
-      </div>
+      <ModalSaveFooter
+        error={error}
+        onClose={onClose}
+        onSave={handleSave}
+        isPending={patchGroupMutation.isPending}
+      />
     </BaseModal>
   );
 }

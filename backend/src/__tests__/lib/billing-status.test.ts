@@ -461,19 +461,19 @@ describe("charge_automatically payments in flight or failed", () => {
     expect(values.openBalance).toBe(50);
   });
 
-  it.each([
-    "requires_payment_method",
-    "canceled",
-  ])("a failed attempt (%s) is overdue and Late", (status) => {
-    const values = derive({
-      invoices: [autoInvoice("in_f", 150000, { payments: payment("pi_f") })],
-      paymentIntents: [{ id: "pi_f", status }],
-    });
-    expect(values.status).toBe("Late");
-    expect(values.upToDate).toBe("No");
-    expect(values.overdue).toBe(1500);
-    expect(values.openBalance).toBe(1500);
-  });
+  it.each(["requires_payment_method", "canceled"])(
+    "a failed attempt (%s) is overdue and Late",
+    (status) => {
+      const values = derive({
+        invoices: [autoInvoice("in_f", 150000, { payments: payment("pi_f") })],
+        paymentIntents: [{ id: "pi_f", status }],
+      });
+      expect(values.status).toBe("Late");
+      expect(values.upToDate).toBe("No");
+      expect(values.overdue).toBe(1500);
+      expect(values.openBalance).toBe(1500);
+    }
+  );
 
   it("past-due send_invoice plus a processing charge: Late, overdue is only the send_invoice", () => {
     const values = derive({
@@ -496,18 +496,17 @@ describe("charge_automatically payments in flight or failed", () => {
     expect(values.openBalance).toBe(50);
   });
 
-  it.each([
-    "requires_action",
-    "requires_confirmation",
-    "requires_capture",
-  ])("%s after an attempt needs attention: overdue", (status) => {
-    const values = derive({
-      invoices: [autoInvoice("in_r", 5000, { payments: payment("pi_r") })],
-      paymentIntents: [{ id: "pi_r", status }],
-    });
-    expect(values.status).toBe("Late");
-    expect(values.overdue).toBe(50);
-  });
+  it.each(["requires_action", "requires_confirmation", "requires_capture"])(
+    "%s after an attempt needs attention: overdue",
+    (status) => {
+      const values = derive({
+        invoices: [autoInvoice("in_r", 5000, { payments: payment("pi_r") })],
+        paymentIntents: [{ id: "pi_r", status }],
+      });
+      expect(values.status).toBe("Late");
+      expect(values.overdue).toBe(50);
+    }
+  );
 
   it("a past due_date makes a never-attempted charge_automatically invoice overdue", () => {
     const values = derive({

@@ -15,6 +15,7 @@ function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   });
+  // biome-ignore lint/correctness/noComponentHookFactories: wrapper factory closes over a fresh QueryClient per test.
   return function Wrapper({ children }) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   };

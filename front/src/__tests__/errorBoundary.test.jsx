@@ -44,6 +44,7 @@ describe("ErrorBoundary", () => {
     const fetchMock = vi.fn();
     const chunkErr = () =>
       new TypeError("Failed to fetch dynamically imported module: /assets/D.js");
+    // biome-ignore lint/correctness/noComponentHookFactories: test-local component that throws to exercise the error boundary.
     const ChunkBomb = () => {
       throw new TypeError(
         "Failed to fetch dynamically imported module: https://dfwsc.com/assets/Demos-abc.js"

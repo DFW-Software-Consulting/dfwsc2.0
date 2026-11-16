@@ -2,7 +2,7 @@
 
 check_agent_docs_sync() {
   base="CLAUDE.md"
-  mirrors="AGENTS.md Qwen.md Gemini.md"
+  mirrors="AGENTS.md Qwen.md Gemini.md .claude/CLAUDE.md"
 
   if [ ! -f "$base" ]; then
     echo "❌ Missing required file: $base"
@@ -24,7 +24,7 @@ check_agent_docs_sync() {
   for file in $mirrors; do
     if ! diff -q "$base" "$file" >/dev/null 2>&1; then
       echo "❌ '$file' is out of sync with $base"
-      echo "   Sync them with: cp CLAUDE.md AGENTS.md && cp CLAUDE.md Qwen.md && cp CLAUDE.md Gemini.md"
+      echo "   Sync them with: cp CLAUDE.md AGENTS.md && cp CLAUDE.md Qwen.md && cp CLAUDE.md Gemini.md && cp CLAUDE.md .claude/CLAUDE.md"
       return 1
     fi
   done

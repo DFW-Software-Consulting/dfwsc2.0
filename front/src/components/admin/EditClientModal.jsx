@@ -1,12 +1,12 @@
 import { useCallback, useState } from "react";
 import { useClient, usePatchClient } from "../../hooks/useClients";
+import { useFeeConfig } from "../../hooks/useFeeConfig";
 import { useGroups } from "../../hooks/useGroups";
-import { validateFeeValue, validateUrl } from "../../utils/validation";
+import { applyFeeConfig } from "../../utils/feeConfig";
 import BaseModal from "./shared/BaseModal";
-import Button from "./shared/Button";
-import ErrorMessage from "./shared/ErrorMessage";
 import FeeConfigSection from "./shared/FeeConfigSection";
 import FormInput from "./shared/FormInput";
+import ModalSaveFooter from "./shared/ModalSaveFooter";
 
 export default function EditClientModal({
   client,
@@ -23,22 +23,13 @@ export default function EditClientModal({
   // Operational fields — seeded from the client prop, which is stable for the
   // lifetime of this modal (the parent unmounts it on close rather than
   // swapping to a different client in place).
-  const [feeType, setFeeType] = useState(() => {
-    if (client.processingFeePercent != null) return "percent";
-    if (client.processingFeeCents != null) return "cents";
-    return "none";
-  });
-  const [feeValue, setFeeValue] = useState(() => {
-    if (client.processingFeePercent != null) return String(client.processingFeePercent);
-    if (client.processingFeeCents != null) return String(client.processingFeeCents);
-    return "";
-  });
   const [groupId, setGroupId] = useState(() => client.groupId ?? "");
   // The list row never carries the payment URLs, so they are seeded from the
   // full client record once it loads.
   const [successUrl, setSuccessUrl] = useState("");
   const [cancelUrl, setCancelUrl] = useState("");
   const [error, setError] = useState("");
+  const { feeType, feeValue, setFeeValue, handleFeeTypeChange } = useFeeConfig(client, setError);
 
   // Profile fields (DFWSC mode only)
   const [name, setName] = useState("");
@@ -98,12 +89,6 @@ export default function EditClientModal({
           : "Will use platform default fee."
       : null;
 
-  const handleFeeTypeChange = useCallback((type) => {
-    setFeeType(type);
-    setFeeValue("");
-    setError("");
-  }, []);
-
   const handleSave = useCallback(() => {
     setError("");
 
@@ -152,30 +137,9 @@ export default function EditClientModal({
       body.paymentCancelUrl = nextCancelUrl || null;
     }
 
-    if (feeType !== "none") {
-      const feeErr = validateFeeValue(feeValue, feeType);
-      if (feeErr) {
-        setError(feeErr);
-        return;
-      }
-      if (feeType === "percent") {
-        body.processingFeePercent = parseFloat(feeValue);
-        body.processingFeeCents = null;
-      } else {
-        body.processingFeeCents = parseInt(feeValue, 10);
-        body.processingFeePercent = null;
-      }
-    } else {
-      body.processingFeePercent = null;
-      body.processingFeeCents = null;
-    }
-
-    if (validateUrl(body.paymentSuccessUrl)) {
-      setError("Success URL must be a valid HTTPS URL.");
-      return;
-    }
-    if (validateUrl(body.paymentCancelUrl)) {
-      setError("Cancel URL must be a valid HTTPS URL.");
+    const feeError = applyFeeConfig(body, feeType, feeValue);
+    if (feeError) {
+      setError(feeError);
       return;
     }
 
@@ -406,21 +370,13 @@ export default function EditClientModal({
         </>
       )}
 
-      <ErrorMessage message={error} className="mb-3" />
-
-      <div className="flex justify-end gap-3">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          variant="primary"
-          isLoading={patchClientMutation.isPending}
-          disabled={clientLoading}
-          onClick={handleSave}
-        >
-          {patchClientMutation.isPending ? "Saving..." : "Save Changes"}
-        </Button>
-      </div>
+      <ModalSaveFooter
+        error={error}
+        onClose={onClose}
+        onSave={handleSave}
+        isPending={patchClientMutation.isPending}
+        disabled={clientLoading}
+      />
     </BaseModal>
   );
 }

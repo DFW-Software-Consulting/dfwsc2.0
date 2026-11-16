@@ -169,17 +169,16 @@ describe("Cerebo API", () => {
       expect(res.json().error).toBe("endsOn must be on or after startsOn.");
     });
 
-    it.each([
-      "0000-01-01",
-      "2026-02-31",
-      "2026-99-01",
-    ])("rejects the invalid calendar date %s", async (startsOn) => {
-      const res = await call("POST", `/clients/${clientA}/projects`, {
-        name: "Invalid calendar date",
-        startsOn,
-      });
-      expect(res.statusCode).toBe(400);
-    });
+    it.each(["0000-01-01", "2026-02-31", "2026-99-01"])(
+      "rejects the invalid calendar date %s",
+      async (startsOn) => {
+        const res = await call("POST", `/clients/${clientA}/projects`, {
+          name: "Invalid calendar date",
+          startsOn,
+        });
+        expect(res.statusCode).toBe(400);
+      }
+    );
 
     it("lists only the requested client's projects", async () => {
       const a = await createProject(clientA, { name: "A only" });

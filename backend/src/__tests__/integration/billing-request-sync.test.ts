@@ -619,22 +619,23 @@ describe("refused requests never reach Stripe", () => {
     ["an unknown kind", { ...ONE_OFF, kind: "Refund" }, "invalid_kind"],
   ];
 
-  it.each(
-    refusals
-  )("fails %s without a Stripe call and without retrying", async (_name, answers, code) => {
-    const result = await submit(61, answers);
-    expect(result).toMatchObject({ completed: 0, failed: 1, retried: 0 });
-    expect(stripe.calls).toHaveLength(0);
-    expect(await sub(61)).toMatchObject({ status: "failed", lastErrorCode: code, attempts: 1 });
-    const [row] = resultRows();
-    expect(cell(row, "Status")).toBe("Failed");
-    expect(cell(row, "Error")).toBe(code);
-    expect(cell(row, "Stripe")).toBe("");
-    // Not picked up again.
-    await makeDue(61);
-    expect(await cycle()).toMatchObject({ completed: 0, failed: 0, retried: 0 });
-    expect(stripe.calls).toHaveLength(0);
-  });
+  it.each(refusals)(
+    "fails %s without a Stripe call and without retrying",
+    async (_name, answers, code) => {
+      const result = await submit(61, answers);
+      expect(result).toMatchObject({ completed: 0, failed: 1, retried: 0 });
+      expect(stripe.calls).toHaveLength(0);
+      expect(await sub(61)).toMatchObject({ status: "failed", lastErrorCode: code, attempts: 1 });
+      const [row] = resultRows();
+      expect(cell(row, "Status")).toBe("Failed");
+      expect(cell(row, "Error")).toBe(code);
+      expect(cell(row, "Stripe")).toBe("");
+      // Not picked up again.
+      await makeDue(61);
+      expect(await cycle()).toMatchObject({ completed: 0, failed: 0, retried: 0 });
+      expect(stripe.calls).toHaveLength(0);
+    }
+  );
 
   it("allows the largest amount", async () => {
     await submit(62, { ...ONE_OFF, amount_usd: "25000.00" });

@@ -7,7 +7,7 @@ services:
       - .env
     environment:
       NODE_ENV: development
-      ENABLE_SWAGGER: 'false'
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-false}
       MAILHOG_ENABLED: 'true'
     ports:
       - "4242:4242"
@@ -104,18 +104,18 @@ services:
       - backend
 
   loki:
-    image: grafana/loki:2.9.8
+    image: grafana/loki:3.7.10
     command: -config.file=/etc/loki/local-config.yaml
     ports:
       - "3100:3100"
     networks:
       - backend
 
-  promtail:
-    image: grafana/promtail:2.9.8
-    command: -config.file=/etc/promtail/config.yml
+  alloy:
+    image: grafana/alloy:v1.22.0
+    command: run --storage.path=/tmp/alloy /etc/alloy/config.alloy
     volumes:
-      - ./observability/promtail-config.yml:/etc/promtail/config.yml:ro
+      - ./observability/config.alloy:/etc/alloy/config.alloy:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:

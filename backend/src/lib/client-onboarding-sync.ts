@@ -60,6 +60,7 @@ import {
   CLIENT_ONBOARDING_RETRY_MAX_MS,
 } from "./constants";
 import { resetCardBaseline } from "./contact-stripe-sync";
+import { createCyclePoller } from "./cycle-poller";
 import {
   getNextcloudConfig,
   NextcloudCircuitOpenError,
@@ -1415,44 +1416,17 @@ export function startClientOnboarding(
     return null;
   }
 
-  let running: Promise<unknown> | null = null;
-  let again = false;
-  let stopped = false;
-  const run = () => {
-    running = runClientOnboardingCycle({ logger, env })
-      .catch((error: unknown) => {
-        logger.error({ errorName: (error as Error)?.name }, "Client onboarding cycle crashed.");
-      })
-      .finally(() => {
-        running = null;
-        if (again && !stopped) {
-          again = false;
-          run();
-        }
-      });
-  };
-  const trigger = () => {
-    if (stopped) return;
-    if (running) {
-      again = true;
-      return;
-    }
-    run();
-  };
-  const timer = setInterval(trigger, config.settings.pollIntervalMs);
-  timer.unref();
-
-  const runner: ClientOnboardingRunner = {
-    trigger,
-    async stop() {
-      stopped = true;
-      clearInterval(timer);
+  const runner: ClientOnboardingRunner = createCyclePoller({
+    logger,
+    cycle: () => runClientOnboardingCycle({ logger, env }),
+    intervalMs: config.settings.pollIntervalMs,
+    crashMessage: "Client onboarding cycle crashed.",
+    onStop: () => {
       if (active?.runner === runner) active = null;
-      while (running) await running;
     },
-  };
+  });
   active = { runner, webhookSecret: config.settings.webhookSecret };
-  trigger();
+  runner.trigger();
   logger.info(
     {
       formId: config.settings.formId,

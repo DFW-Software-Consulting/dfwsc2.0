@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useCallback, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { useClearUrlParams } from "../hooks/useClearUrlParams";
 import { useInitiateOnboarding } from "../hooks/useOnboarding";
 import logger from "../utils/logger";
 
@@ -10,7 +11,6 @@ function readTokenFromSearch() {
 
 export default function OnboardClient() {
   const location = useLocation();
-  const navigate = useNavigate();
   const [token, setToken] = useState(() => {
     const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
     return hashParams.get("token") || readTokenFromSearch();
@@ -18,11 +18,7 @@ export default function OnboardClient() {
   const [message, setMessage] = useState("");
   const { mutate, isPending } = useInitiateOnboarding();
 
-  useEffect(() => {
-    if (location.search || location.hash) {
-      navigate(location.pathname, { replace: true });
-    }
-  }, [location.hash, location.pathname, location.search, navigate]);
+  useClearUrlParams();
 
   const handleSubmit = useCallback(
     (e) => {

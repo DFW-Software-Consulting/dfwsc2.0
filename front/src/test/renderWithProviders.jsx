@@ -11,6 +11,7 @@ export function renderWithProviders(
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
 
+  // biome-ignore lint/correctness/noComponentHookFactories: test helper closes over a per-render QueryClient and route state.
   function Wrapper({ children }) {
     return (
       <QueryClientProvider client={queryClient}>

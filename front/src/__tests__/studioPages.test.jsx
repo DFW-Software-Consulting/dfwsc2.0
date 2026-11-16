@@ -128,6 +128,7 @@ describe("Team", () => {
     renderWithProviders(<Team />, { initialEntries: ["/team"] });
 
     const members = [
+      ["Michael Diltz", "CEO", "Company strategy · Client partnerships"],
       ["Jeremy Ashley", "Founder & CTO", "Discovery · Technical direction"],
       ["Diego Espino", "Full Stack & DevOps Engineer", "Deployment · Performance"],
       ["Hector Oropesa", "DevOps & Network Engineer", "Cloud systems · Networking"],
@@ -135,9 +136,12 @@ describe("Team", () => {
     for (const [name, role, focus] of members) {
       const article = screen.getByRole("heading", { name }).closest("article");
       const card = within(article);
-      expect(
-        card.getByRole("link", { name: `${name} on LinkedIn (opens in a new tab)` })
-      ).toBeInTheDocument();
+      const linkName = `${name} on LinkedIn (opens in a new tab)`;
+      if (name === "Michael Diltz") {
+        expect(card.queryByRole("link", { name: linkName })).not.toBeInTheDocument();
+      } else {
+        expect(card.getByRole("link", { name: linkName })).toBeInTheDocument();
+      }
       expect(card.getByText(role, { exact: false })).toBeInTheDocument();
       expect(card.getByText(focus, { exact: false })).toBeInTheDocument();
     }
@@ -147,6 +151,7 @@ describe("Team", () => {
     renderWithProviders(<Team />, { initialEntries: ["/team"] });
 
     const photos = {
+      "Michael Diltz": "michael-diltz",
       "Jeremy Ashley": "jeremy-ashley",
       "Diego Espino": "diego-espino",
       "Hector Oropesa": "hector-oropesa",
@@ -154,8 +159,10 @@ describe("Team", () => {
     for (const [name, file] of Object.entries(photos)) {
       const article = screen.getByRole("heading", { name }).closest("article");
       expect(article.querySelector(".studio-member-badge")).toHaveTextContent(name);
-      const link = screen.getByRole("link", { name: `${name} on LinkedIn (opens in a new tab)` });
-      expect(link.querySelector("img")).toHaveAttribute("src", expect.stringContaining(file));
+      expect(article.querySelector(".studio-member-photo img")).toHaveAttribute(
+        "src",
+        expect.stringContaining(file)
+      );
     }
     expect(screen.queryByText(/\d{2} \/ DFWSC/)).not.toBeInTheDocument();
   });

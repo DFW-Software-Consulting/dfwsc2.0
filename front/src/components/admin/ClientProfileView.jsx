@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { useClients, usePatchClient } from "../../hooks/useClients";
+import { useGroupForm } from "../../hooks/useGroupForm";
 import { usePatchGroup } from "../../hooks/useGroups";
-import { validateFeeValue, validateUrl } from "../../utils/validation";
 import EditClientModal from "./EditClientModal";
 import BaseModal from "./shared/BaseModal";
 import Button from "./shared/Button";
@@ -20,63 +20,30 @@ export default function ClientProfileView({
   const patchGroupMutation = usePatchGroup();
   const patchClientMutation = usePatchClient();
 
-  const [groupName, setGroupName] = useState(group.name);
-  const [feeType, setFeeType] = useState(() => {
-    if (group.processingFeePercent != null) return "percent";
-    if (group.processingFeeCents != null) return "cents";
-    return "none";
-  });
-  const [feeValue, setFeeValue] = useState(() => {
-    if (group.processingFeePercent != null) return String(group.processingFeePercent);
-    if (group.processingFeeCents != null) return String(group.processingFeeCents);
-    return "";
-  });
-  const [successUrl, setSuccessUrl] = useState(group.paymentSuccessUrl ?? "");
-  const [cancelUrl, setCancelUrl] = useState(group.paymentCancelUrl ?? "");
-  const [error, setError] = useState("");
+  const {
+    name: groupName,
+    setName: setGroupName,
+    successUrl,
+    setSuccessUrl,
+    cancelUrl,
+    setCancelUrl,
+    error,
+    setError,
+    feeType,
+    feeValue,
+    setFeeValue,
+    handleFeeTypeChange,
+    buildPatchBody,
+  } = useGroupForm(group, "Company name is required.");
 
   const [editingClient, setEditingClient] = useState(null);
 
   const members = allClients.filter((c) => c.groupId === group.id);
   const available = allClients.filter((c) => !c.groupId);
 
-  const handleFeeTypeChange = useCallback((type) => {
-    setFeeType(type);
-    setFeeValue("");
-    setError("");
-  }, []);
-
   const handleSaveGroup = useCallback(() => {
-    setError("");
-    const trimmedName = groupName.trim();
-    if (!trimmedName) return setError("Company name is required.");
-
-    const body = {
-      name: trimmedName,
-      paymentSuccessUrl: successUrl.trim() || null,
-      paymentCancelUrl: cancelUrl.trim() || null,
-    };
-
-    if (feeType !== "none") {
-      const feeErr = validateFeeValue(feeValue, feeType);
-      if (feeErr) return setError(feeErr);
-
-      if (feeType === "percent") {
-        body.processingFeePercent = parseFloat(feeValue);
-        body.processingFeeCents = null;
-      } else {
-        body.processingFeeCents = parseInt(feeValue, 10);
-        body.processingFeePercent = null;
-      }
-    } else {
-      body.processingFeePercent = null;
-      body.processingFeeCents = null;
-    }
-
-    if (validateUrl(body.paymentSuccessUrl))
-      return setError("Success URL must be a valid HTTPS URL.");
-    if (validateUrl(body.paymentCancelUrl))
-      return setError("Cancel URL must be a valid HTTPS URL.");
+    const body = buildPatchBody();
+    if (!body) return;
 
     patchGroupMutation.mutate(
       { id: group.id, body },
@@ -85,16 +52,7 @@ export default function ClientProfileView({
         onError: (err) => setError(err.message),
       }
     );
-  }, [
-    group.id,
-    groupName,
-    feeType,
-    feeValue,
-    successUrl,
-    cancelUrl,
-    patchGroupMutation,
-    showToast,
-  ]);
+  }, [group.id, buildPatchBody, patchGroupMutation, setError, showToast]);
 
   const handleToggleClientStatus = (client) => {
     const newStatus = client.status === "active" ? "inactive" : "active";

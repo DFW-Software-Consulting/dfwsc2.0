@@ -148,19 +148,19 @@ describe("invoicing requires the card_payments capability", () => {
     vi.restoreAllMocks();
   });
 
-  it.each([
-    "inactive",
-    "pending",
-  ])("refuses create, finalize and send when card_payments is %s", async (status) => {
-    const c = await seedClient(status);
-    for (const res of [await create(c.apiKey), await finalize(c.apiKey), await send(c.apiKey)]) {
-      expect(res.statusCode).toBe(409);
-      expect(res.json().code).toBe(NOT_ACTIVE_CODE);
-      expect(res.json().error).toMatch(NOT_ACTIVE_MESSAGE);
+  it.each(["inactive", "pending"])(
+    "refuses create, finalize and send when card_payments is %s",
+    async (status) => {
+      const c = await seedClient(status);
+      for (const res of [await create(c.apiKey), await finalize(c.apiKey), await send(c.apiKey)]) {
+        expect(res.statusCode).toBe(409);
+        expect(res.json().code).toBe(NOT_ACTIVE_CODE);
+        expect(res.json().error).toMatch(NOT_ACTIVE_MESSAGE);
+      }
+      expect(stripeMock.accounts.retrieve).not.toHaveBeenCalled();
+      noStripeInvoiceCalls();
     }
-    expect(stripeMock.accounts.retrieve).not.toHaveBeenCalled();
-    noStripeInvoiceCalls();
-  });
+  );
 
   it("lets an active account through the guard without a live read and reaches Stripe", async () => {
     const c = await seedClient("active");

@@ -1038,47 +1038,48 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
       ["the fee item", "invoiceItems.create", 3, "invoice_created"],
       ["the final retrieve", "invoices.retrieve", 1, "invoice_created"],
     ];
-    it.each(
-      stepFailures
-    )("resumes after a Stripe failure at %s with no duplicate Stripe objects", async (_name, call, nth, _state) => {
-      const c = await seedClient();
-      const cust = await seedCustomer(c);
-      const two = body(cust, {
-        lines: [
-          { description: "Rent", unitAmountCents: 100_000 },
-          { description: "Parking", unitAmountCents: 2500, quantity: 2 },
-        ],
-      });
-      stripe.failNth(call, nth, stripeApiError(500));
-      const failed = await post(c.apiKey, two, "resume");
-      expect(failed.statusCode).toBe(502);
+    it.each(stepFailures)(
+      "resumes after a Stripe failure at %s with no duplicate Stripe objects",
+      async (_name, call, nth, _state) => {
+        const c = await seedClient();
+        const cust = await seedCustomer(c);
+        const two = body(cust, {
+          lines: [
+            { description: "Rent", unitAmountCents: 100_000 },
+            { description: "Parking", unitAmountCents: 2500, quantity: 2 },
+          ],
+        });
+        stripe.failNth(call, nth, stripeApiError(500));
+        const failed = await post(c.apiKey, two, "resume");
+        expect(failed.statusCode).toBe(502);
 
-      // The row is hidden from reads until complete, and its claim was given back.
-      const partial = await rowOf(c.id, "resume");
-      expect(partial.creationState).not.toBe("complete");
-      expect(partial.claimedAt).toBeNull();
-      expect((await get(c.apiKey, "/api/v1/invoices")).json().data).toEqual([]);
+        // The row is hidden from reads until complete, and its claim was given back.
+        const partial = await rowOf(c.id, "resume");
+        expect(partial.creationState).not.toBe("complete");
+        expect(partial.claimedAt).toBeNull();
+        expect((await get(c.apiKey, "/api/v1/invoices")).json().data).toEqual([]);
 
-      const retried = await post(c.apiKey, two, "resume");
-      expect(retried.statusCode).toBe(201);
-      expect(retried.json()).toMatchObject({ totalCents: 105_250, feeAmountCents: 250 });
-      expect(stripe.invoicesOn(c.account)).toHaveLength(1);
-      expect(stripe.itemsOn(c.account).map((i) => i.description)).toEqual([
-        "Rent",
-        "Parking",
-        "Processing Fee",
-      ]);
-      // Saved ids are never re-created: only the failed step is sent again.
-      if (call !== "invoices.create") {
-        expect(stripe.callsTo("invoices.create")).toHaveLength(1);
+        const retried = await post(c.apiKey, two, "resume");
+        expect(retried.statusCode).toBe(201);
+        expect(retried.json()).toMatchObject({ totalCents: 105_250, feeAmountCents: 250 });
+        expect(stripe.invoicesOn(c.account)).toHaveLength(1);
+        expect(stripe.itemsOn(c.account).map((i) => i.description)).toEqual([
+          "Rent",
+          "Parking",
+          "Processing Fee",
+        ]);
+        // Saved ids are never re-created: only the failed step is sent again.
+        if (call !== "invoices.create") {
+          expect(stripe.callsTo("invoices.create")).toHaveLength(1);
+        }
+        if (call === "invoiceItems.create") {
+          expect(stripe.callsTo("invoiceItems.create")).toHaveLength(3 + 1);
+        }
+        const done = await rowOf(c.id, "resume");
+        expect(done).toMatchObject({ creationState: "complete", claimedAt: null });
+        expect(done.lineItemIds).toHaveLength(2);
       }
-      if (call === "invoiceItems.create") {
-        expect(stripe.callsTo("invoiceItems.create")).toHaveLength(3 + 1);
-      }
-      const done = await rowOf(c.id, "resume");
-      expect(done).toMatchObject({ creationState: "complete", claimedAt: null });
-      expect(done.lineItemIds).toHaveLength(2);
-    });
+    );
 
     const lostResponses: Array<[string, string, number]> = [
       ["the invoice", "invoices.create", 1],
@@ -1086,35 +1087,36 @@ describe("connected-account invoices API (/api/v1/invoices)", () => {
       ["line 1", "invoiceItems.create", 2],
       ["the fee item", "invoiceItems.create", 3],
     ];
-    it.each(
-      lostResponses
-    )("resumes through key replay when Stripe made %s but the response was lost, with no duplicates", async (_name, call, nth) => {
-      const c = await seedClient();
-      const cust = await seedCustomer(c);
-      const two = body(cust, {
-        lines: [
-          { description: "Rent", unitAmountCents: 100_000 },
-          { description: "Parking", unitAmountCents: 2500, quantity: 2 },
-        ],
-      });
-      stripe.loseResponseNth(call, nth);
-      const failed = await post(c.apiKey, two, "lost");
-      expect(failed.statusCode).toBe(502);
-      // Stripe has the object even though we never saw it.
-      expect(
-        stripe.invoicesOn(c.account).length + stripe.itemsOn(c.account).length
-      ).toBeGreaterThan(0);
+    it.each(lostResponses)(
+      "resumes through key replay when Stripe made %s but the response was lost, with no duplicates",
+      async (_name, call, nth) => {
+        const c = await seedClient();
+        const cust = await seedCustomer(c);
+        const two = body(cust, {
+          lines: [
+            { description: "Rent", unitAmountCents: 100_000 },
+            { description: "Parking", unitAmountCents: 2500, quantity: 2 },
+          ],
+        });
+        stripe.loseResponseNth(call, nth);
+        const failed = await post(c.apiKey, two, "lost");
+        expect(failed.statusCode).toBe(502);
+        // Stripe has the object even though we never saw it.
+        expect(
+          stripe.invoicesOn(c.account).length + stripe.itemsOn(c.account).length
+        ).toBeGreaterThan(0);
 
-      const retried = await post(c.apiKey, two, "lost");
-      expect(retried.statusCode).toBe(201);
-      expect(retried.json()).toMatchObject({ totalCents: 105_250, feeAmountCents: 250 });
-      expect(stripe.invoicesOn(c.account)).toHaveLength(1);
-      expect(stripe.itemsOn(c.account).map((i) => i.description)).toEqual([
-        "Rent",
-        "Parking",
-        "Processing Fee",
-      ]);
-    });
+        const retried = await post(c.apiKey, two, "lost");
+        expect(retried.statusCode).toBe(201);
+        expect(retried.json()).toMatchObject({ totalCents: 105_250, feeAmountCents: 250 });
+        expect(stripe.invoicesOn(c.account)).toHaveLength(1);
+        expect(stripe.itemsOn(c.account).map((i) => i.description)).toEqual([
+          "Rent",
+          "Parking",
+          "Processing Fee",
+        ]);
+      }
+    );
 
     it("keeps answering an error while Stripe replays a stored 5xx for the key, then recovers once it expires", async () => {
       const c = await seedClient();

@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 
 check_agent_docs_sync() {
-  base=".claude/CLAUDE.md"
-  mirrors="AGENTS.md Qwen.md Gemini.md"
+  base="CLAUDE.md"
+  mirrors="AGENTS.md Qwen.md Gemini.md .claude/CLAUDE.md"
 
   if [ ! -f "$base" ]; then
     echo "❌ Missing required file: $base"
@@ -24,7 +24,7 @@ check_agent_docs_sync() {
   for file in $mirrors; do
     if ! diff -q "$base" "$file" >/dev/null 2>&1; then
       echo "❌ '$file' is out of sync with $base"
-      echo "   Sync them with: cp .claude/CLAUDE.md AGENTS.md && cp .claude/CLAUDE.md Qwen.md && cp .claude/CLAUDE.md Gemini.md"
+      echo "   Sync them with: cp CLAUDE.md AGENTS.md && cp CLAUDE.md Qwen.md && cp CLAUDE.md Gemini.md && cp CLAUDE.md .claude/CLAUDE.md"
       return 1
     fi
   done
@@ -61,7 +61,7 @@ COMPOSE="docker compose -f docker-compose.base.yml -f docker-compose.dev.yml"
 if [ "${SKIP_DOCKER_TESTS}" = "1" ]; then
   echo "⚠️  SKIP_DOCKER_TESTS=1 — backend tests skipped."
 elif $COMPOSE ps --status running 2>/dev/null | grep -q "api"; then
-  run_step "Backend tests (90/80 coverage)" $COMPOSE exec -T api npm run test:coverage
+  run_step "Backend tests (coverage 87/79/82/87)" $COMPOSE exec -T api npm run test:coverage
 else
   echo ""
   echo "❌ Docker stack is not running. Start it with 'make up' before pushing."
@@ -73,7 +73,7 @@ fi
 # 3. Full lint (Biome check)
 run_step "Lint" npm run lint
 
-# 4. Guard: .claude/CLAUDE.md mirrors must exist and stay in sync
+# 4. Guard: agent-doc mirrors must exist and stay in sync with CLAUDE.md
 run_step "Agent docs" check_agent_docs_sync
 
 # 5. Backend TypeScript type-check

@@ -1,13 +1,12 @@
-import { QueryCache, QueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { StrictMode } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
-import { authLogoutRef } from "./contexts/AuthContext.jsx";
 import Root from "./Root.jsx";
 import { preloadRoute } from "./routes.js";
 import { handlePreloadError } from "./utils/preloadRecovery.js";
+import { createQueryClient } from "./utils/queryClient.js";
 import { initVisitContext } from "./utils/visitContext.js";
 import "@fontsource/inter/latin-400.css";
 import "@fontsource/inter/latin-500.css";
@@ -19,14 +18,7 @@ import "./index.css";
 window.addEventListener("vite:preloadError", handlePreloadError);
 initVisitContext();
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000, refetchOnWindowFocus: false } },
-  queryCache: new QueryCache({
-    onError: (err) => {
-      if (err?.status === 401) authLogoutRef.current?.();
-    },
-  }),
-});
+const queryClient = createQueryClient();
 
 const container = document.getElementById("root");
 const prerendered = container.hasChildNodes();

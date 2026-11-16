@@ -39,7 +39,7 @@ The application deploys to Coolify as two independent resources, plus a database
   - `api` - the Fastify server (`node dist/index.js`, port 4242, published only on `127.0.0.1:4242` of the host). It also joins Coolify's external `coolify` network under the alias `dfwsc-api` (Coolify ignores `container_name`), which is how the frontend's nginx reaches it.
   - `dfwsc-redis` - `redis:7-alpine`, backing rate limiting and circuit-breaker state. It sits only on the stack's `backend` network, and the compose file fixes the API's `REDIS_URL` to `redis://dfwsc-redis:6379`. The plain name `redis` is not used because the `api` service also sits on Coolify's shared `coolify` network, where Coolify's own control-plane Redis (password-protected) answers to `redis` too. A network alias would not help, since Coolify ignores custom network aliases; the unique service name is what makes it resolve. A `REDIS_URL` set in Coolify is not read: it is not interpolated into the compose file, so it can be deleted. To use an external Redis instead, edit the `REDIS_URL` line in `docker-compose.prod.yml`.
   - `backup` - built from `./backup` (`backup/Dockerfile`: Alpine with `pg_dump`, `aws-cli` and `supercronic`). `backup/scripts/scheduler.sh` runs `backup.sh` on `BACKUP_SCHEDULE` (default `0 2 * * *`) under a file lock, writing gzipped dumps to the `postgres_backups` volume and uploading to S3 when `BACKUP_S3_BUCKET` is set. Variables, restore drills and the healthcheck: [BACKUP.md](./BACKUP.md).
-- **Build**: `backend/Dockerfile`, multi-stage on `node:22-alpine`; the `production` target installs production dependencies only, runs as the `node` user and starts `node dist/index.js`.
+- **Build**: `backend/Dockerfile`, multi-stage on `node:24-alpine`; the `production` target installs production dependencies only, runs as the `node` user and starts `node dist/index.js`.
 - **Environment variables**: add them in Coolify on the Backend resource. The complete list, with required/default/purpose per variable, is in [ENVIRONMENT.md](./ENVIRONMENT.md). The minimum to start the API is:
 
   | Variable | Notes |
@@ -82,9 +82,9 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 
 | File | Image | Notes |
 |------|-------|-------|
-| `backend/Dockerfile` | `api` (target `production`) and `migrator` (target `builder`) | `node:22-alpine`; the builder compiles TypeScript to `build-dist`; production keeps `drizzle/` and `drizzle.config.ts` so `drizzle-kit migrate` can run. |
+| `backend/Dockerfile` | `api` (target `production`) and `migrator` (target `builder`) | `node:24-alpine`; the builder compiles TypeScript to `build-dist`; production keeps `drizzle/` and `drizzle.config.ts` so `drizzle-kit migrate` can run. |
 | `front/Dockerfile` | Frontend | Build args for `VITE_*`, `verify-build` step, CSP origin substitution with a check that no placeholder remains, non-root nginx. |
-| `backup/Dockerfile` | `backup` | Alpine 3.21 with `postgresql17-client`, `aws-cli`, `supercronic`, `tini`; non-root `backup` user. |
+| `backup/Dockerfile` | `backup` | Alpine 3.24 with `postgresql17-client`, `aws-cli`, `supercronic`, `tini`; non-root `backup` user. |
 
 ## Nginx Configuration
 
@@ -130,7 +130,7 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 2. **Test API Endpoints**
    - Health: `https://<api-domain>/api/v1/health` returns `{"status":"ok","database":"connected",...}`.
    - Swagger UI (`/docs` on the API) is off unless `ENABLE_SWAGGER` is exactly `true` on the API. `docker-compose.prod.yml` does not pass that variable, so it is off in this deployment. There is no production guard in the code: if you add it to the compose file, the UI is served in production.
-   - `/api/v1/metrics` answers 404 unless `METRICS_TOKEN` is set, and the compose file does not forward that variable, so it is always 404 in this deployment.
+   - `/api/v1/metrics` answers 404 unless `METRICS_TOKEN` is set. The compose file forwards it, so setting `METRICS_TOKEN` in Coolify (and redeploying) enables the route.
 
 3. **Test Frontend**
    - Open the frontend domain and confirm the pages load.
@@ -165,12 +165,12 @@ The Dockerfiles are the source of truth; they are not copied here because the co
 
 ### Environment Management
 - Use Coolify's secrets for `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_BILLING_WEBHOOK_SECRET`, `JWT_SECRET`, `DATABASE_URL`, `SMTP_PASS`, `NEXTCLOUD_APP_PASSWORD`, the `*_WEBHOOK_SECRET` values and `AWS_SECRET_ACCESS_KEY`.
-- **Only variables listed in `docker-compose.prod.yml` reach the containers.** Setting any other variable in Coolify does nothing. The ones the code reads but the compose file does not forward are `METRICS_TOKEN`, `TRUST_PROXY`, `CLOUDFLARE_IP_RANGES`, `DEFAULT_PAYMENT_SUCCESS_URL`, `DEFAULT_PAYMENT_CANCEL_URL`, `DB_POOL_MAX`, `HOST` and `ENABLE_SWAGGER`; making one effective requires adding it to the compose file. See [ENVIRONMENT.md](./ENVIRONMENT.md) section 8.
+- **Only variables listed in `docker-compose.prod.yml` reach the containers.** Setting any other variable in Coolify does nothing. The ones the code reads but the compose file does not forward are `HOST` and `ENABLE_SWAGGER`; making one effective requires adding it to the compose file. `METRICS_TOKEN`, `TRUST_PROXY`, `CLOUDFLARE_IP_RANGES`, `DEFAULT_PAYMENT_SUCCESS_URL`, `DEFAULT_PAYMENT_CANCEL_URL` and `DB_POOL_MAX` are forwarded, so a value defined in Coolify takes effect on the next deploy. See [ENVIRONMENT.md](./ENVIRONMENT.md) section 8.
 - A variable that is forwarded but unset in Coolify arrives as an empty string, which the code treats as unset (except `SMTP_FROM`; set it).
 
 ### Monitoring & Logging
-- `GET /api/v1/metrics` exposes sync and circuit-breaker state, but needs `METRICS_TOKEN` and a compose change (see above).
-- The API logs structured JSON to stdout, which Coolify's log view shows. The Loki and Promtail services exist only in the dev stack.
+- `GET /api/v1/metrics` exposes sync and circuit-breaker state, and needs `METRICS_TOKEN` set in Coolify (see above).
+- The API logs structured JSON to stdout, which Coolify's log view shows. The Loki and Alloy services exist only in the dev stack.
 - Set up resource monitoring (CPU, memory, disk) and alerting for service failures in Coolify. The `backup` container's own healthcheck fails when the last successful backup is older than `BACKUP_HEARTBEAT_MAX_AGE`.
 
 ### Backup Strategy
@@ -212,7 +212,7 @@ The Dockerfiles are the source of truth; they are not copied here because the co
    - Any hostname the `api` service uses must be unique across everything on the `coolify` network; give shared-network services a unique service name rather than a generic one.
 
 6. **Every visitor shares one rate-limit bucket, or limits trigger too early**
-   - The API must see the real client address. Behind Cloudflare that comes from `CF-Connecting-IP`, honored only for connections from the built-in Cloudflare ranges. If Cloudflare publishes ranges that are missing from `backend/src/lib/client-ip.ts`, set `CLOUDFLARE_IP_RANGES` (it needs a compose change to be forwarded; see Environment Management).
+   - The API must see the real client address. Behind Cloudflare that comes from `CF-Connecting-IP`, honored only for connections from the built-in Cloudflare ranges. If Cloudflare publishes ranges that are missing from `backend/src/lib/client-ip.ts`, set `CLOUDFLARE_IP_RANGES` (the compose file forwards it).
 
 ## Maintenance
 

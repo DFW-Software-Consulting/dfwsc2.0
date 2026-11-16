@@ -20,7 +20,7 @@ Payment portal for DFW Software Consulting clients integrating Stripe Connect.
 
 ### Dev stack (Docker — preferred for all backend work)
 ```sh
-make up           # Start dev stack (api, web, db, redis, mailhog, stripe-cli, loki, promtail)
+make up           # Start dev stack (api, web, db, redis, mailhog, stripe-cli, loki, alloy)
 make up-build     # Build + start
 make down         # Stop
 make down-v       # Stop + remove volumes (destroys pgdata)

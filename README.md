@@ -24,7 +24,7 @@ dfwsc2.0/
 │   └── Dockerfile
 │
 ├── backup/                   # Scheduled Postgres backup image (prod stack)
-├── observability/            # Promtail config (dev stack logging)
+├── observability/            # Alloy config (dev stack logging)
 ├── fallow-baselines/         # Dead-code gate baselines used by CI
 ├── scripts/                  # Repo-level scripts (legacy backup-db.sh, manual/)
 ├── docs/                     # Reference documentation (see below)
@@ -42,7 +42,7 @@ dfwsc2.0/
 | Layer | Stack |
 |-------|-------|
 | Frontend | React 18, Vite 8, React Router 7, TanStack Query v5, TailwindCSS v4, three.js (Home and Team only) |
-| Backend | Node.js >=22.12, Fastify 5, TypeScript, Drizzle ORM |
+| Backend | Node.js >=24.15, Fastify 5, TypeScript, Drizzle ORM |
 | Data | PostgreSQL 17; Redis (optional, used when `REDIS_URL` is set) |
 | Integrations | Stripe Connect, Nodemailer (SMTP), Nextcloud (admin login and optional automations) |
 | Tooling | Biome, Vitest 5, Husky, Docker Compose |
@@ -50,7 +50,7 @@ dfwsc2.0/
 ## Development
 
 ### Prerequisites
-- Node.js >=22.12.0
+- Node.js >=24.15.0
 - Docker with Compose (preferred) or a local PostgreSQL 17
 
 ### Docker dev stack (preferred)
@@ -67,7 +67,7 @@ make up-build            # or: make up
 | Web UI (Vite) | http://localhost:5173 |
 | API | http://localhost:4242 |
 | Mailhog | http://localhost:8025 |
-| Loki (Promtail ships container logs to it) | http://localhost:3100 |
+| Loki (Alloy ships container logs to it) | http://localhost:3100 |
 
 The stack also runs PostgreSQL, Redis and the Stripe CLI, which forwards webhooks to `/api/v1/webhooks/stripe`. The dev API container applies migrations on start.
 

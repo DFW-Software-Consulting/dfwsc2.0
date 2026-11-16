@@ -121,6 +121,16 @@ export default function Footer() {
                     </a>
                   </li>
                 ))}
+                <li className="site-footer-link">
+                  <address className="not-italic">
+                    <span className="sr-only">Mailing address: </span>
+                    DFW Software Consulting
+                    <br />
+                    PO Box 411123
+                    <br />
+                    Dallas, TX 75241
+                  </address>
+                </li>
               </ul>
             </div>
           </nav>

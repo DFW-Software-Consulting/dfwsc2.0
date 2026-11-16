@@ -31,7 +31,7 @@ import {
   STRICT_RATE_LIMIT_MAX,
 } from "../lib/constants";
 import { AppError, errors } from "../lib/errors";
-import { sendMail } from "../lib/mailer";
+import { buildOnboardingEmail, sendMail } from "../lib/mailer";
 import { rateLimit } from "../lib/rate-limit";
 import { errorLogFields, transportErrorFields } from "../lib/safe-error-log";
 import { getSettings, stripe } from "../lib/stripe-billing";
@@ -411,34 +411,17 @@ export default async function connectRoutes(fastify: FastifyInstance) {
       const onboardingUrl = `${frontendOrigin}/onboard#token=${encodeURIComponent(token)}`;
       const regenerateUrl = `${frontendOrigin}/regenerate-key#token=${encodeURIComponent(rawRegenToken)}`;
 
-      const safeName = he.encode(name);
-      const mailHtml = `
-        <h1>Welcome to ${he.encode(companyName)}</h1>
-        <p>Hi ${safeName},</p>
-        <p>Click the link below to start your Stripe onboarding process.</p>
-        <a href="${onboardingUrl}">Onboard Now</a>
-        <p>You will also need an API key to integrate with our services. Use the link below to retrieve it. This link expires in 15 minutes.</p>
-        <a href="${regenerateUrl}">Retrieve Your API Key</a>
-        <p>If you did not request this, please ignore this email.</p>
-      `;
-
-      const mailText = `
-        Welcome to ${companyName}
-        Hi ${name},
-        Click the link below to start your Stripe onboarding process.
-        ${onboardingUrl}
-        You will also need an API key to integrate with our services. Use the link below to retrieve it. This link expires in 15 minutes.
-        ${regenerateUrl}
-        If you did not request this, please ignore this email.
-      `;
-
       try {
-        await sendMail({
-          to: email,
-          subject: `${companyName} - Stripe Onboarding`,
-          html: mailHtml,
-          text: mailText,
-        });
+        await sendMail(
+          buildOnboardingEmail({
+            kind: "welcome",
+            to: email,
+            companyName,
+            clientName: name,
+            onboardingUrl,
+            regenerateUrl,
+          })
+        );
       } catch (err) {
         request.log.error(
           { ...transportErrorFields(err), clientId },
@@ -609,34 +592,16 @@ export default async function connectRoutes(fastify: FastifyInstance) {
 
       const onboardingUrl = `${frontendOrigin}/onboard#token=${encodeURIComponent(newToken)}`;
 
-      const safeName = he.encode(clientRecord.name);
-      const mailHtml = `
-        <h1>Stripe Onboarding Link Refreshed</h1>
-        <p>Hi ${safeName},</p>
-        <p>Your previous onboarding link has expired or been invalidated.</p>
-        <p>Click the new link below to continue with your Stripe onboarding process.</p>
-        <a href="${onboardingUrl}">Continue Onboarding</a>
-        <p>If you did not request this, please contact us.</p>
-        <p><strong>Note:</strong> This link will expire in 24 hours.</p>
-      `;
-
-      const mailText = `
-        Stripe Onboarding Link Refreshed
-        Hi ${clientRecord.name},
-        Your previous onboarding link has expired or been invalidated.
-        Click the new link below to continue with your Stripe onboarding process.
-        ${onboardingUrl}
-        If you did not request this, please contact us.
-        Note: This link will expire in 24 hours.
-      `;
-
       try {
-        await sendMail({
-          to: clientRecord.email,
-          subject: `${companyName} - New Onboarding Link`,
-          html: mailHtml,
-          text: mailText,
-        });
+        await sendMail(
+          buildOnboardingEmail({
+            kind: "refresh",
+            to: clientRecord.email,
+            companyName,
+            clientName: clientRecord.name,
+            onboardingUrl,
+          })
+        );
       } catch (err) {
         request.log.error(
           { ...transportErrorFields(err), clientId: clientRecord.id },
