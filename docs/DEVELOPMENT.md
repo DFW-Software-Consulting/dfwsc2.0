@@ -15,15 +15,15 @@ make up-build            # first run; later: make up
 
 `.env.example` points `DATABASE_URL` at host `db`, which resolves only inside the stack.
 
-| Service            | Source                                    | Port               | Notes                                                                                                                                                          |
-| ------------------ | ----------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api`              | `node:24-alpine` with `./backend` mounted | 4242               | Runs `npm install`, waits for `db`, runs `drizzle-kit migrate`, then `npm run dev` (nodemon + ts-node). A failed migration is logged and the API still starts. |
-| `web`              | `node:24-alpine` with `./front` mounted   | 5173               | Vite dev server.                                                                                                                                               |
-| `db`               | `postgres:17`                             | 127.0.0.1:5432     | Volume `pgdata`.                                                                                                                                               |
-| `redis`            | `redis:7-alpine`                          | 127.0.0.1:6379     | Used only if `REDIS_URL` is set in `.env`; otherwise rate limiting is in-memory.                                                                               |
-| `mailhog`          | `mailhog/mailhog`                         | SMTP 1025, UI 8025 | The `.env.example` SMTP values point here.                                                                                                                     |
-| `stripe-cli`       | `stripe/stripe-cli`                       | -                  | Forwards Stripe events to `api:4242/api/v1/webhooks/stripe`; needs a real `STRIPE_SECRET_KEY` in `.env`.                                                       |
-| `loki`, `promtail` | Grafana                                   | 3100               | Log aggregation; configuration in `observability/`. Port 3100 can clash with another local Loki.                                                               |
+| Service | Source | Port | Notes |
+|---------|--------|------|-------|
+| `api` | `node:24-alpine` with `./backend` mounted | 4242 | Runs `npm install`, waits for `db`, runs `drizzle-kit migrate`, then `npm run dev` (nodemon + ts-node). A failed migration is logged and the API still starts. |
+| `web` | `node:24-alpine` with `./front` mounted | 5173 | Vite dev server. |
+| `db` | `postgres:17` | 127.0.0.1:5432 | Volume `pgdata`. |
+| `redis` | `redis:7-alpine` | 127.0.0.1:6379 | Used only if `REDIS_URL` is set in `.env`; otherwise rate limiting is in-memory. |
+| `mailhog` | `mailhog/mailhog` | SMTP 1025, UI 8025 | The `.env.example` SMTP values point here. |
+| `stripe-cli` | `stripe/stripe-cli` | - | Forwards Stripe events to `api:4242/api/v1/webhooks/stripe`; needs a real `STRIPE_SECRET_KEY` in `.env`. |
+| `loki`, `promtail` | Grafana | 3100 | Log aggregation; configuration in `observability/`. Port 3100 can clash with another local Loki. |
 
 The dev `api` container runs with `NODE_ENV=development`, so it applies migrations itself. Production never does: the `migrator` service runs `npm run db:migrate` once per deploy ([COOLIFY_DEPLOYMENT.md](./COOLIFY_DEPLOYMENT.md)). Swagger is forced off in the dev stack (see [ENVIRONMENT.md](./ENVIRONMENT.md) section 2).
 
@@ -33,18 +33,18 @@ The dev `api` container runs with `NODE_ENV=development`, so it applies migratio
 
 ### Make targets
 
-| Target                                                                                      | Does                                                                                                                                                                    |
-| ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `make up` / `up-build` / `down` / `down-v`                                                  | Start (optionally build), stop, stop and delete volumes (destroys `pgdata`).                                                                                            |
-| `make logs` / `ps` / `sh`                                                                   | API logs, container list, shell in `api`.                                                                                                                               |
-| `make dev-backend` / `dev-frontend`                                                         | Run the API or Vite on the host.                                                                                                                                        |
-| `make test`                                                                                 | `test-front` then `test-back`.                                                                                                                                          |
-| `make test-front`                                                                           | Frontend tests on the host.                                                                                                                                             |
-| `make test-back`                                                                            | Backend tests in the running `api` container.                                                                                                                           |
-| `make test-up`                                                                              | Start the stack, wait for vitest to be installed, run backend then frontend tests.                                                                                      |
-| `make coverage`                                                                             | Backend tests with coverage in the container (`npm run test:coverage`).                                                                                                 |
-| `make prod`, `prod-build`, `down-prod`, `logs-prod`, `sh-prod`, `ps-prod`                   | Run `docker-compose.prod.yml` locally (needs the external Docker network: `docker network create coolify`). The stack is `migrator`, `api`, `dfwsc-redis` and `backup`. |
-| `make backup-build`, `backup-shell`, `backup-now`, `backup-list`, `backup-restore FILE=...` | Backup image helpers; see [BACKUP.md](./BACKUP.md).                                                                                                                     |
+| Target | Does |
+|--------|------|
+| `make up` / `up-build` / `down` / `down-v` | Start (optionally build), stop, stop and delete volumes (destroys `pgdata`). |
+| `make logs` / `ps` / `sh` | API logs, container list, shell in `api`. |
+| `make dev-backend` / `dev-frontend` | Run the API or Vite on the host. |
+| `make test` | `test-front` then `test-back`. |
+| `make test-front` | Frontend tests on the host. |
+| `make test-back` | Backend tests in the running `api` container. |
+| `make test-up` | Start the stack, wait for vitest to be installed, run backend then frontend tests. |
+| `make coverage` | Backend tests with coverage in the container (`npm run test:coverage`). |
+| `make prod`, `prod-build`, `down-prod`, `logs-prod`, `sh-prod`, `ps-prod` | Run `docker-compose.prod.yml` locally (needs the external Docker network: `docker network create coolify`). The stack is `migrator`, `api`, `dfwsc-redis` and `backup`. |
+| `make backup-build`, `backup-shell`, `backup-now`, `backup-list`, `backup-restore FILE=...` | Backup image helpers; see [BACKUP.md](./BACKUP.md). |
 
 `make help` prints the list; its one-line stack descriptions are shorter than the tables above.
 
@@ -52,12 +52,12 @@ Other scripts: `npm run reset:test-data` and `reset:test-data:dry` (resets the l
 
 ## 2. Tests
 
-| Suite            | Command                                     | Notes                                                                                                                                                                                                                     |
-| ---------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backend          | `make test-back`                            | Vitest, serial files (`fileParallelism: false`), 30 s timeouts. Needs a real Postgres through `DATABASE_URL`; the dev container supplies it. Root `npm test` refuses to run without `DATABASE_URL` (`test:back:guarded`). |
-| Backend coverage | `make coverage`                             | Thresholds in `backend/vitest.config.ts`: statements 87, branches 79, functions 82, lines 87. This is the gate CI and the pre-push hook enforce.                                                                          |
-| Frontend         | `make test-front` or `cd front && npm test` | Vitest with jsdom; setup in `front/src/test/setup.js`. Includes guard tests that read the Dockerfile and nginx config.                                                                                                    |
-| Frontend lint    | `cd front && npx eslint src`                | ESLint (react-hooks) plus Biome via `npm run lint`.                                                                                                                                                                       |
+| Suite | Command | Notes |
+|-------|---------|-------|
+| Backend | `make test-back` | Vitest, serial files (`fileParallelism: false`), 30 s timeouts. Needs a real Postgres through `DATABASE_URL`; the dev container supplies it. Root `npm test` refuses to run without `DATABASE_URL` (`test:back:guarded`). |
+| Backend coverage | `make coverage` | Thresholds in `backend/vitest.config.ts`: statements 87, branches 79, functions 82, lines 87. This is the gate CI and the pre-push hook enforce. |
+| Frontend | `make test-front` or `cd front && npm test` | Vitest with jsdom; setup in `front/src/test/setup.js`. Includes guard tests that read the Dockerfile and nginx config. |
+| Frontend lint | `cd front && npx eslint src` | ESLint (react-hooks) plus Biome via `npm run lint`. |
 
 Backend tests run with `NODE_ENV=test` and the values pinned in `vitest.config.ts`. Nextcloud and Stripe are replaced by fakes in `backend/src/__tests__/helpers/`; no test needs real Nextcloud or Stripe access. `smtp-mailhog.test.ts` sets its own SMTP values and does not need the MailHog container. MailHog (UI on port 8025) is only for viewing mail sent from the dev stack.
 
@@ -104,11 +104,11 @@ Five files must stay byte-identical: `CLAUDE.md`, `.claude/CLAUDE.md`, `AGENTS.m
 
 All three checks use `CLAUDE.md` as the base, so editing any mirror without `CLAUDE.md` fails:
 
-| Check              | Base        | Compared with                                            |
-| ------------------ | ----------- | -------------------------------------------------------- |
+| Check | Base | Compared with |
+|-------|------|---------------|
 | pre-commit step 12 | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` |
-| pre-push step 4    | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` |
-| CI `docs-sync`     | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` |
+| pre-push step 4 | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` |
+| CI `docs-sync` | `CLAUDE.md` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` |
 
 After editing any of them, edit `CLAUDE.md` and then run:
 
@@ -120,18 +120,18 @@ cp CLAUDE.md .claude/CLAUDE.md && cp CLAUDE.md AGENTS.md && cp CLAUDE.md Qwen.md
 
 Runs on pull requests and on pushes to `main`; a newer run on the same ref cancels the older one.
 
-| Job                  | What it checks                                                                                                                                                                                                                                                                             |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `lint`               | `npm run lint`, frontend ESLint, and `npm audit` for backend and frontend (non-blocking: ends in `                                                                                                                                                                                         |     | true`). |
-| `typecheck`          | Backend `tsc --noEmit` for both tsconfigs, and the frontend build.                                                                                                                                                                                                                         |
-| `test`               | Postgres 17 service, `npm run db:migrate`, backend `test:coverage` (thresholds enforced), frontend tests.                                                                                                                                                                                  |
-| `build`              | After `lint`, `typecheck` and `test`: builds the backend, frontend and backup images.                                                                                                                                                                                                      |
-| `prod-compose-build` | `docker compose -f docker-compose.prod.yml config -q` and `build`, with dummy values.                                                                                                                                                                                                      |
-| `secrets`            | `secretlint` over the whole repository.                                                                                                                                                                                                                                                    |
-| `commitlint`         | Pull requests only: lints every commit message in the PR range.                                                                                                                                                                                                                            |
-| `source-guards`      | Pull requests only: no added `console.*` / `debugger` in source and no added `.only` / `.skip` in tests.                                                                                                                                                                                   |
-| `docs-sync`          | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` equal `CLAUDE.md`.                                                                                                                                                                                                                |
-| `fallow`             | `fallow@2.104.0 dead-code` for `backend` and `front` against `fallow-baselines/*.json`; fails on new dead code, circular dependencies or unresolved imports beyond the baseline. To refresh a baseline after cleanup, run the command in the comment above the job with `--save-baseline`. |
+| Job | What it checks |
+|-----|----------------|
+| `lint` | `npm run lint`, frontend ESLint, and `npm audit` for backend and frontend (non-blocking: ends in `|| true`). |
+| `typecheck` | Backend `tsc --noEmit` for both tsconfigs, and the frontend build. |
+| `test` | Postgres 17 service, `npm run db:migrate`, backend `test:coverage` (thresholds enforced), frontend tests. |
+| `build` | After `lint`, `typecheck` and `test`: builds the backend, frontend and backup images. |
+| `prod-compose-build` | `docker compose -f docker-compose.prod.yml config -q` and `build`, with dummy values. |
+| `secrets` | `secretlint` over the whole repository. |
+| `commitlint` | Pull requests only: lints every commit message in the PR range. |
+| `source-guards` | Pull requests only: no added `console.*` / `debugger` in source and no added `.only` / `.skip` in tests. |
+| `docs-sync` | `AGENTS.md`, `Qwen.md`, `Gemini.md`, `.claude/CLAUDE.md` equal `CLAUDE.md`. |
+| `fallow` | `fallow@2.104.0 dead-code` for `backend` and `front` against `fallow-baselines/*.json`; fails on new dead code, circular dependencies or unresolved imports beyond the baseline. To refresh a baseline after cleanup, run the command in the comment above the job with `--save-baseline`. |
 
 `.github/workflows/opencode-review.yml` posts an automated review comment on non-draft same-repo pull requests. It is advisory: every step is `continue-on-error`, so it never fails a pull request. Dependabot (`.github/dependabot.yml`) opens monthly npm, Docker and compose update pull requests.
 

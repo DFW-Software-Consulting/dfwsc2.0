@@ -39,18 +39,17 @@ dfwsc2.0/
 
 ## Tech Stack
 
-| Layer        | Stack                                                                                              |
-| ------------ | -------------------------------------------------------------------------------------------------- |
-| Frontend     | React 18, Vite 8, React Router 7, TanStack Query v5, TailwindCSS v4, three.js (Home and Team only) |
-| Backend      | Node.js >=24.15, Fastify 5, TypeScript, Drizzle ORM                                                |
-| Data         | PostgreSQL 17; Redis (optional, used when `REDIS_URL` is set)                                      |
-| Integrations | Stripe Connect, Nodemailer (SMTP), Nextcloud (admin login and optional automations)                |
-| Tooling      | Biome, Vitest 5, Husky, Docker Compose                                                             |
+| Layer | Stack |
+|-------|-------|
+| Frontend | React 18, Vite 8, React Router 7, TanStack Query v5, TailwindCSS v4, three.js (Home and Team only) |
+| Backend | Node.js >=24.15, Fastify 5, TypeScript, Drizzle ORM |
+| Data | PostgreSQL 17; Redis (optional, used when `REDIS_URL` is set) |
+| Integrations | Stripe Connect, Nodemailer (SMTP), Nextcloud (admin login and optional automations) |
+| Tooling | Biome, Vitest 5, Husky, Docker Compose |
 
 ## Development
 
 ### Prerequisites
-
 - Node.js >=24.15.0
 - Docker with Compose (preferred) or a local PostgreSQL 17
 
@@ -63,11 +62,11 @@ make up-build            # or: make up
 
 `make` runs `docker compose -f docker-compose.base.yml -f docker-compose.dev.yml`. Use that pair of files if you call Compose directly; `docker-compose.dev.yml` alone is only an override.
 
-| Service                                    | URL                   |
-| ------------------------------------------ | --------------------- |
-| Web UI (Vite)                              | http://localhost:5173 |
-| API                                        | http://localhost:4242 |
-| Mailhog                                    | http://localhost:8025 |
+| Service | URL |
+|---------|-----|
+| Web UI (Vite) | http://localhost:5173 |
+| API | http://localhost:4242 |
+| Mailhog | http://localhost:8025 |
 | Loki (Promtail ships container logs to it) | http://localhost:3100 |
 
 The stack also runs PostgreSQL, Redis and the Stripe CLI, which forwards webhooks to `/api/v1/webhooks/stripe`. The dev API container applies migrations on start.
@@ -92,13 +91,13 @@ npm start         # start the compiled API
 
 ### Testing
 
-| Command                                     | What it does                                                                                        |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `make test-up`                              | Starts the dev stack, then runs backend tests in the container and frontend tests locally           |
-| `make test-back`                            | Backend tests in the running dev container                                                          |
-| `make test-front` or `cd front && npm test` | Frontend tests                                                                                      |
-| `make coverage`                             | Backend tests with coverage thresholds                                                              |
-| `npm run test`                              | Root script. Exits unless `DATABASE_URL` is set, then runs backend tests followed by frontend tests |
+| Command | What it does |
+|---------|--------------|
+| `make test-up` | Starts the dev stack, then runs backend tests in the container and frontend tests locally |
+| `make test-back` | Backend tests in the running dev container |
+| `make test-front` or `cd front && npm test` | Frontend tests |
+| `make coverage` | Backend tests with coverage thresholds |
+| `npm run test` | Root script. Exits unless `DATABASE_URL` is set, then runs backend tests followed by frontend tests |
 
 Lint and format: `npm run lint`, `npm run lint:fix`, `npm run format` (Biome). Hooks, CI jobs and the CLAUDE.md mirror rule are in [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md).
 
@@ -115,15 +114,15 @@ All routes are under `/api/v1`, except `GET /app-config.js` (served at the root)
 
 Main entry points:
 
-| Method | Path                                  | Purpose                                                                                                                                                                                                                                                                  | Auth                              |
-| ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------- |
-| POST   | `/api/v1/auth/login`                  | Admin login against Nextcloud; returns a JWT                                                                                                                                                                                                                             | Public                            |
-| POST   | `/api/v1/onboard-client/initiate`     | Create a client and email its onboarding link                                                                                                                                                                                                                            | Admin                             |
-| POST   | `/api/v1/onboard-client`              | Exchange `{ token }` for a Stripe onboarding `{ url }`                                                                                                                                                                                                                   | Public (10/min per IP)            |
-| POST   | `/api/v1/payments/create`             | Create a Stripe Checkout payment; returns `{ url, sessionId }`. Requires an `Idempotency-Key` header and `lineItems`; an admin JWT must also send `workspace` and `clientId`. Answers 409 when the client's connected account is missing or lacks active `card_payments` | API key or Admin                  |
-| GET    | `/api/v1/payments/session/:sessionId` | Payment status by Checkout session id                                                                                                                                                                                                                                    | Public (30/min per IP) or API key |
-| POST   | `/api/v1/webhooks/stripe`             | Stripe webhooks                                                                                                                                                                                                                                                          | Stripe signature                  |
-| GET    | `/api/v1/health`                      | Health check (database connectivity)                                                                                                                                                                                                                                     | Public                            |
+| Method | Path | Purpose | Auth |
+|--------|------|---------|------|
+| POST | `/api/v1/auth/login` | Admin login against Nextcloud; returns a JWT | Public |
+| POST | `/api/v1/onboard-client/initiate` | Create a client and email its onboarding link | Admin |
+| POST | `/api/v1/onboard-client` | Exchange `{ token }` for a Stripe onboarding `{ url }` | Public (10/min per IP) |
+| POST | `/api/v1/payments/create` | Create a Stripe Checkout payment; returns `{ url, sessionId }`. Requires an `Idempotency-Key` header and `lineItems`; an admin JWT must also send `workspace` and `clientId`. Answers 409 when the client's connected account is missing or lacks active `card_payments` | API key or Admin |
+| GET | `/api/v1/payments/session/:sessionId` | Payment status by Checkout session id | Public (30/min per IP) or API key |
+| POST | `/api/v1/webhooks/stripe` | Stripe webhooks | Stripe signature |
+| GET | `/api/v1/health` | Health check (database connectivity) | Public |
 
 Routes behind feature flags: `/customers` and `/invoices` need `CONNECT_INVOICING=true`; `/cerebo/*` needs `CEREBO_ENABLED=true`. Integrators should start with [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md).
 
@@ -154,35 +153,35 @@ Every variable, its default, the feature flags (Nextcloud automations, mirrors, 
 
 Routes are defined in `front/src/routes.js`. `/`, `/pricing`, `/team` and `/privacy` are prerendered at build time and indexable. The rest are client-rendered from `spa.html` and served with `noindex`.
 
-| Route                                          | Page                                |
-| ---------------------------------------------- | ----------------------------------- |
-| `/`, `/pricing`, `/team`, `/privacy`           | Marketing pages (prerendered)       |
-| `/demos`                                       | Unlisted sample-sites page          |
-| `/onboard#token=<token>`                       | Client Stripe onboarding            |
-| `/admin`                                       | Admin dashboard (Nextcloud login)   |
-| `/payment-success`, `/payment-cancel`          | Checkout return pages               |
-| `/onboarding-success`                          | Return page after Stripe onboarding |
-| `/regenerate-key`, `/request-key-regeneration` | API key regeneration                |
-| any other path                                 | 404 page                            |
+| Route | Page |
+|-------|------|
+| `/`, `/pricing`, `/team`, `/privacy` | Marketing pages (prerendered) |
+| `/demos` | Unlisted sample-sites page |
+| `/onboard#token=<token>` | Client Stripe onboarding |
+| `/admin` | Admin dashboard (Nextcloud login) |
+| `/payment-success`, `/payment-cancel` | Checkout return pages |
+| `/onboarding-success` | Return page after Stripe onboarding |
+| `/regenerate-key`, `/request-key-regeneration` | API key regeneration |
+| any other path | 404 page |
 
 `/docs` is not a React route: nginx redirects it (301) to the developer guide on Nextcloud. See [docs/FRONTEND.md section 3](./docs/FRONTEND.md#3-routes-routesjs-rendered-by-appjsx).
 
 ## Documentation
 
-| File                                                       | What it covers                                                          |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------- |
-| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)             | System overview, flows, tech stack                                      |
-| [docs/BACKEND.md](./docs/BACKEND.md)                       | Auth, rate limiting, route map, Nextcloud integrations, background jobs |
-| [docs/FRONTEND.md](./docs/FRONTEND.md)                     | React, state, routing, prerendering                                     |
-| [docs/DATABASE.md](./docs/DATABASE.md)                     | Schema, Drizzle, migrations                                             |
-| [docs/STRIPE.md](./docs/STRIPE.md)                         | Stripe Connect, webhooks, payment flows                                 |
-| [docs/STYLES.md](./docs/STYLES.md)                         | Tailwind v4, theme, UI patterns                                         |
-| [docs/ENVIRONMENT.md](./docs/ENVIRONMENT.md)               | Env vars and feature flags                                              |
-| [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)               | Git hooks, CI, CLAUDE.md mirrors                                        |
-| [docs/BACKUP.md](./docs/BACKUP.md)                         | Database backups and restore                                            |
-| [docs/COOLIFY_DEPLOYMENT.md](./docs/COOLIFY_DEPLOYMENT.md) | Production deployment on Coolify                                        |
-| [API_DOCS.md](./API_DOCS.md)                               | API reference for integrators                                           |
-| [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md)           | Integrator guide: payments and invoicing                                |
+| File | What it covers |
+|------|----------------|
+| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) | System overview, flows, tech stack |
+| [docs/BACKEND.md](./docs/BACKEND.md) | Auth, rate limiting, route map, Nextcloud integrations, background jobs |
+| [docs/FRONTEND.md](./docs/FRONTEND.md) | React, state, routing, prerendering |
+| [docs/DATABASE.md](./docs/DATABASE.md) | Schema, Drizzle, migrations |
+| [docs/STRIPE.md](./docs/STRIPE.md) | Stripe Connect, webhooks, payment flows |
+| [docs/STYLES.md](./docs/STYLES.md) | Tailwind v4, theme, UI patterns |
+| [docs/ENVIRONMENT.md](./docs/ENVIRONMENT.md) | Env vars and feature flags |
+| [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md) | Git hooks, CI, CLAUDE.md mirrors |
+| [docs/BACKUP.md](./docs/BACKUP.md) | Database backups and restore |
+| [docs/COOLIFY_DEPLOYMENT.md](./docs/COOLIFY_DEPLOYMENT.md) | Production deployment on Coolify |
+| [API_DOCS.md](./API_DOCS.md) | API reference for integrators |
+| [CLIENT_INTEGRATION.md](./CLIENT_INTEGRATION.md) | Integrator guide: payments and invoicing |
 
 ## Troubleshooting
 
