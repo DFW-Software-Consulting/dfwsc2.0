@@ -321,12 +321,15 @@ describe("client-facing Connect routes", () => {
         ["invalid request", "invalid_request_error", 400, 400, "INVALID_REQUEST"],
         ["idempotency mismatch", "idempotency_error", 400, 409, "IDEMPOTENCY_KEY_REUSED"],
         ["permission", "permission_error", 403, 409, "ACCOUNT_NOT_CONNECTED"],
-      ])("maps a permanent %s error to a non-retryable response", async (_l, type, st, status, code) => {
-        const res = await run(sdkError(type, st, "stripe detail"));
-        expect(res.statusCode).toBe(status);
-        expect(res.json().code).toBe(code);
-        expect(res.headers["retry-after"]).toBeUndefined();
-      });
+      ])(
+        "maps a permanent %s error to a non-retryable response",
+        async (_l, type, st, status, code) => {
+          const res = await run(sdkError(type, st, "stripe detail"));
+          expect(res.statusCode).toBe(status);
+          expect(res.json().code).toBe(code);
+          expect(res.headers["retry-after"]).toBeUndefined();
+        }
+      );
 
       it("keeps a transient Stripe failure retryable, without leaking its message", async () => {
         const res = await run(sdkError("api_error", 500, "internal stripe detail"));

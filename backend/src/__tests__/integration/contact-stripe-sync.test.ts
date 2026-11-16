@@ -550,25 +550,28 @@ describe("errors", () => {
       new Stripe.errors.StripeAuthenticationError({ message: "key", statusCode: 401 } as never),
     ],
     ["403", new Stripe.errors.StripePermissionError({ message: "no", statusCode: 403 } as never)],
-  ])("retries next cycle after a retryable error (%s) and keeps the token", async (_label, error) => {
-    await baselined();
-    const token = await tokenOf();
-    update.mockRejectedValueOnce(error);
-    putCard(UID_A, withBase(["EMAIL", "EMAIL;TYPE=WORK:new@zephyrine.example"]));
-    expect(await cycle()).toMatchObject({ status: "ok", pushed: 0, failed: 1 });
-    expect(await tokenOf()).toBe(token);
-    const failed = await stateOf(UID_A);
-    expect(failed.lastError).toMatch(/^stripe\.customer_update:/);
-    expect(failed.lastErrorHash).toBeNull();
-    // Same delta again (after any auth back-off), the push now succeeds.
-    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10 * 60_000);
-    expect(await cycle()).toMatchObject({ pushed: 1, failed: 0 });
-    expect(update).toHaveBeenCalledTimes(2);
-    expect(update.mock.calls[1][1]).toEqual({ email: "new@zephyrine.example" });
-    expect(update.mock.calls[1][2]).toEqual(update.mock.calls[0][2]); // same idempotency key
-    expect((await stateOf(UID_A)).lastError).toBeNull();
-    expect(await tokenOf()).not.toBe(token);
-  });
+  ])(
+    "retries next cycle after a retryable error (%s) and keeps the token",
+    async (_label, error) => {
+      await baselined();
+      const token = await tokenOf();
+      update.mockRejectedValueOnce(error);
+      putCard(UID_A, withBase(["EMAIL", "EMAIL;TYPE=WORK:new@zephyrine.example"]));
+      expect(await cycle()).toMatchObject({ status: "ok", pushed: 0, failed: 1 });
+      expect(await tokenOf()).toBe(token);
+      const failed = await stateOf(UID_A);
+      expect(failed.lastError).toMatch(/^stripe\.customer_update:/);
+      expect(failed.lastErrorHash).toBeNull();
+      // Same delta again (after any auth back-off), the push now succeeds.
+      vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10 * 60_000);
+      expect(await cycle()).toMatchObject({ pushed: 1, failed: 0 });
+      expect(update).toHaveBeenCalledTimes(2);
+      expect(update.mock.calls[1][1]).toEqual({ email: "new@zephyrine.example" });
+      expect(update.mock.calls[1][2]).toEqual(update.mock.calls[0][2]); // same idempotency key
+      expect((await stateOf(UID_A)).lastError).toBeNull();
+      expect(await tokenOf()).not.toBe(token);
+    }
+  );
 
   it("stores a non-retryable error and retries only after the card changes again", async () => {
     await baselined();

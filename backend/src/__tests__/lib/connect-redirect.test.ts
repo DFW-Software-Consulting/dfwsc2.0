@@ -57,11 +57,10 @@ describe("allowedRedirectHref", () => {
   ])("returns the canonical href for %s", (input, expected) => {
     expect(allowedRedirectHref(input, allowed)).toBe(expected);
   });
-  it.each([
-    "https://evil.com\\@app.example.com/",
-    "https://app.example.com:444/",
-    "nope",
-  ])("returns null for %s", (input) => {
-    expect(allowedRedirectHref(input, allowed)).toBeNull();
-  });
+  it.each(["https://evil.com\\@app.example.com/", "https://app.example.com:444/", "nope"])(
+    "returns null for %s",
+    (input) => {
+      expect(allowedRedirectHref(input, allowed)).toBeNull();
+    }
+  );
 });

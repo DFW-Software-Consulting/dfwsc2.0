@@ -11,6 +11,7 @@ import { createElement, lazy } from "react";
 export function lazyPage(load) {
   const Lazy = lazy(() => load().then((mod) => mod ?? new Promise(() => {})));
   let loaded = null;
+  // biome-ignore lint/correctness/noComponentHookFactories: lazyPage is a factory by design: each page needs its own loaded/preload state.
   function Page(props) {
     return createElement(loaded ?? Lazy, props);
   }

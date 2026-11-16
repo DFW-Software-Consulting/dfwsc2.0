@@ -101,22 +101,21 @@ describe("POST /api/v1/payments/create requires the card_payments capability", (
     resetCircuitBreakersForTests();
   });
 
-  it.each([
-    "inactive",
-    "pending",
-    "unrequested",
-  ])("refuses with 409 CARD_PAYMENTS_NOT_ACTIVE when card_payments is %s", async (status) => {
-    const c = await seedClient(status);
-    const res = await pay(c.apiKey);
-    expect(res.statusCode).toBe(409);
-    expect(res.json()).toEqual({
-      error:
-        "Card payments are not active on this connected account yet. Contact your DFWSC administrator.",
-      code: "CARD_PAYMENTS_NOT_ACTIVE",
-    });
-    expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
-    expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
-  });
+  it.each(["inactive", "pending", "unrequested"])(
+    "refuses with 409 CARD_PAYMENTS_NOT_ACTIVE when card_payments is %s",
+    async (status) => {
+      const c = await seedClient(status);
+      const res = await pay(c.apiKey);
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toEqual({
+        error:
+          "Card payments are not active on this connected account yet. Contact your DFWSC administrator.",
+        code: "CARD_PAYMENTS_NOT_ACTIVE",
+      });
+      expect(stripe.checkout.sessions.create).not.toHaveBeenCalled();
+      expect(stripe.accounts.retrieve).not.toHaveBeenCalled();
+    }
+  );
 
   it("creates the Checkout session when card_payments is active, without a live read", async () => {
     const c = await seedClient("active");

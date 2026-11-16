@@ -69,6 +69,7 @@ describe("hydration of browser-dependent UI", () => {
 
   it("only persists the theme after the visitor chooses one", async () => {
     const { render, screen } = await import("@testing-library/react");
+    // biome-ignore lint/correctness/noComponentHookFactories: test-local component rendered once inside this test.
     function Toggle() {
       const { theme, toggleTheme } = useTheme();
       return (
