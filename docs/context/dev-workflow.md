@@ -11,9 +11,9 @@ Authoritative detail: [docs/DEVELOPMENT.md](../DEVELOPMENT.md) and [CLAUDE.md](.
 
 ## Hooks (Husky, `.husky/`)
 Active only after `npm install` at the root of the checkout. A fresh worktree has no hooks until then, so CI is the first gate.
-- pre-commit: no commits on `main`, no `.env` staged, secretlint, a schema change needs a migration, no `console.*`/`debugger`, no `.only`/`.skip`, type-check, mirror check.
+- pre-commit: no commits on `main`, no `.env` staged, no conflict markers, no staged file over 500 KB, `package.json` changes need the lockfile, secretlint, a schema change needs a migration, no `console.log`/`debugger`, no `.only`/`.skip`, Biome auto-fix on staged files, mirror check, backend type-check when backend TypeScript is staged.
 - commit-msg: commitlint, Conventional Commits, header at most 100 chars.
-- pre-push: refuses `main`, runs coverage in the running dev `api` container of the same directory, lint, type-check, frontend build and tests, prod compose build.
+- pre-push: refuses a force-push to `main`, runs coverage in the running dev `api` container of the same directory, lint, type-check, frontend build and tests, prod compose build.
 - Skips exist (`SKIP_MIGRATION_CHECK`, `ALLOW_CONSOLE`, `SKIP_TYPECHECK`, `SKIP_DOCKER_TESTS`, `SKIP_DOCKER_BUILD`); use only when the reason is real.
 
 ## Agent instruction mirrors
